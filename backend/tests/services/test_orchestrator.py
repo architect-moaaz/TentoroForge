@@ -758,3 +758,81 @@ def test_the_reason_is_one_readable_line(svc):
     report = run(svc, boom, plan=["requirements"], max_attempts=1)
     why = report.failed_because["requirements"]
     assert "\n" not in why and len(why) <= 400
+
+
+def test_the_fanout_runs_subjects_concurrently(svc):
+    """§28: "independent work may execute concurrently." Pages are genuinely
+    independent — each call gets one page's brief and reads nothing another
+    page wrote — and serially they were the dominant cost of a run."""
+    import threading
+    import time
+
+    from services.blueprint.orchestrator import FANOUT_CONCURRENCY
+
+    _fanout_svc(svc, pages=6)
+    inflight, peak = 0, 0
+    lock = threading.Lock()
+
+    def executor(spec):
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        time.sleep(0.05)
+        with lock:
+            inflight -= 1
+        return _layout_result(spec)
+
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert peak > 1, "subjects ran one at a time"
+    assert peak <= FANOUT_CONCURRENCY
+
+
+def test_applies_happen_in_the_given_order_whatever_order_calls_return(svc):
+    """The split is the design: calls parallel, applies serial and ordered.
+
+    `apply_agent_result` allocates ids and saves one shared document, so
+    concurrent applies would race — and id allocation is order-dependent, so a
+    re-projection meant to be byte-identical would stop being one.
+    """
+    import time
+
+    _fanout_svc(svc, pages=4)
+    applied: list[str] = []
+
+    def executor(spec):
+        # later subjects return first, so completion order is reversed
+        time.sleep(0.05 * (4 - int(spec.subject[-1])))
+        return _layout_result(spec)
+
+    original = svc.upsert
+
+    def tracking(section, body, **kw):
+        if section == "pageLayouts":
+            applied.append(body["page"])
+        return original(section, body, **kw)
+
+    svc.upsert = tracking
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    svc.upsert = original
+    assert applied == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
+
+
+def test_a_retry_still_carries_its_own_feedback(svc):
+    """Concurrency must not lose §102's feedback: a retry that is not told what
+    went wrong is just the same request again."""
+    _fanout_svc(svc, pages=3)
+    seen: dict[str, list[str]] = {}
+
+    def executor(spec):
+        seen.setdefault(spec.subject, []).append(spec.feedback)
+        if spec.subject == "PAGE-002" and spec.attempt == 1:
+            raise RuntimeError("bad page tree")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=2)
+    assert seen["PAGE-002"][0] == ""
+    assert "bad page tree" in seen["PAGE-002"][1]
+    assert report.failed == []
+    # subjects that succeeded first time are not called again
+    assert len(seen["PAGE-001"]) == 1

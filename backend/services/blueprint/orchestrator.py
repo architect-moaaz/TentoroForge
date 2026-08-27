@@ -701,15 +701,11 @@ def run(
             done.add(key)
             continue
 
-        failed_subjects: list[str] = []
-        for subject in subjects:
-            outcome = _run_agent_subject(
-                svc, executor, key, node, subject,
-                max_attempts=max_attempts, commit=commit,
-                user_request=user_request, report=report,
-            )
-            if outcome is None:
-                failed_subjects.append(subject)
+        failed_subjects = _run_fanout(
+            svc, executor, key, node, subjects,
+            max_attempts=max_attempts, commit=commit,
+            user_request=user_request, report=report,
+        )
 
         # Only a node that authored nothing at all has genuinely failed;
         # anything less is a partial result its dependents can still use.
@@ -720,6 +716,126 @@ def run(
         continue
 
     return report
+
+
+#: How many subjects to have in flight at once. §28: "independent work may
+#: execute concurrently." Pages are genuinely independent — each call is given
+#: one page's brief and produces one tree, reading nothing another page wrote —
+#: and a serial fan-out was the dominant cost of a run: twenty-four pages at
+#: roughly seventy-five seconds each is half an hour inside a single node.
+FANOUT_CONCURRENCY = 6
+
+
+def _run_fanout(
+    svc: BlueprintService,
+    executor: Executor,
+    key: str,
+    node: DagNode,
+    subjects: list[str],
+    *,
+    max_attempts: int,
+    commit: bool,
+    user_request: str,
+    report: RunReport,
+) -> list[str]:
+    """Author every subject, calling the model concurrently and applying serially.
+
+    The split is the whole design. ``executor`` is a network call and safe to
+    run in parallel; ``apply_agent_result`` is not — it allocates ids, mutates
+    one shared document and saves it, so concurrent applies would race on the
+    allocator and interleave writes. Worse, id allocation is order-dependent,
+    and a re-projection that is supposed to be byte-identical would stop being
+    so.
+
+    So each round calls up to :data:`FANOUT_CONCURRENCY` subjects at once, then
+    applies the results **in the order the subjects were given**, whatever order
+    they came back in. Determinism is preserved because the applies are ordered,
+    not because the calls were.
+
+    Retries keep their §102 feedback: a subject whose apply was rejected goes
+    into the next round carrying the reason, exactly as the serial path did.
+
+    Returns the subjects that never succeeded.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    pending = list(subjects)
+    feedback: dict[str, str] = {}
+    failed: list[str] = []
+
+    for attempt in range(1, max_attempts + 1):
+        if not pending:
+            break
+        results: dict[str, Any] = {}
+
+        def call(subject: str) -> tuple[str, Any]:
+            spec = TaskSpec(
+                task_id=f"TASK-{key}{':' + subject if subject else ''}-{attempt}",
+                node=key,
+                agent=node.agent, attempt=attempt, subject=subject,
+                feedback=feedback.get(subject, ""),
+            )
+            try:
+                return subject, executor(spec)
+            except Exception as exc:  # §102 — a classified outcome, not a crash
+                return subject, exc
+
+        workers = max(1, min(FANOUT_CONCURRENCY, len(pending)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for subject, outcome in pool.map(call, pending):
+                results[subject] = outcome
+
+        retry: list[str] = []
+        for subject in pending:          # given order, not completion order
+            # A node that does not fan out has one empty subject, and its
+            # label is just the node key — callers test membership by it.
+            label = f"{key}:{subject}" if subject else key
+            outcome = results.get(subject)
+
+            if isinstance(outcome, Exception):
+                feedback[subject] = _reason(outcome)
+                if attempt == max_attempts:
+                    report.failed.append(label)
+                    report.failed_because[label] = _reason(outcome)
+                    failed.append(subject)
+                else:
+                    retry.append(subject)
+                continue
+
+            try:
+                application = apply_agent_result(
+                    svc, outcome, commit=commit, user_request=user_request,
+                )
+            except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+                feedback[subject] = _reason(exc)
+                if attempt == max_attempts:
+                    report.failed.append(label)
+                    report.failed_because[label] = _reason(exc)
+                    failed.append(subject)
+                else:
+                    retry.append(subject)
+                continue
+
+            if application.applied:
+                report.artifacts.extend(application.artifacts)
+                report.change_requests.extend(application.change_requests)
+                continue
+            if application.needs_clarification or outcome.status == "blocked":
+                report.blocked.append(label)
+                report.change_requests.extend(application.change_requests)
+                failed.append(subject)
+                continue
+            if attempt == max_attempts:
+                report.failed.append(label)
+                report.failed_because.setdefault(
+                    label, "the agent returned a result that could not be applied")
+                failed.append(subject)
+            else:
+                retry.append(subject)
+
+        pending = retry
+
+    return failed
 
 
 def _reason(exc: Exception) -> str:
