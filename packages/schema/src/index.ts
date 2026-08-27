@@ -4,6 +4,7 @@ export * from "./expressions";
 export * from "./nodes/layout";
 export * from "./nodes/primitive";
 export * from "./nodes/library";
+export * from "./nodes/forms";
 export * from "./nodes/data";
 export * from "./nodes/slot";
 export * as Nodes from "./nodes";

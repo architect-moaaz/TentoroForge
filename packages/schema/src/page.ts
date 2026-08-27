@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AuthFormNode } from "./nodes/forms";
 import { Node } from "./nodes";
 import { TokenRef } from "./tokens";
 import { StyleSlot } from "./style-slot";
@@ -442,6 +443,7 @@ export const NodeV2: z.ZodTypeAny = z.lazy(() => {
   const union = z.discriminatedUnion("type", [
     // strict v2 node types
     CustomNode,
+    AuthFormNode,
     HeroNode,
     SectionNode,
     MetricTileNode,
@@ -607,12 +609,56 @@ export const NodeV2: z.ZodTypeAny = z.lazy(() => {
   // Declared here rather than imported from ./nodes/library: that module
   // imports `Node`, which reaches back into this one, and the cycle leaves a
   // schema half-initialised at parse time. The shape is deliberately the same.
+  // Every type the discriminated union above enumerates.
+  //
+  // Resolved on first parse, not when the union is built. Reading
+  // `option.shape` at construction time is not safe here: these node modules
+  // import one another, so during initialisation an option can still be a
+  // half-built schema whose `shape` is undefined. That threw outright in one
+  // load order and — far worse — produced an *empty set* in another, which
+  // silently turns the fallback below into a hole that shadows every strict
+  // type it was written to protect.
+  //
+  // `optionsMap` is the union's own index, keyed by discriminator value and
+  // built eagerly by Zod, so it is preferred; the shape walk remains a fallback.
+  let knownTypes: Set<string> | null = null;
+  const strictTypes = (): Set<string> => {
+    if (knownTypes) return knownTypes;
+    const map = (union as unknown as {
+      _def?: { optionsMap?: Map<unknown, unknown> };
+    })._def?.optionsMap;
+    if (map && map.size > 0) {
+      knownTypes = new Set(
+        [...map.keys()].filter((k): k is string => typeof k === "string"),
+      );
+      return knownTypes;
+    }
+    const walked = new Set<string>();
+    for (const option of (union.options ?? []) as ReadonlyArray<unknown>) {
+      const value = (option as { shape?: Record<string, { value?: unknown }> })
+        ?.shape?.type?.value;
+      if (typeof value === "string") walked.add(value);
+    }
+    // Never memoise an empty result — that would freeze the degenerate case in
+    // for the life of the process.
+    if (walked.size > 0) knownTypes = walked;
+    return walked;
+  };
+
   const anyRegistered = z
     .object({
       id: z.string().min(1),
-      type: z.string().min(1).refine((t) => !RESERVED_V2.has(t), {
-        message: "type collides with a reserved (non-library) node bucket",
-      }),
+      // Refuses any type the strict union already covers. Without this the
+      // fallback weakens validation for enumerated components: a Heading with
+      // level 99 fails its strict shape, falls through here, and passes.
+      type: z
+        .string()
+        .min(1)
+        .refine((t) => !RESERVED_V2.has(t) && !strictTypes().has(t), {
+          message:
+            "type is already covered by a strict node shape, or collides " +
+            "with a reserved structural bucket",
+        }),
       props: z.record(z.unknown()).optional(),
       visibleIf: z.string().optional(),
       children: z.array(NodeV2Ref).optional(),

@@ -86,3 +86,6 @@ backend/rules_output.json
 !.env.example
 !*.env.template
 !.env.local.template
+
+# Runtime cost log, appended to by every run — not source.
+backend/data/build-usage.jsonl

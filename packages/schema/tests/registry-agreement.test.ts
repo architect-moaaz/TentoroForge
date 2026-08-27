@@ -43,3 +43,32 @@ describe("NodeV2 accepts any registered component", () => {
     expect(stack.success).toBe(true);
   });
 });
+
+describe("a component's props are defined once", () => {
+  it("the library derives AuthForm's props from the schema node", async () => {
+    const schema: any = await import("../dist/nodes/forms.js");
+    const library: any = await import(
+      "../../library/dist/library/src/components/AuthForm/AuthForm.schema.js"
+    );
+    // Same object, not two declarations that happen to look alike. Two copies
+    // is how AuthForm became renderable by the registry and rejected by the
+    // page schema at the same time.
+    expect(library.AuthFormProps).toBe(schema.AuthFormNode.shape.props);
+  });
+
+  it("AuthForm validates as a strict node, not via the open fallback", async () => {
+    const { Page }: any = await import("../dist/page.js");
+    const ok = Page.safeParse({
+      schemaVersion: "2", id: "P", route: "/x",
+      root: { id: "n", type: "AuthForm", props: { mode: "signIn" } },
+    });
+    expect(ok.success).toBe(true);
+
+    // Strict means its own rules apply: an unknown mode is refused.
+    const bad = Page.safeParse({
+      schemaVersion: "2", id: "P", route: "/x",
+      root: { id: "n", type: "AuthForm", props: { mode: "telepathy" } },
+    });
+    expect(bad.success).toBe(false);
+  });
+});

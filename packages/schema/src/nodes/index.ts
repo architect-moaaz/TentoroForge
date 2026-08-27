@@ -24,3 +24,5 @@ export type Node = z.infer<typeof Node>;
 
 export { PageOutletNode } from "./page-outlet";
 export type { PageOutletNodeT } from "./page-outlet";
+
+export { AuthFormNode } from "./forms";
