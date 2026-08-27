@@ -642,3 +642,75 @@ def test_a_skipped_node_records_which_dependency_stopped_it(svc):
 def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
     report = run(svc, lambda spec: None, plan=[])
     assert report.skipped == [] and report.skipped_because == {}
+
+
+def _layout_result(spec: TaskSpec) -> AgentResult:
+    """One authored page tree, keyed to the subject the node fanned out to."""
+    return AgentResult(
+        task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+        proposals=[ArtifactProposal(
+            section="pageLayouts", natural_key=spec.subject,
+            body={"page": spec.subject,
+                  "root": {"type": "Stack", "props": {}, "children": []}},
+        )],
+    )
+
+
+def _fanout_svc(svc, pages=3):
+    svc.doc["pages"] = [
+        {"id": f"PAGE-{i:03d}", "route": f"/p{i}", "name": f"P{i}",
+         "purpose": f"Page {i}."}
+        for i in range(1, pages + 1)
+    ]
+    return svc
+
+
+def test_one_failed_subject_does_not_take_the_whole_node(svc):
+    """One page of twenty-four failed on a live run and `page_layouts` failed
+    with it, skipping frontend, integration, testing, memory, verification and
+    preview. One bad page cost the entire application.
+
+    The hole was the thing to close, not the node: the failure is named, and a
+    page with no authored tree still falls back to its pattern.
+    """
+    _fanout_svc(svc)
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.subject)
+        if spec.subject == "PAGE-002":
+            raise RuntimeError("this one is broken")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    # every subject was attempted, not abandoned at the first failure
+    assert seen == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    assert "page_layouts" in report.completed
+    assert any("PAGE-002" in f for f in report.failed)
+
+
+def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
+    """Partial results are usable; no result is not."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        raise RuntimeError("all broken")
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert "page_layouts" not in report.completed
+    assert len(report.failed) == 3
+
+
+def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
+    """The point of the change: downstream work proceeds on partial input."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        if spec.subject == "PAGE-002":
+            raise RuntimeError("broken")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts", "frontend"],
+                 max_attempts=1, app_root="/tmp/forge-partial-test")
+    assert "frontend" not in report.skipped, (
+        "a partial page_layouts must not skip the projection behind it")

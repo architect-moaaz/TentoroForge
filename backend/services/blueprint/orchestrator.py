@@ -673,17 +673,29 @@ def run(
             report.blocked.append(key)
             continue
 
-        # A fanning-out node authors one artifact per subject. Each subject is
-        # its own call with its own retries, and one failing subject fails the
-        # node rather than quietly leaving a hole — seventeen pages out of
-        # eighteen looks exactly like success.
+        # A fanning-out node authors one artifact per subject, and a subject
+        # that fails is reported and stepped over rather than taking the node
+        # with it.
+        #
+        # It used to abort the whole node, on the reasoning that seventeen
+        # pages out of eighteen looks exactly like success. That reasoning was
+        # right about the danger and wrong about the remedy: on a live run one
+        # page of twenty-four failed, `page_layouts` failed with it, and
+        # `frontend`, `integration`, `testing`, `memory`, `verification` and
+        # `preview` were all skipped behind it. One bad page cost the entire
+        # application.
+        #
+        # The hole is what had to be closed, not the node. Failed subjects are
+        # named in the report, the projection separately reports any page it
+        # could not plan, and a page with no authored tree still falls back to
+        # its pattern — so the failure is visible and survivable at once.
         subjects = subjects_for(node, svc.doc)
         if not subjects:
             report.completed.append(key)
             done.add(key)
             continue
 
-        node_failed = False
+        failed_subjects: list[str] = []
         for subject in subjects:
             outcome = _run_agent_subject(
                 svc, executor, key, node, subject,
@@ -691,9 +703,11 @@ def run(
                 user_request=user_request, report=report,
             )
             if outcome is None:
-                node_failed = True
-                break
-        if node_failed:
+                failed_subjects.append(subject)
+
+        # Only a node that authored nothing at all has genuinely failed;
+        # anything less is a partial result its dependents can still use.
+        if failed_subjects and len(failed_subjects) == len(subjects):
             continue
         report.completed.append(key)
         done.add(key)
