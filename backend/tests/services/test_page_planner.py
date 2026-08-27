@@ -78,7 +78,7 @@ def list_template():
             {"type": "Heading", "props": {"content": "$entity.plural", "level": 1},
              "children": []},
             {"type": "Cluster", "props": {}, "children": [
-                {"type": "Button", "repeat": {"over": "primaryActions"},
+                {"type": "Button", "repeat": "primaryActions",
                  "props": {"label": "$item.label"}, "children": []}]},
             {"type": "TableSortable",
              "props": {"columns": "$columns", "rows": "{{rows}}"}, "children": []},
@@ -283,7 +283,7 @@ def test_a_repeat_does_not_make_its_source_mandatory():
     rejected outright for having no widgets.
     """
     template = {"root": {"type": "Stack", "props": {}, "children": [
-        {"type": "MetricTile", "repeat": {"over": "widgets"},
+        {"type": "MetricTile", "repeat": "widgets",
          "props": {"label": "$item.label"}, "children": []}]}}
     assert pp.derived_requires(template)["widgets"] is False
 
@@ -299,7 +299,7 @@ def test_a_scalar_entity_placeholder_does_make_an_entity_mandatory():
 def test_a_page_without_widgets_still_plans(doc, page, catalog):
     template = list_template()
     template["root"]["children"].append(
-        {"type": "MetricTile", "repeat": {"over": "widgets"},
+        {"type": "MetricTile", "repeat": "widgets",
          "props": {"label": "$item.label", "value": "$item.value",
                    "format": "number"}, "children": []})
     doc["widgets"] = []
@@ -353,3 +353,92 @@ def test_the_digest_marks_required_props_and_bounds(catalog):
     digest = pp.catalog_digest(catalog)
     assert "chips*:" in digest
     assert "masterWidth: integer (>=160, <=600" in digest
+
+
+# --- per-page authoring ----------------------------------------------------
+
+def test_an_authored_page_overrides_its_pattern(doc, page, catalog):
+    """Switching one page to bespoke must not strand the rest on nothing."""
+    doc["pages"] = [page]
+    doc["patternTemplates"] = [list_template()]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "Heading", "props": {"content": "Bespoke"}, "children": []}]},
+    }]
+    result = pp.plan_pages(doc, catalog)
+    root = result["planned"]["PAGE-001"]["root"]
+    assert root["children"][0]["props"]["content"] == "Bespoke"
+
+
+def test_pages_nobody_authored_still_fall_back_to_the_pattern(doc, page, catalog):
+    second = dict(page, id="PAGE-002", route="/other", name="Other")
+    doc["pages"] = [page, second]
+    doc["patternTemplates"] = [list_template()]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "root": {"type": "Stack", "props": {}, "children": []},
+    }]
+    result = pp.plan_pages(doc, catalog)
+    assert set(result["planned"]) == {"PAGE-001", "PAGE-002"}
+    assert result["skipped"] == [] and result["failed"] == []
+
+
+def test_an_authored_page_is_held_to_the_same_catalog(doc, page, catalog):
+    """The gate is what makes per-page safe — its absence is what made
+    per-page composition fail in the old platform."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "root": {"type": "NotAComponent", "props": {}, "children": []},
+    }]
+    errs = pp.validate_template(doc["pageLayouts"][0], catalog)
+    assert "not a registered component" in errs[0]
+
+
+def test_the_brief_carries_the_requirements_the_page_serves(doc, page, entity):
+    """The pattern author never saw these — it designed structure without ever
+    knowing what the user asked for."""
+    doc["pages"] = [dict(page, requirements=["REQ-001"])]
+    doc["requirements"] = [{"id": "REQ-001", "description": "Scan open roles"},
+                           {"id": "REQ-002", "description": "Unrelated"}]
+    brief = pp.page_brief(doc, "PAGE-001")
+    assert [r["id"] for r in brief["requirements"]] == ["REQ-001"]
+    assert brief["entity"]["id"] == "ENTITY-001"
+    assert [c["key"] for c in brief["derived"]["columns"]][0] == "title"
+
+
+def test_the_brief_is_one_page_not_the_whole_app(doc, page):
+    doc["pages"] = [page, dict(page, id="PAGE-002", name="Other", route="/o")]
+    brief = pp.page_brief(doc, "PAGE-001")
+    assert brief["page"]["id"] == "PAGE-001"
+    assert "PAGE-002" not in json.dumps(brief)
+
+
+def test_the_gate_does_not_reject_the_vocabulary_it_offers(catalog):
+    """A placeholder is a deferred value, not a type error.
+
+    The apply-time gate validates an *un-instantiated* tree, where
+    `$summaryFields` is still the string it currently is rather than the array
+    it becomes. Checking it literally rejected a page for using the
+    placeholders exactly as designed — and the retry, correctly told what was
+    wrong, could only comply by abandoning them.
+    """
+    schema = {"root": {"type": "DescriptionList",
+                       "props": {"items": "$summaryFields"}}}
+    assert pp.validate_props(schema, catalog) == []
+
+    bound = {"root": {"type": "Table",
+                      "props": {"columns": "$columns", "rows": "{{records}}"}}}
+    assert pp.validate_props(bound, catalog) == []
+
+
+def test_the_gate_still_rejects_a_value_the_component_refuses(catalog):
+    """Deferring placeholders must not defer everything — an enum the
+    component does not accept is wrong now and wrong later."""
+    schema = {"root": {"type": "Table", "props": {
+        "columns": "$columns",
+        "rowActions": [{"label": "Open", "variant": "ghost"}],
+    }}}
+    errors = pp.validate_props(schema, catalog)
+    assert len(errors) == 1 and "ghost" in errors[0]

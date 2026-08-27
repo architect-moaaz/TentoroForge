@@ -90,7 +90,8 @@ def test_figma_intelligence_is_registered_from_section_101():
     # answer to. It is in the registry anyway so that its writes go through the
     # same check_capability as theirs. A coordinator exempt from the boundary
     # check is how §28's "uncontrolled swarm" gets in wearing a badge.
-    assert extra == {"figma_intelligence", "a2ui_patterns", "memory", "smith"}
+    assert extra == {"figma_intelligence", "a2ui_patterns", "a2ui_pages",
+                     "memory", "smith"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
@@ -475,10 +476,14 @@ def test_the_gate_ignores_agents_that_do_not_write_templates():
                                     body={"name": "X"})]))
 
 
-def test_a2ui_reads_only_what_it_needs():
-    """It authors structure from page contracts and the design language; the
-    data model and endpoints are context it cannot act on."""
-    cap = AGENT_REGISTRY["a2ui_patterns"]
-    assert "*" not in cap.reads
-    assert "pages" in cap.reads
-    assert "data" not in cap.reads and "apis" not in cap.reads
+def test_a2ui_is_scoped_but_can_see_the_intent_it_designs_for():
+    """This asserted the opposite — that A2UI could not see `data` — which
+    certified a real gap as correct: it was designing pages without ever
+    seeing the requirements behind them or the entities its forms are made of.
+    Scoped still, but scoped to the job rather than below it."""
+    for agent in ("a2ui_patterns", "a2ui_pages"):
+        cap = AGENT_REGISTRY[agent]
+        assert "*" not in cap.reads, agent
+        assert {"requirements", "pages", "data"} <= cap.reads, agent
+    # Still not everything: it composes UI, it does not reason about endpoints.
+    assert "apis" not in AGENT_REGISTRY["a2ui_patterns"].reads

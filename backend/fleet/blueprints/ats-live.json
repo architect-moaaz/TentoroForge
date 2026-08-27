@@ -9404,9 +9404,7 @@
                   "label": "$item.label",
                   "value": "$item.value"
                 },
-                "repeat": {
-                  "over": "widgets"
-                },
+                "repeat": "widgets",
                 "type": "MetricTile"
               }
             ],
@@ -9451,9 +9449,7 @@
                               "variant": "secondary",
                               "workflow": "$item.value"
                             },
-                            "repeat": {
-                              "over": "actions"
-                            },
+                            "repeat": "actions",
                             "type": "Button"
                           }
                         ],
@@ -9501,9 +9497,7 @@
                       "variant": "primary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "primaryActions"
-                    },
+                    "repeat": "primaryActions",
                     "type": "Button"
                   }
                 ],
@@ -9530,9 +9524,7 @@
                   "label": "$item.label",
                   "value": "$item.value"
                 },
-                "repeat": {
-                  "over": "widgets"
-                },
+                "repeat": "widgets",
                 "type": "Stat"
               }
             ],
@@ -9579,9 +9571,7 @@
               "elevation": "sm",
               "title": "$item.label"
             },
-            "repeat": {
-              "over": "relatedCollections"
-            },
+            "repeat": "relatedCollections",
             "type": "Card"
           }
         ],
@@ -9609,9 +9599,7 @@
                       "variant": "primary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "primaryActions"
-                    },
+                    "repeat": "primaryActions",
                     "type": "Button"
                   }
                 ],
@@ -9687,9 +9675,7 @@
                       "elevation": "sm",
                       "title": "$item.label"
                     },
-                    "repeat": {
-                      "over": "relatedCollections"
-                    },
+                    "repeat": "relatedCollections",
                     "type": "Card"
                   }
                 ],
@@ -9729,9 +9715,7 @@
                       "variant": "secondary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "actions"
-                    },
+                    "repeat": "actions",
                     "type": "Button"
                   }
                 ],
@@ -9787,9 +9771,7 @@
                       "elevation": "sm",
                       "title": "$item.label"
                     },
-                    "repeat": {
-                      "over": "relatedCollections"
-                    },
+                    "repeat": "relatedCollections",
                     "type": "Card"
                   }
                 ],
@@ -9849,9 +9831,7 @@
                       "variant": "primary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "primaryActions"
-                    },
+                    "repeat": "primaryActions",
                     "type": "Button"
                   }
                 ],
@@ -9915,9 +9895,7 @@
                       "variant": "primary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "primaryActions"
-                    },
+                    "repeat": "primaryActions",
                     "type": "Button"
                   }
                 ],
@@ -9946,9 +9924,7 @@
                   "label": "$item.label",
                   "value": "$item.value"
                 },
-                "repeat": {
-                  "over": "widgets"
-                },
+                "repeat": "widgets",
                 "type": "MetricTile"
               }
             ],
@@ -9994,9 +9970,7 @@
               "elevation": "sm",
               "title": "$item.label"
             },
-            "repeat": {
-              "over": "relatedCollections"
-            },
+            "repeat": "relatedCollections",
             "type": "Card"
           }
         ],
@@ -10032,9 +10006,7 @@
                           "name": "$item.value",
                           "type": "text"
                         },
-                        "repeat": {
-                          "over": "formFields"
-                        },
+                        "repeat": "formFields",
                         "type": "Input"
                       }
                     ],
@@ -10065,9 +10037,7 @@
                       "variant": "secondary",
                       "workflow": "$item.value"
                     },
-                    "repeat": {
-                      "over": "actions"
-                    },
+                    "repeat": "actions",
                     "type": "Button"
                   }
                 ],

@@ -117,3 +117,32 @@ def test_assembly_invalidates_the_build_cache(tmp_path):
 
     assembly.assemble({"application": {"name": "T"}}, app, project_short_id="t")
     assert not (app / ".next").exists()
+
+
+def test_everything_a_projection_writes_is_protected_from_the_scaffold(tmp_path):
+    """Assembly runs after projection, so any projected path missing from
+    PROJECTED_PATHS gets silently overwritten by the scaffold's own copy.
+
+    That is how the generated middleware was replaced by the hardcoded
+    gate-everything one: the file was correct on disk, then assembly restored
+    the scaffold's, and an app with public pages had them quietly closed.
+    """
+    from services.blueprint import projection
+
+    written: set[str] = set()
+    doc = {
+        "pages": [{"id": "PAGE-001", "route": "/", "name": "Home",
+                   "access": "public", "pattern": "entity_list"}],
+        "data": {"entities": [], "relationships": []},
+        "widgets": [], "workflows": [], "navigation": {}, "patternTemplates": [],
+    }
+    app = tmp_path / "app"
+    for fn in (projection.project_nav_flow, projection.project_design_tokens,
+               projection.project_middleware, projection.project_seed,
+               projection.project_sensitive_columns,
+               projection.project_searchable_columns):
+        written.update(fn(doc, app).get("files") or [])
+
+    unprotected = [f for f in written
+                   if not any(f.startswith(p) for p in assembly.PROJECTED_PATHS)]
+    assert not unprotected, f"scaffold would overwrite: {unprotected}"

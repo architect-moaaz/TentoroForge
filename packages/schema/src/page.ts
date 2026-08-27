@@ -430,6 +430,14 @@ const FormNode         = _container("Form");
 // trees as small as ~30 nodes (caught while rendering Mark 2 schemas in
 // the scaffold). Discriminated union dispatches by `type` literal and skips
 // the speculative work entirely.
+//: Structural buckets the open fallback must not shadow — they have their own
+//: strict shapes above.
+const RESERVED_V2 = new Set([
+  "Stack", "Row", "Grid", "Container", "Spacer",
+  "Box", "Text", "Image",
+  "Repeat", "Conditional", "DataBoundary", "Slot",
+]);
+
 export const NodeV2: z.ZodTypeAny = z.lazy(() => {
   const union = z.discriminatedUnion("type", [
     // strict v2 node types
@@ -582,11 +590,38 @@ export const NodeV2: z.ZodTypeAny = z.lazy(() => {
       }
     }
   });
-  // Wire the forward ref so NodeV2Ref (in node-ref.ts) resolves to the refined
-  // union. After this call, any z.lazy(() => NodeV2Ref) in the node files will
-  // validate children against the full strict union with cross-field checks.
-  setNodeV2Ref(refined);
-  return refined;
+  // Any registered component, not only the ones enumerated above.
+  //
+  // `Node` (nodes/index.ts) already ends with `LibraryNode` as an open
+  // fallback — "anything else with a non-reserved type" — but NodeV2 was a
+  // closed discriminated union built independently, so the two disagreed about
+  // what exists. A component could be registered in the runtime registry,
+  // appear in the emitted catalog, be authored, pass every gate, project
+  // cleanly, and then fail validation here and render as nothing with only a
+  // console warning. `AuthForm` did exactly that.
+  //
+  // The strict union is tried first, so every cross-field refinement above
+  // still applies to the types it knows. LibraryNode catches the rest, and it
+  // is not a hole: it requires an id, rejects the reserved structural names,
+  // and validates props and children like any other node.
+  // Declared here rather than imported from ./nodes/library: that module
+  // imports `Node`, which reaches back into this one, and the cycle leaves a
+  // schema half-initialised at parse time. The shape is deliberately the same.
+  const anyRegistered = z
+    .object({
+      id: z.string().min(1),
+      type: z.string().min(1).refine((t) => !RESERVED_V2.has(t), {
+        message: "type collides with a reserved (non-library) node bucket",
+      }),
+      props: z.record(z.unknown()).optional(),
+      visibleIf: z.string().optional(),
+      children: z.array(NodeV2Ref).optional(),
+    })
+    .passthrough();
+
+  const open = z.union([refined, anyRegistered]);
+  setNodeV2Ref(open);
+  return open;
 });
 
 // ============================================================================

@@ -24,6 +24,7 @@ from services.blueprint.service import (
     BlueprintInvalid,
     BlueprintService,
     ArtifactNotFound,
+    IdentityCollision,
     empty_blueprint,
 )
 
@@ -44,7 +45,7 @@ def test_generated_contract_is_present_and_is_the_blueprint():
     schema = json.loads(CONTRACT_PATH.read_text("utf-8"))
     assert schema["$schema"].startswith("http://json-schema.org/draft-07")
     assert set(schema["required"]) == {"schemaVersion", "application"}
-    assert len(schema["properties"]) == 31
+    assert len(schema["properties"]) == 32
 
 
 def test_minimal_blueprint_validates(svc):
@@ -109,6 +110,94 @@ def test_ids_survive_a_reload(tmp_path):
     )
     assert again["id"] == "PAGE-001"
     assert len(reloaded.doc["pages"]) == 1
+
+
+# --- identity collisions ---------------------------------------------------
+#
+# The allocator and the document are two records of the same fact. When they
+# disagree the merge-by-id path in upsert() is no longer an update — it writes
+# one artifact on top of an unrelated one. §76 says surface it, don't repair.
+
+def test_a_document_without_its_registry_refuses_to_mint_over_itself(tmp_path, ats):
+    """A populated Blueprint in an output_dir whose ids.json never saw it.
+
+    The counters start at zero, so the next DEC allocation is DEC-001 — which
+    the fixture already used for something else entirely.
+    """
+    svc = BlueprintService(output_dir=str(tmp_path))
+    svc.doc = ats
+    svc.save()
+    incumbent = svc.doc["decisions"][0]
+    assert incumbent["id"] == "DEC-001"
+
+    with pytest.raises(IdentityCollision) as exc:
+        svc.upsert(
+            "decisions",
+            {"decision": "Store resumes in S3.", "reason": "cheap", "source": "user"},
+            natural_key=prose_key("DEC", "Store resumes in S3."),
+        )
+    assert "DEC-001" in str(exc.value)
+    assert svc.doc["decisions"][0] == incumbent, "the incumbent must be untouched"
+
+
+def test_a_refused_allocation_does_not_leave_a_binding_behind(tmp_path, ats):
+    """The refusal has to be clean, or a retry would be told the id is its own."""
+    svc = BlueprintService(output_dir=str(tmp_path))
+    svc.doc = ats
+    svc.save()
+    key = prose_key("DEC", "Store resumes in S3.")
+
+    with pytest.raises(IdentityCollision):
+        svc.upsert("decisions", {"decision": "Store resumes in S3.",
+                                 "reason": "cheap", "source": "user"}, natural_key=key)
+
+    assert IdAllocator.load(output_dir=tmp_path).lookup(key) is None
+    with pytest.raises(IdentityCollision):
+        svc.upsert("decisions", {"decision": "Store resumes in S3.",
+                                 "reason": "cheap", "source": "user"}, natural_key=key)
+
+
+def test_an_id_owned_by_another_natural_key_is_refused(svc):
+    """An explicit id that the registry has already given to something else."""
+    svc.upsert("data.entities", {"name": "Candidate", "table": "candidates"},
+               natural_key=entity_key("Candidate"))
+    with pytest.raises(IdentityCollision) as exc:
+        svc.upsert("data.entities", {"id": "ENTITY-001", "name": "Job", "table": "jobs"},
+                   natural_key=entity_key("Job"))
+    assert "rebind" in str(exc.value)
+    assert [e["name"] for e in svc.doc["data"]["entities"]] == ["Candidate"]
+
+
+def test_binding_the_documents_ids_first_lets_the_upsert_through(tmp_path, ats):
+    """The way out: teach the registry what the document already knows."""
+    svc = BlueprintService(output_dir=str(tmp_path))
+    svc.doc = ats
+    svc.save()
+    with IdAllocator.session(output_dir=tmp_path) as alloc:
+        for d in svc.doc["decisions"]:
+            alloc.bind(f"DEC:{d['id']}", d["id"])
+
+    written = svc.upsert(
+        "decisions",
+        {"decision": "Store resumes in S3.", "reason": "cheap", "source": "user"},
+        natural_key=prose_key("DEC", "Store resumes in S3."),
+    )
+    assert written["id"] == "DEC-108"
+    assert svc.doc["decisions"][0]["id"] == "DEC-001"
+    svc.validate()
+
+
+def test_an_explicit_id_still_updates_its_own_artifact(svc):
+    """The guard must not break re-import: an id the registry has never seen,
+    carried by the artifact itself, is how §12 admits an existing document."""
+    svc.upsert("pages", {"name": "Candidates", "route": "/candidates",
+                         "purpose": "Manage candidates."}, natural_key=page_key("/candidates"))
+    again = svc.upsert("pages", {"id": "PAGE-001", "name": "Talent Pool",
+                                 "route": "/candidates", "purpose": "Manage candidates."},
+                       natural_key=page_key("/candidates"))
+    assert again["id"] == "PAGE-001"
+    assert len(svc.doc["pages"]) == 1
+    assert svc.doc["pages"][0]["name"] == "Talent Pool"
 
 
 def test_find_locates_artifacts_across_sections(svc):

@@ -818,14 +818,27 @@ def test_unfillable_fields_are_withheld_from_agents():
     `apis` node, and the same failure on an earlier xhigh run."""
     from services.blueprint.agent_contract import AGENT_REGISTRY
     from services.blueprint.executors import WITHHELD_FIELDS, writable_shapes
+    from services.blueprint.orchestrator import DAG
 
-    # `memory` owns the section now, but it is a derivation service — nothing
-    # ever prompts it — so the field is still unfillable by anything that gets
-    # a prompt. If a *prompted* agent gains it, stop withholding.
-    prompted = [a for a, c in AGENT_REGISTRY.items()
-                if "decisions" in c.writes and a != "memory"]
-    assert not prompted, (
-        "if a prompted agent can now author decisions, stop withholding the field")
+    # "Prompted" means prompted *through this seam* — build_prompt, which is
+    # what calls writable_shapes. Derived from the DAG rather than listed by
+    # name, so the guard keeps working as the roster changes.
+    #
+    # Two registered agents own `decisions` and neither is prompted here.
+    # `memory` (§20/§23) is a derivation service, invoked by the orchestrator
+    # and never given a prompt at all. `smith` (§6) is prompted, but by
+    # services.smith.turn against TURN_SCHEMA — a different, hand-written
+    # contract that names `decisions` deliberately, because authoring them from
+    # what the user actually decided is Smith's job. Neither ever receives
+    # writable_shapes output, so the withholding still holds where it applies.
+    prompted = {n.agent for n in DAG.values() if n.kind == "agent"}
+    offenders = sorted(
+        a for a, c in AGENT_REGISTRY.items()
+        if "decisions" in c.writes and a in prompted
+    )
+    assert not offenders, (
+        f"{offenders} are prompted through build_prompt and can now author "
+        "decisions — stop withholding the field for them")
 
     for agent in ("api", "data_model", "page_design", "workflow", "testing"):
         for section, shape in writable_shapes(agent).items():
@@ -857,6 +870,10 @@ def test_the_prompt_redirects_rationale_to_assumptions(svc):
 #: than a data one, so an unexplained gap is a bug and an explained one is a
 #: design decision.
 _DELIBERATE_BLIND_SPOTS: dict[tuple[str, str], str] = {
+    ("page_layouts", "patternTemplates"):
+        "A per-page author designs bespoke; it depends on `patterns` so that "
+        "pages nobody authors individually still have a template to fall back "
+        "on, which is an ordering constraint rather than an input.",
     ("patterns", "components"):
         "A2UI composes from the 165-component catalog, not from Blueprint "
         "components; it depends on page_designs for ordering, not for data.",

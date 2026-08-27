@@ -70,6 +70,8 @@ import { Breadcrumb } from "./components/Breadcrumb/Breadcrumb";
 import { BreadcrumbProps } from "./components/Breadcrumb/Breadcrumb.schema";
 import { Alert } from "./components/Alert/Alert";
 import { AlertProps } from "./components/Alert/Alert.schema";
+import { AuthForm } from "./components/AuthForm/AuthForm";
+import { AuthFormProps } from "./components/AuthForm/AuthForm.schema";
 import { EmptyState } from "./components/EmptyState/EmptyState";
 import { EmptyStateProps } from "./components/EmptyState/EmptyState.schema";
 // Spec C Slice 7 — interaction depth
@@ -461,6 +463,9 @@ export function buildDefaultRegistry(opts: BuildDefaultRegistryOptions = {}): Re
   reg("Breadcrumb", Breadcrumb, BreadcrumbProps, "navigation");
   reg("Alert", Alert, AlertProps, "feedback");
   reg("EmptyState", EmptyState, EmptyStateProps, "feedback");
+  // The only component that exchanges credentials for a session. Without it a
+  // generated login page renders and cannot log anybody in.
+  reg("AuthForm", AuthForm, AuthFormProps, "form");
   // Spec C Slice 7 — interaction depth
   reg("BulkActionBar", BulkActionBar, BulkActionBarProps, "interactive");
   reg("SavedViewsPicker", SavedViewsPicker, SavedViewsPickerProps, "interactive");

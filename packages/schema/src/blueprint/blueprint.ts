@@ -141,6 +141,25 @@ export const PageContract = z.object({
   module: ModuleId.optional(),
 
   /** Roles for whom this page is meaningful. */
+  /**
+   * §100 — who may reach this page at all.
+   *
+   * Auth is a property of a page, not of an application. Some apps are
+   * entirely gated (an internal tracker), some are entirely open (a marketing
+   * site or a calculator), and the common case is neither: a storefront browses
+   * publicly and gates checkout, a SaaS product markets publicly and gates the
+   * product. The scaffold's middleware assumed "gate everything" with one
+   * hardcoded matcher, which quietly makes the third case impossible.
+   *
+   * Defaults to `authenticated`, and the default matters: a page that is
+   * accidentally public leaks data, while a page that is accidentally gated is
+   * a visible annoyance someone reports. Being open has to be stated.
+   */
+  access: z
+    .enum(["public", "authenticated", "role_restricted"])
+    .default("authenticated"),
+
+  /** Roles for whom this page is meaningful; required by `role_restricted`. */
   users: z.array(RoleId).default([]),
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
@@ -305,7 +324,7 @@ export interface TemplateNodeShape {
   type: string;
   props?: Record<string, unknown>;
   children?: TemplateNodeShape[];
-  repeat?: { over: z.infer<typeof RepeatSource> };
+  repeat?: z.infer<typeof RepeatSource>;
   visibleIf?: string;
 }
 
@@ -317,10 +336,15 @@ export const TemplateNode: z.ZodType<TemplateNodeShape> = z.lazy(() =>
     /** Positional — the library composes with children, not named slots. */
     children: z.array(TemplateNode).default([]),
     /**
-     * Emit this subtree once per element of `over`, with `$item.*` bound to
-     * the element. Absent means emit exactly once.
+     * Emit this subtree once per element of the named list, with `$item.*`
+     * bound to the element. Absent means emit exactly once.
+     *
+     * A bare name rather than `{ over: … }`. The wrapper carried exactly one
+     * field and bought nothing, and the first author handed the contract
+     * reached straight past it and wrote `repeat: "actions"` — which is the
+     * shape a reader would expect. The schema was the thing that was wrong.
      */
-    repeat: z.object({ over: RepeatSource }).optional(),
+    repeat: RepeatSource.optional(),
     /** Engine-native conditional; passed through unresolved. */
     visibleIf: z.string().optional(),
   }),
@@ -350,6 +374,36 @@ export const PatternTemplate = z.object({
       relatedCollections: z.boolean().default(false),
     })
     .default({}),
+  root: TemplateNode,
+  ...artifactBase,
+});
+
+/**
+ * A page authored in full, rather than instantiated from a pattern.
+ *
+ * The pattern route buys consistency and determinism: one template, every page
+ * of that kind identical, a rebuild byte-for-byte the same. It pays for that
+ * with fit. `record_workspace` ended up covering nine pages that were really
+ * two jobs — five create/edit forms and four read-heavy workspaces — and the
+ * single template it produced carried a `Form` that suited only half of them.
+ *
+ * So a page may instead carry its own authored tree. The trade is explicit:
+ * per-page authoring costs a model call per page and gives up byte-identical
+ * re-projection, and in exchange nothing is forced through a shape it does not
+ * fit. What it does *not* give up is the gate — an authored tree is validated
+ * against the same component catalog, the same child contracts and the same
+ * prop schemas as a template. That gate is what makes this safe now and its
+ * absence is what made per-page composition fail before.
+ *
+ * The placeholder vocabulary stays available. An author that writes
+ * `$columns` gets the entity's real columns rather than its recollection of
+ * them, so the mechanical parts stay correct by construction even here.
+ */
+export const PageLayout = z.object({
+  /** Natural key — the page this tree renders. */
+  page: PageId,
+  /** Why this structure, for this page, in terms of what the user asked for. */
+  rationale: z.string().default(""),
   root: TemplateNode,
   ...artifactBase,
 });
@@ -807,6 +861,9 @@ export const Blueprint = z.object({
   uiRegistry: UiRegistry.default({}),
   /** §34 — one per distinct page pattern the app uses. Authored by A2UI. */
   patternTemplates: z.array(PatternTemplate).default([]),
+  /** §34 — pages authored individually. Takes precedence over the
+   *  pattern template when both exist for a page. */
+  pageLayouts: z.array(PageLayout).default([]),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
@@ -831,3 +888,4 @@ export type Workflow = z.infer<typeof Workflow>;
 export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
+export type PageLayout = z.infer<typeof PageLayout>;

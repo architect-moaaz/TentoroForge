@@ -370,6 +370,15 @@
             "$ref": "#/properties/modules/items/properties/id",
             "description": "Stable MODULE identifier (§12)"
           },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "authenticated",
+              "role_restricted"
+            ],
+            "default": "authenticated"
+          },
           "users": {
             "type": "array",
             "items": {
@@ -1489,25 +1498,16 @@
                 "default": []
               },
               "repeat": {
-                "type": "object",
-                "properties": {
-                  "over": {
-                    "type": "string",
-                    "enum": [
-                      "actions",
-                      "primaryActions",
-                      "widgets",
-                      "relatedCollections",
-                      "columns",
-                      "formFields",
-                      "states"
-                    ]
-                  }
-                },
-                "required": [
-                  "over"
-                ],
-                "additionalProperties": false
+                "type": "string",
+                "enum": [
+                  "actions",
+                  "primaryActions",
+                  "widgets",
+                  "relatedCollections",
+                  "columns",
+                  "formFields",
+                  "states"
+                ]
               },
               "visibleIf": {
                 "type": "string"
@@ -1536,6 +1536,45 @@
         },
         "required": [
           "pattern",
+          "root"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "pageLayouts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "root": {
+            "$ref": "#/properties/patternTemplates/items/properties/root"
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "page",
           "root"
         ],
         "additionalProperties": false

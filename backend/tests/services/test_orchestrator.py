@@ -28,6 +28,7 @@ from services.blueprint.orchestrator import (
     impacted_artifacts,
     incremental_plan,
     levels,
+    sections_of,
     run,
     transition,
 )
@@ -436,3 +437,184 @@ def test_ported_projections_run_without_an_agent(svc, tmp_path):
     report = run(svc, never_called, plan=["frontend"], app_root=str(tmp_path))
     assert report.completed == ["frontend"]
     assert report.failed == [] and report.blocked == []
+
+
+def test_a_rejected_proposal_is_re_asked_with_the_reason(svc):
+    """Rejecting without saying why makes the retry reproduce the mistake.
+
+    Two pages failed twice each on the same bad enum value because the second
+    attempt received a byte-identical prompt.
+    """
+    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.orchestrator import DAG, RunReport, _run_agent_subject
+
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.feedback)
+        raise InvalidPatternTemplate("root.props.variant: 'ghost' is not allowed")
+
+    report = RunReport()
+    _run_agent_subject(
+        svc, executor, "patterns", DAG["patterns"], "",
+        max_attempts=2, commit=False, user_request="", report=report,
+    )
+    assert len(seen) == 2, "the subject must actually be retried"
+    assert seen[0] == "", "the first attempt has nothing to react to"
+    assert "ghost" in seen[1], "the retry must be told what was rejected"
+
+
+def test_the_reason_reaches_the_prompt(svc):
+    from services.blueprint.executors import build_prompt
+
+    _, plain = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    _, retry = build_prompt(svc.doc, "page_layouts", subject="PAGE-001",
+                            feedback="root.props.variant: 'ghost' is not allowed")
+    assert "ghost" in retry and "ghost" not in plain
+
+# --- §72: the frame is not rebuilt for every change -------------------------
+
+def test_foundational_nodes_are_classified_by_what_they_produce():
+    """§72 enumerates what an incremental change affects: requirements, pages,
+    components, entities, APIs, workflows, rules, tests, source files,
+    migrations. It conspicuously omits the application's frame — what it is,
+    what it looks like, how it is organised, what it talks to."""
+    from services.blueprint.orchestrator import is_foundational
+
+    frame = {k for k, n in DAG.items() if is_foundational(n)}
+    assert frame == {"application_model", "design_system", "integrations",
+                     "ux_architecture"}
+
+
+def test_service_and_projection_nodes_are_never_foundational():
+    """They are deterministic and cheap, and a projection that does not run
+    leaves the application unbuilt."""
+    from services.blueprint.orchestrator import is_foundational
+
+    for node in DAG.values():
+        if node.kind in ("service", "projection"):
+            assert not is_foundational(node), node.key
+
+
+def test_a_rule_change_does_not_re_author_the_design_language(ats):
+    """The DAG is a chain — requirements -> application_model -> {design_system,
+    integrations, ux_architecture} -> everything — so `descendants` alone made
+    every plan the whole DAG. Measured on this fixture: 19 of 22 nodes for a
+    change that added two rules and a field."""
+    plan = incremental_plan(ats, ["RULE-004"], also_sections={"businessRules"})
+    assert "design_system" not in plan
+    assert "integrations" not in plan
+    assert "application_model" not in plan
+    assert len(plan) < len(DAG)
+
+
+def test_containment_does_not_seed_the_frame(ats):
+    """Impact reaches a MODULE because that module *contains* the page that
+    changed. Seeding `ux_architecture` off that has it re-author the module and
+    navigation structure because a table was made more compact."""
+    plan = incremental_plan(ats, ["CMP-033", "PAGE-009"])
+    assert "modules" in sections_of(ats, impacted_artifacts(ats, ["CMP-033", "PAGE-009"]))
+    assert "ux_architecture" not in plan
+
+
+def test_writing_the_frame_does_seed_it(ats):
+    """The safety valve. When the frame genuinely moves — a new module — Smith
+    writes that section and the node is seeded directly."""
+    plan = incremental_plan(ats, [], also_sections={"modules"})
+    assert "ux_architecture" in plan
+
+
+def test_each_frame_section_can_still_reach_its_node(ats):
+    """Every foundational node must remain reachable by writing what it owns,
+    or the frame could never be changed at all."""
+    from services.blueprint.orchestrator import is_foundational
+
+    for key, node in DAG.items():
+        if not is_foundational(node):
+            continue
+        for section in node.produces:
+            assert key in incremental_plan(ats, [], also_sections={section}), (key, section)
+
+
+def test_dropping_a_frame_node_does_not_hide_what_sits_behind_it(ats):
+    """`patterns` depends on `design_system`. Filtering after the closure
+    rather than during it keeps every other node reachable *through* the ones
+    that are dropped."""
+    plan = incremental_plan(ats, ["PAGE-009"])
+    assert "design_system" not in plan
+    assert "patterns" in plan
+
+
+def test_the_plan_still_reaches_the_implementation(ats):
+    """Narrowing must not cut the projections off — a change that never
+    regenerates anything is not a change."""
+    plan = incremental_plan(ats, ["RULE-004"], also_sections={"businessRules"})
+    for required in ("integration", "testing", "verification", "preview"):
+        assert required in plan
+
+
+# --- §20: an agent must not re-author what Smith just wrote -----------------
+
+def test_a_section_this_change_wrote_is_not_re_authored(ats):
+    """§20 — "future agents must respect accepted decisions unless deliberately
+    changed", and a regeneration is not a deliberate change. Re-running
+    `business_rules` over a rule Smith wrote from the user's own words has the
+    agent write over it."""
+    plan = incremental_plan(
+        ats, ["RULE-004"],
+        also_sections={"businessRules"}, already_written={"businessRules"},
+    )
+    assert "business_rules" not in plan
+
+
+def test_downstream_of_a_written_section_still_runs(ats):
+    """The complement: what Smith wrote still has to reach the implementation."""
+    plan = incremental_plan(
+        ats, ["RULE-004"],
+        also_sections={"businessRules"}, already_written={"businessRules"},
+    )
+    assert "integration" in plan and "verification" in plan
+
+# --- §72: the plan follows dataflow, not the impact closure -----------------
+
+def test_a_presentational_change_does_not_re_author_the_rule_catalogue(ats):
+    """`business_rules` depends only on `data_model`, so a component is not one
+    of its inputs. It was being seeded because the *impact closure* from
+    CMP-033 reaches a RULE — via a page that contains the component — and
+    `sections_of` then reported `businessRules` as touched.
+
+    Impact answers "what might be affected", which is what §71 reports to the
+    user. That is a different claim from "this section's owner must re-author
+    its catalogue"."""
+    assert "businessRules" in sections_of(
+        ats, impacted_artifacts(ats, ["CMP-033", "PAGE-009"], depth=2)
+    ), "the closure really does reach rules — that is the trap"
+    assert "businessRules" not in sections_of(ats, {"CMP-033", "PAGE-009"})
+
+    plan = incremental_plan(ats, ["CMP-033", "PAGE-009"])
+    assert "business_rules" not in plan
+
+
+def test_an_entity_change_does_re_author_the_rules(ats):
+    """The complement, and the reason the edge exists: rules are authored from
+    the data model, so an entity change is genuinely one of their inputs."""
+    assert "business_rules" in incremental_plan(ats, ["ENTITY-003"])
+
+
+def test_a_plan_is_seeded_by_what_changed_not_by_what_it_touches(ats):
+    """The closure reaches six sections from one component; directly it is two.
+    A plan seeded from the closure re-runs nodes that cannot see the change."""
+    direct = incremental_plan(ats, ["CMP-033"])
+    from services.blueprint.orchestrator import sections_of as _sections
+
+    assert _sections(ats, {"CMP-033"}) == {"components"}
+    assert "business_rules" not in direct
+    assert "database" not in direct
+    assert "security" not in direct
+
+
+def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
+    """A component change still has to reach composition and the projections."""
+    plan = incremental_plan(ats, ["CMP-033"])
+    for required in ("patterns", "frontend", "integration", "verification", "preview"):
+        assert required in plan, required

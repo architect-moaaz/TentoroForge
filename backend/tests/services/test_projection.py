@@ -378,3 +378,114 @@ def test_a_blueprint_field_never_shadows_a_platform_column():
     assert "passwordHash" not in names and "fullName" not in names
     assert sorted(folded) == ["fullName", "passwordHash"]
     assert "userRole" in names
+
+
+# ---------------------------------------------------------------------------
+# §100 access — auth is a property of a page, not of an application
+# ---------------------------------------------------------------------------
+
+def _matcher(app) -> str:
+    import re as _re
+    text = (app / "src" / "middleware.ts").read_text()
+    return _re.search(r'matcher: \["(.+?)"\]', text).group(1)
+
+
+def _pages(*specs):
+    return {"pages": [{"id": f"PAGE-{i:03d}", "route": r, "access": a}
+                      for i, (r, a) in enumerate(specs, 1)]}
+
+
+def test_a_page_is_gated_unless_it_says_it_is_public(tmp_path):
+    """Fail closed. An accidentally public page leaks data; an accidentally
+    gated one is a visible annoyance somebody reports."""
+    from services.blueprint.projection import access_map
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/roles"}]}   # no access stated
+    assert access_map(doc)["authenticated"] == ["/roles"]
+    assert access_map(doc)["public"] == []
+
+
+def test_a_fully_open_app_gates_nothing_but_the_auth_flow(tmp_path):
+    from services.blueprint.projection import project_middleware
+
+    doc = _pages(("/", "public"), ("/pricing", "public"))
+    result = project_middleware(doc, tmp_path / "app")
+    assert result["gated"] == 0
+    assert set(result["public"]) == {"/", "/pricing"}
+    assert "pricing" in _matcher(tmp_path / "app")
+
+
+def test_a_partly_public_app_is_expressible(tmp_path):
+    """The case the hardcoded matcher made impossible: browse publicly,
+    check out behind a login."""
+    from services.blueprint.projection import project_middleware
+
+    doc = _pages(("/", "public"), ("/catalog", "public"),
+                 ("/checkout", "authenticated"), ("/orders", "role_restricted"))
+    result = project_middleware(doc, tmp_path / "app")
+    assert result["gated"] == 2
+    matcher = _matcher(tmp_path / "app")
+    assert "catalog" in matcher
+    assert "checkout" not in matcher and "orders" not in matcher
+
+
+def test_a_public_landing_route_is_actually_reachable(tmp_path):
+    """A negative lookahead cannot exclude the empty path, so `/` stayed gated
+    however it was declared — requiring one character after the slash is what
+    actually opens it."""
+    from services.blueprint.projection import project_middleware
+
+    project_middleware(_pages(("/", "public")), tmp_path / "open")
+    assert _matcher(tmp_path / "open").endswith(".+)")
+
+    project_middleware(_pages(("/", "authenticated")), tmp_path / "shut")
+    assert _matcher(tmp_path / "shut").endswith(".*)")
+
+
+def test_dynamic_segments_become_a_wildcard(tmp_path):
+    from services.blueprint.projection import project_middleware
+
+    project_middleware(_pages(("/docs/[slug]", "public")), tmp_path / "app")
+    assert "docs/[^/]+" in _matcher(tmp_path / "app")
+
+
+def test_the_auth_flow_is_never_caught_by_its_own_gate(tmp_path):
+    """A gate that catches the login page locks everyone out permanently."""
+    from services.blueprint.projection import project_middleware
+
+    project_middleware(_pages(("/anything", "authenticated")), tmp_path / "app")
+    assert "api/auth" in _matcher(tmp_path / "app")
+
+
+def test_the_root_route_is_projected_not_guessed(tmp_path):
+    """`[...slug]` is a required catch-all and never matches "/", so the root
+    always needs its own file. The scaffold's hardcoded `redirect("/home")` sent
+    it to a route the app did not have — the root 404d, and the 404 redirected
+    into the login gate."""
+    from services.blueprint.projection import project_root_route
+
+    claimed = {"pages": [{"id": "PAGE-001", "route": "/", "name": "Entry"},
+                         {"id": "PAGE-002", "route": "/overview"}]}
+    r = project_root_route(claimed, tmp_path / "a")
+    assert r["claimedBy"] == "PAGE-001"
+    body = (tmp_path / "a" / "src" / "app" / "page.tsx").read_text()
+    assert "renderSchemaPage" in body and "redirect(" not in body
+
+    unclaimed = {"pages": [{"id": "PAGE-002", "route": "/sign-in"},
+                           {"id": "PAGE-003", "route": "/overview"}]}
+    r = project_root_route(unclaimed, tmp_path / "b")
+    body = (tmp_path / "b" / "src" / "app" / "page.tsx").read_text()
+    assert r["redirectsTo"] == "/overview"
+    assert 'redirect("/overview")' in body
+    # Only the *statement* matters — the comment explains the old bug and
+    # legitimately names the route it used to hardcode.
+    code = "\n".join(l for l in body.splitlines() if not l.strip().startswith("//"))
+    assert '"/home"' not in code, "never a route the Blueprint did not declare"
+
+
+def test_the_root_never_forwards_to_a_login_screen(tmp_path):
+    from services.blueprint.projection import landing_route
+
+    doc = {"pages": [{"route": "/login"}, {"route": "/sign-up"},
+                     {"route": "/dashboard"}]}
+    assert landing_route(doc) == "/dashboard"

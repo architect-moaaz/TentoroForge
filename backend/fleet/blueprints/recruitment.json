@@ -114,6 +114,52 @@
       ]
     }
   ],
+  "patternTemplates": [
+    {
+      "pattern": "entity_list",
+      "rationale": "A named collection with its create action and a sortable table.",
+      "requires": {
+        "primaryEntity": true
+      },
+      "root": {
+        "children": [
+          {
+            "children": [],
+            "props": {
+              "content": "$entity.plural",
+              "level": 1
+            },
+            "type": "Heading"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "props": {
+                  "label": "$item.label"
+                },
+                "repeat": "primaryActions",
+                "type": "Button"
+              }
+            ],
+            "props": {},
+            "type": "Cluster"
+          },
+          {
+            "children": [],
+            "props": {
+              "columns": "$columns",
+              "rows": "{{rows}}"
+            },
+            "type": "TableSortable"
+          }
+        ],
+        "props": {},
+        "type": "Stack"
+      },
+      "status": "APPROVED"
+    }
+  ],
   "permissions": [
     {
       "action": "create",
@@ -189,54 +235,6 @@
       ],
       "trigger": {
         "kind": "manual"
-      }
-    }
-  ],
-  "patternTemplates": [
-    {
-      "pattern": "entity_list",
-      "rationale": "A named collection with its create action and a sortable table.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "status": "APPROVED",
-      "root": {
-        "type": "Stack",
-        "props": {},
-        "children": [
-          {
-            "type": "Heading",
-            "props": {
-              "content": "$entity.plural",
-              "level": 1
-            },
-            "children": []
-          },
-          {
-            "type": "Cluster",
-            "props": {},
-            "children": [
-              {
-                "type": "Button",
-                "repeat": {
-                  "over": "primaryActions"
-                },
-                "props": {
-                  "label": "$item.label"
-                },
-                "children": []
-              }
-            ]
-          },
-          {
-            "type": "TableSortable",
-            "props": {
-              "columns": "$columns",
-              "rows": "{{rows}}"
-            },
-            "children": []
-          }
-        ]
       }
     }
   ]

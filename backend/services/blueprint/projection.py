@@ -50,6 +50,11 @@ _TYPES: dict[str, str] = {
 _DEFAULT_TYPE = "text"
 
 
+def _live(items: Any) -> list[dict]:
+    """Artifacts still in play. A DEPRECATED page is not projected."""
+    return [i for i in (items or []) if i.get("status") != "DEPRECATED"]
+
+
 def to_snake(name: str) -> str:
     """``fullName`` -> ``full_name``. The column convention the scaffold uses."""
     s = re.sub(r"(?<!^)(?=[A-Z])", "_", (name or "").strip())
@@ -463,7 +468,10 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles]
         if named:
             guards[route] = {"roles": sorted(named)}
-        if any(k in route for k in ("sign-in", "signin", "login", "sign-up", "register")):
+        # Read from the contract, not guessed from the route name. A page
+        # called /login in an app with no auth is not an auth route, and a
+        # public /pricing is not gated however it is spelled.
+        if (page.get("access") or "authenticated") == "public":
             auth_routes.append(route)
 
     # Transitions come from declared navigation, not from guessing which page
@@ -479,6 +487,8 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     (out / "nav-flow.json").write_text(json.dumps({
         "version": "1.0",
         "pages": entries,
+        # The guards read this as "reachable without a session".
+        "public_routes": sorted(set(auth_routes)),
         "auth_routes": sorted(set(auth_routes)),
         "transitions": transitions,
         "guards": guards,
@@ -870,3 +880,182 @@ def project_searchable_columns(doc: dict, app_root: str | Path) -> dict[str, Any
     )
     return {"files": ["src/lib/searchable-columns.ts"],
             "entities": len({k.lower() for k in manifest})}
+
+
+# ---------------------------------------------------------------------------
+# access — which routes the middleware gates
+# ---------------------------------------------------------------------------
+
+#: Routes the auth flow itself needs, plus build output. A gate that catches
+#: its own login page locks everyone out.
+_ALWAYS_OPEN: tuple[str, ...] = (
+    "api/auth", "_next", "favicon.ico",
+)
+
+
+def _matcher_segment(route: str) -> str:
+    """`/roles/[id]` -> `roles/[^/]+` for a middleware negative lookahead."""
+    body = (route or "/").strip("/")
+    if not body:
+        return ""
+    # Escape only what is special in a JS regex. `re.escape` also escapes
+    # hyphens, so `/sign-in` came out as `sign\\-in` — legal but noise in a
+    # generated file someone has to read.
+    def lit(part: str) -> str:
+        return re.sub(r"([.*+?^${}()|\[\]\\])", r"\\\1", part)
+
+    parts = [r"[^/]+" if p.startswith("[") else lit(p) for p in body.split("/")]
+    return "/".join(parts)
+
+
+def access_map(doc: dict) -> dict[str, list[str]]:
+    """Routes grouped by how they are reached: public, authenticated, by role."""
+    out: dict[str, list[str]] = {"public": [], "authenticated": [],
+                                 "role_restricted": []}
+    for page in _live(doc.get("pages")):
+        route = page.get("route") or "/"
+        access = page.get("access") or "authenticated"
+        out.setdefault(access, []).append(route)
+    for key in out:
+        out[key] = sorted(set(out[key]))
+    return out
+
+
+def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/middleware.ts`` from what the pages declare.
+
+    The scaffold shipped one hardcoded matcher gating everything except the
+    login flow, so an app with any public surface could not be expressed. This
+    generates the matcher from the pages themselves, which is the only way a
+    partly-public app works — and it means the gate cannot drift from the
+    contract, because it *is* the contract.
+
+    Fails closed: a page is gated unless it says it is public.
+    """
+    access = access_map(doc)
+    open_routes = [_matcher_segment(r) for r in access["public"]]
+    open_routes = [r for r in open_routes if r]
+    # A public route at "/" needs the bare root excluded too.
+    root_public = "/" in access["public"]
+
+    excluded = list(_ALWAYS_OPEN) + open_routes
+    pattern = "|".join(excluded)
+    # A negative lookahead cannot exclude the empty path, so `/` is matched by
+    # `.*` no matter what is listed. When the landing route is public, requiring
+    # at least one character after the slash is what actually leaves it open.
+    tail = "+" if root_public else "*"
+    matcher = f"/((?!{pattern}|.*\\\\..*).{tail})"
+
+    lines = [
+        '// Generated from the Living Blueprint. Edit the Blueprint, not this file.',
+        '//',
+        '// Every page declares its own access (§100). Routes listed below are',
+        '// public because a page said so; everything else is gated, because the',
+        '// default is to gate — an accidentally public page leaks data, an',
+        '// accidentally gated one merely annoys.',
+        '//',
+    ]
+    for route in access["public"]:
+        lines.append(f'//   public: {route}')
+    for route in access["role_restricted"]:
+        lines.append(f'//   by role: {route}')
+    lines += [
+        '',
+        'import { withAuth } from "next-auth/middleware";',
+        '',
+        'export default withAuth({',
+        '  pages: { signIn: "/login" },',
+        '});',
+        '',
+        'export const config = {',
+        f'  matcher: ["{matcher}"],',
+        '};',
+        '',
+    ]
+
+    out = Path(app_root) / "src"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "middleware.ts").write_text("\n".join(lines), "utf-8")
+    return {
+        "files": ["src/middleware.ts"],
+        "public": access["public"],
+        "gated": len(access["authenticated"]) + len(access["role_restricted"]),
+    }
+
+
+# ---------------------------------------------------------------------------
+# the root route — `/` is not reachable by the catch-all
+# ---------------------------------------------------------------------------
+
+def landing_route(doc: dict) -> str:
+    """Where `/` should send someone when no page claims it.
+
+    The declared landing route if navigation names one, else the first page
+    that is not an auth screen — never a guess. The scaffold guessed `/home`,
+    a route this application does not have, so the root redirected into a 404
+    and the 404 redirected into the login gate.
+    """
+    nav = doc.get("navigation") or {}
+    for key in ("landing", "home", "root"):
+        route = nav.get(key)
+        if isinstance(route, str) and route.startswith("/"):
+            return route
+    for page in _live(doc.get("pages")):
+        route = page.get("route") or ""
+        if route and route != "/" and not any(
+            k in route for k in ("sign-in", "signin", "login", "sign-up", "register")
+        ):
+            return route
+    return "/"
+
+
+def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/app/page.tsx``.
+
+    Next's `[...slug]` is a *required* catch-all: it matches `/roles` but never
+    `/`. So the root always needs its own route file, and the scaffold shipped
+    one that redirects to a hardcoded `/home`.
+
+    Two cases, both read from the Blueprint. If a page claims `/`, render its
+    schema exactly as the catch-all would. If none does, redirect to the
+    declared landing route.
+    """
+    root_page = next((p for p in _live(doc.get("pages"))
+                      if (p.get("route") or "") == "/"), None)
+    out = Path(app_root) / "src" / "app"
+    out.mkdir(parents=True, exist_ok=True)
+
+    if root_page:
+        body = (
+            '// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n'
+            '//\n'
+            '// `[...slug]` is a required catch-all and never matches "/", so the\n'
+            f'// root needs its own route. {root_page.get("name")} claims it.\n'
+            '\n'
+            'import { renderSchemaPage } from "@/lib/schema-page";\n'
+            '\n'
+            'export default async function RootPage() {\n'
+            '  return renderSchemaPage("/", new Request("internal:?path=%2F"));\n'
+            '}\n'
+        )
+        claimed = root_page.get("id")
+    else:
+        target = landing_route(doc)
+        body = (
+            '// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n'
+            '//\n'
+            '// No page claims "/", so the root forwards to the declared landing\n'
+            '// route. The scaffold hardcoded "/home", which this application does\n'
+            '// not have — the root 404d and the 404 redirected into the gate.\n'
+            '\n'
+            'import { redirect } from "next/navigation";\n'
+            '\n'
+            'export default function RootPage() {\n'
+            f'  redirect("{target}");\n'
+            '}\n'
+        )
+        claimed = None
+
+    (out / "page.tsx").write_text(body, "utf-8")
+    return {"files": ["src/app/page.tsx"], "claimedBy": claimed,
+            "redirectsTo": None if root_page else landing_route(doc)}

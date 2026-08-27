@@ -12,17 +12,21 @@ from services.blueprint.ids import (  # noqa: F401
     component_key,
     entity_key,
     is_valid_id,
+    integration_key,
     module_key,
+    natural_key_for,
     page_key,
     parse_id,
     permission_key,
     prose_key,
     role_key,
+    widget_key,
     workflow_key,
 )
 from services.blueprint.service import (  # noqa: F401,E402
     BlueprintInvalid,
     BlueprintService,
+    IdentityCollision,
     empty_blueprint,
 )
 from services.blueprint.agent_contract import (  # noqa: F401,E402

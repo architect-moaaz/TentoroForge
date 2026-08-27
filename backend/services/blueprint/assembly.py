@@ -60,6 +60,15 @@ SUPERSEDED_REPAIRS: dict[str, str] = {
 PROJECTED_PATHS: tuple[str, ...] = (
     "src/schemas", "src/contracts", "src/db/schema", "src/db/seed.json",
     "src/lib/workflows/definitions", "src/app/tokens.css",
+    # The scaffold ships a middleware that gates everything; the projection
+    # writes one from what each page declares. Assembly runs after projection,
+    # so leaving this off the list silently restored the hardcoded gate and an
+    # app with public pages had them quietly closed again.
+    "src/middleware.ts",
+    # `/` needs its own route file because the catch-all is required, and the
+    # scaffold's redirects to a hardcoded "/home".
+    "src/app/page.tsx",
+    "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
 )
 
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";

@@ -20,13 +20,19 @@ rewording:
     PAGE     route                    (titles get reworded; routes don't)
     API      method + path
     ROLE     role name
-    PERM     subject + action
+    PERM     subject + action + name  (the pair alone is too coarse)
     MODULE   module name
     CMP      component name
     FLOW     workflow name
+    INT      integration name
+    WIDGET   page route + label       (both; a moved widget is a new one)
     REQ      normalised prose digest  ← see below
     RULE     normalised prose digest
+    TEST     normalised prose digest
     DEC      normalised prose digest
+
+:func:`natural_key_for` is that table as code — use it rather than picking a
+key function by hand, so every caller keys an artifact the same way.
 
 Prose artifacts are the awkward case: a requirement that gets reworded is
 usually still the *same* requirement, but its digest changes. Deciding whether
@@ -62,7 +68,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator, Mapping
 
 try:  # POSIX only; the allocator degrades to in-process locking without it.
     import fcntl
@@ -160,8 +166,22 @@ def role_key(name: str) -> str:
     return f"ROLE:{_norm(name)}"
 
 
-def permission_key(subject: str, action: str) -> str:
-    return f"PERM:{_norm(subject)}:{_norm(action)}"
+def permission_key(subject: str, action: str, name: str) -> str:
+    """Subject and action say *what* is permitted; the name says which grant.
+
+    §12 identifies a permission by subject + action, and that is too coarse for
+    a real authorisation model: an ATS grants ``role.read`` over every role and
+    ``role.read_offer_context`` over only the one reached through an
+    application under review. Both are ``read`` on the same entity, and keyed
+    on the pair they are one artifact — so re-proposing either would overwrite
+    the other's scope, quietly widening or narrowing access.
+
+    ``name`` is the discriminator, and the contract requires it. It comes last
+    so the key still reads as the grant it describes, and so a permission whose
+    ``subject`` is not an entity (a session, a route) still keys distinctly on
+    an empty first segment rather than colliding with every other one.
+    """
+    return f"PERM:{_norm(subject)}:{_norm(action)}:{_norm(name)}"
 
 
 def module_key(name: str) -> str:
@@ -174,6 +194,10 @@ def component_key(name: str) -> str:
 
 def workflow_key(name: str) -> str:
     return f"FLOW:{_norm(name)}"
+
+
+def integration_key(name: str) -> str:
+    return f"INT:{_norm(name)}"
 
 
 def widget_key(page_route: str, label: str) -> str:
@@ -194,6 +218,71 @@ def prose_key(prefix: str, text: str) -> str:
     """
     digest = hashlib.sha256(_norm(text).encode("utf-8")).hexdigest()[:16]
     return f"{prefix}:{digest}"
+
+
+def natural_key_for(
+    section: str,
+    artifact: Mapping[str, Any],
+    *,
+    page_routes: Mapping[str, str] | None = None,
+) -> str | None:
+    """The natural key for one artifact, chosen by the section it lives in.
+
+    The table at the top of this module written as code. It exists so that a
+    caller reconstructing a registry from a finished Blueprint keys each
+    artifact the same way the caller that first wrote it did — key the same
+    artifact two ways and the allocator hands it a second ID, which is the one
+    thing this module exists to prevent.
+
+    Returns ``None`` when the artifact is missing the field its key is built
+    from, or when the section has no scheme of its own: ``decisions`` are keyed
+    on the artifact they decide, which takes the whole document to work out,
+    and ``codeMap`` entries have no ID to bind. A caller that has to register
+    every ID should treat ``None`` as "fall back to the artifact's own ID".
+    """
+    def text(name: str) -> str:
+        value = artifact.get(name)
+        return value.strip() if isinstance(value, str) else ""
+
+    if section == "data.entities":
+        return entity_key(text("name")) if text("name") else None
+    if section == "pages":
+        return page_key(text("route")) if text("route") else None
+    if section == "apis":
+        return api_key(text("method"), text("path")) if text("path") else None
+    if section == "roles":
+        return role_key(text("name")) if text("name") else None
+    if section == "permissions":
+        # ``subject`` is optional in the contract; ``name`` and ``action`` are
+        # not, and between them they identify the grant on their own.
+        return (
+            permission_key(text("subject"), text("action"), text("name"))
+            if text("action") and text("name") else None
+        )
+    if section == "modules":
+        return module_key(text("name")) if text("name") else None
+    if section == "components":
+        return component_key(text("name")) if text("name") else None
+    if section == "workflows":
+        return workflow_key(text("name")) if text("name") else None
+    if section == "widgets":
+        # ``page`` holds a PAGE id and :func:`widget_key` wants the route
+        # behind it, so a widget cannot be keyed without the document.
+        route = (page_routes or {}).get(text("page"))
+        return (
+            widget_key(route, text("label"))
+            if route and text("label") else None
+        )
+    if section == "businessRules":
+        return prose_key("RULE", text("statement")) if text("statement") else None
+    if section == "requirements":
+        return prose_key("REQ", text("description")) if text("description") else None
+    if section == "tests":
+        # A test's name is a sentence, and gets reworded like one.
+        return prose_key("TEST", text("name")) if text("name") else None
+    if section == "integrations":
+        return integration_key(text("name")) if text("name") else None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +447,34 @@ class IdAllocator:
         parse_id(artifact_id)  # validates
         with self._lock:
             self.retired.add(artifact_id)
+
+    def unbind(self, natural_key: str) -> str:
+        """Forget one key, leaving its ID reachable under another.
+
+        For a key scheme that has changed: the artifact is registered under
+        both the key it was written with and the key everything now looks it up
+        by, and the old one is a decoy rather than merely unused —
+        :meth:`key_for` can return it, so the artifact reads as belonging to a
+        key nobody named.
+
+        Refuses to drop an ID's *last* key. Counters never rewind, so a
+        forgotten ID cannot be handed to something else — but the artifact
+        itself would be allocated a *new* ID if it were ever re-proposed, and
+        §22 revival coming back under its own ID is what this registry is for.
+        That makes this narrower than it looks: it can drop a duplicate route
+        to an artifact, never the artifact's identity.
+        """
+        with self._lock:
+            artifact_id = self.bindings.get(natural_key)
+            if artifact_id is None:
+                raise InvalidArtifactId(f"nothing bound to {natural_key!r}")
+            if sum(1 for v in self.bindings.values() if v == artifact_id) < 2:
+                raise InvalidArtifactId(
+                    f"{natural_key!r} is the only key bound to {artifact_id}; "
+                    "dropping it would renumber the artifact on revival"
+                )
+            del self.bindings[natural_key]
+            return artifact_id
 
     # -- lookups ------------------------------------------------------------
 

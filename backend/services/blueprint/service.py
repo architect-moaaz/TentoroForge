@@ -86,6 +86,9 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     # One template per pattern — re-authoring `entity_list` replaces it rather
     # than accumulating a second structure for the same pattern.
     "patternTemplates": ("pattern",),
+    # One tree per page — re-authoring a page replaces its layout rather than
+    # accumulating a second one for the same page.
+    "pageLayouts": ("page",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }
@@ -122,6 +125,20 @@ class BlueprintInvalid(ValueError):
 
 class ArtifactNotFound(KeyError):
     pass
+
+
+class IdentityCollision(ValueError):
+    """An ID is claimed by two different artifacts.
+
+    Raised when :class:`IdAllocator` and the Blueprint document disagree about
+    who owns an ID. The usual cause is a document loaded into an ``output_dir``
+    whose ``.forge/ids.json`` never saw it: the counters start at zero and mint
+    an ID the document is already using.
+
+    §120 puts the Blueprint in charge and §76 forbids quiet repair, so this is
+    a refusal rather than a merge — fusing the two artifacts would destroy one
+    of them with no record that it ever existed.
+    """
 
 
 def _now() -> str:
@@ -388,6 +405,10 @@ class BlueprintService:
         (``database``, ``security``, …) are objects with no id and no status,
         so they merge; ``codeMap`` is a list keyed by ``artifact``; everything
         else is an ID-bearing artifact list.
+
+        Raises :class:`IdentityCollision` when the allocator hands out an ID
+        the document has already given to a different artifact — see that
+        class for why that is a refusal and not a merge.
         """
         if section in SINGLETON_SECTIONS:
             current = self.doc.get(section)
@@ -420,10 +441,43 @@ class BlueprintService:
             prefix = ARTIFACT_SECTIONS[section]
             bucket = self.artifacts(section)
 
+        # Raising inside the session skips its ``save()``, so a refusal leaves
+        # the registry exactly as it was.
         with IdAllocator.session(output_dir=self.output_dir) as alloc:
-            artifact_id = artifact.get("id") or alloc.allocate(prefix, natural_key)
-            if artifact.get("id"):
-                alloc.bind(natural_key, artifact["id"])
+            claimed = artifact.get("id")
+            # Read before writing: after allocate/bind the registry can no
+            # longer say who held the id a moment ago.
+            already_bound = alloc.lookup(natural_key)
+            if claimed:
+                owner = alloc.key_for(claimed)
+                if owner is not None and owner != natural_key:
+                    raise IdentityCollision(
+                        f"{section}: {claimed} belongs to {owner!r}, so "
+                        f"{natural_key!r} cannot claim it; two artifacts "
+                        "cannot share one identity. If this artifact's natural "
+                        "identity changed, carry the id across with "
+                        "IdAllocator.rebind()."
+                    )
+                alloc.bind(natural_key, claimed)
+                artifact_id = claimed
+            else:
+                artifact_id = alloc.allocate(prefix, natural_key)
+                # The allocator is monotonic and never re-issues, so an id it
+                # has just minted cannot legitimately be in the document
+                # already. When it is, the registry has fallen out of step with
+                # the document and is minting over the top of it.
+                if already_bound is None and any(
+                    a.get("id") == artifact_id for a in bucket
+                ):
+                    raise IdentityCollision(
+                        f"{section}: allocated {artifact_id} for new artifact "
+                        f"{natural_key!r}, but the Blueprint already has an "
+                        f"artifact with that id. The registry at "
+                        f"{IdAllocator.path_for(self.output_dir)} is out of "
+                        "step with the document — bind the ids the document "
+                        "already uses into it (IdAllocator.bind, or "
+                        "services.smith.smith.bootstrap) before upserting."
+                    )
 
         merged = {**artifact, "id": artifact_id}
         merged.setdefault("status", "PROPOSED")

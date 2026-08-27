@@ -801,7 +801,8 @@ both the count and the order.
 Placeholders are the holes the planner fills, and the set is closed — anything \
 else fails. Available: {placeholders}. Inside a `repeat`, use `$item.label`, \
 `$item.value`, `$item.id` — and over `relatedCollections`, `$item.columns` \
-for that collection's own columns. A `repeat` may iterate: {repeats}. Strings in \
+for that collection's own columns. A node may carry `repeat: "<name>"` \
+to emit once per element; available lists: {repeats}. Strings in \
 `{{{{…}}}}` are runtime data bindings and pass through untouched.
 
 Author templates for exactly these patterns, which are the ones this app's \
@@ -841,6 +842,7 @@ prose, no markdown fence, no commentary — the object and nothing else:
 
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
+    subject: str = "", feedback: str = "",
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
 
@@ -862,6 +864,40 @@ def build_prompt(
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
+    if spec.agent == "a2ui_pages":
+        from services.blueprint.page_planner import (
+            catalog_digest, load_catalog, page_brief,
+        )
+
+        system += CATALOG_ADDENDUM.format(
+            catalog=catalog_digest(load_catalog()),
+            patterns="(authoring this page in full, not from a pattern)",
+            page_facts="",
+            placeholders=", ".join(PLACEHOLDER_VOCABULARY),
+            repeats=", ".join(REPEAT_SOURCES),
+        )
+        brief = page_brief(doc, subject) if subject else {}
+        user = (
+            "Design this page in full. You are given the page's contract, the "
+            "requirements it exists to satisfy, the entity behind it and the "
+            "field roles already derived from that entity — use `derived` "
+            "rather than reconstructing columns or form fields by eye, or use "
+            "the placeholders and they will be filled in for you.\n\n"
+            "Return one `pageLayouts` artifact whose `page` is "
+            f"{subject!r}.\n\n```json\n"
+            + json.dumps(brief, indent=2, sort_keys=True)
+            + "\n```"
+        )
+        if feedback:
+            user += (
+                "\n\nYour previous attempt was rejected against the component "
+                "catalog:\n\n" + feedback +
+                "\n\nFix exactly those. Every prop value must be one the "
+                "component's schema accepts — check the enums in the catalog "
+                "above rather than choosing a plausible-sounding value."
+            )
+        return system, user
+
     if spec.agent == "a2ui_patterns":
         # The catalog is the whole point of this agent: it authors structure
         # against what exists, not against what it remembers existing. The
@@ -1054,6 +1090,7 @@ def make_executor(
         system, user = build_prompt(
             svc.doc, spec.node,
             inline_schema=not getattr(client, "enforces_schema", True),
+            subject=spec.subject, feedback=spec.feedback,
         )
         last: Exception | None = None
 

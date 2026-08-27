@@ -26,11 +26,19 @@ from services.blueprint.ids import (
     InvalidArtifactId,
     UnknownPrefix,
     api_key,
+    component_key,
     entity_key,
+    integration_key,
     is_valid_id,
+    module_key,
+    natural_key_for,
     page_key,
     parse_id,
+    permission_key,
     prose_key,
+    role_key,
+    widget_key,
+    workflow_key,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -236,6 +244,145 @@ def test_two_processes_do_not_mint_the_same_id(tmp_path):
     ids = list(registry["bindings"].values())
     assert len(ids) == 40
     assert len(set(ids)) == 40, "two processes minted the same id"
+
+
+# --- dropping a key --------------------------------------------------------
+
+def test_unbind_drops_a_duplicate_route_to_an_artifact(tmp_path):
+    alloc = IdAllocator(_output_dir=str(tmp_path))
+    alloc.bind("PERM:entity 002:read", "PERM-004")            # the old scheme
+    alloc.bind("PERM:entity 002:read:role.read", "PERM-004")  # the current one
+    assert alloc.unbind("PERM:entity 002:read") == "PERM-004"
+    assert alloc.lookup("PERM:entity 002:read") is None
+    assert alloc.key_for("PERM-004") == "PERM:entity 002:read:role.read"
+
+
+def test_unbind_refuses_to_drop_an_artifacts_last_key(tmp_path):
+    """Counters never rewind, so the id cannot go to something else — but the
+    artifact itself would be renumbered if it were ever re-proposed, and §22
+    revival coming back under its own id is what the registry is for."""
+    alloc = IdAllocator(_output_dir=str(tmp_path))
+    alloc.allocate("ENTITY", entity_key("Candidate"))
+    with pytest.raises(InvalidArtifactId):
+        alloc.unbind(entity_key("Candidate"))
+    assert alloc.lookup(entity_key("Candidate")) == "ENTITY-001"
+
+
+def test_unbinding_something_that_was_never_bound_raises(tmp_path):
+    alloc = IdAllocator(_output_dir=str(tmp_path))
+    with pytest.raises(InvalidArtifactId):
+        alloc.unbind(entity_key("Nothing"))
+
+
+# --- one scheme, every section ---------------------------------------------
+#
+# The key an artifact is written under and the key it is looked up under have
+# to be the same string. When they are not, nothing fails: the lookup misses,
+# the allocator mints a second id, and the document ends up holding the same
+# artifact twice.
+
+SECTION_KEYS = [
+    ("data.entities", {"name": "Candidate"}, entity_key("Candidate")),
+    ("pages", {"route": "/candidates"}, page_key("/candidates")),
+    ("apis", {"method": "GET", "path": "/api/candidates"},
+     api_key("GET", "/api/candidates")),
+    ("roles", {"name": "Recruiter"}, role_key("Recruiter")),
+    ("permissions", {"name": "candidate.read", "subject": "ENTITY-001",
+                     "action": "read"},
+     permission_key("ENTITY-001", "read", "candidate.read")),
+    ("modules", {"name": "Candidate Management"}, module_key("Candidate Management")),
+    ("components", {"name": "CandidateTable"}, component_key("CandidateTable")),
+    ("workflows", {"name": "Advance Stage"}, workflow_key("Advance Stage")),
+    ("businessRules", {"name": "Open on create", "statement": "A role starts open."},
+     prose_key("RULE", "A role starts open.")),
+    ("requirements", {"description": "Recruiters can post roles."},
+     prose_key("REQ", "Recruiters can post roles.")),
+    ("tests", {"name": "A new role is open", "kind": "business_rule"},
+     prose_key("TEST", "A new role is open")),
+    ("integrations", {"name": "Email + Password Session Auth", "kind": "auth"},
+     integration_key("Email + Password Session Auth")),
+]
+
+
+@pytest.mark.parametrize("section,artifact,expected", SECTION_KEYS)
+def test_natural_key_for_matches_the_documented_scheme(section, artifact, expected):
+    assert natural_key_for(section, artifact) == expected
+
+
+def test_a_widget_is_keyed_on_the_route_behind_its_page_id():
+    """Widgets carry a PAGE id; the key wants the route, so the mapping needs
+    the document. Without it there is no key rather than a wrong one."""
+    widget = {"page": "PAGE-001", "label": "Open Roles", "kind": "metric"}
+    routes = {"PAGE-001": "/overview"}
+    assert natural_key_for("widgets", widget, page_routes=routes) == \
+        widget_key("/overview", "Open Roles")
+    assert natural_key_for("widgets", widget) is None
+
+
+def test_two_grants_of_the_same_action_on_the_same_subject_are_two_artifacts():
+    """§12's subject + action is too coarse for a real authorisation model.
+    Unscoped read over every role and read over only the role reached through
+    an offer under review are both `read` on ENTITY-002; keyed on the pair they
+    would be one artifact, and re-proposing either would rewrite the other's
+    scope."""
+    broad = {"name": "role.read", "subject": "ENTITY-002", "action": "read"}
+    narrow = {"name": "role.read_offer_context", "subject": "ENTITY-002",
+              "action": "read"}
+    assert natural_key_for("permissions", broad) != \
+        natural_key_for("permissions", narrow)
+
+
+def test_a_permission_without_a_subject_still_keys_distinctly():
+    """`subject` is optional in the contract. An empty first segment is fine
+    now that the name is in the key — it was not when the key was the pair."""
+    sign_in = {"name": "session.sign_in", "action": "execute"}
+    sign_out = {"name": "session.sign_out", "action": "execute"}
+    assert natural_key_for("permissions", sign_in) == \
+        permission_key("", "execute", "session.sign_in")
+    assert natural_key_for("permissions", sign_in) != \
+        natural_key_for("permissions", sign_out)
+
+
+def test_a_permission_without_a_name_has_no_key():
+    """The contract requires it; an artifact that lacks it cannot be told
+    apart from its siblings, so it gets no key rather than a colliding one."""
+    assert natural_key_for("permissions", {"subject": "ENTITY-002",
+                                           "action": "read"}) is None
+
+
+def test_sections_with_no_scheme_of_their_own_return_none():
+    """Not a failure — decisions are keyed on the artifact they decide, and
+    codeMap entries have no id to bind. The caller decides what to do."""
+    assert natural_key_for("decisions", {"decision": "x", "source": "user"}) is None
+    assert natural_key_for("codeMap", {"artifact": "PAGE-001"}) is None
+    assert natural_key_for("pages", {"name": "No route here"}) is None
+
+
+def test_every_id_bearing_section_has_a_key(ats):
+    """A new section added to the Blueprint without a key scheme would silently
+    fall back to binding artifacts under their own ids, which registers them
+    without making them findable."""
+    from services.blueprint.orchestrator import graph_pool
+
+    routes = {p["id"]: p.get("route", "") for p in ats["pages"]}
+    unkeyed = {
+        section for section, art in graph_pool(ats)
+        if art.get("id") and natural_key_for(section, art, page_routes=routes) is None
+    }
+    assert unkeyed == set()
+
+
+def test_the_same_document_keys_the_same_way_twice(ats):
+    """The property the allocator depends on, stated directly."""
+    routes = {p["id"]: p.get("route", "") for p in ats["pages"]}
+    once = [natural_key_for(s, a, page_routes=routes) for s, a in graph_pool_of(ats)]
+    twice = [natural_key_for(s, a, page_routes=routes) for s, a in graph_pool_of(ats)]
+    assert once == twice and any(once)
+
+
+def graph_pool_of(doc):
+    from services.blueprint.orchestrator import graph_pool
+    return [(s, a) for s, a in graph_pool(doc) if a.get("id")]
 
 
 # --- cross-language drift ---------------------------------------------------

@@ -49,7 +49,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "uiRegistry", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "patternTemplates", "completeness"}
+       "patternTemplates", "pageLayouts", "completeness"}
 )
 
 
@@ -193,7 +193,14 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         # not entities, not endpoints, not workflows. Handing it the whole
         # Blueprint costs ~80k tokens a call for context it cannot use, and
         # §101 scopes context precisely so an agent cannot reach past its job.
-        reads={"pages", "designSystem", "uiRegistry", "navigation", "modules"},
+        # Widened deliberately. Scoped to structure alone, this agent designed
+        # pages without ever seeing what the user asked for — it could read the
+        # page contracts but not the requirements behind them, and not the
+        # entities whose fields its forms and tables are made of. Designing
+        # completely means seeing the intent, not just the outline.
+        reads={"requirements", "pages", "data", "widgets", "roles",
+               "permissions", "designSystem", "uiRegistry", "navigation",
+               "modules"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
     ),
@@ -206,6 +213,18 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         {"decisions", "completeness"},
         reads={"*"},
         tools={"blueprint:read"},
+    ),
+    # §34 — the same authority as a2ui_patterns, aimed at one page at a time.
+    # Kept as a separate agent rather than a mode of the other so the §30
+    # boundary stays legible: this one writes page trees and nothing else.
+    "a2ui_pages": _cap(
+        "a2ui_pages",
+        {"pageLayouts"},
+        reads={"requirements", "pages", "data", "widgets", "roles",
+               "permissions", "designSystem", "uiRegistry", "navigation",
+               "modules", "workflows", "apis"},
+        tools={"blueprint:read", "page_contract:read", "design_system:read",
+               "component_catalog:read", "mcp:a2ui"},
     ),
     "data_model": _cap(
         "data_model",
@@ -387,18 +406,26 @@ def check_pattern_templates(result: AgentResult) -> None:
     does not exist, or breaks a container's positional contract, is rejected
     here so the agent is asked again rather than the schema loosened.
     """
-    proposals = [p for p in result.proposals if p.section == "patternTemplates"]
+    proposals = [p for p in result.proposals
+                 if p.section in ("patternTemplates", "pageLayouts")]
     if not proposals:
         return
 
-    from services.blueprint.page_planner import load_catalog, validate_template
+    from services.blueprint.page_planner import (
+        load_catalog, validate_props, validate_template,
+    )
 
     catalog = load_catalog()
     problems: list[str] = []
     for proposal in proposals:
+        # Structure *and* props. Checking only structure let a bad prop value
+        # through the gate and commit, so it surfaced at projection instead —
+        # long after the retry that could have fixed it. `variant: "ghost"` on
+        # a Table rowAction passed apply and failed the build.
         errors = validate_template(proposal.body, catalog)
+        errors += validate_props({"root": proposal.body.get("root")}, catalog)
         if errors:
-            pattern = proposal.body.get("pattern", "?")
+            pattern = proposal.body.get("pattern") or proposal.body.get("page", "?")
             problems.extend(f"{pattern}: {e}" for e in errors)
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))

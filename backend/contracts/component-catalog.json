@@ -3,14 +3,14 @@
   "catalogVersion": 1,
   "composition": "children",
   "counts": {
-    "total": 165,
+    "total": 166,
     "byCategory": {
       "layout": 19,
       "data": 32,
       "interactive": 13,
       "feedback": 18,
+      "form": 32,
       "static": 28,
-      "form": 31,
       "structural": 8,
       "navigation": 14,
       "motion": 2
@@ -613,6 +613,55 @@
             },
             "minItems": 1,
             "maxItems": 6
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "AuthForm",
+      "category": "form",
+      "acceptsChildren": false,
+      "doc": "AuthForm — sign in or create an account.\n\nThe one thing a schema-rendered page could not do. Every other form in the\nlibrary dispatches to a workflow, and authentication is not a workflow: it\nexchanges credentials for a session. `signIn` appeared nowhere in the\nlibrary, renderer or runtime, so a generated login page rendered perfectly\nand could not log anybody in.\n\nImplemented against the auth HTTP endpoints rather than by importing\nnext-auth, so the library stays a UI library with no framework dependency.\nThe credentials flow is a CSRF token fetch followed by a form post; that is\nall `signIn(\"credentials\", …)` does underneath.",
+      "props": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "signIn",
+              "signUp"
+            ],
+            "default": "signIn"
+          },
+          "submitLabel": {
+            "type": "string"
+          },
+          "successRoute": {
+            "type": "string",
+            "default": "/"
+          },
+          "alternateRoute": {
+            "type": "string"
+          },
+          "alternateLabel": {
+            "type": "string"
+          },
+          "emailLabel": {
+            "type": "string",
+            "default": "Email"
+          },
+          "passwordLabel": {
+            "type": "string",
+            "default": "Password"
+          },
+          "nameLabel": {
+            "type": "string",
+            "default": "Name"
+          },
+          "className": {
+            "type": "string"
           }
         },
         "additionalProperties": false,

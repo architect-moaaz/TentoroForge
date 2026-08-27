@@ -407,7 +407,7 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
     """
     rep = node.get("repeat")
     if rep:
-        items = repeat_items(doc, page, entity, rep.get("over"))
+        items = repeat_items(doc, page, entity, rep)
         out: list[dict] = []
         for item in items:
             scoped = dict(ctx)
@@ -423,6 +423,8 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
         return out
 
     built: dict[str, Any] = {"type": node["type"]}
+    if node.get("id"):
+        built["id"] = node["id"]
     props = resolve(node.get("props") or {}, ctx)
     if props:
         built["props"] = props
@@ -508,6 +510,24 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
                 schema = dict(schema)
                 schema["required"] = [r for r in schema["required"] if r not in bound]
             for err in Draft7Validator(schema).iter_errors(checkable):
+                # Two kinds of value are supplied later and cannot be type
+                # checked now.
+                #
+                # A binding can sit anywhere, not only at the top of a prop:
+                # `ValidationChecklist.items[0].valid` is legitimately
+                # "{{form.values.title}}", a boolean the renderer resolves at
+                # run time.
+                #
+                # A placeholder is the same story one stage earlier. Validating
+                # an *un-instantiated* tree sees `$summaryFields` as the string
+                # it currently is rather than the array it becomes, so the gate
+                # rejected a page for using the placeholder vocabulary exactly
+                # as intended — and the retry, correctly told what was wrong,
+                # could only fix it by abandoning the placeholders.
+                if isinstance(err.instance, str) and (
+                    "{{" in err.instance or err.instance.startswith("$")
+                ):
+                    continue
                 loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
                 errors.append(f"{path}.props.{loc}: {err.message}")
         for i, child in enumerate(node.get("children") or []):
@@ -653,6 +673,28 @@ def prune_unsatisfiable(node: dict, catalog: dict[str, dict]) -> dict | None:
     return node
 
 
+def assign_node_ids(node: dict, path: str = "n") -> dict:
+    """Give every node a stable id derived from its position.
+
+    Not decoration. ``LibraryNode`` — the open fallback that lets *any*
+    registered component be used — requires an id, so a node without one falls
+    through to the closed structural unions and is reported as an invalid
+    discriminator. Every library component in a generated page was failing
+    strict validation for want of an id, and the page rendered "as-is" with the
+    component silently missing.
+
+    Derived from the path rather than generated, so the same Blueprint produces
+    the same ids and re-projection stays byte-identical.
+    """
+    out = dict(node)
+    out.setdefault("id", path)
+    kids = out.get("children") or []
+    if kids:
+        out["children"] = [assign_node_ids(c, f"{path}-{i}")
+                           for i, c in enumerate(kids)]
+    return out
+
+
 def plan_page(doc: dict, page: dict, template: dict,
               catalog: dict[str, dict]) -> dict:
     """One Page Contract + its pattern template -> an engine page schema."""
@@ -675,6 +717,8 @@ def plan_page(doc: dict, page: dict, template: dict,
             f"a repeat on the root would leave the page without a single root"
         )
     root = prune_unsatisfiable(roots[0], catalog)
+    if root is not None:
+        root = assign_node_ids(root)
     if root is None:
         raise PlanError(
             f"{page.get('id')}: the pattern's root node needs data this page "
@@ -703,13 +747,18 @@ def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, A
     """Plan every page that has a pattern and a template. Reports what it skipped."""
     catalog = catalog or load_catalog()
     templates = {t.get("pattern"): t for t in _live(doc.get("patternTemplates"))}
+    # An individually authored tree wins over the pattern template for that
+    # page. Both may exist: the pattern is the fallback for pages nobody
+    # authored, so switching a single page to bespoke does not strand the rest.
+    authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
 
     planned: dict[str, dict] = {}
     skipped: list[dict] = []
     failed: list[dict] = []
     for page in _live(doc.get("pages")):
         pattern = page.get("pattern")
-        template = templates.get(pattern)
+        layout = authored.get(page.get("id"))
+        template = layout or templates.get(pattern)
         if not template:
             skipped.append({"page": page.get("id"), "pattern": pattern,
                             "reason": "no template for this pattern"})
@@ -750,8 +799,18 @@ def _prop_line(name: str, spec: dict, *, required: bool = False) -> str:
                 # item shape is the part that gets guessed wrong.
                 shape = items.get("properties") or {}
                 req = set(items.get("required") or [])
-                fields = ", ".join(
-                    f"{k}{'*' if k in req else ''}" for k in list(shape)[:6])
+                def _item_field(k: str) -> str:
+                    spec = shape.get(k) or {}
+                    mark = "*" if k in req else ""
+                    # Enums inside an item shape are the values an author has
+                    # no way to guess: `rowActions[].variant` came back as
+                    # "ghost", which is not one the component accepts.
+                    if spec.get("enum"):
+                        return f"{k}{mark}:" + "|".join(
+                            str(v) for v in spec["enum"][:4])
+                    return f"{k}{mark}"
+
+                fields = ", ".join(_item_field(k) for k in list(shape)[:6])
                 kind = f"array<{{{fields}}}>" if fields else "array<object>"
             else:
                 kind = f"array<{inner}>" if inner else "array"
@@ -852,3 +911,52 @@ def patterns_in_use(doc: dict) -> list[str]:
     page count and not the full §39 vocabulary.
     """
     return sorted({p.get("pattern") for p in _live(doc.get("pages")) if p.get("pattern")})
+
+
+# ---------------------------------------------------------------------------
+# One page's slice — what a per-page author is shown
+# ---------------------------------------------------------------------------
+
+def page_brief(doc: dict, page_id: str) -> dict:
+    """Everything about one page and nothing about the other seventeen.
+
+    A per-page author handed the whole Blueprint pays ~50k tokens a call for
+    context it cannot act on, and eighteen of those is most of the cost of the
+    whole run. It needs this page's contract, the entity behind it, the fields
+    of anything it links to, its widgets, and — the part the pattern author
+    never had — the requirements this page exists to satisfy.
+    """
+    pages = {p.get("id"): p for p in _live(doc.get("pages"))}
+    page = pages.get(page_id)
+    if not page:
+        return {}
+
+    entities = _entities(doc)
+    entity = entities.get((page.get("data") or {}).get("primaryEntity"))
+    wanted = set(page.get("requirements") or [])
+    reqs = [r for r in _live(doc.get("requirements")) if r.get("id") in wanted]
+    roles = {r.get("id"): r for r in _live(doc.get("roles"))}
+
+    brief: dict[str, Any] = {
+        "page": page,
+        "requirements": reqs,
+        "users": [roles[r] for r in (page.get("users") or []) if r in roles],
+        "widgets": [w for w in _live(doc.get("widgets"))
+                    if w.get("page") == page_id],
+        "designSystem": doc.get("designSystem") or {},
+    }
+    if entity:
+        brief["entity"] = entity
+        # Derived field roles, so the author sees the real columns and form
+        # fields rather than reconstructing them from the entity by eye.
+        brief["derived"] = {
+            "titleField": title_field(entity),
+            "columns": columns_for(entity),
+            "formFields": form_fields_for(entity),
+            "summaryFields": summary_fields(entity),
+        }
+        brief["relatedCollections"] = [
+            {**rel, "columns": rel.get("columns")}
+            for rel in related_collections(doc, entity.get("id"))
+        ]
+    return brief

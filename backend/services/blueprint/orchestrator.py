@@ -38,14 +38,15 @@ placements are marked and are the parts to argue with.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from services.blueprint.agent_contract import (
     AgentResult,
+    InvalidPatternTemplate,
     apply_agent_result,
     capability_for,
 )
-from services.blueprint.service import BlueprintService
+from services.blueprint.service import BlueprintInvalid, BlueprintService
 
 # ---------------------------------------------------------------------------
 # §94 — application state machine
@@ -155,10 +156,16 @@ class DagNode:
     produces: frozenset[str] = frozenset()
     note: str = ""
     kind: str = "agent"
+    #: Author one artifact per subject instead of one for the whole app.
+    #: Names a key in :data:`FANOUT`, which resolves the subjects from the
+    #: Blueprint. A node without it runs exactly once, as before.
+    fanout: str = ""
 
 
-def _n(key, agent, depends_on=(), produces=(), note="", kind="agent") -> DagNode:
-    return DagNode(key, agent, frozenset(depends_on), frozenset(produces), note, kind)
+def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
+       fanout="") -> DagNode:
+    return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
+                   note, kind, fanout)
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -192,7 +199,13 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("patterns", "a2ui_patterns", ("page_contracts", "page_designs", "design_system"),
        ("patternTemplates",),
        note="§34; structure per pattern, instantiated per page by the planner"),
-    _n("frontend", "frontend", ("patterns",), ("codeMap",), kind="projection",
+    # One call per page. Runs after `patterns` so a page that nobody authors
+    # individually still has a template to fall back on — the two coexist, and
+    # the projection prefers the authored tree where one exists.
+    _n("page_layouts", "a2ui_pages", ("patterns",), ("pageLayouts",),
+       fanout="pages",
+       note="§34; one authored tree per page, gated on the same catalog"),
+    _n("frontend", "frontend", ("page_layouts",), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -225,6 +238,27 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("verification", "verification", ("memory",), (), kind="service"),
     _n("preview", "build", ("verification",), ("runtime",), kind="projection"),
 )}
+
+
+#: How a fanning-out node finds its subjects. Kept here rather than in the node
+#: so the DAG stays a description of shape, not a place where documents are
+#: read.
+FANOUT: dict[str, Any] = {
+    "pages": lambda doc: [
+        p["id"] for p in (doc.get("pages") or [])
+        if p.get("id") and p.get("status") != "DEPRECATED"
+    ],
+}
+
+
+def subjects_for(node: "DagNode", doc: dict) -> list[str]:
+    """The subjects a node authors for. ``[""]`` means "once, for the app"."""
+    if not node.fanout:
+        return [""]
+    resolve = FANOUT.get(node.fanout)
+    if resolve is None:
+        raise KeyError(f"node {node.key!r} declares unknown fanout {node.fanout!r}")
+    return resolve(doc) or []
 
 
 class CyclicDag(ValueError):
@@ -380,8 +414,50 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 # §72 — incremental DAG
 # ---------------------------------------------------------------------------
 
+#: §72's own enumeration of what an incremental change affects:
+#:
+#:     affected requirements, pages, components, entities, APIs, workflows,
+#:     rules, tests, source files, database migrations
+#:
+#: plus the permissions §71's worked example lists under NEW, and the runtime
+#: §70 rebuilds at the end of the pipeline.
+#:
+#: What it leaves out is the interesting part. ``product``, ``designSystem``,
+#: ``modules``, ``navigation`` and ``integrations`` are the application's
+#: *frame* — what it is, what it looks like, how it is organised, what it talks
+#: to. §72 does not list them because adding a business rule does not change
+#: any of them.
+INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
+    "requirements", "pages", "components", "widgets", "pageLayouts",
+    "patternTemplates", "data.entities", "data.relationships",
+    "data.constraints", "apis", "workflows", "businessRules", "tests",
+    "codeMap", "database", "runtime", "roles", "permissions", "security",
+})
+
+
+def is_foundational(node: DagNode) -> bool:
+    """True when re-running this node would re-author the application's frame.
+
+    Derived from what the node produces rather than listed by name, so a node
+    added to the DAG later classifies itself. ``patternTemplates`` counts as
+    incremental — §72 says "components", and a pattern template is a
+    composition of them.
+
+    Only meaningful for agent nodes; service and projection nodes are
+    deterministic and cheap, and a projection that does not run leaves the
+    application unbuilt.
+    """
+    return (
+        node.kind == "agent"
+        and bool(node.produces)
+        and not (node.produces & INCREMENTAL_SECTIONS)
+    )
+
+
 def incremental_plan(
-    doc: dict, changed: Iterable[str], *, also_sections: Iterable[str] = (),
+    doc: dict, changed: Iterable[str], *,
+    also_sections: Iterable[str] = (),
+    already_written: Iterable[str] = (),
 ) -> list[str]:
     """The sub-DAG needed for a change — §72's 'only affected artifacts'.
 
@@ -395,15 +471,94 @@ def incremental_plan(
     things — "add a manager approval step" — would otherwise select an empty
     plan and regenerate nothing. The caller names the sections the new work
     lands in and they seed the plan alongside the impacted ones.
-    """
-    affected = impacted_artifacts(doc, changed)
-    touched_sections = sections_of(doc, affected) | set(also_sections)
 
-    seeds = {k for k, n in DAG.items() if n.produces & touched_sections}
+    Foundational nodes (:func:`is_foundational`) are reached only by being
+    seeded — never by propagation. Without that, ``descendants`` makes every
+    plan the whole DAG, because the graph is a chain::
+
+        requirements -> application_model -> {design_system, integrations,
+                                              ux_architecture} -> everything
+
+    so adding one business rule re-authored the design language and the
+    integrations list. Measured on ats-live: 19 of 22 nodes for a change that
+    added two rules and a field.
+
+    The cut is safe in this DAG's shape, not merely cheap. ``ux_architecture``
+    produces ``navigation`` and runs *before* ``page_contracts`` — re-running
+    it after a page changed would not see the new page anyway, because
+    navigation is authored upstream of pages by construction. And when the
+    frame really does move, Smith writes to those sections and the node is
+    seeded directly.
+
+    What this gives up is caught rather than lost: a gap between the frame and
+    the artifacts is what the §75 matrix is for, and ``verification`` always
+    re-runs. §76 flags it instead of a rebuild hiding it.
+
+    ``already_written`` names sections this change has *just authored*. Their
+    producing nodes are dropped from the plan; everything downstream stays,
+    because downstream genuinely has to consume the new artifacts.
+
+    This is a correctness rule, not an optimisation. When Smith writes a
+    business rule from the user's own words (§20), re-running the
+    ``business_rules`` agent over the same Blueprint has it re-author that
+    section — and §20 is explicit that "future agents must respect accepted
+    decisions unless deliberately changed". Regeneration is not a deliberate
+    change. Without this, answering a question and having the answer quietly
+    overwritten is a single turn away.
+    """
+    written = set(also_sections)
+    # Seeded from what actually changed, NOT from the impact closure.
+    #
+    # `impacted_artifacts` answers "what might be affected" — the question §71
+    # reports to the user. Seeding the plan from it conflates that with "this
+    # section's owner must re-author its catalogue", and the two are different
+    # claims. On ats-live, changing one component closes over to
+    # {businessRules, components, modules, pages, tests, workflows}: a rule is
+    # in there because it references a page that contains the component. That
+    # made `business_rules` re-author the rule catalogue because a table was
+    # made more compact — and `business_rules` depends only on `data_model`, so
+    # a component is not one of its inputs at all.
+    #
+    # Directly: {components, pages}. Propagation to the nodes that really do
+    # read those is what `descendants` is for.
+    touched_sections = sections_of(doc, set(changed)) | written
+
+    # Two seed rules, because "disturbed by" and "needs re-authoring" are not
+    # the same claim.
+    #
+    # An incremental node is seeded by either: a page whose component changed
+    # has to be re-contracted.
+    #
+    # A foundational node is seeded only by what the change *writes*. Impact
+    # analysis reaches a MODULE because that module contains the page that
+    # changed — a containment edge, not a dependency — and `sections_of` then
+    # reports `modules` as touched. Seeding `ux_architecture` off that has it
+    # re-author the module and navigation structure because a table was made
+    # more compact. When the frame genuinely moves, Smith writes `modules` and
+    # the node is seeded properly.
+    seeds = {
+        k for k, n in DAG.items()
+        if n.produces & (written if is_foundational(n) else touched_sections)
+    }
     plan: set[str] = set(seeds)
     for s in seeds:
         plan |= descendants(s)
     plan |= {"verification"} | descendants("verification")
+
+    # Foundational nodes ride in only on their own seed, never on a descendant
+    # edge. Filtering after the closure rather than during it keeps every other
+    # node reachable *through* them — dropping `design_system` must not hide
+    # `patterns`, which sits behind it.
+    plan -= {k for k in plan - seeds if is_foundational(DAG[k])}
+
+    # Drop the nodes whose entire output this change already wrote. Their
+    # descendants were added above and stay.
+    authored = set(already_written)
+    if authored:
+        plan -= {
+            k for k, n in DAG.items()
+            if n.produces and n.produces <= authored and n.kind == "agent"
+        }
 
     order = [k for lvl in levels() for k in lvl]
     return [k for k in order if k in plan]
@@ -421,6 +576,15 @@ class TaskSpec:
     node: str
     agent: str
     attempt: int = 1
+    #: The artifact this call is for, when the node fans out. ``build_prompt``
+    #: narrows the context to it, so a per-page call carries one page rather
+    #: than eighteen.
+    subject: str = ""
+    #: Why the previous attempt was rejected. Rejecting a proposal only
+    #: improves the next one if the next one is told what was wrong —
+    #: otherwise a retry re-runs an identical prompt and reproduces the
+    #: identical mistake, which is exactly what it did.
+    feedback: str = ""
 
 
 @dataclass
@@ -499,43 +663,101 @@ def run(
             report.blocked.append(key)
             continue
 
-        outcome = None
-        for attempt in range(1, max_attempts + 1):
-            spec = TaskSpec(
-                task_id=f"TASK-{key}-{attempt}", node=key,
-                agent=node.agent, attempt=attempt,
-            )
-            try:
-                result = executor(spec)
-            except Exception:  # §102 — agent failure is one classified outcome
-                if attempt == max_attempts:
-                    report.failed.append(key)
-                    outcome = "failed"
-                continue
+        # A fanning-out node authors one artifact per subject. Each subject is
+        # its own call with its own retries, and one failing subject fails the
+        # node rather than quietly leaving a hole — seventeen pages out of
+        # eighteen looks exactly like success.
+        subjects = subjects_for(node, svc.doc)
+        if not subjects:
+            report.completed.append(key)
+            done.add(key)
+            continue
 
+        node_failed = False
+        for subject in subjects:
+            outcome = _run_agent_subject(
+                svc, executor, key, node, subject,
+                max_attempts=max_attempts, commit=commit,
+                user_request=user_request, report=report,
+            )
+            if outcome is None:
+                node_failed = True
+                break
+        if node_failed:
+            continue
+        report.completed.append(key)
+        done.add(key)
+        continue
+
+    return report
+
+
+def _run_agent_subject(
+    svc: BlueprintService,
+    executor: Executor,
+    key: str,
+    node: DagNode,
+    subject: str,
+    *,
+    max_attempts: int,
+    commit: bool,
+    user_request: str,
+    report: RunReport,
+) -> str | None:
+    """One agent call (with retries) for one subject.
+
+    Returns ``"completed"`` or ``None``; a ``None`` means the caller must stop,
+    because the node cannot be considered done. Retries are bounded by
+    ``max_attempts`` (§103) and are safe because agent results are idempotent by
+    natural key, so a retry updates the same artifact rather than adding one.
+    """
+    label = f"{key}:{subject}" if subject else key
+    feedback = ""
+    for attempt in range(1, max_attempts + 1):
+        spec = TaskSpec(
+            task_id=f"TASK-{label}-{attempt}", node=key,
+            agent=node.agent, attempt=attempt, subject=subject,
+            feedback=feedback,
+        )
+        try:
+            result = executor(spec)
+        except Exception as exc:  # §102 — one classified outcome, not a crash
+            # Carried into the next attempt for the same reason an apply
+            # rejection is: a retry that is not told what went wrong is just
+            # the same request again.
+            feedback = str(exc)
+            if attempt == max_attempts:
+                report.failed.append(label)
+                return None
+            continue
+
+        try:
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-            if application.applied:
-                report.completed.append(key)
-                report.artifacts.extend(application.artifacts)
-                report.change_requests.extend(application.change_requests)
-                done.add(key)
-                outcome = "completed"
-                break
-            if application.needs_clarification or result.status == "blocked":
-                report.blocked.append(key)
-                report.change_requests.extend(application.change_requests)
-                outcome = "blocked"
-                break
+        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+            feedback = str(exc)
+            # A rejected proposal is an outcome, not a crash. This used to
+            # escape and kill the whole run: one page whose tree failed
+            # contract validation took the other seventeen with it, and the
+            # traceback surfaced instead of a report. Nothing was written —
+            # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
-                report.failed.append(key)
-                outcome = "failed"
-
-        if outcome != "completed":
+                report.failed.append(label)
+                return None
             continue
-
-    return report
+        if application.applied:
+            report.artifacts.extend(application.artifacts)
+            report.change_requests.extend(application.change_requests)
+            return "completed"
+        if application.needs_clarification or result.status == "blocked":
+            report.blocked.append(label)
+            report.change_requests.extend(application.change_requests)
+            return None
+        if attempt == max_attempts:
+            report.failed.append(label)
+            return None
+    return None
 
 
 def _run_verification(svc: BlueprintService) -> None:
@@ -560,12 +782,15 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
-        apply_frontend_projection, project_design_tokens, project_nav_flow,
+        apply_frontend_projection, project_design_tokens, project_middleware,
+        project_nav_flow, project_root_route,
     )
 
     apply_frontend_projection(svc, app_root)
     project_nav_flow(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
+    project_middleware(svc.doc, app_root)
+    project_root_route(svc.doc, app_root)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
