@@ -344,7 +344,7 @@ def project_frontend(doc: dict, app_root: str | Path,
         target.write_text(
             json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
         written.append(rel)
-        code_map.append({"artifact": page_id, "page": page_id, "service": [rel]})
+        code_map.append({"artifact": page_id, "service": [rel]})
 
     # A page that stopped planning must not leave its last good schema behind:
     # the directory would still hold eighteen files and read as a complete
@@ -633,8 +633,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             json.dumps(definition, indent=2, sort_keys=True) + "\n", "utf-8")
         rel = f"src/lib/workflows/definitions/{slug}.json"
         written.append(rel)
-        code_map.append({"artifact": wf.get("id"), "workflow": wf.get("id"),
-                         "service": [rel]})
+        code_map.append({"artifact": wf.get("id"), "service": [rel]})
 
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
