@@ -45,8 +45,6 @@ decide alone, and granting that band is what delegation *is*.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
 from services.blueprint.agent_contract import AUTO_DECIDE
 from services.blueprint.service import ArtifactNotFound, BlueprintService
 
@@ -195,18 +193,3 @@ def by_user(doc: dict) -> list[dict]:
         ),
         key=lambda d: d.get("id", ""),
     )
-
-
-def binding_for(doc: dict, artifact_ids: Any) -> list[dict]:
-    """User decisions relevant to a set of artifacts, for a prompt.
-
-    Note this cannot filter precisely without the allocator, so it returns
-    every binding user decision when the caller has no output_dir to resolve
-    against. Over-including a decision costs tokens; under-including one lets
-    an agent contradict something the user settled, which §20 forbids outright.
-    """
-    wanted = set(artifact_ids or ())
-    decisions = by_user(doc)
-    if not wanted:
-        return decisions
-    return decisions

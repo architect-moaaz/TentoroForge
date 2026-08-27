@@ -49,7 +49,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from services.blueprint.agent_contract import ArtifactProposal
-from services.blueprint.ids import IdAllocator, is_valid_id, parse_id
+from services.blueprint.ids import (
+    IdAllocator,
+    is_valid_id,
+    natural_key_for,
+    parse_id,
+)
 from services.blueprint.orchestrator import (
     DAG,
     RunReport,
@@ -176,9 +181,21 @@ class ImpactReport:
     request: str
     #: Artifacts that exist and are disturbed by the change.
     modified: list[str] = field(default_factory=list)
+    #: The subset of ``modified`` that references the change directly — one hop.
+    #: Separated because the two read very differently to a user approving a
+    #: change: "CMP-033" is what you touched, and the other sixty-two are what
+    #: share it. A single undifferentiated list of sixty-three makes a
+    #: presentational tweak look like a rewrite.
+    direct: list[str] = field(default_factory=list)
     #: Artifacts the change introduces, as ``(section, natural_key)``. They
     #: have no ids yet — ids are allocated when the proposal is committed.
     new: list[tuple[str, str]] = field(default_factory=list)
+    #: natural_key -> a human name for it. Business rules and requirements are
+    #: keyed on a digest of their prose (§12: reworded prose is still the same
+    #: artifact), so the key is `RULE:190b43a7f8fda257`. §71's report is what a
+    #: user approves a change from — its own example reads "Manager Approval
+    #: Workflow", not a hash.
+    labels: dict[str, str] = field(default_factory=dict)
     #: Blueprint sections the work lands in.
     sections: set[str] = field(default_factory=set)
     #: The sub-DAG, in dependency order (§72).
@@ -192,10 +209,19 @@ class ImpactReport:
         lines = []
         if self.new:
             lines.append("NEW:")
-            lines += [f"  {key}  ({section})" for section, key in self.new]
-        if self.modified:
-            lines.append("MODIFIED:")
-            lines += [f"  {a}" for a in self.modified]
+            lines += [
+                f"  {self.labels.get(key, key)}  ({section})"
+                for section, key in self.new
+            ]
+        if self.direct:
+            lines.append("MODIFIED (directly):")
+            lines += [f"  {a}" for a in self.direct]
+        downstream = [a for a in self.modified if a not in set(self.direct)]
+        if downstream:
+            lines.append(f"MODIFIED (downstream, {len(downstream)}):")
+            lines += [f"  {a}" for a in downstream[:12]]
+            if len(downstream) > 12:
+                lines.append(f"  … and {len(downstream) - 12} more")
         if not lines:
             lines.append("No application artifacts are affected.")
         lines.append(f"\nRe-running {len(self.plan)} of {len(DAG)} nodes: "
@@ -205,6 +231,41 @@ class ImpactReport:
 
 def _prefix_for(section: str) -> str | None:
     return "ENTITY" if section == "data.entities" else ARTIFACT_SECTIONS.get(section)
+
+
+def canonicalise(
+    proposals: Sequence[ArtifactProposal], doc: dict,
+) -> list[ArtifactProposal]:
+    """Restate each proposal's natural key in the registry's own scheme.
+
+    A model states identity in its own terms — "Sign In", or "/sign-in" — and
+    the registry keys pages as ``PAGE:/sign-in``. Those are the same page, and
+    nothing but the deterministic layer can say so: ``natural_key_for`` derives
+    the canonical key from the artifact's own fields, which is what it exists
+    for.
+
+    This is not a repair of bad output. The model is not being corrected; it is
+    being *read*, by the one component that owns identity (§12/§116). Skipping
+    it has two failure modes and both are silent-ish: the NEW/MODIFIED split
+    calls an existing page new, and the upsert then allocates a second id for
+    it — which is now an ``IdentityCollision``, so the change is refused rather
+    than corrupting anything, but it is refused for a reason the user cannot
+    act on.
+
+    Where no scheme applies the model's own key stands.
+    """
+    page_routes = {
+        page["id"]: page.get("route") or ""
+        for page in (doc.get("pages") or [])
+        if page.get("id")
+    }
+    out: list[ArtifactProposal] = []
+    for p in proposals:
+        key = natural_key_for(p.section, p.body, page_routes=page_routes)
+        out.append(
+            ArtifactProposal(p.section, key, p.body) if key else p
+        )
+    return out
 
 
 def analyse(
@@ -233,7 +294,10 @@ def analyse(
 
     seeds = {a for a in anchors if a in known}
 
+    proposals = canonicalise(proposals, doc)
+
     new: list[tuple[str, str]] = []
+    labels: dict[str, str] = {}
     new_sections: set[str] = set()
     for p in proposals:
         prefix = _prefix_for(p.section)
@@ -248,13 +312,21 @@ def analyse(
             seeds.add(bound)
         else:
             new.append((p.section, p.natural_key))
+            label = (p.body.get("name") or p.body.get("route")
+                     or p.body.get("description") or "")
+            if label:
+                labels[p.natural_key] = str(label)[:80]
         new_sections.add(p.section)
 
+    def _sorted(ids: Any) -> list[str]:
+        return sorted(
+            (a for a in ids if is_valid_id(a)),
+            key=lambda i: (parse_id(i)[0], parse_id(i)[1]),
+        )
+
     affected = impacted_artifacts(doc, seeds, depth=depth) if seeds else set()
-    modified = sorted(
-        (a for a in affected if is_valid_id(a)),
-        key=lambda i: (parse_id(i)[0], parse_id(i)[1]),
-    )
+    direct = impacted_artifacts(doc, seeds, depth=1) if seeds else set()
+    modified = _sorted(affected)
 
     sections = sections_of(doc, affected) | new_sections
     # The plan is computed from the *bounded* impact set rather than from the
@@ -262,14 +334,16 @@ def analyse(
     # from the unbounded closure would quietly rebuild more than the report
     # said, which makes the report a lie rather than a summary.
     plan = (
-        incremental_plan(doc, affected or seeds, also_sections=new_sections)
+        incremental_plan(doc, seeds, also_sections=new_sections)
         if (seeds or new_sections) else []
     )
 
     return ImpactReport(
         request=request,
         modified=modified,
+        direct=_sorted(direct),
         new=sorted(new),
+        labels=labels,
         sections=sections,
         plan=plan,
         empty=not modified and not new and not new_sections,
@@ -315,6 +389,7 @@ def apply_change(
     """
     from services.blueprint.agent_contract import AgentResult, apply_agent_result
 
+    proposals = canonicalise(proposals, svc.doc)
     impact = analyse(svc, request, anchors=anchors, proposals=proposals)
     if impact.empty:
         return ChangeResult(
@@ -342,23 +417,38 @@ def apply_change(
             )
         committed = list(application.artifacts)
 
-    record = svc.commit(
-        user_request=request,
-        smith_interpretation=interpretation,
-        before=before,
-        affected=sorted(set(impact.modified) | set(committed)),
-    )
+    if committed:
+        record = svc.commit(
+            user_request=request,
+            smith_interpretation=interpretation,
+            before=before,
+            affected=sorted(set(impact.modified) | set(committed)),
+        )
+        version = record["version"]
+    else:
+        # Nothing was written, so there is nothing to version. §91 versions an
+        # *accepted change*; an empty diff with a bumped number is history
+        # nobody can read — and it would make §93 rollback offer a version
+        # identical to the one before it.
+        #
+        # This is still a legitimate turn: regenerating from an unchanged
+        # Blueprint is what you do after fixing a projection, and §115 is
+        # satisfied because the definition did not move.
+        version = svc.doc.get("version", 1)
 
     # Newly-created artifacts change the graph, so the plan is recomputed
     # against the committed document. Computing it once before the write would
     # plan against a Blueprint that did not yet contain the change.
+    written = {p.section for p in proposals}
     impact.plan = incremental_plan(
         svc.doc,
-        impacted_artifacts(svc.doc, set(committed), depth=IMPACT_DEPTH)
-        | set(impact.modified) | set(committed),
-        also_sections={section for section, _key in impact.new} | {
-            p.section for p in proposals
-        },
+        # What was actually written plus what the user pointed at — not the
+        # impact closure, which is the §71 report's question, not the plan's.
+        set(committed) | set(anchors),
+        also_sections={section for section, _key in impact.new} | written,
+        # Smith authored these this turn, from what the user said. Re-running
+        # the agent that owns them would re-author them (§20).
+        already_written=written,
     )
 
     report = None
@@ -372,7 +462,7 @@ def apply_change(
 
     return ChangeResult(
         impact=impact,
-        version=record["version"],
+        version=version,
         committed=committed,
         run=report,
         applied=True,

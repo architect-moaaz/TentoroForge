@@ -46,7 +46,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from services.blueprint.ids import is_valid_id, parse_id
+from services.blueprint.ids import parse_id
 from services.blueprint.orchestrator import graph_pool
 from services.smith.code_intel import dependencies, where
 
