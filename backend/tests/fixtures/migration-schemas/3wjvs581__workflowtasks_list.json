@@ -1,0 +1,329 @@
+{
+  "schemaVersion": "2",
+  "id": "workflow-tasks/list",
+  "route": "/workflow-tasks",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Workflow Tasks"
+  },
+  "dataSources": [
+    {
+      "name": "tasks",
+      "entity": "WorkflowTask",
+      "op": "list"
+    },
+    {
+      "name": "stats",
+      "entity": "WorkflowTask",
+      "op": "stats"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "content-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "WORKFLOW",
+              "headline": "Task Management",
+              "subhead": "Review and process pending workflow tasks across all leave requests and approvals.",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "View All Requests",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/leave-requests"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "My Dashboard",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/dashboard"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.lg",
+              "motion": "fade-in"
+            }
+          },
+          {
+            "id": "stats-grid",
+            "type": "Grid",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "stat-pending",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Pending Tasks",
+                  "value": "{{stats.pending}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.pendingDelta}}",
+                    "direction": "{{stats.pendingDirection}}"
+                  },
+                  "icon": "clock"
+                }
+              },
+              {
+                "id": "stat-overdue",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Overdue",
+                  "value": "{{stats.overdue}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.overdueDelta}}",
+                    "direction": "{{stats.overdueDirection}}"
+                  },
+                  "icon": "alert-triangle"
+                }
+              },
+              {
+                "id": "stat-completed",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Completed Today",
+                  "value": "{{stats.completedToday}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.completedDelta}}",
+                    "direction": "{{stats.completedDirection}}"
+                  },
+                  "icon": "check-circle"
+                }
+              },
+              {
+                "id": "stat-avg-time",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Avg Processing Time",
+                  "value": "{{stats.avgProcessingHours}}",
+                  "format": "number",
+                  "icon": "timer"
+                }
+              }
+            ]
+          },
+          {
+            "id": "tasks-section",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Active Tasks"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "tasks-grid",
+                "type": "Grid",
+                "props": {
+                  "columns": 3,
+                  "gap": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "tasks-repeat",
+                    "type": "Repeat",
+                    "bind": "tasks",
+                    "children": [
+                      {
+                        "id": "task-card",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.3"
+                        },
+                        "style": {
+                          "background": {
+                            "type": "solid",
+                            "value": "tokens.color.surface.0"
+                          },
+                          "padding": "tokens.spacing.6",
+                          "radius": "tokens.radius.lg",
+                          "shadow": "tokens.shadow.md"
+                        },
+                        "children": [
+                          {
+                            "id": "task-header",
+                            "type": "Row",
+                            "props": {
+                              "justify": "between",
+                              "align": "start"
+                            },
+                            "children": [
+                              {
+                                "id": "task-assignee",
+                                "type": "Row",
+                                "props": {
+                                  "gap": "tokens.spacing.2",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "id": "assignee-avatar",
+                                    "type": "Avatar",
+                                    "props": {
+                                      "name": "{{item.assignee.name}}",
+                                      "src": "{{item.assignee.avatar}}",
+                                      "size": "sm"
+                                    }
+                                  },
+                                  {
+                                    "id": "assignee-name",
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{item.assignee.name}}",
+                                      "as": "strong"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "task-priority",
+                                "type": "Badge",
+                                "props": {
+                                  "content": "{{item.priority}}",
+                                  "variant": "neutral"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "task-info",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.2"
+                            },
+                            "children": [
+                              {
+                                "id": "task-title",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{item.title}}",
+                                  "as": "h3"
+                                }
+                              },
+                              {
+                                "id": "task-description",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{item.description}}"
+                                },
+                                "style": {
+                                  "color": "tokens.color.text.secondary"
+                                }
+                              },
+                              {
+                                "id": "task-meta",
+                                "type": "Row",
+                                "props": {
+                                  "gap": "tokens.spacing.3",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "id": "task-type",
+                                    "type": "Badge",
+                                    "props": {
+                                      "content": "{{item.type}}",
+                                      "variant": "neutral"
+                                    }
+                                  },
+                                  {
+                                    "id": "task-due-date",
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "Due {{item.dueDate}}"
+                                    },
+                                    "style": {
+                                      "color": "tokens.color.text.tertiary"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": "task-actions",
+                            "type": "Row",
+                            "props": {
+                              "gap": "tokens.spacing.2",
+                              "justify": "end"
+                            },
+                            "children": [
+                              {
+                                "id": "view-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "View Details",
+                                  "variant": "ghost",
+                                  "size": "sm",
+                                  "navigate": "/workflow-tasks/{{item.id}}"
+                                }
+                              },
+                              {
+                                "id": "process-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "Process",
+                                  "variant": "primary",
+                                  "size": "sm",
+                                  "workflow": "processWorkflowTask",
+                                  "args": {
+                                    "taskId": "{{item.id}}"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

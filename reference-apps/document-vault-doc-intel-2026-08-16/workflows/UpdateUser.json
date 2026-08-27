@@ -1,0 +1,98 @@
+{
+  "id": "update-user",
+  "name": "UpdateUser",
+  "description": "Update a User record.",
+  "processVariables": [
+    {
+      "name": "id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "definition": {
+    "trigger": {
+      "type": "manual"
+    },
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "type": "manual"
+          },
+          "label": "Start"
+        }
+      },
+      {
+        "id": "db_update",
+        "type": "action",
+        "position": {
+          "x": 200,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "actionType": "db_update",
+            "table": "users",
+            "where": {
+              "id": "id"
+            },
+            "values": {
+              "id": "{{id}}"
+            }
+          },
+          "label": "Update User"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "position": {
+          "x": 400,
+          "y": 0
+        },
+        "data": {
+          "config": {},
+          "label": "End"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_trigger_action",
+        "source": "trigger",
+        "target": "db_update"
+      },
+      {
+        "id": "e_action_end",
+        "source": "db_update",
+        "target": "end"
+      }
+    ]
+  }
+}

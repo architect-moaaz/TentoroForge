@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "1",
+  "id": "products/list",
+  "route": "/products",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Products" },
+  "dataSources": [
+    { "name": "products", "entity": "Product", "op": "list" }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "spacing.6" },
+    "children": [
+      {
+        "id": "header-row",
+        "type": "Row",
+        "props": { "justify": "between", "align": "center" },
+        "children": [
+          {
+            "id": "heading",
+            "type": "Heading",
+            "props": { "level": 1, "content": "Products" }
+          },
+          {
+            "id": "new-product-btn",
+            "type": "Button",
+            "props": {
+              "label": "New Product",
+              "variant": "primary",
+              "navigate": "/products/new"
+            }
+          }
+        ]
+      },
+      {
+        "id": "search-row",
+        "type": "Row",
+        "props": { "align": "center" },
+        "children": [
+          {
+            "id": "search-input",
+            "type": "Input",
+            "props": { "placeholder": "Search products..." }
+          }
+        ]
+      },
+      {
+        "id": "table-card",
+        "type": "Card",
+        "props": {},
+        "children": [
+          {
+            "id": "products-table",
+            "type": "Table",
+            "props": {
+              "columns": [
+                { "key": "name", "label": "Name" },
+                { "key": "price", "label": "Price" },
+                { "key": "in_stock", "label": "In Stock" },
+                { "key": "actions", "label": "" }
+              ]
+            },
+            "children": [
+              {
+                "id": "products-repeat",
+                "type": "Repeat",
+                "props": { "source": "products", "path": "items", "as": "product", "keyPath": "id" },
+                "children": [
+                  {
+                    "id": "product-row",
+                    "type": "Row",
+                    "props": { "gap": "spacing.4", "align": "center", "justify": "between" },
+                    "children": [
+                      {
+                        "id": "product-name",
+                        "type": "Text",
+                        "bind": { "source": "product", "path": "name" },
+                        "props": { "as": "span" }
+                      },
+                      {
+                        "id": "product-price",
+                        "type": "Text",
+                        "bind": { "source": "product", "path": "price" },
+                        "props": { "as": "span" }
+                      },
+                      {
+                        "id": "product-stock",
+                        "type": "Text",
+                        "bind": { "source": "product", "path": "in_stock" },
+                        "props": { "as": "span" }
+                      },
+                      {
+                        "id": "product-actions",
+                        "type": "Row",
+                        "props": { "gap": "spacing.2" },
+                        "children": [
+                          {
+                            "id": "edit-btn",
+                            "type": "Button",
+                            "props": {
+                              "label": "Edit",
+                              "variant": "secondary",
+                              "navigate": "/products/[id]/edit"
+                            }
+                          },
+                          {
+                            "id": "delete-btn",
+                            "type": "Button",
+                            "props": {
+                              "label": "Delete",
+                              "variant": "danger",
+                              "workflow": "deleteProduct",
+                              "args": { "id": "product.id" }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "empty-state",
+        "type": "EmptyState",
+        "visibleIf": "products.items.length == 0",
+        "props": {
+          "message": "No products yet. Add your first product to get started."
+        }
+      },
+      {
+        "id": "pagination",
+        "type": "Pagination",
+        "props": { "currentPage": 1, "totalPages": 1 }
+      }
+    ]
+  }
+}

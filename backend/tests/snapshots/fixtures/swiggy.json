@@ -1,0 +1,21 @@
+{
+  "app_shape": {
+    "layout": {"shell": "bottom-tabs", "hero": "search-hero", "primaryInteraction": "browse", "density": "spacious"},
+    "auth": {"surface": "modal", "gating": "on-action"},
+    "nav": {"menu": "bottom-tabs", "back": "history"},
+    "workflows": {"executionMode": "streaming"},
+    "data": {"readShape": "row-rails", "denormalization": "aggressive"},
+    "identity": {"usageMode": "returning-personal"},
+    "label": "browse-and-order"
+  },
+  "archetypes": [
+    {"name": "home", "recipe": "catalog", "entities": ["restaurant"], "routes": ["/"]},
+    {"name": "restaurant_detail", "recipe": "detail_view", "entities": ["restaurant", "menu_item"], "routes": ["/r/[id]"]},
+    {"name": "cart", "recipe": "cart", "entities": ["cart_item"], "routes": ["/cart"]},
+    {"name": "checkout", "recipe": "checkout", "entities": ["order"], "routes": ["/checkout"]},
+    {"name": "orders", "recipe": "catalog", "entities": ["order"], "routes": ["/orders"]},
+    {"name": "track", "recipe": "map_pins", "entities": ["delivery"], "routes": ["/track/[orderId]"]}
+  ],
+  "industry": "consumer-food-delivery",
+  "runtime_context": ["geo", "push_notifications", "deep_linking"]
+}

@@ -1,0 +1,1 @@
+An Applicant Tracking System purpose-built for aviation cabin crew recruitment. Candidates upload CVs that are parsed and aggregated; recruiters shortlist candidates, schedule interviews within recruitment Drives, and submit aviation-aligned feedback scorecards.

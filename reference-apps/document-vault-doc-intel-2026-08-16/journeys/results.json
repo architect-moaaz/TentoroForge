@@ -1,0 +1,258 @@
+{
+  "config": {
+    "configFile": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/playwright.config.ts",
+    "rootDir": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys",
+        "testIgnore": [],
+        "testMatch": [
+          "driver.spec.ts"
+        ],
+        "timeout": 120000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json",
+        {
+          "outputFile": "results.json"
+        }
+      ],
+      [
+        "list",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "driver.spec.ts",
+      "file": "driver.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "crud-write-document · Create a Document through the UI",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 10626,
+                  "error": {
+                    "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n",
+                    "stack": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7",
+                    "location": {
+                      "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                      "column": 26,
+                      "line": 191
+                    },
+                    "snippet": "  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator(["
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                        "column": 26,
+                        "line": 191
+                      },
+                      "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n\n  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator([\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "login_as",
+                      "duration": 10088,
+                      "error": {
+                        "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n",
+                        "stack": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7",
+                        "location": {
+                          "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                          "column": 26,
+                          "line": 191
+                        },
+                        "snippet": "  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator(["
+                      }
+                    }
+                  ],
+                  "startTime": "2026-08-15T17:14:47.231Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI/test-failed-1.png"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI/video.webm"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI/error-context.md"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                    "column": 26,
+                    "line": 191
+                  }
+                },
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 10208,
+                  "error": {
+                    "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n",
+                    "stack": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7",
+                    "location": {
+                      "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                      "column": 26,
+                      "line": 191
+                    },
+                    "snippet": "  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator(["
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                        "column": 26,
+                        "line": 191
+                      },
+                      "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n\n  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator([\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "steps": [
+                    {
+                      "title": "login_as",
+                      "duration": 10036,
+                      "error": {
+                        "message": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n",
+                        "stack": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7",
+                        "location": {
+                          "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                          "column": 26,
+                          "line": 191
+                        },
+                        "snippet": "  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator(["
+                      }
+                    }
+                  ],
+                  "startTime": "2026-08-15T17:14:58.682Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI-retry1/test-failed-1.png"
+                    },
+                    {
+                      "name": "video",
+                      "contentType": "video/webm",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI-retry1/video.webm"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI-retry1/error-context.md"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI-retry1/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/test-results/driver-crud-write-document-bd11a-e-a-Document-through-the-UI-retry1/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts",
+                    "column": 26,
+                    "line": 191
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "43e257347681fb822c83-b4ba94c31f2c4a3b29bf",
+          "file": "driver.spec.ts",
+          "line": 311,
+          "column": 7
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-08-15T17:14:46.863Z",
+    "duration": 22194.933999999997,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

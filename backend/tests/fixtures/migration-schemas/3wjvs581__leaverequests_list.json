@@ -1,0 +1,308 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/list",
+  "route": "/leave-requests",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Leave Requests"
+  },
+  "dataSources": [
+    {
+      "name": "requests",
+      "entity": "LeaveRequest",
+      "op": "list"
+    },
+    {
+      "name": "stats",
+      "entity": "LeaveRequest",
+      "op": "stats"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "main-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "TIME OFF MANAGEMENT",
+              "headline": "Leave Requests",
+              "subhead": "Manage employee time-off requests with streamlined approval workflows and department-based access control.",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "Submit New Request",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/leave-requests/new"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "View Calendar",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/calendar"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.lg"
+            }
+          },
+          {
+            "id": "stats-grid",
+            "type": "Grid",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "children": [
+              {
+                "id": "stat-pending",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Pending Approval",
+                  "value": "{{stats.pending}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.pendingDelta}}",
+                    "direction": "{{stats.pendingDirection}}"
+                  },
+                  "icon": "clock"
+                }
+              },
+              {
+                "id": "stat-approved",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Approved",
+                  "value": "{{stats.approved}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.approvedDelta}}",
+                    "direction": "{{stats.approvedDirection}}"
+                  },
+                  "icon": "check-circle"
+                }
+              },
+              {
+                "id": "stat-rejected",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Rejected",
+                  "value": "{{stats.rejected}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.rejectedDelta}}",
+                    "direction": "{{stats.rejectedDirection}}"
+                  },
+                  "icon": "x-circle"
+                }
+              },
+              {
+                "id": "stat-balance",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Avg Days Remaining",
+                  "value": "{{stats.avgBalance}}",
+                  "format": "number",
+                  "icon": "calendar"
+                }
+              }
+            ]
+          },
+          {
+            "id": "requests-section",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Recent Requests"
+            },
+            "children": [
+              {
+                "id": "requests-grid",
+                "type": "Grid",
+                "props": {
+                  "columns": 3,
+                  "gap": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "type": "Repeat",
+                    "bind": "requests",
+                    "children": [
+                      {
+                        "type": "Card",
+                        "style": {
+                          "padding": "tokens.spacing.6",
+                          "radius": "tokens.radius.lg",
+                          "shadow": "tokens.shadow.md"
+                        },
+                        "children": [
+                          {
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.3"
+                            },
+                            "children": [
+                              {
+                                "type": "Row",
+                                "props": {
+                                  "justify": "between",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "horizontal",
+                                      "gap": "tokens.spacing.2",
+                                      "align": "center"
+                                    },
+                                    "children": [
+                                      {
+                                        "type": "Avatar",
+                                        "props": {
+                                          "name": "{{item.employee.name}}",
+                                          "src": "{{item.employee.avatar}}",
+                                          "size": "sm"
+                                        }
+                                      },
+                                      {
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.employee.name}}",
+                                          "as": "strong"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "Badge",
+                                    "props": {
+                                      "content": "{{item.status}}",
+                                      "variant": "neutral"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "Stack",
+                                "props": {
+                                  "direction": "vertical",
+                                  "gap": "tokens.spacing.1"
+                                },
+                                "children": [
+                                  {
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{item.type}}"
+                                    },
+                                    "style": {
+                                      "color": "tokens.color.text.secondary"
+                                    }
+                                  },
+                                  {
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{item.startDate}} \u2014 {{item.endDate}}"
+                                    }
+                                  },
+                                  {
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{item.reason}}"
+                                    },
+                                    "style": {
+                                      "color": "tokens.color.text.tertiary"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "Row",
+                                "props": {
+                                  "justify": "between",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{item.totalDays}} days"
+                                    },
+                                    "style": {
+                                      "color": "tokens.color.text.secondary"
+                                    }
+                                  },
+                                  {
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "horizontal",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "type": "IconButton",
+                                        "props": {
+                                          "icon": "eye",
+                                          "aria-label": "View details",
+                                          "variant": "ghost",
+                                          "size": "sm",
+                                          "navigate": "/leave-requests/{{item.id}}"
+                                        }
+                                      },
+                                      {
+                                        "type": "IconButton",
+                                        "props": {
+                                          "icon": "edit",
+                                          "aria-label": "Edit request",
+                                          "variant": "ghost",
+                                          "size": "sm",
+                                          "navigate": "/leave-requests/{{item.id}}/edit"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

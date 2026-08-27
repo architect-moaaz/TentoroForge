@@ -1,0 +1,55 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "carbon",
+  "description": "Sharp, dense, monochrome + single accent. IBM Carbon aesthetic. Workspace / data-grid signature.",
+  "when_to_use": {
+    "identity.usageMode": ["multi-user-team"],
+    "layout.density_any_of": ["dense", "comfortable"],
+    "layout.primaryInteraction_any_of": ["data-grid"]
+  },
+  "tokens": {
+    "color": {
+      "background": "hsl(0 0% 100%)",
+      "surface": "hsl(0 0% 100%)",
+      "surfaceHover": "hsl(220 10% 96%)",
+      "border": "hsl(220 8% 82%)",
+      "primary": "hsl(216 100% 40%)",
+      "foreground": "hsl(220 20% 12%)",
+      "muted": "hsl(220 10% 40%)"
+    },
+    "radius": {
+      "sm": "0px",
+      "md": "0px",
+      "lg": "2px",
+      "xl": "4px"
+    },
+    "shadow": {
+      "sm": "0 0 0 1px hsl(220 8% 82%)",
+      "card": "0 0 0 1px hsl(220 8% 82%)",
+      "elevated": "0 2px 6px hsl(220 20% 12% / 0.08)"
+    },
+    "spacing": "dense",
+    "typography": {
+      "display": "'IBM Plex Sans', 'Inter', system-ui, sans-serif",
+      "body": "'IBM Plex Sans', 'Inter', system-ui, sans-serif",
+      "mono": "'IBM Plex Mono', 'JetBrains Mono', monospace"
+    }
+  },
+  "css_variables": {
+    "--background": "0 0% 100%",
+    "--foreground": "220 20% 12%",
+    "--card": "0 0% 100%",
+    "--card-foreground": "220 20% 12%",
+    "--border": "220 8% 82%",
+    "--primary": "216 100% 40%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "220 10% 96%",
+    "--muted-foreground": "220 10% 40%",
+    "--ring": "216 100% 40%"
+  },
+  "surface_treatment": {
+    "root": {"background": "hsl(0 0% 100%)"},
+    "card": {"boxShadow": "0 0 0 1px hsl(220 8% 82%)", "borderRadius": "0"},
+    "button.primary": {"borderRadius": "0"}
+  }
+}

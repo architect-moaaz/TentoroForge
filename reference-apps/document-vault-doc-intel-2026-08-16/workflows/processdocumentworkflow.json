@@ -1,0 +1,103 @@
+{
+  "id": "processdocumentworkflow",
+  "name": "ProcessDocument",
+  "description": "Per-file: insert row (status=queued) -> mark processing -> PaddleOCR (URL or uploaded file) -> AI extract -> persist. Accepts either { fileUrl } for a public URL or { fileId } for an uploaded file (via /api/files/upload).",
+  "processVariables": [
+    { "name": "originalFilename", "type": "string", "required": true },
+    { "name": "fileUrl", "type": "string", "required": false },
+    { "name": "fileId", "type": "string", "required": false },
+    { "name": "mimeType", "type": "string", "required": false }
+  ],
+  "definition": {
+    "trigger": { "type": "api_event", "event": "document.uploaded" },
+    "nodes": [
+      {
+        "id": "trigger", "type": "trigger", "position": {"x": 250, "y": 0},
+        "data": {"label": "document.uploaded", "config": {"type": "api_event", "event": "document.uploaded"}}
+      },
+      {
+        "id": "insert_document", "type": "action", "position": {"x": 250, "y": 100},
+        "data": {"label": "Insert row (queued)", "config": {
+          "actionType": "db_insert",
+          "table": "documents",
+          "values": {
+            "originalFilename": "{{originalFilename}}",
+            "fileUrl": "{{fileUrl}}{{fileId}}",
+            "mimeType": "{{mimeType}}",
+            "uploadedBy": "$user.id",
+            "status": "queued"
+          }
+        }}
+      },
+      {
+        "id": "set_processing", "type": "action", "position": {"x": 250, "y": 200},
+        "data": {"label": "Mark processing", "config": {
+          "actionType": "db_update",
+          "table": "documents",
+          "where": {"id": "{{insert_document.inserted.id}}"},
+          "values": {"status": "processing"}
+        }}
+      },
+      {
+        "id": "call_paddleocr", "type": "action", "position": {"x": 250, "y": 300},
+        "data": {"label": "PaddleOCR", "config": {
+          "actionType": "ocr_document",
+          "ocrFileRef": "{{fileId}}{{fileUrl}}"
+        }}
+      },
+      {
+        "id": "ocr_success_gate", "type": "exclusive_gateway", "position": {"x": 250, "y": 400},
+        "data": {"label": "OCR ok?", "config": {"expression": "call_paddleocr.confidence > 0"}}
+      },
+      {
+        "id": "ai_extract_fields", "type": "ai_extract", "position": {"x": 120, "y": 500},
+        "data": {"label": "AI extract", "config": {
+          "actionType": "ai_extract",
+          "aiFileRef": "{{fileId}}",
+          "aiInput": "{{call_paddleocr.text}}",
+          "aiPrompt": "Read the attached document (and the OCR text below, if useful) and extract every clearly-labeled key → value pair the document contains — dates, IDs, account/reference numbers, amounts + currency, names, addresses, phone numbers, statuses, times, branch/location, signatures noted, totals, tax, commission, exchange rates, etc. The document may be in Arabic or another non-Latin script; read it directly from the image. Preserve the document's original language for VALUES — do NOT translate values. Use short snake_case English keys when the label maps to a common concept (date, amount, currency, reference_number, customer_name, account_number, branch, operation_number, teller, time, total, tax, commission, exchange_rate, check_number, from_account, to_account, transaction_type); otherwise use the label verbatim in its original script. Return ONE flat JSON object of key→value strings — no arrays, no nested objects, no null/empty values. If the document is genuinely empty or not a business document, return {}."
+        }}
+      },
+      {
+        "id": "persist_results", "type": "action", "position": {"x": 120, "y": 600},
+        "data": {"label": "Persist complete", "config": {
+          "actionType": "db_update",
+          "table": "documents",
+          "where": {"id": "{{insert_document.inserted.id}}"},
+          "values": {
+            "status": "complete",
+            "ocrText": "{{call_paddleocr.text}}",
+            "extractedFields": "{{ai_extract_fields.extracted_fields}}",
+            "confidence": "{{call_paddleocr.confidence}}",
+            "pageCount": "{{call_paddleocr.pageCount}}",
+            "processedAt": "$now"
+          }
+        }}
+      },
+      {
+        "id": "set_failed", "type": "action", "position": {"x": 380, "y": 500},
+        "data": {"label": "Persist failed", "config": {
+          "actionType": "db_update",
+          "table": "documents",
+          "where": {"id": "{{insert_document.inserted.id}}"},
+          "values": {
+            "status": "failed",
+            "errorMessage": "OCR returned no text — check file"
+          }
+        }}
+      },
+      {"id": "end", "type": "end", "position": {"x": 250, "y": 700}, "data": {"label": "Done"}}
+    ],
+    "edges": [
+      {"id": "e1", "source": "trigger", "target": "insert_document"},
+      {"id": "e2", "source": "insert_document", "target": "set_processing"},
+      {"id": "e3", "source": "set_processing", "target": "call_paddleocr"},
+      {"id": "e4", "source": "call_paddleocr", "target": "ocr_success_gate"},
+      {"id": "e5", "source": "ocr_success_gate", "target": "ai_extract_fields", "data": {"edgeType": "then", "label": "Yes"}},
+      {"id": "e6", "source": "ocr_success_gate", "target": "set_failed", "data": {"edgeType": "else", "label": "No"}, "sourceHandle": "else"},
+      {"id": "e7", "source": "ai_extract_fields", "target": "persist_results"},
+      {"id": "e8", "source": "persist_results", "target": "end"},
+      {"id": "e9", "source": "set_failed", "target": "end"}
+    ]
+  }
+}

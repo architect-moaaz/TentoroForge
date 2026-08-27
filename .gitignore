@@ -1,0 +1,88 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Build output
+.next/
+dist/
+build/
+*.egg-info/
+
+# Generated app output
+output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg
+*.whl
+pip-log.txt
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+coverage/
+.pytest_cache/
+htmlcov/
+
+# Misc
+*.sqlite3
+*.db
+
+# HTTP response caches (Unsplash URL cache, etc.)
+.cache/
+
+# Per-iteration screenshots from the fidelity loop (large, reproducible)
+output/*/.fidelity-history/
+
+# Auto-generated build artifacts inside packages/*/src — never commit these.
+# They are compiled outputs that should live only in packages/*/dist.
+# Committing them shadows the .tsx source for tools like Vitest and was
+# the root cause of a debugging session where renderer fixes never landed.
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+
+# Brainstorm scratch + TypeScript incremental build info (regenerated)
+.superpowers/
+*.tsbuildinfo
+
+# Fleet regression-run outputs (regenerable)
+backend/fleet-results/
+
+# Playwright local test artifacts
+test-results/
+
+# Runtime artifacts written by generation — not source.
+backend/logs/
+backend/cache/
+backend/rules_output.json
+
+# Any env file, however it is suffixed. `.env.bak-a2ui` held five live
+# credentials and matched none of the patterns above — a backup of a secret is
+# still a secret, and the naming is never predictable.
+.env*
+!.env.example
+!*.env.template
+!.env.local.template

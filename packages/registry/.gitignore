@@ -1,0 +1,6 @@
+# Override root gitignore: keep starter.json so Python backend can read it
+# without needing a prior npm build.
+!dist/
+!dist/starter.json
+dist/*
+!dist/starter.json

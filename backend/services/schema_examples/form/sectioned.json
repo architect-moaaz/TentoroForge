@@ -1,0 +1,339 @@
+{
+  "schemaVersion": "2",
+  "id": "employees/new",
+  "route": "/employees/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Add Employee", "description": "Onboard a new team member" },
+  "dataSources": [
+    { "name": "departments", "entity": "Department", "op": "list" },
+    { "name": "roles",       "entity": "Role",       "op": "list" },
+    { "name": "managers",    "entity": "Employee",   "op": "list",
+      "filter": { "isManager": true } }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.8" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "form-hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "ONBOARDING",
+          "headline": "Add New Employee",
+          "subhead": "Fill in the sections below to create the employee record and trigger the onboarding workflow.",
+          "layout": "stacked",
+          "ctas": []
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.100",
+            "to": "tokens.color.surface.0",
+            "angle": 160
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "section-personal",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Personal Information",
+          "subtitle": "Basic identity — used in directory, email, and payroll"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "personal-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "name-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "field-first-name",
+                    "type": "Input",
+                    "props": {
+                      "name": "firstName",
+                      "label": "First Name",
+                      "type": "text",
+                      "placeholder": "e.g. Priya",
+                      "validators": { "required": true }
+                    }
+                  },
+                  {
+                    "id": "field-last-name",
+                    "type": "Input",
+                    "props": {
+                      "name": "lastName",
+                      "label": "Last Name",
+                      "type": "text",
+                      "placeholder": "e.g. Nair",
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "field-email",
+                "type": "Input",
+                "props": {
+                  "name": "email",
+                  "label": "Work Email",
+                  "type": "email",
+                  "placeholder": "priya.nair@company.com",
+                  "validators": {
+                    "required": true,
+                    "pattern": "^[^@]+@company\\.com$",
+                    "message": "Must be a @company.com address"
+                  }
+                }
+              },
+              {
+                "id": "field-phone",
+                "type": "Input",
+                "props": {
+                  "name": "phone",
+                  "label": "Mobile Phone",
+                  "type": "tel",
+                  "placeholder": "+44 7700 900 000",
+                  "validators": { "required": false }
+                }
+              },
+              {
+                "id": "field-dob",
+                "type": "DatePicker",
+                "props": {
+                  "name": "dateOfBirth",
+                  "label": "Date of Birth",
+                  "max": "2006-01-01",
+                  "validators": { "required": true }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "section-job",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Job Details",
+          "subtitle": "Position, department, and reporting structure"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "job-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "field-job-title",
+                "type": "Input",
+                "props": {
+                  "name": "jobTitle",
+                  "label": "Job Title",
+                  "type": "text",
+                  "placeholder": "e.g. Senior Software Engineer",
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "dept-role-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "field-department",
+                    "type": "Select",
+                    "props": {
+                      "name": "departmentId",
+                      "label": "Department",
+                      "options": [
+                        { "value": "engineering", "label": "Engineering" },
+                        { "value": "design",      "label": "Design" },
+                        { "value": "product",     "label": "Product" },
+                        { "value": "hr",          "label": "People & HR" },
+                        { "value": "finance",     "label": "Finance" },
+                        { "value": "legal",       "label": "Legal" }
+                      ],
+                      "validators": { "required": true }
+                    }
+                  },
+                  {
+                    "id": "field-employment-type",
+                    "type": "Select",
+                    "props": {
+                      "name": "employmentType",
+                      "label": "Employment Type",
+                      "options": [
+                        { "value": "full-time",  "label": "Full-time" },
+                        { "value": "part-time",  "label": "Part-time" },
+                        { "value": "contractor", "label": "Contractor" },
+                        { "value": "intern",     "label": "Intern" }
+                      ],
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "field-manager",
+                "type": "Select",
+                "props": {
+                  "name": "managerId",
+                  "label": "Reporting Manager",
+                  "options": [
+                    { "value": "marcus-chen",  "label": "Marcus Chen" },
+                    { "value": "jane-doe",     "label": "Jane Doe" },
+                    { "value": "tom-bakker",   "label": "Tom Bakker" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-start-date",
+                "type": "DatePicker",
+                "props": {
+                  "name": "startDate",
+                  "label": "Start Date",
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-location",
+                "type": "Select",
+                "props": {
+                  "name": "location",
+                  "label": "Work Location",
+                  "options": [
+                    { "value": "london-hq",    "label": "London HQ" },
+                    { "value": "manchester",   "label": "Manchester Office" },
+                    { "value": "remote-uk",    "label": "Remote (UK)" },
+                    { "value": "remote-eu",    "label": "Remote (EU)" }
+                  ],
+                  "validators": { "required": true }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "section-permissions",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "System Access",
+          "subtitle": "Initial permissions granted on first login"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "permissions-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+            "children": [
+              {
+                "id": "field-role",
+                "type": "Select",
+                "props": {
+                  "name": "systemRole",
+                  "label": "System Role",
+                  "options": [
+                    { "value": "viewer",    "label": "Viewer — read-only access" },
+                    { "value": "member",    "label": "Member — standard employee access" },
+                    { "value": "manager",   "label": "Manager — can approve leave and view team reports" },
+                    { "value": "hr-admin",  "label": "HR Admin — full people data access" },
+                    { "value": "admin",     "label": "Admin — full system access" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-send-invite",
+                "type": "Checkbox",
+                "props": {
+                  "name": "sendWelcomeEmail",
+                  "label": "Send welcome email with login instructions on start date"
+                }
+              },
+              {
+                "id": "field-require-2fa",
+                "type": "Checkbox",
+                "props": {
+                  "name": "require2FA",
+                  "label": "Require two-factor authentication on first login"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "form-footer",
+        "type": "Row",
+        "props": { "justify": "end", "align": "center" },
+        "style": { "padding": "tokens.spacing.4" },
+        "children": [
+          {
+            "id": "btn-cancel",
+            "type": "Text",
+            "props": { "content": "Cancel", "as": "span" }
+          },
+          {
+            "id": "footer-spacer",
+            "type": "Spacer",
+            "props": { "size": "tokens.spacing.4" }
+          },
+          {
+            "id": "btn-save-draft",
+            "type": "Text",
+            "props": { "content": "Save as Draft", "as": "span" }
+          },
+          {
+            "id": "footer-spacer-2",
+            "type": "Spacer",
+            "props": { "size": "tokens.spacing.3" }
+          },
+          {
+            "id": "btn-create",
+            "type": "Text",
+            "props": { "content": "Create Employee", "as": "span" }
+          }
+        ]
+      }
+    ]
+  }
+}

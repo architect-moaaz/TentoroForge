@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "actions": [
+    {
+      "file": "Document/new.json",
+      "kind": "form_submit",
+      "label": "Upload Document",
+      "workflow_ref": "CreateDocument",
+      "workflow_id": "create-document",
+      "resolved": true,
+      "record_context": false,
+      "requires_record": false,
+      "input_map": {
+        "confidence": "confidence",
+        "errorMessage": "errorMessage",
+        "extractedFields": "extractedFields",
+        "fileSizeBytes": "fileSizeBytes",
+        "fileUrl": "fileUrl",
+        "mimeType": "mimeType",
+        "ocrText": "ocrText",
+        "originalFilename": "originalFilename",
+        "pageCount": "pageCount",
+        "status": "status",
+        "uploadedByName": "uploadedByName"
+      },
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "admins/[id]/edit.json",
+      "kind": "form_submit",
+      "label": "Save changes",
+      "workflow_ref": "UpdateUser",
+      "workflow_id": "update-user",
+      "resolved": true,
+      "record_context": true,
+      "requires_record": true,
+      "input_map": {
+        "id": "id"
+      },
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "admins/new.json",
+      "kind": "form_submit",
+      "label": "Upload User",
+      "workflow_ref": "CreateUser",
+      "workflow_id": "create-user",
+      "resolved": true,
+      "record_context": false,
+      "requires_record": false,
+      "input_map": {
+        "email": "email",
+        "name": "name",
+        "password": "password",
+        "role": "role",
+        "isActive": "isActive"
+      },
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "documents/[id]/edit.json",
+      "kind": "form_submit",
+      "label": "Save changes",
+      "workflow_ref": "UpdateDocument",
+      "workflow_id": "update-document",
+      "resolved": true,
+      "record_context": true,
+      "requires_record": true,
+      "input_map": {
+        "id": "id"
+      },
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "documents/new.json",
+      "kind": "form_submit",
+      "label": "Upload Document",
+      "workflow_ref": "CreateDocument",
+      "workflow_id": "create-document",
+      "resolved": true,
+      "record_context": false,
+      "requires_record": false,
+      "input_map": {
+        "confidence": "confidence",
+        "errorMessage": "errorMessage",
+        "extractedFields": "extractedFields",
+        "fileSizeBytes": "fileSizeBytes",
+        "fileUrl": "fileUrl",
+        "mimeType": "mimeType",
+        "ocrText": "ocrText",
+        "originalFilename": "originalFilename",
+        "pageCount": "pageCount",
+        "status": "status",
+        "uploadedByName": "uploadedByName"
+      },
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "documents/upload.json",
+      "kind": "form_submit",
+      "label": "Upload Document",
+      "workflow_ref": "UploadDocumentsWorkflow",
+      "workflow_id": "uploaddocumentsworkflow",
+      "resolved": true,
+      "record_context": false,
+      "requires_record": true,
+      "input_map": {},
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    },
+    {
+      "file": "home/[id]/edit.json",
+      "kind": "form_submit",
+      "label": "Save changes",
+      "workflow_ref": "UpdateDocument",
+      "workflow_id": "update-document",
+      "resolved": true,
+      "record_context": true,
+      "requires_record": true,
+      "input_map": {},
+      "dropped_inputs": [],
+      "unmapped_fields": [
+        "id"
+      ]
+    },
+    {
+      "file": "home/new.json",
+      "kind": "form_submit",
+      "label": "Create Document",
+      "workflow_ref": "CreateDocument",
+      "workflow_id": "create-document",
+      "resolved": true,
+      "record_context": false,
+      "requires_record": false,
+      "input_map": {},
+      "dropped_inputs": [],
+      "unmapped_fields": []
+    }
+  ]
+}

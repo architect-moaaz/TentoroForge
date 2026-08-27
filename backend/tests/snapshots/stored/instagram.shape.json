@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-load",
+    "surface": "route"
+  },
+  "data": {
+    "denormalization": "aggressive",
+    "readShape": "feed"
+  },
+  "identity": {
+    "usageMode": "returning-personal"
+  },
+  "label": "social-feed",
+  "layout": {
+    "density": "spacious",
+    "hero": "feed-header",
+    "primaryInteraction": "feed",
+    "shell": "bottom-tabs"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "bottom-tabs"
+  },
+  "workflows": {
+    "executionMode": "fire-and-forget"
+  }
+}

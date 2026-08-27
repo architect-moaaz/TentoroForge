@@ -1,0 +1,20 @@
+{
+  "name": "multi-step-approval",
+  "description": "Approval flow: reviewer sees context + comment box + Approve/Reject actions with reason capture on Reject.",
+  "when_to_use": {"archetype_any_of": ["approval_queue"], "interactions_contains": "approve-reject"},
+  "invariants": ["reason-required-on-reject", "audit-trail-append", "in-flight-disable", "assignment-check"],
+  "shape": {
+    "type": "Stack", "props": {"gap": "tokens.spacing.6"}, "children": [
+      {"type": "Card", "props": {"title": "Request context"}, "children": [{"$slot": "context"}]},
+      {"type": "Card", "children": [
+        {"type": "Form", "children": [
+          {"type": "Textarea", "props": {"label": "Comment (required on reject)", "name": "reason", "rows": 4}}
+        ]},
+        {"type": "Row", "props": {"justify": "end", "gap": "tokens.spacing.2"}, "children": [
+          {"type": "Button", "props": {"variant": "destructive", "label": "Reject"}},
+          {"type": "Button", "props": {"variant": "primary", "label": "Approve", "submit": true}}
+        ]}
+      ]}
+    ]
+  }
+}

@@ -1,0 +1,436 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-balances/form",
+  "route": "/leave-balances/form",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Leave Balance",
+    "description": "Manage employee leave balance records"
+  },
+  "dataSources": [
+    {
+      "name": "employees",
+      "entity": "Employee",
+      "op": "list"
+    },
+    {
+      "name": "leaveTypes",
+      "entity": "LeaveType",
+      "op": "list"
+    },
+    {
+      "name": "leaveBalance",
+      "entity": "LeaveBalance",
+      "op": "get"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-content",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "form-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "LEAVE MANAGEMENT",
+              "headline": "Leave Balance Record",
+              "subhead": "Track and manage employee leave accruals, usage, and current balances across all leave types.",
+              "layout": "stacked",
+              "ctas": []
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 135
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "section-employee",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Employee Information",
+              "subtitle": "Select the employee for this leave balance record"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "employee-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.5"
+                },
+                "children": [
+                  {
+                    "id": "field-employee",
+                    "type": "Select",
+                    "props": {
+                      "name": "employeeId",
+                      "label": "Employee",
+                      "options": [
+                        {
+                          "value": "emp-001",
+                          "label": "Sarah Johnson - Marketing"
+                        },
+                        {
+                          "value": "emp-002",
+                          "label": "Michael Chen - Engineering"
+                        },
+                        {
+                          "value": "emp-003",
+                          "label": "Emily Rodriguez - Design"
+                        }
+                      ],
+                      "validators": {
+                        "required": true
+                      }
+                    }
+                  },
+                  {
+                    "id": "field-leave-type",
+                    "type": "Select",
+                    "props": {
+                      "name": "leaveTypeId",
+                      "label": "Leave Type",
+                      "options": [
+                        {
+                          "value": "vacation",
+                          "label": "Vacation Leave"
+                        },
+                        {
+                          "value": "sick",
+                          "label": "Sick Leave"
+                        },
+                        {
+                          "value": "personal",
+                          "label": "Personal Leave"
+                        },
+                        {
+                          "value": "maternity",
+                          "label": "Maternity Leave"
+                        },
+                        {
+                          "value": "paternity",
+                          "label": "Paternity Leave"
+                        },
+                        {
+                          "value": "bereavement",
+                          "label": "Bereavement Leave"
+                        }
+                      ],
+                      "validators": {
+                        "required": true
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-balance",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Balance Details",
+              "subtitle": "Current balance amounts and period adjustments"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "balance-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.5"
+                },
+                "children": [
+                  {
+                    "id": "balance-row",
+                    "type": "Row",
+                    "props": {
+                      "align": "start",
+                      "gap": "tokens.spacing.4"
+                    },
+                    "children": [
+                      {
+                        "id": "field-current-balance",
+                        "type": "Input",
+                        "props": {
+                          "name": "currentBalance",
+                          "label": "Current Balance (Hours)",
+                          "type": "number",
+                          "placeholder": "40.0",
+                          "validators": {
+                            "required": true,
+                            "min": 0
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-accrued-amount",
+                        "type": "Input",
+                        "props": {
+                          "name": "accruedAmount",
+                          "label": "Accrued This Period",
+                          "type": "number",
+                          "placeholder": "8.0",
+                          "validators": {
+                            "required": true,
+                            "min": 0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "usage-row",
+                    "type": "Row",
+                    "props": {
+                      "align": "start",
+                      "gap": "tokens.spacing.4"
+                    },
+                    "children": [
+                      {
+                        "id": "field-used-amount",
+                        "type": "Input",
+                        "props": {
+                          "name": "usedAmount",
+                          "label": "Used This Period",
+                          "type": "number",
+                          "placeholder": "16.0",
+                          "validators": {
+                            "required": true,
+                            "min": 0
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-carry-forward",
+                        "type": "Input",
+                        "props": {
+                          "name": "carryForward",
+                          "label": "Carry Forward from Previous",
+                          "type": "number",
+                          "placeholder": "24.0",
+                          "validators": {
+                            "required": false,
+                            "min": 0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "field-max-accrual",
+                    "type": "Input",
+                    "props": {
+                      "name": "maxAccrual",
+                      "label": "Maximum Accrual Limit",
+                      "type": "number",
+                      "placeholder": "240.0",
+                      "validators": {
+                        "required": false,
+                        "min": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-period",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Effective Period",
+              "subtitle": "Date range and additional information for this balance record"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "period-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.5"
+                },
+                "children": [
+                  {
+                    "id": "date-row",
+                    "type": "Row",
+                    "props": {
+                      "align": "start",
+                      "gap": "tokens.spacing.4"
+                    },
+                    "children": [
+                      {
+                        "id": "field-effective-date",
+                        "type": "DatePicker",
+                        "props": {
+                          "name": "effectiveDate",
+                          "label": "Effective Date",
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-expiry-date",
+                        "type": "DatePicker",
+                        "props": {
+                          "name": "expiryDate",
+                          "label": "Expiry Date",
+                          "validators": {
+                            "required": false
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "field-notes",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "notes",
+                      "label": "Notes",
+                      "rows": 3,
+                      "placeholder": "Any additional notes about this balance record, adjustments, or special circumstances...",
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  },
+                  {
+                    "id": "field-is-active",
+                    "type": "Checkbox",
+                    "props": {
+                      "name": "isActive",
+                      "label": "Active record - include in current balance calculations"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "form-footer",
+            "type": "Row",
+            "props": {
+              "justify": "between",
+              "align": "center",
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "padding": "tokens.spacing.6",
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.1"
+              },
+              "radius": "tokens.radius.lg"
+            },
+            "children": [
+              {
+                "id": "footer-left",
+                "type": "Text",
+                "props": {
+                  "content": "Changes will be audited and may trigger notifications to the employee and their manager."
+                },
+                "style": {
+                  "color": "tokens.color.text.secondary",
+                  "fontSize": "tokens.typography.scale.caption"
+                }
+              },
+              {
+                "id": "footer-actions",
+                "type": "Row",
+                "props": {
+                  "gap": "tokens.spacing.3",
+                  "align": "center"
+                },
+                "children": [
+                  {
+                    "id": "btn-cancel",
+                    "type": "Button",
+                    "props": {
+                      "label": "Cancel",
+                      "variant": "ghost",
+                      "navigate": "/leave-balances"
+                    }
+                  },
+                  {
+                    "id": "btn-save-draft",
+                    "type": "Button",
+                    "props": {
+                      "label": "Save as Draft",
+                      "variant": "secondary",
+                      "workflow": "saveLeaveBalanceDraft"
+                    }
+                  },
+                  {
+                    "id": "btn-save",
+                    "type": "Button",
+                    "props": {
+                      "label": "Save Balance Record",
+                      "variant": "primary",
+                      "workflow": "saveLeaveBalance"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

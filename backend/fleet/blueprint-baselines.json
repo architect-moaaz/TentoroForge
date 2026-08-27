@@ -1,0 +1,170 @@
+{
+  "ats-live": {
+    "app": "ats-live",
+    "by_edge": {
+      "API\u2194Permission": 12,
+      "Widget\u2194DataSource": 1
+    },
+    "composite": 0.9125,
+    "counts": {
+      "bound": {
+        "ok": 15,
+        "total": 16
+      },
+      "grounded": {
+        "ok": 35,
+        "total": 35
+      },
+      "guarded": {
+        "ok": 20,
+        "total": 32
+      },
+      "implemented": {
+        "ok": 0,
+        "total": 0
+      },
+      "reachable": {
+        "ok": 4,
+        "total": 4
+      },
+      "tested": {
+        "ok": 0,
+        "total": 0
+      },
+      "traceability": {
+        "ok": 0,
+        "total": 0
+      },
+      "wired": {
+        "ok": 16,
+        "total": 16
+      }
+    },
+    "errors": [],
+    "findings": 13,
+    "metrics": {
+      "bound": 0.9375,
+      "grounded": 1.0,
+      "guarded": 0.625,
+      "implemented": null,
+      "reachable": 1.0,
+      "tested": null,
+      "traceability": null,
+      "wired": 1.0
+    },
+    "valid": true
+  },
+  "degraded": {
+    "app": "degraded",
+    "by_edge": {
+      "API\u2194Permission": 1,
+      "Blueprint\u2194Implementation": 4,
+      "Navigation\u2194Page": 1,
+      "Page\u2194PatternTemplate": 1,
+      "Page\u2194Workflow": 1,
+      "Requirement\u2194Code": 1,
+      "Requirement\u2194Test": 1,
+      "Widget\u2194DataSource": 1
+    },
+    "composite": 0.125,
+    "counts": {
+      "bound": {
+        "ok": 0,
+        "total": 1
+      },
+      "grounded": {
+        "ok": 2,
+        "total": 2
+      },
+      "guarded": {
+        "ok": 0,
+        "total": 1
+      },
+      "implemented": {
+        "ok": 0,
+        "total": 4
+      },
+      "reachable": {
+        "ok": 0,
+        "total": 1
+      },
+      "tested": {
+        "ok": 0,
+        "total": 1
+      },
+      "traceability": {
+        "ok": 0,
+        "total": 1
+      },
+      "wired": {
+        "ok": 0,
+        "total": 1
+      }
+    },
+    "errors": [],
+    "findings": 11,
+    "metrics": {
+      "bound": 0.0,
+      "grounded": 1.0,
+      "guarded": 0.0,
+      "implemented": 0.0,
+      "reachable": 0.0,
+      "tested": 0.0,
+      "traceability": 0.0,
+      "wired": 0.0
+    },
+    "valid": true
+  },
+  "recruitment": {
+    "app": "recruitment",
+    "by_edge": {},
+    "composite": 1.0,
+    "counts": {
+      "bound": {
+        "ok": 1,
+        "total": 1
+      },
+      "grounded": {
+        "ok": 2,
+        "total": 2
+      },
+      "guarded": {
+        "ok": 1,
+        "total": 1
+      },
+      "implemented": {
+        "ok": 4,
+        "total": 4
+      },
+      "reachable": {
+        "ok": 1,
+        "total": 1
+      },
+      "tested": {
+        "ok": 1,
+        "total": 1
+      },
+      "traceability": {
+        "ok": 1,
+        "total": 1
+      },
+      "wired": {
+        "ok": 1,
+        "total": 1
+      }
+    },
+    "errors": [],
+    "findings": 0,
+    "metrics": {
+      "bound": 1.0,
+      "grounded": 1.0,
+      "guarded": 1.0,
+      "implemented": 1.0,
+      "reachable": 1.0,
+      "tested": 1.0,
+      "traceability": 1.0,
+      "wired": 1.0
+    },
+    "valid": true
+  }
+}

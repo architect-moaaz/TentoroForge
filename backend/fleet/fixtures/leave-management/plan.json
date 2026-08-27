@@ -1,0 +1,856 @@
+{
+  "module_name": "leave-request-management",
+  "name": "Leave Request Management",
+  "description": "Employee leave request system where employees submit requests and managers approve or reject them.",
+  "domain": "hr",
+  "actors": [
+    {
+      "name": "employee",
+      "role": "employee",
+      "access": "auth",
+      "onboarding": {
+        "source": "invite"
+      }
+    },
+    {
+      "name": "manager",
+      "role": "manager",
+      "access": "auth",
+      "onboarding": {
+        "source": "invite"
+      }
+    }
+  ],
+  "entities": {
+    "User": {
+      "table": "users",
+      "schema": "src/db/schema/users.ts",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "employee",
+            "manager",
+            "admin"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "employee",
+              "manager",
+              "admin"
+            ]
+          }
+        },
+        {
+          "name": "department",
+          "type": "varchar",
+          "not_null": false
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ]
+    },
+    "LeaveRequest": {
+      "table": "leave_requests",
+      "schema": "src/db/schema/leave_requests.ts",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "employeeId",
+          "type": "uuid",
+          "not_null": true,
+          "user_fk_role": "actor",
+          "role": "actor",
+          "fk": {
+            "table": "users",
+            "column": "id"
+          }
+        },
+        {
+          "name": "reviewerId",
+          "type": "uuid",
+          "not_null": false,
+          "user_fk_role": "assignment",
+          "role": "assignment",
+          "fk": {
+            "table": "users",
+            "column": "id"
+          }
+        },
+        {
+          "name": "leaveType",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "Vacation",
+            "Sick",
+            "Personal",
+            "Parental",
+            "Unpaid"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "Vacation",
+              "Sick",
+              "Personal",
+              "Parental",
+              "Unpaid"
+            ]
+          }
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "not_null": false
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          }
+        },
+        {
+          "name": "reviewerNote",
+          "type": "text",
+          "not_null": false
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "depends_on": [
+        "User"
+      ]
+    },
+    "Employee": {
+      "name": "Employee",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    },
+    "Reviewer": {
+      "name": "Reviewer",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    }
+  },
+  "relations": [
+    {
+      "from": "LeaveRequest",
+      "to": "User",
+      "foreignKey": "employeeId"
+    },
+    {
+      "from": "LeaveRequest",
+      "to": "User",
+      "foreignKey": "reviewerId"
+    }
+  ],
+  "pages": [
+    {
+      "name": "Dashboard",
+      "route": "/",
+      "type": "dashboard",
+      "archetype": "dashboard",
+      "features": [
+        "status-pipeline"
+      ],
+      "entity": null,
+      "dataSource": null,
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "LeaveRequest",
+          "title": "Pending Requests",
+          "metric": {
+            "fn": "count",
+            "filter": {
+              "status": "pending"
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "LeaveRequest",
+          "title": "Approved Requests",
+          "metric": {
+            "fn": "count",
+            "filter": {
+              "status": "approved"
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "LeaveRequest",
+          "title": "Rejected Requests",
+          "metric": {
+            "fn": "count",
+            "filter": {
+              "status": "rejected"
+            }
+          }
+        },
+        {
+          "type": "chart",
+          "entity": "LeaveRequest",
+          "title": "By Leave Type",
+          "groupBy": "leaveType"
+        },
+        {
+          "type": "chart",
+          "entity": "LeaveRequest",
+          "title": "Volume by Month",
+          "groupBy": "createdAt",
+          "bucket": "month"
+        },
+        {
+          "type": "table",
+          "entity": "LeaveRequest",
+          "title": "Recent Requests",
+          "limit": 5,
+          "columns": [
+            "employeeId",
+            "leaveType",
+            "status",
+            "startDate"
+          ]
+        }
+      ],
+      "actions": [],
+      "entity_summary": [
+        "User",
+        "LeaveRequest"
+      ]
+    },
+    {
+      "name": "LeaveRequestList",
+      "route": "/leave-requests",
+      "type": "list",
+      "archetype": "kanban",
+      "features": [
+        "status-pipeline",
+        "approval"
+      ],
+      "entity": "LeaveRequest",
+      "dataSource": {
+        "entity": "LeaveRequest",
+        "op": "list"
+      },
+      "actions": []
+    },
+    {
+      "name": "LeaveRequestDetail",
+      "route": "/leave-requests/[id]",
+      "type": "detail",
+      "archetype": "detail",
+      "features": [
+        "approval"
+      ],
+      "entity": "LeaveRequest",
+      "dataSource": {
+        "entity": "LeaveRequest",
+        "op": "get"
+      },
+      "actions": []
+    },
+    {
+      "name": "LeaveRequestForm",
+      "route": "/leave-requests/new",
+      "type": "form",
+      "archetype": "form",
+      "features": [],
+      "entity": "LeaveRequest",
+      "submit": {
+        "kind": "workflow",
+        "target": "SubmitLeaveRequest"
+      },
+      "fields": [
+        {
+          "name": "leaveType",
+          "label": "Leave Type",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "startDate",
+          "label": "Start Date",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "endDate",
+          "label": "End Date",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "reason",
+          "semanticType": "multiline",
+          "label": "Reason",
+          "required": false,
+          "order": 4
+        }
+      ],
+      "actions": []
+    },
+    {
+      "name": "Login",
+      "route": "/login",
+      "type": "auth",
+      "archetype": "form",
+      "entity": null,
+      "dataSource": null,
+      "features": [],
+      "actions": []
+    },
+    {
+      "name": "EmployeeList",
+      "route": "/employees",
+      "type": "list",
+      "archetype": "list",
+      "entity": "User",
+      "dataSource": {
+        "entity": "User",
+        "op": "list"
+      },
+      "features": [],
+      "filter": {
+        "role": "employee"
+      },
+      "visibleTo": [
+        "admin",
+        "manager"
+      ],
+      "actions": []
+    },
+    {
+      "name": "ManagerList",
+      "route": "/managers",
+      "type": "list",
+      "archetype": "list",
+      "entity": "User",
+      "dataSource": {
+        "entity": "User",
+        "op": "list"
+      },
+      "features": [],
+      "filter": {
+        "role": "manager"
+      },
+      "visibleTo": [
+        "admin"
+      ],
+      "actions": []
+    }
+  ],
+  "workflows": [
+    {
+      "name": "SubmitLeaveRequest",
+      "trigger": "form_submit on LeaveRequestForm",
+      "source": {
+        "kind": "form",
+        "page": "LeaveRequestForm"
+      },
+      "inputs": [
+        {
+          "name": "employeeId",
+          "type": "uuid",
+          "required": true,
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          }
+        },
+        {
+          "name": "leaveType",
+          "type": "string",
+          "required": true,
+          "source": {
+            "kind": "form_field",
+            "field": "leaveType"
+          }
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp",
+          "required": true,
+          "source": {
+            "kind": "form_field",
+            "field": "startDate"
+          }
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp",
+          "required": true,
+          "source": {
+            "kind": "form_field",
+            "field": "endDate"
+          }
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "required": false,
+          "source": {
+            "kind": "form_field",
+            "field": "reason"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "insert_request",
+          "type": "action",
+          "config": {
+            "actionType": "db_insert",
+            "table": "leave_requests",
+            "fields": [
+              "employeeId",
+              "leaveType",
+              "startDate",
+              "endDate",
+              "reason",
+              "status"
+            ],
+            "values": {
+              "status": "pending"
+            }
+          },
+          "next": "notify_manager"
+        },
+        {
+          "id": "notify_manager",
+          "type": "action",
+          "config": {
+            "actionType": "send_notification",
+            "recipientRole": "manager",
+            "message": "A new leave request has been submitted and requires your review."
+          },
+          "next": "end"
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ]
+    },
+    {
+      "name": "ApproveLeaveRequest",
+      "trigger": "button on LeaveRequestDetail",
+      "source": {
+        "kind": "button",
+        "page": "LeaveRequestDetail"
+      },
+      "inputs": [
+        {
+          "name": "leaveRequestId",
+          "type": "uuid",
+          "required": true,
+          "source": {
+            "kind": "route",
+            "param": "id"
+          }
+        },
+        {
+          "name": "reviewerId",
+          "type": "uuid",
+          "required": true,
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          }
+        },
+        {
+          "name": "reviewerNote",
+          "type": "text",
+          "required": false,
+          "source": {
+            "kind": "form_field",
+            "field": "reviewerNote"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "update_approved",
+          "type": "action",
+          "config": {
+            "actionType": "db_update",
+            "table": "leave_requests",
+            "fields": [
+              "status",
+              "reviewerId",
+              "reviewerNote"
+            ],
+            "values": {
+              "status": "approved"
+            },
+            "where": {
+              "id": "{{leaveRequestId}}"
+            }
+          },
+          "next": "notify_employee_approved"
+        },
+        {
+          "id": "notify_employee_approved",
+          "type": "action",
+          "config": {
+            "actionType": "send_notification",
+            "recipientRole": "employee",
+            "message": "Your leave request has been approved."
+          },
+          "next": "end"
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ]
+    },
+    {
+      "name": "RejectLeaveRequest",
+      "trigger": "button on LeaveRequestDetail",
+      "source": {
+        "kind": "button",
+        "page": "LeaveRequestDetail"
+      },
+      "inputs": [
+        {
+          "name": "leaveRequestId",
+          "type": "uuid",
+          "required": true,
+          "source": {
+            "kind": "route",
+            "param": "id"
+          }
+        },
+        {
+          "name": "reviewerId",
+          "type": "uuid",
+          "required": true,
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          }
+        },
+        {
+          "name": "reviewerNote",
+          "type": "text",
+          "required": false,
+          "source": {
+            "kind": "form_field",
+            "field": "reviewerNote"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "update_rejected",
+          "type": "action",
+          "config": {
+            "actionType": "db_update",
+            "table": "leave_requests",
+            "fields": [
+              "status",
+              "reviewerId",
+              "reviewerNote"
+            ],
+            "values": {
+              "status": "rejected"
+            },
+            "where": {
+              "id": "{{leaveRequestId}}"
+            }
+          },
+          "next": "notify_employee_rejected"
+        },
+        {
+          "id": "notify_employee_rejected",
+          "type": "action",
+          "config": {
+            "actionType": "send_notification",
+            "recipientRole": "employee",
+            "message": "Your leave request has been rejected."
+          },
+          "next": "end"
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ]
+    }
+  ],
+  "api_routes": [],
+  "data_models": [
+    {
+      "name": "User",
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "employee",
+            "manager",
+            "admin"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "employee",
+              "manager",
+              "admin"
+            ]
+          }
+        },
+        {
+          "name": "department",
+          "type": "varchar",
+          "not_null": false
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "LeaveRequest",
+      "table": "leave_requests",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "employeeId",
+          "type": "uuid",
+          "not_null": true,
+          "user_fk_role": "actor",
+          "role": "actor",
+          "fk": {
+            "table": "users",
+            "column": "id"
+          }
+        },
+        {
+          "name": "reviewerId",
+          "type": "uuid",
+          "not_null": false,
+          "user_fk_role": "assignment",
+          "role": "assignment",
+          "fk": {
+            "table": "users",
+            "column": "id"
+          }
+        },
+        {
+          "name": "leaveType",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "Vacation",
+            "Sick",
+            "Personal",
+            "Parental",
+            "Unpaid"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "Vacation",
+              "Sick",
+              "Personal",
+              "Parental",
+              "Unpaid"
+            ]
+          }
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "not_null": false
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          }
+        },
+        {
+          "name": "reviewerNote",
+          "type": "text",
+          "not_null": false
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    }
+  ],
+  "authGated": true,
+  "assumptions": [
+    "Employees can only submit requests; managers can approve or reject.",
+    "reviewerNote is optional on approve/reject \u2014 managers may leave it blank.",
+    "Status values are pending, approved, rejected \u2014 no draft or cancelled state assumed.",
+    "No multi-level approval chain \u2014 one manager approval is sufficient.",
+    "Notifications are in-app; email delivery is not modelled at this stage.",
+    "Employee and Reviewer synthesized entities removed \u2014 User entity with role enum covers both actor types.",
+    "Login page archetype changed to form (not list) since it has no dataSource.",
+    "EmployeeList and ManagerList pages filter User entity by role; both declare actions[]."
+  ]
+}

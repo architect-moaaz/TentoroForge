@@ -1,0 +1,199 @@
+{
+  "name": "Document Intelligence",
+  "entities": {
+    "User": {
+      "table": "users",
+      "schema": "src/db/schema/users.ts",
+      "type": "src/types/users.ts",
+      "api": [
+        "src/app/api/users/route.ts",
+        "src/app/api/users/[id]/route.ts"
+      ],
+      "components": [
+        "src/components/users/UserTable.tsx",
+        "src/components/users/UserForm.tsx"
+      ],
+      "pages": [
+        "src/app/users/page.tsx",
+        "src/app/users/[id]/page.tsx"
+      ],
+      "depends_on": [],
+      "used_by": [
+        "Document"
+      ]
+    },
+    "Document": {
+      "table": "documents",
+      "schema": "src/db/schema/documents.ts",
+      "type": "src/types/documents.ts",
+      "api": [
+        "src/app/api/documents/route.ts",
+        "src/app/api/documents/[id]/route.ts"
+      ],
+      "components": [
+        "src/components/documents/DocumentTable.tsx",
+        "src/components/documents/DocumentForm.tsx"
+      ],
+      "pages": [
+        "src/app/documents/page.tsx",
+        "src/app/documents/[id]/page.tsx"
+      ],
+      "depends_on": [
+        "User"
+      ],
+      "used_by": [
+        "ProcessDocumentJob"
+      ]
+    },
+    "ProcessDocumentJob": {
+      "table": "process_document_jobs",
+      "schema": "src/db/schema/process-document-jobs.ts",
+      "type": "src/types/process-document-jobs.ts",
+      "api": [
+        "src/app/api/process_document_jobs/route.ts",
+        "src/app/api/process_document_jobs/[id]/route.ts"
+      ],
+      "components": [
+        "src/components/process-document-jobs/ProcessDocumentJobTable.tsx",
+        "src/components/process-document-jobs/ProcessDocumentJobForm.tsx"
+      ],
+      "pages": [
+        "src/app/process-document-jobs/page.tsx",
+        "src/app/process-document-jobs/[id]/page.tsx"
+      ],
+      "depends_on": [
+        "Document"
+      ],
+      "used_by": []
+    }
+  },
+  "pages": [
+    {
+      "route": "/documents",
+      "component": "DocumentsListPage",
+      "description": "Table of all documents with columns: original filename, status (coloured badge: queued=slate, processing=amber+spinner, complete=green, failed=red), confidence %, page count, uploaded by, createdAt. Auto-refreshes every 5 s while any row has status=queued or status=processing; halts polling once all rows are terminal. Toolbar has Upload button.",
+      "entity": "Document"
+    },
+    {
+      "route": "/documents/upload",
+      "component": "DocumentUploadPage",
+      "description": "Multi-file upload form. Accepts PDF and image files. Submits multipart/form-data to the upload workflow. Shows a drag-and-drop zone. On submit, dispatches ProcessDocumentWorkflow per file and navigates to /documents.",
+      "entity": "Document"
+    },
+    {
+      "route": "/documents/[id]",
+      "component": "DocumentDetailPage",
+      "description": "Two-column layout. Left panel: inline file preview (PDF iframe or <img>). Right panel: DescriptionList of extracted key-value pairs from extractedFields JSONB, each with a confidence colour chip. Collapsible accordion below shows raw ocrText in a monospace pre block. Status badge at top. If status=failed, shows errorMessage.",
+      "entity": "Document"
+    },
+    {
+      "route": "/documents/search",
+      "component": "DocumentSearchPage",
+      "description": "Full-text + structured search page. Search bar at top runs against the tsvector index (ocr_text + all JSONB string values). Results table shows filename, status, confidence, matched snippet. Filters: status, date range, confidence threshold. Empty state shows instructions to upload documents first.",
+      "entity": "Document"
+    },
+    {
+      "route": "/",
+      "component": "DashboardPage",
+      "description": "Overview KPIs: total documents, complete count, failed count, average confidence. Recent documents table. Quick upload button."
+    },
+    {
+      "route": "/login",
+      "component": "Login",
+      "description": ""
+    },
+    {
+      "route": "/admins",
+      "component": "admins",
+      "description": "Directory of admins in the app.",
+      "entity": "User"
+    },
+    {
+      "route": "/signup",
+      "component": "SignupPage",
+      "description": "Sign up"
+    },
+    {
+      "route": "/error",
+      "component": "ErrorPage",
+      "description": "Error"
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "description": "List users"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "description": "Create user"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/[id]",
+      "description": "Get user"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/[id]",
+      "description": "Update user"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/[id]",
+      "description": "Delete user"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents",
+      "description": "List documents"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents",
+      "description": "Create document"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/[id]",
+      "description": "Get document"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/documents/[id]",
+      "description": "Update document"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/documents/[id]",
+      "description": "Delete document"
+    },
+    {
+      "method": "GET",
+      "path": "/api/process_document_jobs",
+      "description": "List process_document_jobs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/process_document_jobs",
+      "description": "Create processdocumentjob"
+    },
+    {
+      "method": "GET",
+      "path": "/api/process_document_jobs/[id]",
+      "description": "Get processdocumentjob"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/process_document_jobs/[id]",
+      "description": "Update processdocumentjob"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/process_document_jobs/[id]",
+      "description": "Delete processdocumentjob"
+    }
+  ]
+}

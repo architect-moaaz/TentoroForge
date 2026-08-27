@@ -1,0 +1,33 @@
+{
+  "name": "@tentoroforge/renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/renderer/src/index.js",
+  "types": "dist/renderer/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@forge/patches": "*",
+    "@tentoroforge/feel-lite": "*",
+    "@tentoroforge/schema": "*",
+    "react": "^19.0.0",
+    "dompurify": "^3.2.7"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^25.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

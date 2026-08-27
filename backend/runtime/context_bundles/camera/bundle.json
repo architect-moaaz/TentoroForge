@@ -1,0 +1,22 @@
+{
+  "capability": "camera",
+  "permissions": {
+    "ios": {
+      "NSCameraUsageDescription": "We use the camera to capture photos and scan items."
+    },
+    "android": [
+      "android.permission.CAMERA"
+    ],
+    "expo_plugins": ["expo-camera"]
+  },
+  "native_imports": {
+    "expo": ["expo-camera"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/CameraProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useCamera", "useCapture"]
+  },
+  "integration_keys": []
+}

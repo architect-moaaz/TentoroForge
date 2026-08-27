@@ -1,0 +1,19 @@
+{
+  "app_shape": {
+    "layout": {"shell": "sidebar", "hero": "kpi-strip", "primaryInteraction": "dashboard", "density": "comfortable"},
+    "auth": {"surface": "route", "gating": "on-load"},
+    "nav": {"menu": "sidebar-links", "back": "history"},
+    "workflows": {"executionMode": "await-with-progress"},
+    "data": {"readShape": "dashboard", "denormalization": "moderate"},
+    "identity": {"usageMode": "returning-personal"},
+    "label": "hr-back-office"
+  },
+  "archetypes": [
+    {"name": "home", "recipe": "dashboard", "entities": ["employee", "review"], "routes": ["/"]},
+    {"name": "employees", "recipe": "directory", "entities": ["employee"], "routes": ["/employees"]},
+    {"name": "employee_detail", "recipe": "detail_view", "entities": ["employee"], "routes": ["/employees/[id]"]},
+    {"name": "approvals", "recipe": "approval_queue", "entities": ["approval"], "routes": ["/approvals"]}
+  ],
+  "industry": "workspace-hr",
+  "runtime_context": ["push_notifications", "deep_linking"]
+}

@@ -1,0 +1,260 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "Task Manager"
+  },
+  "tokens": {},
+  "dataSources": {
+    "tasks": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/tasks",
+      "params": {
+        "search": { "type": "string", "from": "state:search" },
+        "status": { "type": "string", "from": "state:status" }
+      },
+      "shape": { "items": "Task[]", "total": "number" },
+      "refresh": "on-focus"
+    },
+    "taskDetail": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/tasks/{id}",
+      "params": {
+        "id": { "type": "string", "from": "state:selectedId" }
+      },
+      "shape": { "id": "string", "title": "string", "description": "string", "status": "string", "priority": "string", "assignee": "object", "dueDate": "string" }
+    },
+    "updateTask": {
+      "type": "rest",
+      "method": "PUT",
+      "path": "/api/tasks/{id}",
+      "onSuccess": { "invalidate": ["tasks", "taskDetail"] }
+    }
+  },
+  "pages": [
+    {
+      "$id": "task-list",
+      "route": "/tasks",
+      "title": "Tasks",
+      "auth": { "required": true },
+      "state": {
+        "search": "",
+        "status": "all",
+        "selectedId": null
+      },
+      "root": {
+        "node": "Row",
+        "height": "screen",
+        "children": [
+          {
+            "node": "Stack",
+            "width": "320px",
+            "gap": "none",
+            "padding": { "top": "md" },
+            "scroll": true,
+            "children": [
+              {
+                "node": "Stack",
+                "padding": { "x": "md" },
+                "gap": "sm",
+                "children": [
+                  {
+                    "node": "Text",
+                    "content": "Tasks",
+                    "typography": "heading-2"
+                  },
+                  {
+                    "node": "TextInput",
+                    "bind": "state:search",
+                    "placeholder": "Search tasks...",
+                    "icon": "search",
+                    "debounce": 300
+                  },
+                  {
+                    "node": "Select",
+                    "bind": "state:status",
+                    "options": [
+                      { "value": "all", "label": "All statuses" },
+                      { "value": "todo", "label": "To Do" },
+                      { "value": "in_progress", "label": "In Progress" },
+                      { "value": "done", "label": "Done" }
+                    ],
+                    "size": "sm"
+                  }
+                ]
+              },
+              {
+                "node": "Divider"
+              },
+              {
+                "node": "Repeater",
+                "data": "source:tasks.items",
+                "itemKey": "id",
+                "direction": "vertical",
+                "gap": "xs",
+                "emptyState": {
+                  "node": "EmptyState",
+                  "icon": "inbox",
+                  "message": "No tasks match your filters"
+                },
+                "template": {
+                  "node": "Card",
+                  "padding": "sm",
+                  "hoverable": true,
+                  "selected": "{{item.id}} === state:selectedId",
+                  "action": { "type": "setState", "path": "selectedId", "value": "{{item.id}}" },
+                  "children": [
+                    {
+                      "node": "Text",
+                      "content": "{{item.title}}",
+                      "weight": "medium",
+                      "truncate": 1
+                    },
+                    {
+                      "node": "Row",
+                      "gap": "sm",
+                      "align": "center",
+                      "children": [
+                        {
+                          "node": "Badge",
+                          "content": "{{item.status}}",
+                          "size": "sm",
+                          "colorMap": {
+                            "todo": "muted",
+                            "in_progress": "primary",
+                            "done": "success"
+                          }
+                        },
+                        {
+                          "node": "Text",
+                          "content": "{{item.dueDate | relativeDate}}",
+                          "typography": "caption"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "node": "Divider",
+            "direction": "vertical"
+          },
+          {
+            "node": "Stack",
+            "flex": 1,
+            "padding": "lg",
+            "scroll": true,
+            "children": [
+              {
+                "node": "Slot",
+                "switch": "state:selectedId",
+                "cases": {
+                  "null": {
+                    "node": "EmptyState",
+                    "icon": "mouse-pointer-click",
+                    "message": "Select a task from the sidebar"
+                  },
+                  "default": {
+                    "node": "AsyncSlot",
+                    "data": "source:taskDetail",
+                    "params": { "id": "state:selectedId" },
+                    "loading": {
+                      "node": "Skeleton",
+                      "variant": "text",
+                      "lines": 8
+                    },
+                    "children": [
+                      {
+                        "node": "Stack",
+                        "gap": "lg",
+                        "children": [
+                          {
+                            "node": "Row",
+                            "justify": "between",
+                            "align": "center",
+                            "children": [
+                              {
+                                "node": "Text",
+                                "content": "{{source:taskDetail.title}}",
+                                "typography": "heading-2"
+                              },
+                              {
+                                "node": "Row",
+                                "gap": "sm",
+                                "children": [
+                                  {
+                                    "node": "Badge",
+                                    "content": "{{source:taskDetail.status}}",
+                                    "colorMap": {
+                                      "todo": "muted",
+                                      "in_progress": "primary",
+                                      "done": "success"
+                                    }
+                                  },
+                                  {
+                                    "node": "Badge",
+                                    "content": "{{source:taskDetail.priority}}",
+                                    "variant": "outline"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "node": "Grid",
+                            "columns": 2,
+                            "gap": "md",
+                            "children": [
+                              {
+                                "node": "Stack",
+                                "gap": "xs",
+                                "children": [
+                                  { "node": "Text", "content": "Assignee", "typography": "caption" },
+                                  {
+                                    "node": "Row",
+                                    "gap": "sm",
+                                    "align": "center",
+                                    "children": [
+                                      { "node": "Avatar", "src": "{{source:taskDetail.assignee.avatar}}", "name": "{{source:taskDetail.assignee.name}}", "size": "sm" },
+                                      { "node": "Text", "content": "{{source:taskDetail.assignee.name}}" }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "node": "Stack",
+                                "gap": "xs",
+                                "children": [
+                                  { "node": "Text", "content": "Due Date", "typography": "caption" },
+                                  { "node": "Text", "content": "{{source:taskDetail.dueDate | relativeDate}}" }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "node": "Divider"
+                          },
+                          {
+                            "node": "Stack",
+                            "gap": "xs",
+                            "children": [
+                              { "node": "Text", "content": "Description", "typography": "caption" },
+                              { "node": "Text", "content": "{{source:taskDetail.description}}" }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

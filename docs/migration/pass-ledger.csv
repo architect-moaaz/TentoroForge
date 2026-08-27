@@ -1,0 +1,152 @@
+step,module,disposition,target,note,needs_review
+1,guard_result,dead,,log capture for the chain itself,False
+2,post_gen_phases,dead,,per-run completion counter for the chain,False
+3,post_gen_phases,dead,,ditto,False
+4,schema_json_repair,dead,,§29 rejects malformed agent output; nothing to repair afterwards,False
+5,schema_dedup_guard,dead,,IdAllocator keys on natural identity; a second Candidate is the first,False
+6,schema_import_guard,emitter,,codegen import wiring,False
+7,workflow_table_guard,edge,Workflow↔API,,False
+8,workflow_mutation_guard,guardrail,workflows,only the workflow agent may write workflows,False
+9,list_data_source_guard,edge,Page↔API,,False
+10,crud_invariants,constraint,pages.actions,,False
+11,action_invariants,constraint,pages.actions,,False
+12,widget_data_source_guard,constraint,widgets,Widget.dataSource is required; a hardcoded widget will not parse,False
+13,stub_page_backfill,constraint,pages.states,"empty is a declared state, not a discovery",False
+14,self_heal,dead,,"missing workflows are a DAG gap, not a repair",False
+15,drizzle_column_guard,emitter,,Drizzle emission from data.entities,False
+16,drizzle_check_guard,emitter,,Drizzle emission from constraints,False
+17,fk_type_guard,constraint,data.relationships,Relationship declares both ends; a type mismatch is not writable,False
+18,seed_synthesizer,emitter,,§61 seed generation from the data model,False
+19,detail_polish,constraint,pages.pattern,,False
+20,ensure_edit_routes,constraint,pages.route,CRUD routes derive from the entity + pattern,False
+21,payment_feature,constraint,integrations,,True
+22,workflow_launch_forms,constraint,workflows.launchedFrom,,False
+23,task_notification_defaults,constraint,workflows.steps,,False
+24,orphan_wiring_pass,edge,Page↔Workflow,,False
+25,file_first_forms,emitter,,upload UI emission,False
+26,submit_authority_guards,edge,Page↔Workflow,,False
+27,submit_authority_guards,edge,Page↔Workflow,,False
+28,workflow_trigger_button_guard,edge,Page↔Workflow,,False
+29,workflow_input_map_backfill,constraint,workflows.steps,,False
+30,workflow_input_map_backfill,constraint,workflows.steps,,False
+31,workflow_values_clean_guard,constraint,workflows.steps,,False
+32,workflow_form_field_pruner,constraint,workflows.steps,,False
+33,form_scaffold,constraint,data.entities.fields,form inputs derive from entity fields; nothing to scaffold after,False
+34,form_scaffold,edge,API↔Database,FK dropdown to a real entity,False
+35,form_scaffold,constraint,data.entities.fields.required,,False
+36,form_scaffold,constraint,data.entities.fields.enumValues,,False
+37,humanize_nav_flow_labels,emitter,,labels derived from terminology; the 'batchs' class of bug,False
+38,chart_type_alias,edge,Design↔DesignSystem,hallucinated chart types are the same registry violation,False
+39,apply_hints_to_pages,constraint,pages,,True
+40,requirement_fidelity_critic,edge,Requirement↔Code,,False
+41,alias_unknown_components,edge,Design↔DesignSystem,"unknown component types are a registry violation, now detected",False
+42,semantic_field_types,constraint,data.entities.fields.type,,False
+43,motion_tokens_writer,emitter,,,False
+44,motion_tokens_writer,emitter,,,False
+45,apply_signature_moves,constraint,designSystem,,False
+46,apply_signature_moves,constraint,designSystem,,False
+47,logo_generator,emitter,,,False
+48,illustrated_empty_pass,constraint,pages.states,,False
+49,interactions_css_inject,emitter,,,False
+50,edge_page_customizer,emitter,,,False
+51,edge_page_customizer,emitter,,,False
+52,residual_placeholder_guard,edge,Requirement↔Code,,False
+53,context_panel_builder,constraint,pages.pattern,,False
+54,ensure_edit_routes,constraint,pages.route,,False
+55,fk_label_columns,constraint,data.entities.labelField,,False
+56,next_config_guard,emitter,,,False
+57,table_row_nav_guard,edge,Navigation↔Page,,False
+58,auth_gate_guard,constraint,security.authentication,,False
+59,nav_transitions,emitter,,,False
+60,figma_overlay_strip,dead,,artifact of the split Figma pipeline (§5),False
+61,surface_wrap_guard,constraint,pages.pattern,,False
+62,chart_data_source_guard,constraint,widgets,a series without groupBy will not parse,False
+63,schema_references,edge,Page↔API,,False
+64,list_data_source_guard,edge,Page↔API,re-entrant with 9,False
+65,a2ui_authority,emitter,,§34 A2UI is the page-generation capability,False
+66,a2ui_authority,emitter,,,False
+67,dashboard_anatomy,constraint,pages.pattern,,False
+68,apply_dashboard_maquette,constraint,pages.pattern,,False
+69,dashboard_authority,constraint,pages.pattern,,False
+70,library_manifest,constraint,uiRegistry,,False
+71,dashboard_page_composer,constraint,pages.pattern,,False
+72,apply_collection_maquette,constraint,pages.pattern,,False
+73,apply_record_maquette,constraint,pages.pattern,,False
+74,section_layout,constraint,pages.pattern,,False
+75,kpi_format_honesty,edge,Widget↔DataSource,"a count formatted as a percent; the 1,000% utilisation bug",False
+76,nav_entity_dedup,constraint,navigation.tree,,False
+77,shell_menu_sync,emitter,,shell menu derived from navigation,False
+78,dashboard_slot_fit,constraint,pages.pattern,,False
+79,unbound_placeholder_text,constraint,pages.states,,False
+80,widget_data_contract,edge,Widget↔DataSource,,False
+81,widget_data_contract,edge,Widget↔DataSource,,False
+82,list_entity_coherence_guard,edge,Page↔API,,False
+83,sensitive_column_guard,constraint,data.entities.fields.sensitive,also a guardrail: page_design cannot write data.entities,False
+84,action_contract_guard,edge,Page↔Workflow,,False
+85,action_contract_guard,edge,Page↔Workflow,,False
+86,detail_action_guard,edge,Page↔Workflow,,False
+87,filter_field_guard,edge,Page↔API,,False
+88,nav_route_reconcile_guard,edge,Navigation↔Page,,False
+89,surface_border_guard,emitter,,,False
+90,fk_source_guard,edge,API↔Database,an FK pointing at a non-entity is a reference violation,False
+91,read_binding_guard,edge,Page↔API,,False
+92,aggregate_metrics_guard,constraint,widgets,the aggregate variant requires an aggregation,False
+93,dashboard_completeness,constraint,pages.pattern,,False
+94,bare_container_guard,constraint,pages.states,,False
+95,route_intent_apply,constraint,pages.purpose,route intent is the page's declared purpose,False
+96,navigate_target_guard,edge,Navigation↔Page,the dead 'View details' button class,False
+97,text_template_backstop,emitter,,mechanical strings derive from terminology; agents must not author them,False
+98,commerce_placement,constraint,product.capabilities,,True
+99,token_completeness_guard,constraint,designSystem,,False
+100,platform_heals,dead,,grab-bag of chain-era repairs,True
+101,mobile_scaffold,dead,,§106 native mobile is a V1 non-goal,False
+102,emit_verify_container,emitter,,,False
+103,mobile_branding,dead,,§106,False
+104,workflow_graph_gate,edge,Workflow↔API,,False
+105,workflow_variable_reconcile,constraint,workflows.steps,,False
+106,workflow_validator,edge,Workflow↔API,,False
+107,workflow_validator,edge,Workflow↔API,,False
+108,contract_validator,edge,Page↔API,,False
+109,contract_validator,edge,Page↔API,,False
+110,proof_pass,edge,Blueprint↔Implementation,,False
+111,proof_pass,edge,Blueprint↔Implementation,,False
+112,rtl_scope_guard,emitter,,,False
+113,rules_validator,edge,Workflow↔BusinessRule,,False
+114,rules_validator,edge,Workflow↔BusinessRule,,False
+115,proof_auto_heal,dead,,"§120: auto-heal is the repair half, architecturally excluded",False
+116,proof_auto_heal,dead,,ditto,False
+117,verify_trigger,emitter,,dispatches the §77 test run,False
+118,archetype_page_fixes,dead,,single-app special-casing,False
+119,archetype_page_fixes,dead,,ditto,False
+120,archetype_page_fixes,dead,,ditto,False
+121,blueprint_writer,dead,,superseded by BlueprintService,False
+122,page_critic_summary,emitter,,,False
+123,design_brief_to_prompt,constraint,designSystem,,False
+124,aesthetic_profile_picker,constraint,designSystem,,False
+125,surface_treatment_pass,emitter,,,False
+126,form_ux_invariants,constraint,pages.states,NN/g form invariants; partly emitter — see review,True
+127,substrate_brief_writer,emitter,,,False
+128,route_dedup,dead,,page_key(route) makes duplicate routes one page,False
+129,route_dedup,dead,,ditto,False
+130,route_dedup,dead,,ditto,False
+131,density_frames,constraint,designSystem.informationDensity,,False
+132,page_anatomy,constraint,pages.pattern,,False
+133,page_nav,constraint,navigation.tree,breadcrumbs from the tree,False
+134,page_nav,emitter,,,False
+135,transition_materializer,edge,Blueprint↔Implementation,,False
+136,binding_prop_normalizer,constraint,pages,binding shape is schema-enforced,False
+137,file_preview_guard,emitter,,,False
+138,rules_sanity,edge,Workflow↔BusinessRule,,False
+139,page_contract_repair,dead,,required props are schema defaults,False
+140,page_contract_validator,dead,,page shape is validated by the Blueprint schema at write time,False
+141,binding_smoke,edge,Widget↔DataSource,,False
+142,ensure_edit_routes,constraint,pages.route,junk create pages cannot be created if routes are derived,False
+143,record_subresource_tabs,constraint,pages.pattern,,False
+144,shell_menu_sync,emitter,,re-entrant with 77; one derivation now,False
+145,plan_writeback,dead,,§115: the Blueprint is the plan; nothing to write back into,False
+146,test_suite_emitter,emitter,,§77 generated tests,False
+147,workflow_trigger_backfill,constraint,workflows.trigger,,False
+148,motion_authority,edge,Design↔DesignSystem,,False
+149,delivery_gate,edge,Blueprint↔Implementation,,False
+150,scorecard,emitter,,keep — the fleet scoreboard depends on it,False
+151,post_gen_phases,dead,,ditto,False

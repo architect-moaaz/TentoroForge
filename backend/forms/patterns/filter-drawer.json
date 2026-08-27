@@ -1,0 +1,17 @@
+{
+  "name": "filter-drawer",
+  "description": "Filter form in a Sheet/Drawer — leaves the underlying list visible. Auto-applies on change or has explicit Apply.",
+  "when_to_use": {"modality": "drawer", "page_type_any_of": ["list", "grid", "board"]},
+  "invariants": ["auto-apply-or-explicit-apply", "clear-all-affordance", "restore-scroll"],
+  "shape": {
+    "type": "Sheet", "props": {"side": "right", "title": "Filters"}, "children": [
+      {"type": "Form", "children": [
+        {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [{"$slot": "filter-fields"}]}
+      ]},
+      {"type": "Row", "props": {"justify": "between"}, "children": [
+        {"type": "Button", "props": {"variant": "ghost", "label": "Clear all"}},
+        {"type": "Button", "props": {"variant": "primary", "label": "Apply", "submit": true}}
+      ]}
+    ]
+  }
+}

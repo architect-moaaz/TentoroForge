@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/pending",
+  "route": "/leave-requests",
+  "meta": { "title": "Leave Requests", "archetype": "approval" },
+  "dataSources": [
+    { "kind": "list", "name": "requests", "table": "leaveRequests",
+      "filter": { "status": "pending" },
+      "orderBy": [{ "field": "submittedAt", "dir": "asc" }] },
+    { "kind": "detail", "name": "selectedRequest", "table": "leaveRequests",
+      "filter": { "id": "{{url.inspector}}" } },
+    { "kind": "list", "name": "auditLog", "table": "leaveAuditEntries",
+      "filter": { "requestId": "{{url.inspector}}" },
+      "orderBy": [{ "field": "timestamp", "dir": "desc" }] }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": { "topbar": { "$ref": "node:breadcrumb" } },
+    "children": [
+      {
+        "id": "filter-bar", "type": "FilterBar",
+        "props": {
+          "showSearch": true,
+          "chips": [
+            { "key": "type", "label": "Leave Type",
+              "options": [
+                { "value": "annual", "label": "Annual" },
+                { "value": "sick",   "label": "Sick" },
+                { "value": "unpaid", "label": "Unpaid" }
+              ]
+            },
+            { "key": "dept", "label": "Department",
+              "options": [
+                { "value": "eng",     "label": "Engineering" },
+                { "value": "design",  "label": "Design" },
+                { "value": "sales",   "label": "Sales" }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "requests-grid", "type": "DataGrid",
+        "props": {
+          "columns": [
+            { "key": "employee.name", "label": "Employee", "sortable": true, "frozen": true, "width": 200 },
+            { "key": "type",          "label": "Type",     "sortable": true },
+            { "key": "startDate",     "label": "From",     "sortable": true },
+            { "key": "endDate",       "label": "To",       "sortable": true },
+            { "key": "days",          "label": "Days",     "align": "right" },
+            { "key": "submittedAt",   "label": "Submitted","sortable": true }
+          ],
+          "rows": "{{requests}}",
+          "rowKey": "id",
+          "selectable": true,
+          "rowActions": [
+            { "label": "Review",
+              "action": { "type": "navigate", "to": "?inspector={{row.id}}" } }
+          ]
+        }
+      },
+      {
+        "id": "request-inspector", "type": "InspectorPanel",
+        "props": { "paramKey": "inspector", "title": "Leave Request", "width": "wide" },
+        "children": [
+          {
+            "id": "requester-card", "type": "PersonCard",
+            "props": {
+              "name": "{{selectedRequest.employee.name}}",
+              "role": "{{selectedRequest.employee.role}}",
+              "department": "{{selectedRequest.employee.department}}",
+              "email": "{{selectedRequest.employee.email}}",
+              "status": "{{selectedRequest.employee.status}}",
+              "layout": "compact"
+            }
+          },
+          {
+            "id": "request-details", "type": "KeyValueList",
+            "props": {
+              "items": [
+                { "label": "Leave Type",   "value": "{{selectedRequest.type}}" },
+                { "label": "From",         "value": "{{selectedRequest.startDate}}" },
+                { "label": "To",           "value": "{{selectedRequest.endDate}}" },
+                { "label": "Days",         "value": "{{selectedRequest.days}}" },
+                { "label": "Reason",       "value": "{{selectedRequest.reason}}" },
+                { "label": "Submitted",    "value": "{{selectedRequest.submittedAt}}" }
+              ]
+            }
+          },
+          {
+            "id": "approval-stepper", "type": "ApprovalStepper",
+            "props": {
+              "orientation": "vertical",
+              "steps": [
+                { "id": "submitted", "label": "Submitted",      "status": "{{selectedRequest.steps.submitted.status}}",
+                  "actor": "{{selectedRequest.steps.submitted.actor}}", "timestamp": "{{selectedRequest.steps.submitted.timestamp}}" },
+                { "id": "manager",   "label": "Manager Review", "status": "{{selectedRequest.steps.manager.status}}",
+                  "actor": "{{selectedRequest.steps.manager.actor}}", "timestamp": "{{selectedRequest.steps.manager.timestamp}}" },
+                { "id": "hr",        "label": "HR Approval",    "status": "{{selectedRequest.steps.hr.status}}",
+                  "actor": "{{selectedRequest.steps.hr.actor}}", "timestamp": "{{selectedRequest.steps.hr.timestamp}}" }
+              ]
+            }
+          },
+          {
+            "id": "audit-timeline", "type": "Timeline",
+            "props": {
+              "orientation": "vertical",
+              "entries": "{{auditLog}}"
+            }
+          },
+          {
+            "id": "action-cluster", "type": "Cluster",
+            "props": { "gap": "tokens.spacing.3", "justify": "start" },
+            "children": [
+              { "id": "approve-btn", "type": "Button",
+                "props": { "label": "Approve", "variant": "primary",
+                           "workflow": "approveLeaveRequest",
+                           "args": { "requestId": "{{selectedRequest.id}}" } } },
+              { "id": "reject-btn", "type": "Button",
+                "props": { "label": "Reject", "variant": "danger",
+                           "workflow": "rejectLeaveRequest",
+                           "args": { "requestId": "{{selectedRequest.id}}" } } },
+              { "id": "reassign-btn", "type": "Button",
+                "props": { "label": "Reassign", "variant": "secondary",
+                           "workflow": "reassignLeaveRequest",
+                           "args": { "requestId": "{{selectedRequest.id}}" } } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

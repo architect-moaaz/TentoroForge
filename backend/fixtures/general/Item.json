@@ -1,0 +1,12 @@
+[
+  { "id": "00000000-0000-0000-0000-000000000101", "name": "Sample Item One", "description": "A first sample item used for previewing list pages", "status": "active", "createdAt": "2025-08-01T10:00:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000102", "name": "Demo Widget", "description": "Widget shown in MetricTile previews", "status": "pending", "createdAt": "2025-08-15T14:30:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000103", "name": "Test Record", "description": "Record with longer descriptive text to exercise text wrap behaviour and ensure components handle multi-line content correctly", "status": "approved", "createdAt": "2025-09-02T09:15:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000104", "name": "Quick Entry", "description": "Short", "status": "active", "createdAt": "2025-09-20T16:45:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000105", "name": "Edge Case Sample", "description": "Item with all common rendering edge cases", "status": "rejected", "createdAt": "2025-10-08T11:30:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000106", "name": "Standard Item", "description": "Bog-standard item entry", "status": "active", "createdAt": "2025-10-25T08:00:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000107", "name": "Recent Addition", "description": "Newly added record to test sort order", "status": "pending", "createdAt": "2025-11-10T17:20:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000108", "name": "Archived Example", "description": "Older record, possibly archived", "status": "archived", "createdAt": "2025-04-04T12:00:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000109", "name": "Mid Year", "description": "Mid-year sample", "status": "active", "createdAt": "2025-06-30T14:00:00Z" },
+  { "id": "00000000-0000-0000-0000-000000000110", "name": "Last Item", "description": "Final entry in the seed list", "status": "approved", "createdAt": "2025-12-15T18:30:00Z" }
+]

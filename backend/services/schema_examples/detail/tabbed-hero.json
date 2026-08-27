@@ -1,0 +1,209 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/detail",
+  "route": "/leave-requests/:id",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Leave Request Detail" },
+  "dataSources": [
+    { "name": "request",  "entity": "LeaveRequest", "op": "get" },
+    { "name": "activity", "entity": "LeaveActivity", "op": "list",
+      "filter": { "requestId": ":id" },
+      "orderBy": [{ "field": "createdAt", "dir": "desc" }], "limit": 20 }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "LEAVE REQUEST",
+          "headline": "Annual Leave — Jane Doe",
+          "subhead": "Submitted Dec 10, 2024 · 8 days · Pending Manager Approval",
+          "layout": "split",
+          "ctas": [
+            {
+              "label": "Approve",
+              "action": { "type": "workflow", "name": "approveLeaveRequest" },
+              "variant": "primary"
+            },
+            {
+              "label": "Decline",
+              "action": { "type": "workflow", "name": "declineLeaveRequest" },
+              "variant": "ghost"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.50",
+            "to": "tokens.color.surface.0",
+            "angle": 150
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "detail-tabs",
+        "type": "Tabs",
+        "props": {
+          "tabs": [
+            { "id": "tab-overview",  "label": "Overview",  "icon": "file-text" },
+            { "id": "tab-activity",  "label": "Activity",  "icon": "activity" },
+            { "id": "tab-settings",  "label": "Settings",  "icon": "settings" }
+          ],
+          "value": "tab-overview"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm"
+        },
+        "children": [
+          {
+            "id": "tab-overview-content",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+            "style": { "padding": "tokens.spacing.6" },
+            "children": [
+              {
+                "id": "overview-details",
+                "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Employee",      "value": "Jane Doe",                     "copyable": false },
+                    { "label": "Department",    "value": "Engineering",                  "copyable": false },
+                    { "label": "Leave Type",    "value": "Annual Leave",                 "copyable": false },
+                    { "label": "Start Date",    "value": "December 24, 2024",            "copyable": true  },
+                    { "label": "End Date",      "value": "December 31, 2024",            "copyable": true  },
+                    { "label": "Duration",      "value": "8 working days",               "copyable": false },
+                    { "label": "Reason",        "value": "Year-end family time abroad",  "copyable": false },
+                    { "label": "Balance After", "value": "4 days remaining",             "copyable": false }
+                  ]
+                }
+              },
+              {
+                "id": "coverage-section",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Coverage Plan",
+                  "subtitle": "Who covers while Jane is away"
+                },
+                "children": [
+                  {
+                    "id": "coverage-list",
+                    "type": "KeyValueList",
+                    "props": {
+                      "items": [
+                        { "label": "Primary Cover",   "value": "Marcus Chen (Engineering Lead)" },
+                        { "label": "Escalation",      "value": "Priya Nair (Senior Engineer)" },
+                        { "label": "On-Call Rota",    "value": "Team rota active — no change" }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "tab-activity-content",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+            "style": { "padding": "tokens.spacing.6" },
+            "children": [
+              {
+                "id": "activity-repeat",
+                "type": "Repeat",
+                "props": { "source": "activity", "as": "event", "keyPath": "id" },
+                "children": [
+                  {
+                    "id": "activity-event",
+                    "type": "Row",
+                    "props": { "align": "start" },
+                    "children": [
+                      {
+                        "id": "event-avatar",
+                        "type": "Avatar",
+                        "props": { "name": "Actor Name", "size": "sm" }
+                      },
+                      {
+                        "id": "event-body",
+                        "type": "Stack",
+                        "props": { "direction": "vertical", "gap": "tokens.spacing.1" },
+                        "children": [
+                          {
+                            "id": "event-description",
+                            "type": "Text",
+                            "props": { "content": "Event description", "as": "p" }
+                          },
+                          {
+                            "id": "event-timestamp",
+                            "type": "Text",
+                            "props": { "content": "Timestamp", "as": "span" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "tab-settings-content",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+            "style": { "padding": "tokens.spacing.6" },
+            "children": [
+              {
+                "id": "settings-notice",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Request Settings",
+                  "subtitle": "Modify request parameters — only available while status is Pending"
+                },
+                "children": [
+                  {
+                    "id": "settings-override-approver",
+                    "type": "Select",
+                    "props": {
+                      "name": "overrideApprover",
+                      "label": "Override Approver",
+                      "options": [
+                        { "value": "auto",        "label": "Auto (Manager)" },
+                        { "value": "hr-director", "label": "HR Director" },
+                        { "value": "coo",         "label": "COO" }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "settings-notes",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "adminNotes",
+                      "label": "Admin Notes",
+                      "placeholder": "Internal notes not visible to employee…",
+                      "rows": 3
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

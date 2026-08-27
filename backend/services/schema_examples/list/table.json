@@ -1,0 +1,232 @@
+{
+  "schemaVersion": "2",
+  "id": "employees/list",
+  "route": "/employees",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Employees", "description": "Manage your organisation's workforce" },
+  "dataSources": [
+    { "name": "employees", "entity": "Employee", "op": "list",
+      "orderBy": [{ "field": "lastName", "dir": "asc" }] },
+    { "name": "headcount", "entity": "Employee", "op": "stats" }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "PEOPLE",
+          "headline": "Employee Directory",
+          "subhead": "Browse, search, and manage everyone in your organisation.",
+          "layout": "stacked",
+          "role": "inline",
+          "ctas": [
+            {
+              "label": "Add Employee",
+              "action": { "type": "navigate", "to": "/employees/new" },
+              "variant": "primary"
+            },
+            {
+              "label": "Export CSV",
+              "action": { "type": "workflow", "name": "exportEmployeesCsv" },
+              "variant": "secondary"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.100",
+            "to": "tokens.color.surface.0",
+            "angle": 160
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "headcount-stats",
+        "type": "Stagger",
+        "props": { "interval": 60 },
+        "children": [
+          {
+            "id": "stats-cluster",
+            "type": "Cluster",
+            "props": { "justify": "start", "align": "center", "gap": "tokens.spacing.4" },
+            "children": [
+              {
+                "id": "stat-total",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Total Employees",
+                  "value": 248,
+                  "format": "number",
+                  "delta": { "value": 0.06, "direction": "up" },
+                  "icon": "users",
+                  "importance": "primary"
+                }
+              },
+              {
+                "id": "stat-active",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Active",
+                  "value": 231,
+                  "format": "number",
+                  "delta": { "value": 0.03, "direction": "up" },
+                  "icon": "user-check"
+                }
+              },
+              {
+                "id": "stat-onleave",
+                "type": "MetricTile",
+                "props": {
+                  "label": "On Leave",
+                  "value": 9,
+                  "format": "number",
+                  "icon": "calendar-off"
+                }
+              },
+              {
+                "id": "stat-new-hires",
+                "type": "MetricTile",
+                "props": {
+                  "label": "New This Quarter",
+                  "value": 17,
+                  "format": "number",
+                  "delta": { "value": 0.42, "direction": "up" },
+                  "icon": "user-plus"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "table-section",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "All Employees",
+          "subtitle": "Click a row to view full profile"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "employee-table",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.0" },
+            "children": [
+              {
+                "id": "table-toolbar",
+                "type": "Row",
+                "props": { "justify": "between", "align": "center" },
+                "style": { "padding": "tokens.spacing.4" },
+                "children": [
+                  {
+                    "id": "search-input",
+                    "type": "Input",
+                    "props": {
+                      "name": "search",
+                      "label": "Search employees",
+                      "type": "text",
+                      "placeholder": "Name, department, role…"
+                    }
+                  },
+                  {
+                    "id": "dept-filter",
+                    "type": "Select",
+                    "props": {
+                      "name": "department",
+                      "label": "Department",
+                      "options": [
+                        { "value": "all",         "label": "All Departments" },
+                        { "value": "engineering", "label": "Engineering" },
+                        { "value": "design",      "label": "Design" },
+                        { "value": "product",     "label": "Product" },
+                        { "value": "hr",          "label": "People & HR" },
+                        { "value": "finance",     "label": "Finance" }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "data-rows",
+                "type": "Repeat",
+                "props": { "source": "employees", "as": "employee", "keyPath": "id" },
+                "children": [
+                  {
+                    "id": "employee-row",
+                    "type": "Row",
+                    "props": { "justify": "between", "align": "center" },
+                    "style": { "padding": "tokens.spacing.3" },
+                    "children": [
+                      {
+                        "id": "row-identity",
+                        "type": "Row",
+                        "props": { "align": "center" },
+                        "children": [
+                          {
+                            "id": "row-avatar",
+                            "type": "Avatar",
+                            "props": { "name": "Employee Name", "size": "sm" }
+                          },
+                          {
+                            "id": "row-name",
+                            "type": "Stack",
+                            "props": { "direction": "vertical", "gap": "tokens.spacing.0" },
+                            "children": [
+                              {
+                                "id": "row-full-name",
+                                "type": "Text",
+                                "props": { "content": "Full Name", "as": "strong" }
+                              },
+                              {
+                                "id": "row-email",
+                                "type": "Text",
+                                "props": { "content": "email@company.com", "as": "span" }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": "row-dept",
+                        "type": "Text",
+                        "props": { "content": "Department", "as": "span" }
+                      },
+                      {
+                        "id": "row-role",
+                        "type": "Text",
+                        "props": { "content": "Role", "as": "span" }
+                      },
+                      {
+                        "id": "row-start-date",
+                        "type": "Text",
+                        "props": { "content": "Start Date", "as": "span" }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

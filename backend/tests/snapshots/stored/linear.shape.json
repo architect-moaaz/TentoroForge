@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-load",
+    "surface": "route"
+  },
+  "data": {
+    "denormalization": "moderate",
+    "readShape": "list"
+  },
+  "identity": {
+    "usageMode": "returning-personal"
+  },
+  "label": "issue-tracker",
+  "layout": {
+    "density": "compact",
+    "hero": "none",
+    "primaryInteraction": "data-grid",
+    "shell": "sidebar"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "sidebar-links"
+  },
+  "workflows": {
+    "executionMode": "await-with-progress"
+  }
+}

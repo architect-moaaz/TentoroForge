@@ -1,0 +1,147 @@
+/* Spec C5 — edge page frame styles. All colors from --* tokens the
+   design-spec chain writes into globals.css, so every app inherits
+   its own brand automatically. */
+
+.edge-root {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+
+.edge-card {
+  width: min(560px, 100%);
+  padding: 40px 32px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04),
+              0 8px 24px -12px rgb(0 0 0 / 0.08);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.edge-monogram {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground, 0 0% 100%));
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-family: var(--font-display, var(--font-body, system-ui, sans-serif));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .edge-monogram--pulse {
+    animation: edge-monogram-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes edge-monogram-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.96); }
+}
+
+.edge-code {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.edge-title {
+  margin: 0;
+  font-size: clamp(20px, 3.5vw, 26px);
+  line-height: 1.25;
+  font-weight: 600;
+  text-wrap: balance;
+  font-family: var(--font-display, var(--font-body, system-ui, sans-serif));
+}
+
+.edge-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: hsl(var(--muted-foreground));
+}
+.edge-body p { margin: 0; }
+
+.edge-cta {
+  align-self: flex-start;
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground, 0 0% 100%));
+  border: 1px solid hsl(var(--primary));
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 120ms ease-out;
+}
+.edge-cta:hover { opacity: 0.9; }
+.edge-cta:focus-visible {
+  outline: 2px solid hsl(var(--ring, var(--primary)));
+  outline-offset: 2px;
+}
+
+.edge-inline-link {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.edge-meta {
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.edge-meta code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  background: hsl(var(--muted));
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Loading variant — shimmer rows in the body slot. */
+.edge-shimmer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.edge-shimmer {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--border)) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: edge-shimmer-anim 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edge-shimmer { animation: none; }
+}
+@keyframes edge-shimmer-anim {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

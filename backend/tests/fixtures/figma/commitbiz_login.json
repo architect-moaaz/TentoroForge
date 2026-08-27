@@ -1,0 +1,118 @@
+{
+  "id": "1:2",
+  "type": "FRAME",
+  "name": "Commitbiz_intentai_login",
+  "layoutMode": "NONE",
+  "fills": [{"type": "SOLID", "color": {"r": 0.98, "g": 0.98, "b": 0.99}}],
+  "children": [
+    {
+      "id": "1:3",
+      "type": "FRAME",
+      "name": "Container",
+      "children": [{
+        "id": "1:4",
+        "type": "FRAME",
+        "name": "Container",
+        "children": [
+          {
+            "id": "1:5",
+            "type": "FRAME",
+            "name": "Container",
+            "children": [{
+              "id": "1:6",
+              "type": "FRAME",
+              "name": "Container",
+              "layoutMode": "VERTICAL",
+              "itemSpacing": 24,
+              "children": [
+                {"id": "1:7", "type": "RECTANGLE", "name": "Logo Image", "fills": [{"type": "IMAGE"}]},
+                {
+                  "id": "1:20",
+                  "type": "FRAME",
+                  "name": "Heading 1",
+                  "children": [{"id": "1:21", "type": "TEXT", "name": "IntentAI Title", "characters": "IntentAI", "fills": [{"type": "SOLID", "color": {"r": 0.06, "g": 0.10, "b": 0.16}}], "style": {"fontFamily": "Inter Display", "fontWeight": 700, "fontSize": 32, "lineHeightPx": 40, "letterSpacing": -0.5}}]
+                },
+                {
+                  "id": "1:22",
+                  "type": "FRAME",
+                  "name": "Paragraph",
+                  "children": [{"id": "1:23", "type": "TEXT", "name": "Platform Description", "characters": "Automated intent detection platform", "fills": [{"type": "SOLID", "color": {"r": 0.40, "g": 0.45, "b": 0.55}}], "style": {"fontFamily": "Inter", "fontWeight": 400, "fontSize": 14, "lineHeightPx": 20}}]
+                }
+              ]
+            }]
+          },
+          {
+            "id": "1:47",
+            "type": "FRAME",
+            "name": "Container",
+            "children": [{
+              "id": "1:50",
+              "type": "FRAME",
+              "name": "Sign in Form",
+              "layoutMode": "VERTICAL",
+              "itemSpacing": 16,
+              "paddingTop": 24, "paddingRight": 24, "paddingBottom": 24, "paddingLeft": 24,
+              "children": [
+                {
+                  "id": "1:51",
+                  "type": "FRAME",
+                  "name": "Heading 4",
+                  "children": [{"id": "1:52", "type": "TEXT", "name": "Welcome Title", "characters": "Welcome", "fills": [{"type": "SOLID", "color": {"r": 0.06, "g": 0.10, "b": 0.16}}], "style": {"fontFamily": "Inter Display", "fontWeight": 600, "fontSize": 24, "lineHeightPx": 32, "letterSpacing": -0.3}}]
+                },
+                {"id": "1:53", "type": "TEXT", "name": "Sign in Subtitle", "characters": "Sign in to your account", "fills": [{"type": "SOLID", "color": {"r": 0.40, "g": 0.45, "b": 0.55}}], "style": {"fontFamily": "Inter", "fontWeight": 400, "fontSize": 16, "lineHeightPx": 24}},
+                {
+                  "id": "1:55",
+                  "type": "FRAME",
+                  "name": "Form",
+                  "layoutMode": "VERTICAL",
+                  "itemSpacing": 16,
+                  "children": [
+                    {
+                      "id": "1:56",
+                      "type": "FRAME",
+                      "name": "Container",
+                      "children": [
+                        {"id": "1:57", "type": "FRAME", "name": "Primitive.label", "children": [{"id": "1:58", "type": "TEXT", "name": "Email Label", "characters": "Email", "style": {"fontFamily": "Inter", "fontWeight": 500, "fontSize": 12, "lineHeightPx": 16}}]},
+                        {"id": "1:59", "type": "FRAME", "name": "Email Input", "cornerRadius": 6, "children": [{"id": "1:60", "type": "TEXT", "name": "Email Placeholder", "characters": "you@example.com"}]}
+                      ]
+                    },
+                    {
+                      "id": "1:61",
+                      "type": "FRAME",
+                      "name": "Container",
+                      "children": [
+                        {"id": "1:62", "type": "FRAME", "name": "Primitive.label", "children": [{"id": "1:63", "type": "TEXT", "name": "Password Label", "characters": "Password", "style": {"fontFamily": "Inter", "fontWeight": 500, "fontSize": 12, "lineHeightPx": 16}}]},
+                        {"id": "1:64", "type": "FRAME", "name": "Password Input", "cornerRadius": 6, "children": [{"id": "1:65", "type": "TEXT", "name": "Password Placeholder", "characters": "••••••••"}]}
+                      ]
+                    },
+                    {
+                      "id": "1:66",
+                      "type": "FRAME",
+                      "name": "Container",
+                      "layoutMode": "HORIZONTAL",
+                      "children": [
+                        {"id": "1:67", "type": "FRAME", "name": "Label", "children": [
+                          {"id": "1:68", "type": "FRAME", "name": "Checkbox", "cornerRadius": 2},
+                          {"id": "1:69", "type": "TEXT", "name": "Remember me Text", "characters": "Remember me"}
+                        ]},
+                        {"id": "1:70", "type": "FRAME", "name": "Link", "children": [{"id": "1:71", "type": "TEXT", "name": "Forgot password Link", "characters": "Forgot password?"}]}
+                      ]
+                    },
+                    {
+                      "id": "1:72",
+                      "type": "FRAME",
+                      "name": "Button",
+                      "cornerRadius": 8,
+                      "fills": [{"type": "SOLID", "color": {"r": 0.063, "g": 0.725, "b": 0.506}}],
+                      "children": [{"id": "1:73", "type": "TEXT", "name": "Sign in Button Text", "characters": "Sign in", "style": {"fontFamily": "Inter", "fontWeight": 600, "fontSize": 16, "lineHeightPx": 20}}]
+                    }
+                  ]
+                }
+              ]
+            }]
+          }
+        ]
+      }]
+    }
+  ]
+}

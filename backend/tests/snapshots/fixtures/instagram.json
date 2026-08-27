@@ -1,0 +1,17 @@
+{
+  "app_shape": {
+    "layout": {"shell": "bottom-tabs", "hero": "feed-header", "primaryInteraction": "feed", "density": "spacious"},
+    "auth": {"surface": "route", "gating": "on-load"},
+    "nav": {"menu": "bottom-tabs", "back": "history"},
+    "workflows": {"executionMode": "fire-and-forget"},
+    "data": {"readShape": "feed", "denormalization": "aggressive"},
+    "identity": {"usageMode": "returning-personal"},
+    "label": "social-feed"
+  },
+  "archetypes": [
+    {"name": "feed", "recipe": "feed", "entities": ["post"], "routes": ["/"]},
+    {"name": "capture", "recipe": "visual_product_search", "entities": ["post"], "routes": ["/capture"]}
+  ],
+  "industry": "consumer-social",
+  "runtime_context": ["camera", "photo_library", "push_notifications", "contacts", "deep_linking"]
+}

@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "2",
+  "id": "document-detail-page",
+  "route": "/documents/[id]",
+  "layout": "main",
+  "dataSources": [
+    { "name": "document", "entity": "Document", "op": "get" }
+  ],
+  "root": {
+    "type": "Stack",
+    "props": {
+      "gap": "tokens.spacing.6",
+      "className": "px-6 py-6 md:px-8 md:py-8"
+    },
+    "children": [
+      {
+        "type": "Row",
+        "props": { "justify": "space-between", "align": "center", "gap": "tokens.spacing.4" },
+        "children": [
+          { "type": "Heading", "props": { "level": 1, "content": "{{document.originalFilename}}" } },
+          { "type": "Badge",   "props": { "content": "{{document.status}}", "variant": "auto" } }
+        ]
+      },
+      {
+        "type": "Conditional",
+        "props": { "when": "{{document.errorMessage}}" },
+        "children": [
+          {
+            "type": "Alert",
+            "props": {
+              "variant": "danger",
+              "title": "Processing failed",
+              "message": "{{document.errorMessage}}"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Split",
+        "props": { "ratio": "1:1", "breakpoint": "lg" },
+        "children": [
+          {
+            "type": "Card",
+            "props": {
+              "title": "Preview",
+              "density": "comfortable",
+              "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+            },
+            "children": [
+              {
+                "type": "Conditional",
+                "props": { "when": "{{document.fileUrl}}" },
+                "children": [
+                  {
+                    "type": "CustomBlock",
+                    "props": {
+                      "html": "<div style=\"display:flex;flex-direction:column;gap:8px;\"><a href=\"/api/files/preview?src={{document.fileUrl}}\" target=\"_blank\" rel=\"noopener\" style=\"align-self:flex-end;padding:6px 12px;background:#0f172a;color:#fff;text-decoration:none;border-radius:4px;font:500 13px system-ui;\">Open PDF ↗</a><object data=\"/api/files/preview?src={{document.fileUrl}}\" type=\"application/pdf\" style=\"width:100%;height:640px;border:1px solid #E5E5E5;border-radius:4px;display:block;background:#f5f5f5;\"><div style=\"padding:24px;text-align:center;color:#666;font:14px system-ui;\">Inline preview unavailable — use the Open PDF button above.</div></object></div>"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Stack",
+            "props": { "gap": "tokens.spacing.6" },
+            "children": [
+              {
+                "type": "Card",
+                "props": {
+                  "title": "Extracted fields",
+                  "density": "comfortable",
+                  "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+                },
+                "children": [
+                  {
+                    "type": "DescriptionList",
+                    "props": {
+                      "orientation": "horizontal",
+                      "dataSource": "{{document.extractedFields}}",
+                      "itemMode": "entries",
+                      "emptyText": "No fields extracted yet."
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Card",
+                "props": {
+                  "title": "OCR confidence",
+                  "density": "compact",
+                  "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+                },
+                "children": [
+                  {
+                    "type": "DescriptionList",
+                    "props": {
+                      "orientation": "horizontal",
+                      "items": [
+                        { "label": "Confidence",   "value": "{{document.confidence}}" },
+                        { "label": "Uploaded",     "value": "{{document.createdAt}}" },
+                        { "label": "Processed",    "value": "{{document.processedAt}}" }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Accordion",
+                "props": { "mode": "single" },
+                "children": [
+                  {
+                    "type": "AccordionPanel",
+                    "props": { "label": "Raw OCR text", "value": "ocr" },
+                    "children": [
+                      {
+                        "type": "CodeBlock",
+                        "props": {
+                          "code": "{{document.ocrText}}",
+                          "language": "text",
+                          "showCopy": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {}
+}

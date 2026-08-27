@@ -1,0 +1,23 @@
+{
+  "capability": "photo_library",
+  "permissions": {
+    "ios": {
+      "NSPhotoLibraryUsageDescription": "Select photos from your library to upload."
+    },
+    "android": [
+      "android.permission.READ_MEDIA_IMAGES",
+      "android.permission.READ_MEDIA_VIDEO"
+    ],
+    "expo_plugins": ["expo-image-picker", "expo-media-library"]
+  },
+  "native_imports": {
+    "expo": ["expo-image-picker", "expo-media-library"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/PhotoLibraryProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["usePhotoLibrary", "usePickImage"]
+  },
+  "integration_keys": []
+}

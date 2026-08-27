@@ -1,0 +1,116 @@
+/* Spec C Slice 4 — motion primitive refresh.
+ *
+ * Interactive-element transitions (hover, press, focus). Applies across
+ * the library via data-* attributes and generic tag selectors so
+ * individual component files don't have to opt in. All timings read
+ * from the same --token-motion-* CSS vars the enter-animations use.
+ *
+ * Convention:
+ *   - Buttons + role="button" get a subtle press (translateY + brightness).
+ *   - Cards get a rise on hover (translateY + soft shadow bump).
+ *   - Tables rows tint on hover.
+ *   - Modal/Toast overlays fade+scale in.
+ * All wrapped in prefers-reduced-motion: reduce → transitions disabled.
+ */
+
+/* ─── Buttons ─────────────────────────────────────────────── */
+button,
+[role="button"],
+[data-forge-btn] {
+  transition:
+    background-color var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    color            var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    transform        var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    box-shadow       var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color     var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+button:hover:not(:disabled),
+[role="button"]:hover:not([aria-disabled="true"]) {
+  filter: brightness(0.96);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  transform: translateY(1px);
+  filter: brightness(0.92);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+[data-forge-focus-ring]:focus-visible {
+  outline: 2px solid var(--ring, var(--primary, hsl(210 60% 45%)));
+  outline-offset: 2px;
+}
+
+/* ─── Cards / surfaces ────────────────────────────────────── */
+[data-forge-card],
+[data-forge-hover-lift] {
+  transition:
+    transform  var(--token-motion-duration-normal, 240ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    box-shadow var(--token-motion-duration-normal, 240ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+[data-forge-card][data-hoverable="true"]:hover,
+[data-forge-hover-lift]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 12px -4px rgba(0, 0, 0, 0.12), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Table rows ──────────────────────────────────────────── */
+[data-forge-table] tbody tr {
+  transition: background-color var(--token-motion-duration-fast, 120ms)
+              var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+[data-forge-table] tbody tr:hover {
+  background-color: var(--muted, hsl(0 0% 96%));
+}
+
+/* ─── Modal / Dialog / Toast enter ────────────────────────── */
+@keyframes forge-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes forge-slide-in-bottom {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+[data-forge-modal],
+[data-forge-dialog],
+[role="dialog"][data-state="open"] {
+  animation: forge-scale-in var(--token-motion-duration-normal, 240ms)
+             var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)) both;
+}
+
+[data-forge-toast],
+[role="alert"][data-forge-live] {
+  animation: forge-slide-in-bottom var(--token-motion-duration-normal, 240ms)
+             var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)) both;
+}
+
+/* ─── Global reduced-motion respect ───────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  [data-forge-btn],
+  [data-forge-card],
+  [data-forge-hover-lift],
+  [data-forge-table] tbody tr {
+    transition: none !important;
+  }
+  button:hover, button:active,
+  [role="button"]:hover, [role="button"]:active,
+  [data-forge-card][data-hoverable="true"]:hover,
+  [data-forge-hover-lift]:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+  [data-forge-modal],
+  [data-forge-dialog],
+  [role="dialog"][data-state="open"],
+  [data-forge-toast],
+  [role="alert"][data-forge-live] {
+    animation: none !important;
+  }
+}

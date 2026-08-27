@@ -1,0 +1,53 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "fluent-2",
+  "description": "Microsoft Fluent 2 — subtle depth, acrylic overlays, mica surfaces. Enterprise-friendly.",
+  "when_to_use": {
+    "identity.usageMode": ["multi-user-team"],
+    "layout.shell_any_of": ["sidebar", "three-pane"]
+  },
+  "tokens": {
+    "color": {
+      "background": "hsl(210 20% 98%)",
+      "surface": "hsl(0 0% 100%)",
+      "surfaceHover": "hsl(210 20% 96%)",
+      "border": "hsl(210 15% 88%)",
+      "primary": "hsl(210 100% 44%)",
+      "foreground": "hsl(220 20% 12%)",
+      "muted": "hsl(220 10% 40%)"
+    },
+    "radius": {
+      "sm": "4px",
+      "md": "6px",
+      "lg": "8px",
+      "xl": "12px"
+    },
+    "shadow": {
+      "sm": "0 1px 2px hsl(210 15% 15% / 0.08)",
+      "card": "0 2px 4px hsl(210 15% 15% / 0.10), 0 1px 2px hsl(210 15% 15% / 0.06)",
+      "elevated": "0 8px 16px hsl(210 15% 15% / 0.14)"
+    },
+    "spacing": "comfortable",
+    "typography": {
+      "display": "'Segoe UI Variable', 'Segoe UI', 'Inter', system-ui, sans-serif",
+      "body": "'Segoe UI Variable', 'Segoe UI', 'Inter', system-ui, sans-serif"
+    }
+  },
+  "css_variables": {
+    "--background": "210 20% 98%",
+    "--foreground": "220 20% 12%",
+    "--card": "0 0% 100%",
+    "--card-foreground": "220 20% 12%",
+    "--border": "210 15% 88%",
+    "--primary": "210 100% 44%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "210 20% 96%",
+    "--muted-foreground": "220 10% 40%",
+    "--ring": "210 100% 44%"
+  },
+  "surface_treatment": {
+    "root": {"background": "hsl(210 20% 98%)"},
+    "card": {"borderRadius": "8px"},
+    "button.primary": {"borderRadius": "6px"}
+  }
+}

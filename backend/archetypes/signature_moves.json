@@ -1,0 +1,254 @@
+{
+  "$schema_version": "1.1.0",
+  "$description": "Signature moves KEYED BY capability primitive value (not recipe name). Any module — recipe-picked or LLM-composed — whose resolved capabilities contain a triggering value gets the corresponding signature injected on its owning routes. Recipes MAY add their own recipe-specific signatures on top of primitive-triggered ones. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "triggers": [
+    {
+      "when": {"primitive": "interactions", "contains": "drag-between-groups"},
+      "signatures": ["lane-columns-with-drop-zone-glow", "card-lift-on-drag", "lane-swap-animation"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "drag-reorder"},
+      "signatures": ["grip-handle-affordance", "drag-shadow", "drop-line-indicator"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "bulk-select"},
+      "signatures": ["multi-select-checkbox-column", "action-bar-slide-up"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "inline-edit"},
+      "signatures": ["hover-edit-affordance", "commit-on-blur", "revert-on-escape"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "infinite-scroll"},
+      "signatures": ["load-more-sentinel", "skeleton-row-placeholders"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "hover-preview"},
+      "signatures": ["quick-peek-on-hover", "peek-arrow-affordance"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "keyboard-shortcut"},
+      "signatures": ["shortcut-hint-pill", "cmd-palette-affordance"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "context-menu"},
+      "signatures": ["right-click-hint-cursor", "context-menu-fade-in"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "undo"},
+      "signatures": ["toast-with-undo", "history-drawer"]
+    },
+    {
+      "when": {"primitive": "interactions", "contains": "presence"},
+      "signatures": ["avatar-stack-live", "cursor-tag-follow"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "map-pins"},
+      "signatures": ["pin-cluster-badge", "hover-tooltip", "cluster-zoom-in"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "timeline"},
+      "signatures": ["continuous-axis", "endpoint-emphasis", "hover-scrub"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "chart"},
+      "signatures": ["sparkline-preview", "axis-hover-crosshair", "zoom-brush"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "board"},
+      "signatures": ["column-headers-with-counts", "add-card-ghost", "wip-limit-hint"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "feed"},
+      "signatures": ["pull-to-refresh", "unread-badge-return", "read-more-fade"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "tree"},
+      "signatures": ["expand-collapse-chevron", "hierarchy-guides", "leaf-node-emphasis"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "calendar"},
+      "signatures": ["today-indicator", "grouped-by-day", "event-density-heat"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "table"},
+      "signatures": ["sticky-first-column", "sticky-header", "column-resize-handles"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "gantt"},
+      "signatures": ["timeline-brush", "dependency-arrow", "critical-path-tint"]
+    },
+    {
+      "when": {"primitive": "read.pattern", "equals": "kpi-strip"},
+      "signatures": ["metric-tile-trend-indicator", "sparkline-under-metric"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "capture"},
+      "signatures": ["pulsing-scan-orb", "viewfinder-frame", "capture-flash"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "wizard"},
+      "signatures": ["step-progress-bar", "per-step-summary-card", "back-continue-rail"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "drag"},
+      "signatures": ["drag-handle-affordance", "ghost-preview", "drop-target-highlight"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "form"},
+      "signatures": ["field-focus-guide", "inline-validation-tick", "sticky-save-bar"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "step-form"},
+      "signatures": ["step-progress-bar", "back-continue-rail", "step-status-dots"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "modal-form"},
+      "signatures": ["dimmed-backdrop", "modal-slide-up", "escape-to-close-hint"]
+    },
+    {
+      "when": {"primitive": "write.pattern", "equals": "inline-form"},
+      "signatures": ["expand-in-place", "commit-on-blur", "cancel-x-affordance"]
+    },
+    {
+      "when": {"primitive": "state.realtime", "equals": "stream"},
+      "signatures": ["live-dot-indicator", "ambient-tick-animation", "connection-lost-banner"]
+    },
+    {
+      "when": {"primitive": "state.realtime", "equals": "poll"},
+      "signatures": ["last-updated-timestamp", "manual-refresh-affordance"]
+    },
+    {
+      "when": {"primitive": "state.saving", "equals": "auto-save"},
+      "signatures": ["saved-check-fade", "unsaved-dot-indicator"]
+    },
+    {
+      "when": {"primitive": "state.saving", "equals": "explicit"},
+      "signatures": ["sticky-save-bar", "dirty-form-warning-nav"]
+    },
+    {
+      "when": {"primitive": "state.loading", "equals": "skeleton"},
+      "signatures": ["skeleton-shimmer", "skeleton-row-placeholders"]
+    },
+    {
+      "when": {"primitive": "state.loading", "equals": "spinner"},
+      "signatures": ["centered-spinner", "opacity-dim-content"]
+    },
+    {
+      "when": {"all": [{"primitive": "presentation.itemShape", "equals": "card"}, {"primitive": "read.pattern", "equals": "grid"}]},
+      "signatures": ["image-lead-card", "hover-lift", "quick-actions-overlay"]
+    },
+    {
+      "when": {"all": [{"primitive": "presentation.itemShape", "equals": "row"}, {"primitive": "read.pattern", "equals": "list"}]},
+      "signatures": ["zebra-stripe-optional", "row-hover-highlight", "column-sort-indicators"]
+    },
+    {
+      "when": {"all": [{"primitive": "presentation.itemShape", "equals": "row"}, {"primitive": "presentation.leading", "equals": "avatar"}]},
+      "signatures": ["photo-forward-row", "avatar-with-status-dot"]
+    },
+    {
+      "when": {"all": [{"primitive": "presentation.itemShape", "equals": "row"}, {"primitive": "presentation.leading", "equals": "status"}]},
+      "signatures": ["leading-status-pill", "status-tinted-row"]
+    },
+    {
+      "when": {"primitive": "presentation.emptyState", "equals": "illustrated"},
+      "signatures": ["illustrated-empty-hero", "primary-cta-below-illustration"]
+    },
+    {
+      "when": {"primitive": "write.integrity", "equals": "audit-logged"},
+      "signatures": ["change-history-drawer", "who-approved-badge", "audit-history-drawer"]
+    },
+    {
+      "when": {"primitive": "write.integrity", "equals": "approval-required"},
+      "signatures": ["awaiting-approval-badge", "escalation-menu"]
+    },
+    {
+      "when": {"primitive": "write.integrity", "equals": "signature-required"},
+      "signatures": ["signature-pad-card", "signed-by-badge"]
+    },
+    {
+      "when": {"primitive": "write.integrity", "equals": "otp-required"},
+      "signatures": ["otp-focus-chase", "resend-cooldown-hint"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "relational-select"},
+      "signatures": ["dropdown-search-highlight", "recently-picked-first"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "date-range"},
+      "signatures": ["calendar-range-brush", "preset-chip-row"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "media-upload"},
+      "signatures": ["drop-zone-dashed-border", "thumbnail-strip-preview"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "rich-text"},
+      "signatures": ["floating-toolbar-on-select", "markdown-shortcut-hint"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "signature"},
+      "signatures": ["signature-pad-card", "clear-signature-affordance"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "tags"},
+      "signatures": ["chip-fade-in", "suggested-tag-strip"]
+    },
+    {
+      "when": {"primitive": "form.field", "contains": "money"},
+      "signatures": ["currency-prefix-badge", "thousand-separator-live"]
+    },
+    {
+      "when": {"primitive": "record.mode", "equals": "view"},
+      "signatures": ["description-list-two-column", "edit-mode-affordance-top-right"]
+    },
+    {
+      "when": {"primitive": "record.mode", "equals": "edit"},
+      "signatures": ["sticky-save-bar", "dirty-form-warning-nav", "field-focus-guide"]
+    },
+    {
+      "when": {"primitive": "record.mode", "equals": "create"},
+      "signatures": ["field-focus-guide", "welcome-primer-callout"]
+    },
+    {
+      "when": {"primitive": "hero.kind", "equals": "editorial-quote"},
+      "signatures": ["centred-typography-hero", "generous-whitespace-frame"]
+    },
+    {
+      "when": {"primitive": "hero.kind", "equals": "media-lead"},
+      "signatures": ["photo-lead-header", "gradient-scrim-under-photo"]
+    },
+    {
+      "when": {"primitive": "hero.kind", "equals": "status-led"},
+      "signatures": ["leading-status-pill", "status-tinted-hero"]
+    },
+    {
+      "when": {"primitive": "commerce", "contains": "cart"},
+      "signatures": ["cart-badge-count-bounce", "add-to-cart-fly-animation"]
+    },
+    {
+      "when": {"primitive": "commerce", "contains": "checkout"},
+      "signatures": ["order-summary-sticky", "trust-badge-row"]
+    },
+    {
+      "when": {"primitive": "notification", "equals": "in-app"},
+      "signatures": ["bell-dot-indicator", "notification-drawer-slide"]
+    },
+    {
+      "when": {"primitive": "search", "equals": "typeahead"},
+      "signatures": ["search-highlight-in-results", "recent-searches-list"]
+    },
+    {
+      "when": {"primitive": "search", "equals": "faceted"},
+      "signatures": ["facet-pill-row", "active-filter-summary"]
+    },
+    {
+      "when": {"primitive": "onboarding", "equals": "first-run"},
+      "signatures": ["welcome-primer-callout", "next-step-cta-strip"]
+    },
+    {
+      "when": {"primitive": "onboarding", "equals": "tour"},
+      "signatures": ["coach-mark-spotlight", "step-progress-dots"]
+    }
+  ]
+}

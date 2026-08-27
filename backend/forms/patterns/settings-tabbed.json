@@ -1,0 +1,14 @@
+{
+  "name": "settings-tabbed",
+  "description": "Settings page — vertical tabs left, sectioned form right. One save button per section.",
+  "when_to_use": {"page_type_any_of": ["settings"], "field_count_range": [10, 60]},
+  "invariants": ["auto-save-or-explicit-save", "success-toast", "unsaved-changes-guard"],
+  "shape": {
+    "type": "Split", "props": {"ratio": "1:3"}, "children": [
+      {"type": "SideNav", "props": {"variant": "compact"}, "children": [{"$slot": "tabs"}]},
+      {"type": "Stack", "props": {"gap": "tokens.spacing.8"}, "children": [
+        {"$slot": "section-cards"}
+      ]}
+    ]
+  }
+}

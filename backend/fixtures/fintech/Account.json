@@ -1,0 +1,12 @@
+[
+  { "id": "acc-001", "accountNumber": "**** 4821", "accountHolder": "Sarah Chen", "balance": 482910.50, "currency": "USD", "type": "investment", "status": "active", "openedAt": "2023-04-12T10:00:00Z" },
+  { "id": "acc-002", "accountNumber": "**** 9376", "accountHolder": "Marcus Lee Trust", "balance": 1284502.18, "currency": "USD", "type": "trust", "status": "active", "openedAt": "2019-08-22T09:30:00Z" },
+  { "id": "acc-003", "accountNumber": "**** 1052", "accountHolder": "Diego Alvarez", "balance": 38240.92, "currency": "EUR", "type": "savings", "status": "active", "openedAt": "2024-02-08T11:15:00Z" },
+  { "id": "acc-004", "accountNumber": "**** 6648", "accountHolder": "Imani Okonkwo", "balance": 192847.00, "currency": "USD", "type": "checking", "status": "active", "openedAt": "2021-10-30T14:00:00Z" },
+  { "id": "acc-005", "accountNumber": "**** 0294", "accountHolder": "Ana Martins", "balance": 56120.75, "currency": "USD", "type": "investment", "status": "frozen", "openedAt": "2022-06-14T08:45:00Z" },
+  { "id": "acc-006", "accountNumber": "**** 8473", "accountHolder": "Fatima Rashid", "balance": 928340.62, "currency": "USD", "type": "investment", "status": "active", "openedAt": "2020-11-19T13:30:00Z" },
+  { "id": "acc-007", "accountNumber": "**** 5519", "accountHolder": "Noah Müller", "balance": 12480.00, "currency": "EUR", "type": "savings", "status": "active", "openedAt": "2024-09-04T16:00:00Z" },
+  { "id": "acc-008", "accountNumber": "**** 3927", "accountHolder": "Kenji Tanaka", "balance": 645210.33, "currency": "JPY", "type": "investment", "status": "active", "openedAt": "2018-03-25T10:20:00Z" },
+  { "id": "acc-009", "accountNumber": "**** 7104", "accountHolder": "Priya Shah", "balance": 84920.40, "currency": "USD", "type": "checking", "status": "active", "openedAt": "2023-12-11T09:00:00Z" },
+  { "id": "acc-010", "accountNumber": "**** 2658", "accountHolder": "Henrietta Wellington-Smythe-Jones IV", "balance": 4820000.00, "currency": "USD", "type": "investment", "status": "active", "openedAt": "2015-07-08T15:45:00Z" }
+]

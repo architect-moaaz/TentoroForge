@@ -1,0 +1,22 @@
+{
+  "capability": "contacts",
+  "permissions": {
+    "ios": {
+      "NSContactsUsageDescription": "We use contacts to find friends and share invitations."
+    },
+    "android": [
+      "android.permission.READ_CONTACTS"
+    ],
+    "expo_plugins": ["expo-contacts"]
+  },
+  "native_imports": {
+    "expo": ["expo-contacts"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/ContactsProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useContacts", "usePickContact"]
+  },
+  "integration_keys": []
+}

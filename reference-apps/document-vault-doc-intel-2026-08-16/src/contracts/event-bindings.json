@@ -1,0 +1,28 @@
+{
+  "bindings": [
+    {
+      "event": "uploaddocumentsworkflow_trigger",
+      "source": "workflow:UploadDocumentsWorkflow",
+      "workflows": [
+        "UploadDocumentsWorkflow"
+      ],
+      "description": "form_submit on DocumentUploadPage"
+    },
+    {
+      "event": "processdocumentworkflow_trigger",
+      "source": "workflow:ProcessDocumentWorkflow",
+      "workflows": [
+        "ProcessDocumentWorkflow"
+      ],
+      "description": "db_change on ProcessDocumentJob"
+    },
+    {
+      "event": "reprocessdocumentworkflow_trigger",
+      "source": "workflow:ReprocessDocumentWorkflow",
+      "workflows": [
+        "ReprocessDocumentWorkflow"
+      ],
+      "description": "button on DocumentDetailPage"
+    }
+  ]
+}

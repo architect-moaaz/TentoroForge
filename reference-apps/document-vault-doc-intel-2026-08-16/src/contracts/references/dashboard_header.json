@@ -1,0 +1,230 @@
+{
+  "slug": "dashboard_header",
+  "query": "modern admin dashboard header with page title and primary action",
+  "source": "21st.dev",
+  "fragment": {
+    "type": "Row",
+    "props": {},
+    "children": [
+      {
+        "type": "Stack",
+        "props": {},
+        "children": [
+          {
+            "type": "Row",
+            "props": {
+              "align": "between"
+            },
+            "children": [
+              {
+                "type": "Row",
+                "props": {},
+                "children": [
+                  {
+                    "type": "Icon",
+                    "props": {
+                      "name": "layout-dashboard"
+                    }
+                  },
+                  {
+                    "type": "Heading",
+                    "props": {
+                      "level": 1,
+                      "content": "Logo"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "IconButton",
+                "props": {
+                  "icon": "chevron-left",
+                  "label": "Collapse sidebar"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Stack",
+            "props": {},
+            "children": [
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Dashboard",
+                  "href": "#",
+                  "icon": "layout-dashboard",
+                  "active": true
+                }
+              },
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Home",
+                  "href": "#",
+                  "icon": "home"
+                }
+              },
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Analytics",
+                  "href": "#",
+                  "icon": "bar-chart-3"
+                }
+              },
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Profile",
+                  "href": "#",
+                  "icon": "user"
+                }
+              },
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Settings",
+                  "href": "#",
+                  "icon": "settings"
+                }
+              },
+              {
+                "type": "NavLink",
+                "props": {
+                  "label": "Logout",
+                  "href": "#",
+                  "icon": "log-out"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Row",
+            "props": {},
+            "children": [
+              {
+                "type": "Icon",
+                "props": {
+                  "name": "user-circle"
+                }
+              },
+              {
+                "type": "Stack",
+                "props": {},
+                "children": [
+                  {
+                    "type": "Text",
+                    "props": {
+                      "content": "John Doe"
+                    }
+                  },
+                  {
+                    "type": "Text",
+                    "props": {
+                      "content": "john@example.com"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Stack",
+        "props": {},
+        "children": [
+          {
+            "type": "Card",
+            "props": {},
+            "children": [
+              {
+                "type": "Heading",
+                "props": {
+                  "level": 2,
+                  "content": "Welcome to Dashboard"
+                }
+              },
+              {
+                "type": "Text",
+                "props": {
+                  "content": "This is the main content area. The sidebar is fully responsive and works great on both desktop and mobile devices."
+                }
+              },
+              {
+                "type": "Grid",
+                "props": {
+                  "columns": 3,
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "type": "Card",
+                    "props": {
+                      "title": "Card 1"
+                    },
+                    "children": [
+                      {
+                        "type": "Icon",
+                        "props": {
+                          "name": "bar-chart-3"
+                        }
+                      },
+                      {
+                        "type": "Text",
+                        "props": {
+                          "content": "Sample content card to demonstrate the layout with the sidebar."
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Card",
+                    "props": {
+                      "title": "Card 2"
+                    },
+                    "children": [
+                      {
+                        "type": "Icon",
+                        "props": {
+                          "name": "bar-chart-3"
+                        }
+                      },
+                      {
+                        "type": "Text",
+                        "props": {
+                          "content": "Sample content card to demonstrate the layout with the sidebar."
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Card",
+                    "props": {
+                      "title": "Card 3"
+                    },
+                    "children": [
+                      {
+                        "type": "Icon",
+                        "props": {
+                          "name": "bar-chart-3"
+                        }
+                      },
+                      {
+                        "type": "Text",
+                        "props": {
+                          "content": "Sample content card to demonstrate the layout with the sidebar."
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

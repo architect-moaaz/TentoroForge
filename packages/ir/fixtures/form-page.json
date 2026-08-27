@@ -1,0 +1,152 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "Task Manager"
+  },
+  "tokens": {},
+  "dataSources": {
+    "teamMembers": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/team-members",
+      "shape": { "items": "User[]" }
+    },
+    "createTask": {
+      "type": "rest",
+      "method": "POST",
+      "path": "/api/tasks",
+      "body": { "from": "state:form" },
+      "onSuccess": { "invalidate": ["tasks"] }
+    }
+  },
+  "pages": [
+    {
+      "$id": "create-task",
+      "route": "/tasks/new",
+      "title": "Create Task",
+      "auth": { "required": true },
+      "state": {
+        "form": {
+          "title": "",
+          "description": "",
+          "status": "todo",
+          "priority": "medium",
+          "assigneeId": "",
+          "dueDate": ""
+        }
+      },
+      "root": {
+        "node": "Stack",
+        "gap": "lg",
+        "padding": "lg",
+        "align": "center",
+        "children": [
+          {
+            "node": "Stack",
+            "width": "640px",
+            "gap": "lg",
+            "children": [
+              {
+                "node": "Row",
+                "justify": "between",
+                "align": "center",
+                "children": [
+                  {
+                    "node": "Text",
+                    "content": "Create Task",
+                    "typography": "heading-2"
+                  },
+                  {
+                    "node": "Text",
+                    "content": "Fill in the details below",
+                    "typography": "body-sm"
+                  }
+                ]
+              },
+              {
+                "node": "Form",
+                "bind": "state:form",
+                "onSubmit": {
+                  "type": "sequence",
+                  "steps": [
+                    { "type": "mutate", "source": "createTask" },
+                    { "type": "toast", "variant": "success", "message": "Task created!" },
+                    { "type": "navigate", "to": "/tasks" }
+                  ]
+                },
+                "layout": "single-column",
+                "fields": [
+                  {
+                    "field": "title",
+                    "label": "Task Title",
+                    "required": true,
+                    "node": "TextInput",
+                    "placeholder": "Enter task title...",
+                    "validation": [
+                      { "rule": "required", "message": "Title is required" },
+                      { "rule": "minLength", "value": 3, "message": "Title must be at least 3 characters" }
+                    ]
+                  },
+                  {
+                    "field": "description",
+                    "label": "Description",
+                    "node": "TextArea",
+                    "placeholder": "Describe the task...",
+                    "rows": 4
+                  },
+                  {
+                    "field": "priority",
+                    "label": "Priority",
+                    "node": "RadioGroup",
+                    "direction": "row",
+                    "options": [
+                      { "value": "low", "label": "Low" },
+                      { "value": "medium", "label": "Medium" },
+                      { "value": "high", "label": "High" },
+                      { "value": "urgent", "label": "Urgent" }
+                    ]
+                  },
+                  {
+                    "field": "assigneeId",
+                    "label": "Assignee",
+                    "node": "Select",
+                    "options": { "source": "teamMembers", "value": "id", "label": "name" },
+                    "searchable": true,
+                    "placeholder": "Select team member..."
+                  },
+                  {
+                    "field": "dueDate",
+                    "label": "Due Date",
+                    "node": "DatePicker",
+                    "min": "{{today}}"
+                  }
+                ],
+                "actions": [
+                  {
+                    "node": "Row",
+                    "justify": "end",
+                    "gap": "sm",
+                    "children": [
+                      {
+                        "node": "Button",
+                        "label": "Cancel",
+                        "variant": "ghost",
+                        "action": { "type": "navigate", "to": "/tasks" }
+                      },
+                      {
+                        "node": "Button",
+                        "label": "Create Task",
+                        "variant": "primary",
+                        "icon": "plus"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

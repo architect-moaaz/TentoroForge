@@ -1,0 +1,426 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-balances/detail",
+  "route": "/leave-balances/:id",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Leave Balance Details"
+  },
+  "dataSources": [
+    {
+      "name": "leaveBalance",
+      "entity": "LeaveBalance",
+      "op": "get"
+    },
+    {
+      "name": "employee",
+      "entity": "Employee",
+      "op": "get",
+      "filter": {
+        "id": "{{leaveBalance.employeeId}}"
+      }
+    },
+    {
+      "name": "balanceHistory",
+      "entity": "LeaveTransaction",
+      "op": "list",
+      "filter": {
+        "leaveBalanceId": ":id"
+      },
+      "orderBy": [
+        {
+          "field": "transactionDate",
+          "dir": "desc"
+        }
+      ],
+      "limit": 20
+    },
+    {
+      "name": "upcomingLeave",
+      "entity": "LeaveRequest",
+      "op": "list",
+      "filter": {
+        "employeeId": "{{leaveBalance.employeeId}}",
+        "leaveTypeId": "{{leaveBalance.leaveTypeId}}",
+        "status": "approved",
+        "startDate": {
+          "gte": "{{now}}"
+        }
+      },
+      "orderBy": [
+        {
+          "field": "startDate",
+          "dir": "asc"
+        }
+      ],
+      "limit": 5
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "balance-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "LEAVE BALANCE",
+              "headline": "{{employee.name}} - {{leaveBalance.leaveType.name}}",
+              "subhead": "{{leaveBalance.remaining}} days remaining of {{leaveBalance.allocated}} allocated",
+              "layout": "split",
+              "ctas": [
+                {
+                  "label": "Request Leave",
+                  "action": {
+                    "type": "workflow",
+                    "name": "requestLeave"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "View All Balances",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/employees/{{employee.id}}/leave-balances"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 135
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "shadow": "tokens.shadow.md",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "balance-metrics",
+            "type": "Grid",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "children": [
+              {
+                "id": "remaining-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Remaining",
+                  "value": "{{leaveBalance.remaining}}",
+                  "format": "number",
+                  "icon": "calendar-check"
+                },
+                "style": {
+                  "background": "tokens.color.surface.0",
+                  "padding": "tokens.spacing.4",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                }
+              },
+              {
+                "id": "used-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Used This Year",
+                  "value": "{{leaveBalance.used}}",
+                  "format": "number",
+                  "icon": "calendar-minus"
+                },
+                "style": {
+                  "background": "tokens.color.surface.0",
+                  "padding": "tokens.spacing.4",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                }
+              },
+              {
+                "id": "accrued-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Accrued",
+                  "value": "{{leaveBalance.accrued}}",
+                  "format": "number",
+                  "icon": "calendar-plus"
+                },
+                "style": {
+                  "background": "tokens.color.surface.0",
+                  "padding": "tokens.spacing.4",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                }
+              },
+              {
+                "id": "pending-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Pending Requests",
+                  "value": "{{leaveBalance.pendingRequests}}",
+                  "format": "number",
+                  "icon": "clock"
+                },
+                "style": {
+                  "background": "tokens.color.surface.0",
+                  "padding": "tokens.spacing.4",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                }
+              }
+            ]
+          },
+          {
+            "id": "balance-content",
+            "type": "Split",
+            "props": {
+              "ratio": "1:2",
+              "breakpoint": "md"
+            },
+            "children": [
+              {
+                "id": "balance-sidebar",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "balance-details-card",
+                    "type": "Card",
+                    "style": {
+                      "background": "tokens.color.surface.0",
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "balance-details-title",
+                        "type": "Heading",
+                        "props": {
+                          "content": "Balance Details"
+                        },
+                        "style": {
+                          "marginBottom": "tokens.spacing.4"
+                        }
+                      },
+                      {
+                        "id": "balance-details-list",
+                        "type": "KeyValueList",
+                        "props": {
+                          "items": [
+                            {
+                              "label": "Employee",
+                              "value": "{{employee.name}}"
+                            },
+                            {
+                              "label": "Department",
+                              "value": "{{employee.department}}"
+                            },
+                            {
+                              "label": "Leave Type",
+                              "value": "{{leaveBalance.leaveType.name}}"
+                            },
+                            {
+                              "label": "Policy Year",
+                              "value": "{{leaveBalance.policyYear}}"
+                            },
+                            {
+                              "label": "Allocation Date",
+                              "value": "{{leaveBalance.allocationDate}}"
+                            },
+                            {
+                              "label": "Expiry Date",
+                              "value": "{{leaveBalance.expiryDate}}"
+                            },
+                            {
+                              "label": "Accrual Rate",
+                              "value": "{{leaveBalance.accrualRate}} days/month"
+                            },
+                            {
+                              "label": "Max Carryover",
+                              "value": "{{leaveBalance.maxCarryover}} days"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "upcoming-leave-card",
+                    "type": "Card",
+                    "style": {
+                      "background": "tokens.color.surface.0",
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "upcoming-leave-title",
+                        "type": "Heading",
+                        "props": {
+                          "content": "Upcoming Leave"
+                        },
+                        "style": {
+                          "marginBottom": "tokens.spacing.4"
+                        }
+                      },
+                      {
+                        "id": "upcoming-leave-repeat",
+                        "type": "Repeat",
+                        "bind": "upcomingLeave",
+                        "children": [
+                          {
+                            "id": "upcoming-leave-item",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.2"
+                            },
+                            "style": {
+                              "borderBottom": "1px solid tokens.color.border.default",
+                              "paddingBottom": "tokens.spacing.3",
+                              "marginBottom": "tokens.spacing.3"
+                            },
+                            "children": [
+                              {
+                                "id": "upcoming-leave-dates",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{item.startDate}} - {{item.endDate}}"
+                                },
+                                "style": {
+                                  "fontWeight": "tokens.typography.weight.heading"
+                                }
+                              },
+                              {
+                                "id": "upcoming-leave-days",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{item.daysCount}} days"
+                                },
+                                "style": {
+                                  "color": "tokens.color.text.secondary"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "balance-main",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "balance-history-card",
+                    "type": "Card",
+                    "style": {
+                      "background": "tokens.color.surface.0",
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "balance-history-header",
+                        "type": "Row",
+                        "props": {
+                          "justify": "between",
+                          "align": "center"
+                        },
+                        "style": {
+                          "marginBottom": "tokens.spacing.6"
+                        },
+                        "children": [
+                          {
+                            "id": "balance-history-title",
+                            "type": "Heading",
+                            "props": {
+                              "content": "Transaction History"
+                            }
+                          },
+                          {
+                            "id": "balance-history-cta",
+                            "type": "Button",
+                            "props": {
+                              "label": "Export",
+                              "variant": "ghost",
+                              "size": "sm",
+                              "workflow": "exportBalanceHistory"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "balance-history-table",
+                        "type": "TableSortable",
+                        "props": {
+                          "columns": [
+                            {
+                              "key": "transactionDate",
+                              "label": "Date",
+                              "width": "140px"
+                            },
+                            {
+                              "key": "type",
+                              "label": "Type"
+                            },
+                            {
+                              "key": "amount",
+                              "label": "Amount",
+                              "width": "80px"
+                            },
+                            {
+                              "key": "balance",
+                              "label": "Balance",
+                              "width": "80px"
+                            },
+                            {
+                              "key": "description",
+                              "label": "Description"
+                            }
+                          ],
+                          "caption": "Recent balance changes and transactions"
+                        },
+                        "bind": "balanceHistory"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

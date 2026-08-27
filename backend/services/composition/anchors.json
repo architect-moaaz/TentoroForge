@@ -1,0 +1,7111 @@
+{
+  "$schema_version": "1",
+  "anchors": {
+    "action_menu": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ActionMenu",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "active_tab_content": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "settings_tabbed"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ActiveTabContent",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "activity_item": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "timeline_stream"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ActivityItem",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "add_card_button": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "kanban_board"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "AddCardButton",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "add_constraint_button": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "filter_builder"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "AddConstraintButton",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "ambient_metric_row": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SlaVitalsStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "anomaly_feed": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveEventLog",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "answer_option_row": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "AnswerOptionRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "approve_reject_bar": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "approval"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ApproveRejectBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "arrival_headline": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "ArrivalHeadline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "article_headline": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "ArticleHeadline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "attention_queue_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "AttentionQueueHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "avatar_overlap": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "AvatarOverlap",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "bio_stats_row": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BioStatsRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "board_filter_rail": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "kanban_board"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BoardFilterRail",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "board_header": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "kanban_board"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BoardHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "book_cta": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "BookCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "booking_bar": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BookingBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "brand_story_pulse": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BrandStoryPulse",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "bulk_action_header": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "admin_table"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BulkActionHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "byline_meta": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "BylineMeta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "cached_content_note": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "offline"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CachedContentNote",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "calendar_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "patron_events"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ScanStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "calendar_week": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "manager_overview"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CalendarWeek",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "cancel_option": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "loading_wait"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CancelOption",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "cancel_ride_link": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CancelRideLink",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "carrier_meta_row": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CarrierMetaRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "cart_cta": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "CartCta",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "case_status_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "citizen_service"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "CaseStatusHero",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "category_tabs": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "notification_center"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CategoryTabs",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "celebration_backdrop": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CelebrationBackdrop",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "checkout_progress": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CheckoutProgress",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "checkout_stage": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CheckoutStage",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "community_pulse": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CommunityPulse",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "completion_capture": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CompletionCapture",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "completion_date": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CompletionDate",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "confirm_cta": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "ConfirmCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "confirmation_channel_note": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "success_confirm"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ConfirmationChannelNote",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "confirmation_message": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "success_confirm"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ConfirmationMessage",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "constraint_stack": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "filter_builder"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ConstraintStack",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "contact_action_row": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ContactActionRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "content_pane": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ContentPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "copy_last_week_link": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CopyLastWeekLink",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "correctness_feedback": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CorrectnessFeedback",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "course_name": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CourseName",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "create_event_cta": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "CreateEventCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "day_cell": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DayCell",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "day_group_header": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "timeline_stream"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DayGroupHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "day_hour_cell": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DayHourCell",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "decision_comment": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "approval"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DecisionComment",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "denial_headline": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "permission_denied"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "DenialHeadline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "denial_reason": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "permission_denied"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DenialReason",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "description_block": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DescriptionBlock",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "description_or_transcript": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "media_player"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DescriptionOrTranscript",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "destination_search_sheet": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DestinationSearchSheet",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "dirty_state_indicator": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DirtyStateIndicator",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "discovery_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "learner_home",
+        "patron_events"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DiscoveryRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "document_checklist": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "citizen_service"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DocumentChecklist",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "download_pdf_button": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DownloadPdfButton",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "draft_focus_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "DraftFocusHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "draggable_card": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "kanban_board"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DraggableCard",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "driver_courier_card": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DriverCourierCard",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "drop_zone": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "upload_and_process"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DropZone",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "emergency_action_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EmergencyActionRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "emergency_call_button": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EmergencyActionRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "empty_body": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "empty_state"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EmptyBody",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "empty_headline": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "empty_state"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "EmptyHeadline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "empty_illustration": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "empty_state"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EmptyIllustration",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "empty_primary_cta": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "empty_state"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "EmptyPrimaryCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "empty_search_helper": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "search_results"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EmptySearchHelper",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "error_explanation": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "error_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ErrorExplanation",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "error_headline": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "error_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "ErrorHeadline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "error_mark": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "error_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ErrorMark",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "escalations_queue": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "manager_overview"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EscalationsQueue",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "eta_line": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "loading_wait"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EtaLine",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "eta_prominent": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EtaProminent",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "event_dot_or_bar": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "EventDotOrBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "exercise_progress_header": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ExerciseProgressHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "facet_rail": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "search_results"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FacetRail",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "fare_estimate_row": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FareEstimateRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "featured_content_grid": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FeaturedContentGrid",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "featured_moment_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "FeaturedMomentHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "field_group": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "create_entity",
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FieldGroup",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "filter_chip_row": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "admin_table"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "FilterChipRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "filter_search_bar": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "catalog_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FilterSearchBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "first_value_moment": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "onboarding"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FirstValueMoment",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "follow_cta": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "FollowCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "following_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "patron_events"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecsRailReasoned",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "form_field": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "create_entity",
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FormField",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "form_header": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "create_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FormHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "form_header_named": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FormHeaderNamed",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "full_map_canvas": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-map-ground",
+        "--color-map-pin",
+        "--color-map-route",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "FullMapCanvas",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "geo_search_bar": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "map_list"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "GeoSearchBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "grand_total": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "GrandTotal",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "greeting_context_hero": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "service_launcher"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead",
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "GreetingContextHero",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "hero_media": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "HeroMedia",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "hint_action": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "HintAction",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "image_gallery": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ImageGallery",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "inventory_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TrendingRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "item_card_grid": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "catalog_grid"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ItemCardGrid",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "job_checklist": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "JobChecklist",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "jump_to_source_link": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "notification_center"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "JumpToSourceLink",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "learner_name": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LearnerName",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "legend_key": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LegendKey",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "lesson_progress_stepper": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "lesson_viewer"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LessonProgressStepper",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "list_pane": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "map_list"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ListPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "live_event_log": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveEventLog",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "live_preview_count": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "filter_builder"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LivePreviewCount",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "live_progress_bar": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "upload_and_process"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveProgressBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "live_tracking_map": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-map-ground",
+        "--color-map-pin",
+        "--color-map-route",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveTrackingMap",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "load_more_cta": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "timeline_stream"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "LoadMoreCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "location_snapshot_map": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-map-ground",
+        "--color-map-pin",
+        "--color-map-route",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LocationSnapshotMap",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "lock_icon": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "permission_denied"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LockIcon",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "log_stream_toggle": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "workflow_run_trace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LogStreamToggle",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "map_canvas": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "map_list"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-map-ground",
+        "--color-map-pin",
+        "--color-map-route",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MapCanvas",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "mark_all_read_bar": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "notification_center"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MarkAllReadBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "mark_complete_cta": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "lesson_viewer"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "MarkCompleteCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "me_pin": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MePin",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "medal_or_badge": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "MedalOrBadge",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "media_meta_row": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "media_player"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MediaMetaRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "media_viewport": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "media_player"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MediaViewport",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "media_viewport_lesson": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "lesson_viewer"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MediaViewportLesson",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "milestone_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "citizen_service"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MilestoneStrip",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "mixed_result_row": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "search_results"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MixedResultRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "month_year_header": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "MonthYearHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "narrative_headline": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "NarrativeHeadline",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "nav_alternatives": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "permission_denied"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "NavAlternatives",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "next_action_cta": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "upload_and_process"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "NextActionCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "next_actions_list": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PrioritiesStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "next_cta": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "NextCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "next_event_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "patron_events"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "PinnedMomentHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "next_job_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "PinnedMomentHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "next_step_cta": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "success_confirm"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "NextStepCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "node_timeline": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "workflow_run_trace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "NodeTimeline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "notification_item": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "notification_center"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "NotificationItem",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "notification_pill": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "service_launcher"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "NotificationPill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "notify_me_toggle": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "NotifyMeToggle",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "offline_icon": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "offline"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "OfflineIcon",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "offline_message": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "offline"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "OfflineMessage",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "onboarding_step": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "onboarding"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "OnboardingStep",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "order_summary_sidebar": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "OrderSummarySidebar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "overdue_pin": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_inbox"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "OverduePin",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "pagination_footer": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "admin_table"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PaginationFooter",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "pagination_or_infinite": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "catalog_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PaginationOrInfinite",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "payment_form": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PaymentForm",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "peer_wins_feed": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "learner_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CommunityPulse",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "per_node_io_pane": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "workflow_run_trace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PerNodeIoPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "per_tab_save_bar": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "settings_tabbed"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PerTabSaveBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "period_header": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PeriodHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "pin_marker": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "map_list"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PinMarker",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "pinned_moment_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "PinnedMomentHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "place_order_cta": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "PlaceOrderCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "plain_language_notice_feed": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "citizen_service"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PlainLanguageNoticeFeed",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "policy_context_side": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "approval"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PolicyContextSide",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "price_stack": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PriceStack",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "primary_purchase_cta": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "PrimaryPurchaseCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "primary_tabs": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "PrimaryTabs",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "priorities_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "manager_overview"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PrioritiesStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "processing_status_strip": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "upload_and_process"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProcessingStatusStrip",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "profile_cover_hero": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "ProfileCoverHero",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "profile_tabs": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "profile_public"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProfileTabs",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "progress_dots": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "onboarding"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProgressDots",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "progress_indicator_large": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "loading_wait"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProgressIndicatorLarge",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "progress_percent": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "wizard_multistep"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProgressPercent",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "progress_vitals": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "learner_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "VitalsInContext",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "project_row": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProjectRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "promoted_service_tile": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "service_launcher"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "PromotedServiceTile",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "prose_body": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ProseBody",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "publish_cta": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "StickyPrimaryCta",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "query_header": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "search_results"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "QueryHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "question_stem": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "QuestionStem",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "queued_actions_list": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "offline"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "QueuedActionsList",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "reaction_bar": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ReactionBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "read_state_pill": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "notification_center"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "ReadStatePill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "reasons_to_return_row": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ReasonsToReturnRow",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "reassign_action": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ReassignAction",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "recent_activity_feed": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "creator_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveEventLog",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "recent_activity_strip": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "service_launcher"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecentActivityStrip",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "recognition_feed": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "manager_overview"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecognitionFeed",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "record_header": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecordHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "recs_rail_reasoned": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecsRailReasoned",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "refinement_chip_row": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "catalog_grid"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "RefinementChipRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "related_articles": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "article_reader"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RelatedArticles",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "related_media_grid": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "media_player"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RelatedMediaGrid",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "related_rail": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RelatedRail",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "related_sidebar": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RelatedSidebar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "request_access_cta": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "permission_denied"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "RequestAccessCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "request_context_header": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "approval"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body",
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RequestContextHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "request_evidence_body": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "approval"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RequestEvidenceBody",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "reroute_or_hold_action": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RerouteOrHoldAction",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "resource_row": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ResourceRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "result_preview_pane": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "upload_and_process"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ResultPreviewPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "resume_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "learner_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "PinnedMomentHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "resume_position": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "lesson_viewer"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ResumePosition",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "retry_button": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "error_page",
+        "offline"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RetryButton",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "reviews_feed": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ReviewsFeed",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "route_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "geoConfig",
+            "kind": "object",
+            "note": "center, zoom, provider tokens"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ScanStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "row_action_menu": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "admin_table"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RowActionMenu",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "row_total": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RowTotal",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "run_control_bar": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "workflow_run_trace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RunControlBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "run_header": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "workflow_run_trace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RunHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "save_and_apply_bar": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "filter_builder"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SaveAndApplyBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "save_and_exit_link": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "wizard_multistep"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SaveAndExitLink",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "save_discard_delete_bar": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SaveDiscardDeleteBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "saved_views_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ScanStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "scan_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ScanStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "secondary_recovery_row": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "error_page"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SecondaryRecoveryRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "section_divider": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "create_entity",
+        "edit_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SectionDivider",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "segment_breakdown": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "DescriptionList",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "selection_sync": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "map_list"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SelectionSync",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "service_tile_grid": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "service_launcher"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ServiceTileGrid",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "service_type_selector": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "hail_ride_map"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ServiceTypeSelector",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "settings_tab_rail": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "settings_tabbed"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SettingsTabRail",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "share_export_cta": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "StickyPrimaryCta",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "share_row": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "certificate_page"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ShareRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "share_trip_button": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "ride_in_progress"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ShareTripButton",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "shift_metrics_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ShiftMetricsRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "single_next_action_cta": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "citizen_service"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "SingleNextActionCta",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "skip_link": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "onboarding"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SkipLink",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "sla_vitals_strip": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SlaVitalsStrip",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "sortable_table": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "admin_table"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SortableTable",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "specs_table": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": [
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SpecsTable",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "stage_timeline": {
+      "categories": [
+        "location"
+      ],
+      "appears_in": [
+        "live_tracking_status"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StageTimeline",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "status_column": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "kanban_board"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StatusColumn",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "status_line": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "loading_wait"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StatusLine",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "status_pill": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "record_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "StatusPill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "step_content_pane": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "wizard_multistep"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StepContentPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "step_indicator": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "wizard_multistep"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StepIndicator",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "step_nav_bar": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "wizard_multistep"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "formTarget",
+            "kind": "route|workflow",
+            "note": "where the form submits"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StepNavBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "sticky_primary_cta": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": [
+          {
+            "name": "workflow",
+            "kind": "workflow",
+            "note": "workflow to dispatch on activation"
+          },
+          {
+            "name": "navigate",
+            "kind": "route",
+            "note": "route to navigate to on activation"
+          }
+        ]
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-primary",
+        "--color-primary-contrast",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-cta",
+        "--radius-md"
+      ],
+      "component": "StickyPrimaryCta",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "streak_pill": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "exercise_workflow"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "StreakPill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "stream_filter_row": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "timeline_stream"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "StreamFilterRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "submit_bar": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "timesheet_grid"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SubmitBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "submit_bar_sticky": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "create_entity"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SubmitBarSticky",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "success_mark": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "success_confirm"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "SuccessMark",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_complete_bar": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskCompleteBar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_content_pane": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskContentPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_context_header": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body",
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskContextHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_count_header": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_inbox"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskCountHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_filter_row": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_inbox"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskFilterRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_history_sidebar": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskHistorySidebar",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "task_row": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_inbox"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TaskRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "taste_recs_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TasteRecsRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "team_comms_thread": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "field_worker_today"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "LiveEventLog",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "team_glance_hero": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "manager_overview"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "TeamGlanceHero",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "team_status_board": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "operator_console"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TeamStatusBoard",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "time_axis_header": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "title",
+        "meta"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TimeAxisHeader",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "today_marker": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month",
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TodayMarker",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "transcript_or_notes_pane": {
+      "categories": [
+        "learning"
+      ],
+      "appears_in": [
+        "lesson_viewer"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TranscriptOrNotesPane",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "trend_chart_annotated": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "analyst_workspace"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "Chart",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "trending_rail": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "shopper_home"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TrendingRail",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "trust_markers": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "checkout"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "TrustMarkers",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "type_badge": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "search_results"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "TypeBadge",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "unread_state_pill": {
+      "categories": [
+        "list"
+      ],
+      "appears_in": [
+        "timeline_stream"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "UnreadStatePill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "unsaved_changes_warning": {
+      "categories": [
+        "form"
+      ],
+      "appears_in": [
+        "settings_tabbed"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "UnsavedChangesWarning",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "up_next_rail": {
+      "categories": [
+        "detail",
+        "home",
+        "learning"
+      ],
+      "appears_in": [
+        "learner_home",
+        "lesson_viewer",
+        "media_player"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "RecsRailReasoned",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "urgency_pill": {
+      "categories": [
+        "workflow"
+      ],
+      "appears_in": [
+        "task_inbox"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "label"
+      ],
+      "tokens": [
+        "--color-accent",
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md",
+        "--radius-pill"
+      ],
+      "component": "UrgencyPill",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "variant_picker": {
+      "categories": [
+        "detail"
+      ],
+      "appears_in": [
+        "product_detail"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "VariantPicker",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "venue_pulse": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "patron_events"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "CommunityPulse",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "view_switcher": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ViewSwitcher",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "vitals_in_context": {
+      "categories": [
+        "home"
+      ],
+      "appears_in": [
+        "member_home"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [
+        "body"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "VitalsInContext",
+      "impl_status": "v1",
+      "notes": ""
+    },
+    "weekday_row": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "event_calendar_month"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "WeekdayRow",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "welcome_hero": {
+      "categories": [
+        "flow"
+      ],
+      "appears_in": [
+        "onboarding"
+      ],
+      "binds": {
+        "required": [
+          {
+            "name": "dataSource",
+            "kind": "dataSource",
+            "note": "entity or query the anchor renders"
+          }
+        ],
+        "optional": []
+      },
+      "copy_slots": [
+        "eyebrow",
+        "headline",
+        "subhead"
+      ],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--font-display",
+        "--radius-md"
+      ],
+      "component": "WelcomeHero",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "what_happens_next": {
+      "categories": [
+        "system"
+      ],
+      "appears_in": [
+        "success_confirm"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "WhatHappensNext",
+      "impl_status": "stub",
+      "notes": ""
+    },
+    "zoom_range_toggle": {
+      "categories": [
+        "calendar"
+      ],
+      "appears_in": [
+        "resource_calendar"
+      ],
+      "binds": {
+        "required": [],
+        "optional": []
+      },
+      "copy_slots": [],
+      "tokens": [
+        "--color-surface",
+        "--color-text-primary",
+        "--font-body",
+        "--radius-md"
+      ],
+      "component": "ZoomRangeToggle",
+      "impl_status": "stub",
+      "notes": ""
+    }
+  }
+}

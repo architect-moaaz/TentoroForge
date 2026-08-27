@@ -1,0 +1,38 @@
+{
+  "slug": "metric_row",
+  "query": "row of four metric tiles with label, value, and trend indicator",
+  "source": "21st.dev",
+  "fragment": {
+    "type": "Row",
+    "props": {
+      "align": "center",
+      "gap": "tokens.spacing.2"
+    },
+    "children": [
+      {
+        "type": "Badge",
+        "props": {
+          "label": "Online",
+          "variant": "dot",
+          "color": "green"
+        }
+      },
+      {
+        "type": "Badge",
+        "props": {
+          "label": "Pending",
+          "variant": "dot",
+          "color": "amber"
+        }
+      },
+      {
+        "type": "Badge",
+        "props": {
+          "label": "Failed",
+          "variant": "dot",
+          "color": "red"
+        }
+      }
+    ]
+  }
+}

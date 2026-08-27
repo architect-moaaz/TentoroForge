@@ -1,0 +1,1260 @@
+{
+  "components": {
+    "Accordion": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Accordion \u2014 collapsible panel group. mode=\"single\" closes other panels"
+    },
+    "AccordionPanel": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "AccordionPanel (layout)"
+    },
+    "ActivityFeed": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Coerce a raw entry (which may come from arbitrary bound data) into the"
+    },
+    "AddToCart": {
+      "category": "action",
+      "data_shape": "none",
+      "slot_hints": [
+        "action"
+      ],
+      "summary": "Renders a button that adds the referenced item to the current user's c"
+    },
+    "Alert": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Alert (display)"
+    },
+    "AppShell": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "AppShell (layout)"
+    },
+    "ApprovalStepper": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "ApprovalStepper (data)"
+    },
+    "AreaChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "AreaChart (chart)"
+    },
+    "AutoFocus": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "AutoFocus \u2014 Spec E Wave 2. On mount, moves keyboard focus to the"
+    },
+    "Avatar": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Avatar \u2014 user portrait. Renders <img> when src is set; otherwise shows"
+    },
+    "Badge": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Badge \u2014 small status pill. Variants pick semantic background + foregro"
+    },
+    "Banner": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Banner (display)"
+    },
+    "BarChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "BarChart (chart)"
+    },
+    "Breadcrumb": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Breadcrumb (display)"
+    },
+    "BulkActionBar": {
+      "category": "data",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "BulkActionBar \u2014 Spec C Slice 7 selection toolbar"
+    },
+    "Button": {
+      "category": "action",
+      "data_shape": "none",
+      "slot_hints": [
+        "action"
+      ],
+      "summary": "Action descriptor shape for onClick. Engine handles \"navigate\" at the"
+    },
+    "Calendar": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Calendar with two modes"
+    },
+    "CameraCapture": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Endpoint that receives multipart file uploads and returns"
+    },
+    "Card": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Schema-level elevation \u2014 overrides token elevation when set"
+    },
+    "Carousel": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Carousel (media)"
+    },
+    "CartBadge": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Live cart-count indicator. Polls once on mount, refreshes on the"
+    },
+    "CartPage": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "CartPage (nav)"
+    },
+    "CartPanel": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "CartPanel (nav)"
+    },
+    "Cascader": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Cascader (data)"
+    },
+    "Chart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Chart dispatcher"
+    },
+    "Checkbox": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Checkbox with side-by-side label. Uses native <input type=\"checkbox\">"
+    },
+    "Chip": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Chip (display)"
+    },
+    "Cluster": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Inline group with consistent gap and wrapping. Naturally responsive"
+    },
+    "CodeBlock": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "CodeBlock (display)"
+    },
+    "ColorPicker": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "ColorPicker (input)"
+    },
+    "Combobox": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Combobox (input)"
+    },
+    "CommandPalette": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "CommandPalette (overlay)"
+    },
+    "Conditional": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Conditional (display)"
+    },
+    "ConfirmDialog": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Test injection \u2014 bypasses context in unit tests"
+    },
+    "Container": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Container (layout)"
+    },
+    "ContextMenu": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "ContextMenu (overlay)"
+    },
+    "CustomBlock": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Escape-hatch component. Renders sanitized HTML via dompurify (default"
+    },
+    "DataBoundary": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "DataBoundary (display)"
+    },
+    "DataGrid": {
+      "category": "data",
+      "data_shape": "tabular",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "DataGrid v1 \u2014 frozen columns, density-aware row height, row virtualisa"
+    },
+    "DatePicker": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "DatePicker \u2014 native <input type=\"date\"> with shadcn-style chrome so it"
+    },
+    "DateRangePicker": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "DateRangePicker (input)"
+    },
+    "DescriptionList": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "DescriptionList (data)"
+    },
+    "Dialog": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Required \u2014 the Dialog is opened by a Button whose `opensDialog` prop"
+    },
+    "Divider": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Divider (display)"
+    },
+    "DonutChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "DonutChart (chart)"
+    },
+    "Drawer": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Drawer (overlay)"
+    },
+    "DropdownMenu": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "DropdownMenu (overlay)"
+    },
+    "EditableLineGrid": {
+      "category": "data",
+      "data_shape": "tabular",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Controlled-mode change handler. Receives the next rows array"
+    },
+    "EmptyState": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "EmptyState (display)"
+    },
+    "EmptyStateRich": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Private prop injected by SchemaRendererWrapper to scope illustration"
+    },
+    "FadeIn": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Wraps children with a fade-in animation. Delay/duration override"
+    },
+    "FeatureCard": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "FeatureCard \u2014 icon + title + description block, optional CTA. Two layo"
+    },
+    "FileUpload": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Endpoint that stores the file and returns a FileUploadRef"
+    },
+    "FilterBar": {
+      "category": "data",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "FilterBar (data)"
+    },
+    "FilterBuilder": {
+      "category": "data",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "FilterBuilder \u2014 a compact chip-list expression builder"
+    },
+    "FocusRing": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "FocusRing \u2014 Spec E Wave 2. Wraps children in a span that carries a"
+    },
+    "FocusTrap": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "FocusTrap \u2014 Spec E Wave 2. Contains keyboard focus inside its"
+    },
+    "Form": {
+      "category": "input",
+      "data_shape": "none",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Slice 5 \u2014 a compute-controller exposed to any Button descendant of the"
+    },
+    "FunnelChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "FunnelChart (chart)"
+    },
+    "Gauge": {
+      "category": "chart",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Radial KPI gauge \u2014 a 270\u00b0 arc with optional colored threshold zones, a"
+    },
+    "GlobalSearch": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "GlobalSearch \u2014 Spec C Slice 7 app-wide search input"
+    },
+    "Grid": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Grid (layout)"
+    },
+    "Heading": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "heading"
+      ],
+      "summary": "Optional className override \u2014 carries Figma-sourced text-size / color"
+    },
+    "Heatmap": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Matrix heatmap \u2014 rows \u00d7 columns with per-cell colour intensity (densit"
+    },
+    "Hero": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "heading"
+      ],
+      "summary": "Hero \u2014 page-leading headline block. Three layouts"
+    },
+    "HoverCard": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "HoverCard (overlay)"
+    },
+    "Icon": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Icon (display)"
+    },
+    "IconButton": {
+      "category": "action",
+      "data_shape": "none",
+      "slot_hints": [
+        "action"
+      ],
+      "summary": "Image/SVG URL (e.g. a Figma-exported asset) rendered as an <img>"
+    },
+    "IllustratedEmpty": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "IllustratedEmpty \u2014 Spec C Slice 9 branded empty-state"
+    },
+    "Image": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Image (media)"
+    },
+    "Input": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Labeled text-style input. Supports controlled value via `value` + `onC"
+    },
+    "InputOTP": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "InputOTP (input)"
+    },
+    "InspectorPanel": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "InspectorPanel (layout)"
+    },
+    "Kanban": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Data-driven Kanban board"
+    },
+    "KeyValueInput": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Editable string\u2192value map for a jsonb / config column. Self-manages it"
+    },
+    "KeyValueList": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "KeyValueList \u2014 definition-list display. Empty values render as em-dash"
+    },
+    "KeyboardShortcuts": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "KeyboardShortcuts \u2014 Spec C Slice 7 shortcut legend"
+    },
+    "Lightbox": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Lightbox (media)"
+    },
+    "LineChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "LineChart (chart)"
+    },
+    "Link": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Test injection only \u2014 allows bypassing context in unit tests"
+    },
+    "List": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "List (data)"
+    },
+    "LoadingState": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "LoadingState (display)"
+    },
+    "MaskedInput": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "MaskedInput (input)"
+    },
+    "Menubar": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Menubar (overlay)"
+    },
+    "MetricTile": {
+      "category": "chart",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Single-stat tile with optional delta indicator and sparkline trend"
+    },
+    "MobileNav": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Hamburger nav for mobile viewports. Renders nothing on `md` and above"
+    },
+    "Modal": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Modal (overlay)"
+    },
+    "MoneyDisplay": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "MoneyDisplay (display)"
+    },
+    "MoneyInput": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "MoneyInput (input)"
+    },
+    "MultiSelect": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "MultiSelect (input)"
+    },
+    "NarrativeHeadline": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "heading"
+      ],
+      "summary": "NarrativeHeadline (display)"
+    },
+    "NavLink": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Current pathname \u2014 passed by the foundation wrapper (e.g. from Next.js"
+    },
+    "NumberInput": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "NumberInput (input)"
+    },
+    "OptimisticProvider": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Merges intended patch into current optimistic state"
+    },
+    "OverlayCard": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "OverlayCard (layout)"
+    },
+    "Pagination": {
+      "category": "data",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Pagination (data)"
+    },
+    "PersonCard": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "PersonCard (display)"
+    },
+    "PersonaChrome": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "PersonaChrome (nav)"
+    },
+    "PieChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "PieChart (chart)"
+    },
+    "Popover": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Popover (overlay)"
+    },
+    "PresenceIndicator": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Optional explicit users list. When omitted, the component"
+    },
+    "Progress": {
+      "category": "chart",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Progress (chart)"
+    },
+    "QRCode": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "QRCode (media)"
+    },
+    "RadarChart": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "RadarChart (chart)"
+    },
+    "RadioGroup": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "RadioGroup (input)"
+    },
+    "Rating": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Rating (input)"
+    },
+    "Repeat": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Repeat (display)"
+    },
+    "ResourceTimeline": {
+      "category": "data",
+      "data_shape": "tabular",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Categorical status \u2192 HSL bar colour. Falls back to a hashed hue"
+    },
+    "RichTextEditor": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "RichTextEditor (display)"
+    },
+    "Row": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Row (layout)"
+    },
+    "SavedViewsPicker": {
+      "category": "data",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "SavedViewsPicker \u2014 Spec C Slice 7. Segmented control-ish row of"
+    },
+    "Scanner": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Scanner (media)"
+    },
+    "Schematic": {
+      "category": "chart",
+      "data_shape": "none",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Schematic map \u2014 a self-contained SVG floor plan / zone map / route dia"
+    },
+    "SearchInput": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Optional callback receiving results in addition to updating the store"
+    },
+    "SearchResults": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Optional test-mode override \u2014 bypasses the store so unit tests can pas"
+    },
+    "Section": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Section \u2014 content block with optional header. Variants control the vis"
+    },
+    "SegmentedControl": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "SegmentedControl (input)"
+    },
+    "Select": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Labeled native <select>. Options come from props.options[]"
+    },
+    "SensitiveField": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "SensitiveField (display)"
+    },
+    "Sheet": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Sheet (overlay)"
+    },
+    "SideNav": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "Collapsible, responsive navigation rail"
+    },
+    "Sidebar": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Pinned-narrow + flex-main shell. Children must be exactly 2: [sidebar"
+    },
+    "Skeleton": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Skeleton \u2014 loading placeholder. variant=rect \u2192 block, circle \u2192 round"
+    },
+    "SkipLink": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "SkipLink \u2014 Spec E Wave 2. Renders an anchor that stays hidden until"
+    },
+    "Slider": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Slider (input)"
+    },
+    "Slot": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Slot (display)"
+    },
+    "Spacer": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Spacer (layout)"
+    },
+    "Sparkline": {
+      "category": "chart",
+      "data_shape": "series",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Inline mini-chart \u2014 just the shape, no axes, no tooltips"
+    },
+    "Spinner": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Spinner (display)"
+    },
+    "Split": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Two-column responsive split. On mobile the panes stack vertically; at"
+    },
+    "SplitArc": {
+      "category": "chart",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Half-arc gauge whose 180\u00b0 sweep is split across \u22652 coloured segments"
+    },
+    "SplitView": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "SplitView \u2014 master-detail split with URL selection sync"
+    },
+    "Stack": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Stack (layout)"
+    },
+    "Stagger": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Wraps children with a staggered reveal. Each direct child gets a fade"
+    },
+    "Stat": {
+      "category": "chart",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "chart"
+      ],
+      "summary": "Stat (chart)"
+    },
+    "Stepper": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Generic process stepper \u2014 numbered stages with connectors, coloured by"
+    },
+    "Switch": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Controlled value. When omitted the Switch manages its own state"
+    },
+    "TabPanel": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Passthrough TabPanel \u2014 the v2 schema's TabsNode encodes panels as a"
+    },
+    "TabPanelWithDeepLink": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "TabPanelWithDeepLink (layout)"
+    },
+    "Table": {
+      "category": "data",
+      "data_shape": "tabular",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Modern, interactive data table"
+    },
+    "TableSortable": {
+      "category": "data",
+      "data_shape": "tabular",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Modern, interactive data table"
+    },
+    "Tabs": {
+      "category": "layout",
+      "data_shape": "none",
+      "slot_hints": [
+        "surface"
+      ],
+      "summary": "Tabs \u2014 indexed-children tab container. children[i] is the panel for"
+    },
+    "Tag": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Tag (display)"
+    },
+    "Text": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Text (display)"
+    },
+    "Textarea": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "Multi-line text input. Defaults to 4 rows"
+    },
+    "ThemeToggle": {
+      "category": "nav",
+      "data_shape": "none",
+      "slot_hints": [
+        "chrome"
+      ],
+      "summary": "ThemeToggle \u2014 Spec C Slice 8 dark-mode primitive"
+    },
+    "TimePicker": {
+      "category": "input",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "form-field"
+      ],
+      "summary": "TimePicker (input)"
+    },
+    "Timeline": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Timeline (data)"
+    },
+    "Toast": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Toast (display)"
+    },
+    "Tooltip": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "Tooltip (overlay)"
+    },
+    "TourOverlay": {
+      "category": "overlay",
+      "data_shape": "none",
+      "slot_hints": [
+        "modal"
+      ],
+      "summary": "TourOverlay \u2014 spotlighted step-by-step onboarding tour"
+    },
+    "Transfer": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Transfer (data)"
+    },
+    "Tree": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Tree (data)"
+    },
+    "UndoManager": {
+      "category": "display",
+      "data_shape": "none",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "Runtime shape the mutation queue publishes"
+    },
+    "ValidationChecklist": {
+      "category": "display",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "body"
+      ],
+      "summary": "ValidationChecklist (display)"
+    },
+    "Video": {
+      "category": "media",
+      "data_shape": "scalar",
+      "slot_hints": [
+        "media"
+      ],
+      "summary": "Video (media)"
+    },
+    "Wizard": {
+      "category": "data",
+      "data_shape": "list",
+      "slot_hints": [
+        "data-row"
+      ],
+      "summary": "Wizard \u2014 Spec E Wave 3 multi-step form"
+    }
+  }
+}

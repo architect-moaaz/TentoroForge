@@ -1,0 +1,296 @@
+{
+  "schemaVersion": "2",
+  "id": "home/landing",
+  "route": "/",
+  "layout": "MarketingLayout",
+  "meta": {
+    "title": "PeopleOS — Modern HR for Growing Teams",
+    "description": "Leave management, workforce analytics, and project delivery — all in one place."
+  },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.0" },
+    "style": { "motion": "fade-in" },
+    "children": [
+      {
+        "id": "hero-section",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "INTRODUCING PEOPLEOS 2.0",
+          "headline": "Run your entire workforce from one platform",
+          "subhead": "Leave management, team analytics, and project delivery — beautifully unified. Trusted by 1,200+ teams across Europe.",
+          "layout": "centered",
+          "ctas": [
+            {
+              "label": "Start Free Trial",
+              "action": { "type": "navigate", "to": "/signup" },
+              "variant": "primary"
+            },
+            {
+              "label": "Book a Demo",
+              "action": { "type": "workflow", "name": "openDemoBookingModal" },
+              "variant": "secondary"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.600",
+            "to": "tokens.color.secondary.700",
+            "angle": 135
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.none",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "social-proof",
+        "type": "FadeIn",
+        "props": { "delay": 200, "duration": 400 },
+        "children": [
+          {
+            "id": "metrics-strip",
+            "type": "Cluster",
+            "props": { "justify": "center", "align": "center", "gap": "tokens.spacing.8" },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.surface.0" },
+              "padding": "tokens.spacing.6",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "metric-customers",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Teams worldwide",
+                  "value": 1200,
+                  "format": "number",
+                  "delta": { "value": 0.34, "direction": "up" },
+                  "icon": "globe"
+                }
+              },
+              {
+                "id": "metric-leaves",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Leave requests processed",
+                  "value": 980000,
+                  "format": "number",
+                  "icon": "calendar"
+                }
+              },
+              {
+                "id": "metric-uptime",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Uptime SLA",
+                  "value": 99.97,
+                  "format": "percent",
+                  "icon": "shield"
+                }
+              },
+              {
+                "id": "metric-nps",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Net Promoter Score",
+                  "value": 71,
+                  "format": "number",
+                  "delta": { "value": 0.08, "direction": "up" },
+                  "icon": "star"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "features-section",
+        "type": "Section",
+        "props": {
+          "variant": "feature",
+          "title": "Everything your people team needs",
+          "subtitle": "Built for HR managers, loved by employees — PeopleOS removes the friction from every people process."
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.neutral.50" },
+          "padding": "tokens.spacing.semantic.section",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "features-stagger",
+            "type": "Stagger",
+            "props": { "interval": 100 },
+            "children": [
+              {
+                "id": "features-grid",
+                "type": "Grid",
+                "props": { "columns": 3, "gap": "tokens.spacing.6" },
+                "children": [
+                  {
+                    "id": "feature-leave",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "Smart Leave Management",
+                      "description": "Employees submit requests in 30 seconds. Managers approve from mobile. Calendars sync automatically. Balances update in real time.",
+                      "icon": "calendar-check",
+                      "layout": "icon-top",
+                      "cta": { "label": "See how it works", "href": "/features/leave" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  },
+                  {
+                    "id": "feature-analytics",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "Workforce Analytics",
+                      "description": "Track headcount, attrition, leave trends, and performance across departments. Export-ready reports that your board will actually read.",
+                      "icon": "bar-chart-2",
+                      "layout": "icon-top",
+                      "cta": { "label": "Explore analytics", "href": "/features/analytics" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  },
+                  {
+                    "id": "feature-projects",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "Project & Delivery Tracking",
+                      "description": "From backlog to launch, track projects with milestones, risk logs, and budget burn-down. Integrates with Jira, GitHub, and Slack.",
+                      "icon": "git-branch",
+                      "layout": "icon-top",
+                      "cta": { "label": "Learn more", "href": "/features/projects" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  },
+                  {
+                    "id": "feature-onboarding",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "Automated Onboarding",
+                      "description": "New hire forms, IT provisioning triggers, buddy assignments, and 30-60-90 day check-ins — on autopilot from offer acceptance.",
+                      "icon": "user-plus",
+                      "layout": "icon-top",
+                      "cta": { "label": "See automation", "href": "/features/onboarding" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  },
+                  {
+                    "id": "feature-compliance",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "Built-in Compliance",
+                      "description": "GDPR-ready, SOC 2 Type II certified, and UK Working Time Regulations aware. Audit logs for every action — never scramble for evidence again.",
+                      "icon": "shield-check",
+                      "layout": "icon-top",
+                      "cta": { "label": "Security overview", "href": "/security" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  },
+                  {
+                    "id": "feature-integrations",
+                    "type": "FeatureCard",
+                    "props": {
+                      "title": "40+ Integrations",
+                      "description": "Connect your existing stack in minutes: Slack, Google Workspace, Microsoft 365, BambooHR, Workday, Xero, and more.",
+                      "icon": "plug",
+                      "layout": "icon-top",
+                      "cta": { "label": "View integrations", "href": "/integrations" }
+                    },
+                    "style": {
+                      "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.md"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cta-section",
+        "type": "Section",
+        "props": {
+          "variant": "cta",
+          "title": "Ready to transform how you manage people?",
+          "subtitle": "Join 1,200+ teams. No credit card required. Cancel any time."
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.700",
+            "to": "tokens.color.secondary.600",
+            "angle": 125
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "cta-actions",
+            "type": "Cluster",
+            "props": { "justify": "center", "align": "center", "gap": "tokens.spacing.4" },
+            "children": [
+              {
+                "id": "cta-signup",
+                "type": "FadeIn",
+                "props": { "delay": 100, "duration": 300 },
+                "children": [
+                  {
+                    "id": "cta-email-input",
+                    "type": "Input",
+                    "props": {
+                      "name": "ctaEmail",
+                      "label": "Work email",
+                      "type": "email",
+                      "placeholder": "you@company.com",
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "cta-btn",
+                "type": "Text",
+                "props": { "content": "Start Free Trial", "as": "span" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "material-3",
+  "description": "Google Material 3 — dynamic color, rounded corners, tonal surfaces, expressive.",
+  "when_to_use": {
+    "identity.usageMode": ["returning-personal", "multi-user-team"],
+    "layout.shell_any_of": ["bottom-tabs", "sidebar"]
+  },
+  "tokens": {
+    "color": {
+      "background": "hsl(250 30% 98%)",
+      "surface": "hsl(250 20% 96%)",
+      "surfaceHover": "hsl(250 25% 92%)",
+      "border": "hsl(250 15% 84%)",
+      "primary": "hsl(258 90% 60%)",
+      "foreground": "hsl(250 20% 14%)",
+      "muted": "hsl(250 10% 42%)"
+    },
+    "radius": {
+      "sm": "12px",
+      "md": "16px",
+      "lg": "24px",
+      "xl": "28px"
+    },
+    "shadow": {
+      "sm": "0 1px 3px hsl(258 20% 10% / 0.10)",
+      "card": "0 2px 6px hsl(258 20% 10% / 0.12), 0 1px 2px hsl(258 20% 10% / 0.06)",
+      "elevated": "0 6px 18px hsl(258 20% 10% / 0.18)"
+    },
+    "spacing": "comfortable",
+    "typography": {
+      "display": "'Roboto Flex', 'Roboto', system-ui, sans-serif",
+      "body": "'Roboto', 'Inter', system-ui, sans-serif"
+    }
+  },
+  "css_variables": {
+    "--background": "250 30% 98%",
+    "--foreground": "250 20% 14%",
+    "--card": "250 20% 96%",
+    "--card-foreground": "250 20% 14%",
+    "--border": "250 15% 84%",
+    "--primary": "258 90% 60%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "250 25% 92%",
+    "--muted-foreground": "250 10% 42%",
+    "--ring": "258 90% 60%"
+  },
+  "surface_treatment": {
+    "root": {"background": "hsl(250 30% 98%)"},
+    "card": {"borderRadius": "16px"},
+    "button.primary": {"borderRadius": "20px"}
+  }
+}

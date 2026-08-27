@@ -1,0 +1,485 @@
+{
+  "AssessmentFeedbackWorkflow": {
+    "name": "AssessmentFeedbackWorkflow",
+    "description": "Triggered when an assessor submits structured feedback for an applicant. Persists the assessment, uses AI to classify the overall recommendation, updates the applicant status, and notifies the recruiting manager.",
+    "trigger": "manual",
+    "steps": [
+      {
+        "id": "trigger_assessment",
+        "type": "trigger",
+        "config": {
+          "entity": "Assessment",
+          "triggerType": "manual"
+        }
+      },
+      {
+        "id": "insert_assessment",
+        "type": "action",
+        "config": {
+          "table": "assessments",
+          "fields": [
+            "applicantId",
+            "recruitmentDriveId",
+            "assessorId",
+            "stage",
+            "customerServiceScore",
+            "communicationScore",
+            "teamworkScore",
+            "safetyAwarenessScore",
+            "overallRecommendation",
+            "notes",
+            "completedAt"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "classify_recommendation",
+        "type": "action",
+        "config": {
+          "classes": [
+            "Advance",
+            "Hold",
+            "Reject"
+          ],
+          "actionType": "ai_classify",
+          "inputFields": [
+            "customerServiceScore",
+            "communicationScore",
+            "teamworkScore",
+            "safetyAwarenessScore",
+            "overallRecommendation"
+          ],
+          "outputField": "derivedStatus"
+        }
+      },
+      {
+        "id": "decision_gate",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "derivedStatus"
+        }
+      },
+      {
+        "id": "update_status_advance",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Offer Made"
+        }
+      },
+      {
+        "id": "update_status_hold",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Shortlisted"
+        }
+      },
+      {
+        "id": "update_status_reject",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Rejected"
+        }
+      },
+      {
+        "id": "notify_manager_assessment",
+        "type": "action",
+        "config": {
+          "message": "Assessment feedback submitted. Applicant status updated.",
+          "actionType": "send_notification",
+          "recipientRole": "manager"
+        }
+      },
+      {
+        "id": "end_assessment",
+        "type": "end"
+      }
+    ]
+  },
+  "ApplicationDeadlineReminderWorkflow": {
+    "name": "ApplicationDeadlineReminderWorkflow",
+    "description": "Runs daily to check recruitment drives whose application deadline is within 48 hours. Sends reminder notifications to recruiters and emails applicants who have started but not submitted applications.",
+    "trigger": "schedule",
+    "steps": [
+      {
+        "id": "trigger_daily_check",
+        "type": "trigger",
+        "config": {
+          "cron": "0 8 * * *",
+          "triggerType": "schedule"
+        }
+      },
+      {
+        "id": "query_upcoming_deadlines",
+        "type": "action",
+        "config": {
+          "table": "recruitment_drives",
+          "filter": "applicationDeadline <= NOW() + INTERVAL '48 hours' AND status = 'Open'",
+          "actionType": "db_query",
+          "outputField": "upcomingDrives"
+        }
+      },
+      {
+        "id": "check_drives_found",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "upcomingDrives.length > 0"
+        }
+      },
+      {
+        "id": "notify_recruiters_deadline",
+        "type": "action",
+        "config": {
+          "message": "Application deadline is approaching within 48 hours for one or more drives.",
+          "actionType": "send_notification",
+          "recipientRole": "recruiter"
+        }
+      },
+      {
+        "id": "send_applicant_reminders",
+        "type": "action",
+        "config": {
+          "subject": "Reminder: Complete your Cabin Crew application",
+          "actionType": "send_email",
+          "templateId": "application_deadline_reminder",
+          "recipientField": "incompleteApplicants.email"
+        }
+      },
+      {
+        "id": "end_no_deadlines",
+        "type": "end"
+      },
+      {
+        "id": "end_deadline_reminder",
+        "type": "end"
+      }
+    ]
+  },
+  "OfferWorkflow": {
+    "name": "OfferWorkflow",
+    "description": "Triggered when a recruiter clicks Make Offer on an applicant. Generates an offer letter document, emails it to the applicant, updates status to Offer Made, and schedules a follow-up reminder if no response in 5 days.",
+    "trigger": "manual",
+    "steps": [
+      {
+        "id": "trigger_offer",
+        "type": "trigger",
+        "config": {
+          "entity": "Applicant",
+          "triggerType": "manual"
+        }
+      },
+      {
+        "id": "generate_offer_letter",
+        "type": "action",
+        "config": {
+          "actionType": "generate_document",
+          "templateId": "cabin_crew_offer_letter",
+          "outputField": "offerLetterUrl"
+        }
+      },
+      {
+        "id": "update_status_offer",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Offer Made"
+        }
+      },
+      {
+        "id": "email_offer",
+        "type": "action",
+        "config": {
+          "subject": "Congratulations \u2014 Cabin Crew Offer Letter",
+          "actionType": "send_email",
+          "templateId": "offer_letter_email",
+          "recipientField": "applicant.email",
+          "attachmentField": "offerLetterUrl"
+        }
+      },
+      {
+        "id": "wait_for_response",
+        "type": "wait",
+        "config": {
+          "duration": "5d",
+          "resumeOn": "applicant_response"
+        }
+      },
+      {
+        "id": "check_response",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "applicant.status === 'Offer Accepted'"
+        }
+      },
+      {
+        "id": "end_accepted",
+        "type": "end"
+      },
+      {
+        "id": "send_followup_reminder",
+        "type": "action",
+        "config": {
+          "message": "Applicant has not responded to offer after 5 days. Follow up required.",
+          "actionType": "send_notification",
+          "recipientRole": "recruiter"
+        }
+      },
+      {
+        "id": "end_reminder",
+        "type": "end"
+      }
+    ]
+  },
+  "ApplicantShortlistWorkflow": {
+    "name": "ApplicantShortlistWorkflow",
+    "description": "Manually triggered by a recruiter clicking Shortlist or Reject on an applicant. Classifies the decision, updates applicant status, logs a recruiter note, and sends the applicant a notification email.",
+    "trigger": "manual",
+    "steps": [
+      {
+        "id": "trigger_shortlist",
+        "type": "trigger",
+        "config": {
+          "entity": "Applicant",
+          "triggerType": "manual"
+        }
+      },
+      {
+        "id": "check_decision",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "input.decision === 'Shortlist'"
+        }
+      },
+      {
+        "id": "set_shortlisted",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Shortlisted"
+        }
+      },
+      {
+        "id": "email_shortlisted",
+        "type": "action",
+        "config": {
+          "subject": "You have been shortlisted \u2014 Cabin Crew Recruitment",
+          "actionType": "send_email",
+          "templateId": "applicant_shortlisted",
+          "recipientField": "applicant.email"
+        }
+      },
+      {
+        "id": "set_rejected",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Rejected"
+        }
+      },
+      {
+        "id": "email_rejected",
+        "type": "action",
+        "config": {
+          "subject": "Your application outcome \u2014 Cabin Crew Recruitment",
+          "actionType": "send_email",
+          "templateId": "applicant_rejected",
+          "recipientField": "applicant.email"
+        }
+      },
+      {
+        "id": "log_note",
+        "type": "action",
+        "config": {
+          "table": "recruiter_notes",
+          "fields": [
+            "applicantId",
+            "authorId",
+            "content",
+            "noteType"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "notify_team",
+        "type": "action",
+        "config": {
+          "message": "Applicant status updated.",
+          "actionType": "send_notification",
+          "recipientRole": "recruiter"
+        }
+      },
+      {
+        "id": "end_shortlist",
+        "type": "end"
+      }
+    ]
+  },
+  "CVParseWorkflow": {
+    "name": "CVParseWorkflow",
+    "description": "Triggered when a new applicant record is created with a CV file URL. Extracts structured data from the uploaded CV using AI, persists parsed fields back to the applicant record, and notifies the recruiter.",
+    "trigger": "db_change",
+    "steps": [
+      {
+        "id": "trigger_cv_upload",
+        "type": "trigger",
+        "config": {
+          "event": "insert",
+          "table": "applicants",
+          "triggerType": "db_change"
+        }
+      },
+      {
+        "id": "extract_cv_data",
+        "type": "action",
+        "config": {
+          "actionType": "ai_extract",
+          "inputField": "cvFileUrl",
+          "outputFields": [
+            "firstName",
+            "lastName",
+            "email",
+            "phone",
+            "languagesSpoken",
+            "workExperience",
+            "education"
+          ]
+        }
+      },
+      {
+        "id": "update_applicant_cv",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "cvParsedData",
+            "firstName",
+            "lastName",
+            "email",
+            "phone",
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "CV Reviewed"
+        }
+      },
+      {
+        "id": "notify_recruiter_cv",
+        "type": "action",
+        "config": {
+          "message": "New applicant CV parsed and ready for review.",
+          "actionType": "send_notification",
+          "recipientRole": "recruiter"
+        }
+      },
+      {
+        "id": "end_cv_parse",
+        "type": "end"
+      }
+    ]
+  },
+  "DriveStatusWorkflow": {
+    "name": "DriveStatusWorkflow",
+    "description": "Triggered by recruiter clicking Open Applications or Close Drive on a recruitment drive. Updates the drive status, notifies relevant team members, and on close generates a drive summary report.",
+    "trigger": "manual",
+    "steps": [
+      {
+        "id": "trigger_drive_status",
+        "type": "trigger",
+        "config": {
+          "entity": "RecruitmentDrive",
+          "triggerType": "manual"
+        }
+      },
+      {
+        "id": "check_drive_action",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "input.action === 'Open'"
+        }
+      },
+      {
+        "id": "set_drive_open",
+        "type": "action",
+        "config": {
+          "table": "recruitment_drives",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Open"
+        }
+      },
+      {
+        "id": "notify_open",
+        "type": "action",
+        "config": {
+          "message": "Recruitment drive is now open for applications.",
+          "actionType": "send_notification",
+          "recipientRole": "recruiter"
+        }
+      },
+      {
+        "id": "set_drive_closed",
+        "type": "action",
+        "config": {
+          "table": "recruitment_drives",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update",
+          "statusValue": "Closed"
+        }
+      },
+      {
+        "id": "generate_drive_report",
+        "type": "action",
+        "config": {
+          "actionType": "generate_document",
+          "templateId": "recruitment_drive_summary",
+          "outputField": "driveReportUrl"
+        }
+      },
+      {
+        "id": "notify_closed",
+        "type": "action",
+        "config": {
+          "message": "Recruitment drive closed. Summary report generated.",
+          "actionType": "send_notification",
+          "recipientRole": "manager"
+        }
+      },
+      {
+        "id": "end_drive_status",
+        "type": "end"
+      }
+    ]
+  }
+}

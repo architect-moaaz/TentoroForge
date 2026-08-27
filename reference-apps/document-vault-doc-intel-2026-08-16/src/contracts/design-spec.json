@@ -1,0 +1,211 @@
+{
+  "colorPalette": {
+    "primary": "#92400E",
+    "accent": "#D97706",
+    "background": "#FFFFFF",
+    "surface": "#F8FAFC",
+    "border": "#D7D8DB",
+    "muted": "#525252",
+    "textPrimary": "#0F172A",
+    "textSecondary": "#475569",
+    "sidebarBg": "#0B1220",
+    "sidebarText": "#CBD5E1",
+    "success": "#16A34A",
+    "warning": "#F59E0B",
+    "error": "#DC2626",
+    "info": "#3B82F6",
+    "_scales": {
+      "brand": {
+        "50": "#F3FBFE",
+        "100": "#DAF2FD",
+        "200": "#B5E5FB",
+        "300": "#83D3F8",
+        "400": "#45BEF4",
+        "500": "#0EA5E9",
+        "600": "#0B84BA",
+        "700": "#08638C",
+        "800": "#06425D",
+        "900": "#032433",
+        "950": "#011017"
+      },
+      "accent": {
+        "50": "#FFF8F3",
+        "100": "#FEEADC",
+        "200": "#FDD5B9",
+        "300": "#FCB98A",
+        "400": "#FA9650",
+        "500": "#F97316",
+        "600": "#D35A05",
+        "700": "#9F4304",
+        "800": "#6A2D03",
+        "900": "#3A1901",
+        "950": "#1A0B01"
+      },
+      "neutral": {
+        "50": "#F7F7F8",
+        "100": "#ECEDEE",
+        "200": "#D7D8DB",
+        "300": "#BCBEC2",
+        "400": "#999CA3",
+        "500": "#797D86",
+        "600": "#666970",
+        "700": "#52555B",
+        "800": "#3F4146",
+        "900": "#2C2D30",
+        "950": "#18191B"
+      }
+    },
+    "surfaceHover": "#F1F5F9",
+    "textTertiary": "#94A3B8",
+    "sidebarActiveItem": "#D97706"
+  },
+  "typography": {
+    "display": {
+      "family": "IBM Plex Sans",
+      "weights": [
+        500,
+        700
+      ],
+      "weight": 700
+    },
+    "body": {
+      "family": "IBM Plex Sans",
+      "weights": [
+        400,
+        500,
+        600
+      ]
+    },
+    "utility": {
+      "family": "IBM Plex Mono"
+    },
+    "scale": {
+      "h1": "1.875rem",
+      "h2": "1.5rem",
+      "h3": "1.25rem",
+      "body": "1rem",
+      "caption": "0.8125rem"
+    },
+    "fontFamily": "Nunito, system-ui, sans-serif",
+    "headingFontFamily": "Plus Jakarta Sans, system-ui, sans-serif",
+    "bodyWeight": 400,
+    "headingWeight": 700,
+    "lineHeight": "1.5",
+    "numeric": {
+      "family": "Inter, system-ui, sans-serif",
+      "tabular": true
+    },
+    "bodyText": {
+      "family": "Inter, system-ui, sans-serif",
+      "weight": 400,
+      "lineHeight": 1.5
+    }
+  },
+  "layout": {
+    "density": "comfortable",
+    "radius": {
+      "sm": 1,
+      "md": 3,
+      "lg": 4
+    },
+    "grid": "12-col fixed 1280px max, 24px gutters",
+    "navigation": "sidebar-light"
+  },
+  "borderRadius": {
+    "sm": "0.375rem",
+    "md": "0.625rem",
+    "lg": "0.875rem",
+    "xl": "1.25rem",
+    "full": "9999px"
+  },
+  "modes": {
+    "light": true,
+    "dark": true
+  },
+  "motion": {
+    "durationFastMs": 120,
+    "durationMediumMs": 240,
+    "durationSlowMs": 480,
+    "easeOut": "cubic-bezier(0.2, 0.0, 0.0, 1.0)",
+    "easeInOut": "cubic-bezier(0.4, 0.0, 0.2, 1.0)",
+    "reduceMotionRespect": true
+  },
+  "responsive": {
+    "primaryFormFactor": "desktop",
+    "breakpointsPriority": [
+      "desktop",
+      "tablet",
+      "mobile"
+    ],
+    "layoutVariants": []
+  },
+  "cta_hierarchy": {
+    "primary": {
+      "variant": "primary",
+      "max_per_page": 1,
+      "min_per_page": 1
+    },
+    "secondary": {
+      "variant": "secondary",
+      "max_per_page": 3,
+      "min_per_page": 0
+    },
+    "tertiary": {
+      "variant": "ghost",
+      "max_per_page": null,
+      "min_per_page": 0
+    }
+  },
+  "tokens": {
+    "surface": {
+      "gradient": {
+        "subtle": {
+          "type": "linear",
+          "angle": 135,
+          "from": "tokens.color.primary.50",
+          "to": "tokens.color.surface.0"
+        },
+        "vibrant": {
+          "type": "linear",
+          "angle": 135,
+          "from": "tokens.color.primary.200",
+          "to": "tokens.color.primary.50"
+        }
+      },
+      "shadow": {
+        "subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.04)",
+        "elevated": "0 8px 24px -8px rgba(15, 23, 42, 0.18)",
+        "floating": "0 16px 48px -16px rgba(15, 23, 42, 0.28)"
+      }
+    }
+  },
+  "entityPhotos": {
+    "User": "https://picsum.photos/seed/c2e4d65e693e/1600/900",
+    "Document": "https://picsum.photos/seed/145f9f88d179/1600/900",
+    "ProcessDocumentJob": "https://picsum.photos/seed/145f9f88d179/1600/900"
+  },
+  "shadows": {
+    "sm": "0 1px 3px rgba(0,0,0,.10)",
+    "md": "0 4px 12px rgba(0,0,0,.12)",
+    "lg": "0 12px 32px rgba(0,0,0,.16)",
+    "xl": "0 24px 56px rgba(0,0,0,.20)"
+  },
+  "animation": {
+    "duration": "220ms, 400ms"
+  },
+  "_designTemplate": {
+    "id": "warm-paper",
+    "name": "Warm Paper",
+    "provenance": "sampled from document management redesign case studies (updivision WebGed redesign, Behance document management dashboard projects) — observed: warm off-white canvas evoking physical paper, amber-tinted sidebar navigation, rounded card components for each uploaded document record, comfortable row spacing, soft drop shadows under upload zones and result cards, humanist sans body type"
+  },
+  "register": "default",
+  "spacing": {
+    "semantic": {
+      "page": "2rem",
+      "card": "1.25rem",
+      "section": "4rem",
+      "element": "1rem",
+      "input": "0.75rem"
+    }
+  }
+}

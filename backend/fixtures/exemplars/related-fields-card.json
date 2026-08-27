@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "2",
+  "id": "leads/new",
+  "route": "/leads/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Create Lead" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "children": [
+      {
+        "id": "lead-form",
+        "type": "Form",
+        "props": {},
+        "children": [
+          {
+            "id": "address-card",
+            "type": "Card",
+            "props": { "title": "Address" },
+            "children": [
+              {
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+                "children": [
+                  { "type": "Input", "props": { "name": "street", "label": "Street", "type": "text" } },
+                  { "type": "Input", "props": { "name": "city",   "label": "City",   "type": "text" } },
+                  { "type": "Input", "props": { "name": "state",  "label": "State",  "type": "text" } },
+                  { "type": "Input", "props": { "name": "zip",    "label": "Zip",    "type": "text" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "btn-submit",
+            "type": "Button",
+            "props": { "label": "Save Address", "variant": "primary", "workflow": "saveAddress" }
+          }
+        ]
+      }
+    ]
+  }
+}

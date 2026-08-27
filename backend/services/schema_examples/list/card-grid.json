@@ -1,0 +1,259 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/list",
+  "route": "/leave-requests",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Leave Requests" },
+  "dataSources": [
+    { "name": "requests", "entity": "LeaveRequest", "op": "list" },
+    { "name": "stats",    "entity": "LeaveRequest", "op": "stats" }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "TIME OFF",
+          "headline": "Leave Requests",
+          "subhead": "Submit, track, and approve time-off requests across your team.",
+          "layout": "centered",
+          "ctas": [
+            {
+              "label": "New Request",
+              "action": { "type": "navigate", "to": "/leave-requests/new" },
+              "variant": "primary"
+            },
+            {
+              "label": "Calendar View",
+              "action": { "type": "navigate", "to": "/calendar" },
+              "variant": "secondary"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.50",
+            "to": "tokens.color.surface.0"
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.lg",
+          "motion": "fade-in"
+        }
+      },
+      {
+        "id": "stats-row",
+        "type": "Cluster",
+        "props": {
+          "justify": "between",
+          "align": "center",
+          "gap": "tokens.spacing.4"
+        },
+        "style": { "motion": "fade-up" },
+        "children": [
+          {
+            "id": "stat-pending",
+            "type": "MetricTile",
+            "props": {
+              "label": "Pending Review",
+              "value": 12,
+              "format": "number",
+              "delta": { "value": 0.20, "direction": "up" },
+              "icon": "clock"
+            }
+          },
+          {
+            "id": "stat-approved",
+            "type": "MetricTile",
+            "props": {
+              "label": "Approved",
+              "value": 47,
+              "format": "number",
+              "delta": { "value": 0.10, "direction": "up" },
+              "icon": "check-circle"
+            }
+          },
+          {
+            "id": "stat-rejected",
+            "type": "MetricTile",
+            "props": {
+              "label": "Declined",
+              "value": 3,
+              "format": "number",
+              "delta": { "value": 0.05, "direction": "down" },
+              "icon": "x-circle"
+            }
+          },
+          {
+            "id": "stat-balance",
+            "type": "MetricTile",
+            "props": {
+              "label": "Avg Remaining Days",
+              "value": 18,
+              "format": "number",
+              "icon": "calendar"
+            }
+          }
+        ]
+      },
+      {
+        "id": "results-section",
+        "type": "Section",
+        "props": { "variant": "plain", "title": "All Requests" },
+        "style": { "motion": "fade-up" },
+        "children": [
+          {
+            "id": "results-grid",
+            "type": "Grid",
+            "props": { "columns": 3, "gap": "tokens.spacing.4" },
+            "children": [
+              {
+                "id": "card-pending-1",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                  "padding": "tokens.spacing.6",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.md"
+                },
+                "children": [
+                  {
+                    "id": "card-1-header",
+                    "type": "Row",
+                    "props": { "justify": "between", "align": "center" },
+                    "children": [
+                      {
+                        "id": "card-1-name",
+                        "type": "Text",
+                        "props": { "content": "Jane Doe", "as": "strong" }
+                      },
+                      {
+                        "id": "card-1-badge",
+                        "type": "Avatar",
+                        "props": { "name": "Jane Doe", "size": "sm", "status": "away" }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "card-1-type",
+                    "type": "Text",
+                    "props": { "content": "Annual Leave", "as": "p" }
+                  },
+                  {
+                    "id": "card-1-dates",
+                    "type": "Text",
+                    "props": { "content": "Dec 24 — Dec 31, 2024", "as": "p" }
+                  },
+                  {
+                    "id": "card-1-reason",
+                    "type": "Text",
+                    "props": { "content": "Year-end family time", "as": "p" }
+                  }
+                ]
+              },
+              {
+                "id": "card-approved-2",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                  "padding": "tokens.spacing.6",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.md"
+                },
+                "children": [
+                  {
+                    "id": "card-2-header",
+                    "type": "Row",
+                    "props": { "justify": "between", "align": "center" },
+                    "children": [
+                      {
+                        "id": "card-2-name",
+                        "type": "Text",
+                        "props": { "content": "Marcus Chen", "as": "strong" }
+                      },
+                      {
+                        "id": "card-2-avatar",
+                        "type": "Avatar",
+                        "props": { "name": "Marcus Chen", "size": "sm", "status": "online" }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "card-2-type",
+                    "type": "Text",
+                    "props": { "content": "Sick Leave", "as": "p" }
+                  },
+                  {
+                    "id": "card-2-dates",
+                    "type": "Text",
+                    "props": { "content": "Jan 8 — Jan 10, 2025", "as": "p" }
+                  },
+                  {
+                    "id": "card-2-reason",
+                    "type": "Text",
+                    "props": { "content": "Medical appointment + recovery", "as": "p" }
+                  }
+                ]
+              },
+              {
+                "id": "card-pending-3",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                  "padding": "tokens.spacing.6",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.md"
+                },
+                "children": [
+                  {
+                    "id": "card-3-header",
+                    "type": "Row",
+                    "props": { "justify": "between", "align": "center" },
+                    "children": [
+                      {
+                        "id": "card-3-name",
+                        "type": "Text",
+                        "props": { "content": "Priya Nair", "as": "strong" }
+                      },
+                      {
+                        "id": "card-3-avatar",
+                        "type": "Avatar",
+                        "props": { "name": "Priya Nair", "size": "sm" }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "card-3-type",
+                    "type": "Text",
+                    "props": { "content": "Parental Leave", "as": "p" }
+                  },
+                  {
+                    "id": "card-3-dates",
+                    "type": "Text",
+                    "props": { "content": "Feb 1 — Apr 30, 2025", "as": "p" }
+                  },
+                  {
+                    "id": "card-3-reason",
+                    "type": "Text",
+                    "props": { "content": "Maternity leave — approved by HR", "as": "p" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

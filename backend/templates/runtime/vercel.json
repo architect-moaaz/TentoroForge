@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npx tsx src/db/reset-schema.ts && npx drizzle-kit push --config=drizzle.config.ts --force --verbose && npx tsx src/db/seed.ts && next build && node scripts/fix-rsc-manifest.js",
+  "installCommand": "npm install --legacy-peer-deps",
+  "crons": [
+    { "path": "/api/cron/tick", "schedule": "*/15 * * * *" }
+  ],
+  "functions": {
+    "src/app/api/**/route.ts": { "maxDuration": 60 },
+    "src/app/**/page.tsx": {
+      "includeFiles": "src/{schemas,contracts}/**/*.json"
+    },
+    "src/app/**/layout.tsx": {
+      "includeFiles": "src/{schemas,contracts}/**/*.json"
+    }
+  }
+}

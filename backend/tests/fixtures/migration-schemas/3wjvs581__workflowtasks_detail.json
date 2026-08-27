@@ -1,0 +1,654 @@
+{
+  "schemaVersion": "2",
+  "id": "workflow-tasks/detail",
+  "route": "/workflow-tasks/:id",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Workflow Task Details"
+  },
+  "dataSources": [
+    {
+      "name": "workflowTask",
+      "entity": "WorkflowTask",
+      "op": "get"
+    },
+    {
+      "name": "leaveRequest",
+      "entity": "LeaveRequest",
+      "op": "get",
+      "filter": {
+        "id": "workflowTask.entityId"
+      }
+    },
+    {
+      "name": "employee",
+      "entity": "Employee",
+      "op": "get",
+      "filter": {
+        "id": "leaveRequest.employeeId"
+      }
+    },
+    {
+      "name": "assignee",
+      "entity": "Employee",
+      "op": "get",
+      "filter": {
+        "id": "workflowTask.assigneeId"
+      }
+    },
+    {
+      "name": "taskHistory",
+      "entity": "WorkflowTaskHistory",
+      "op": "list",
+      "filter": {
+        "workflowTaskId": ":id"
+      },
+      "orderBy": [
+        {
+          "field": "createdAt",
+          "dir": "desc"
+        }
+      ]
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "task-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "WORKFLOW TASK",
+              "headline": "{{workflowTask.title}}",
+              "subhead": "{{workflowTask.type}} \u2022 Priority: {{workflowTask.priority}} \u2022 Due {{workflowTask.dueDate}}",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "Approve",
+                  "action": {
+                    "type": "workflow",
+                    "name": "approveTask"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "Reject",
+                  "action": {
+                    "type": "workflow",
+                    "name": "rejectTask"
+                  },
+                  "variant": "danger"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 145
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "shadow": "tokens.shadow.md"
+            }
+          },
+          {
+            "id": "task-metrics",
+            "type": "Grid",
+            "props": {
+              "columns": 4
+            },
+            "children": [
+              {
+                "id": "status-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Status",
+                  "value": "{{workflowTask.status}}",
+                  "format": "number",
+                  "icon": "clock"
+                }
+              },
+              {
+                "id": "priority-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Priority",
+                  "value": "{{workflowTask.priority}}",
+                  "format": "number",
+                  "icon": "flag"
+                }
+              },
+              {
+                "id": "days-pending-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Days Pending",
+                  "value": "{{workflowTask.daysPending}}",
+                  "format": "number",
+                  "icon": "calendar"
+                }
+              },
+              {
+                "id": "sla-metric",
+                "type": "MetricTile",
+                "props": {
+                  "label": "SLA Remaining",
+                  "value": "{{workflowTask.slaHoursRemaining}}",
+                  "format": "duration",
+                  "icon": "timer"
+                }
+              }
+            ]
+          },
+          {
+            "id": "task-content",
+            "type": "Split",
+            "props": {
+              "ratio": "2:1",
+              "breakpoint": "lg"
+            },
+            "children": [
+              {
+                "id": "main-content",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "task-details-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "task-details-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Task Details"
+                        },
+                        "children": [
+                          {
+                            "id": "task-description",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{workflowTask.description}}"
+                            },
+                            "style": {
+                              "margin": "0 0 tokens.spacing.4 0"
+                            }
+                          },
+                          {
+                            "id": "task-details-list",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Task Type",
+                                  "value": "{{workflowTask.type}}"
+                                },
+                                {
+                                  "label": "Created",
+                                  "value": "{{workflowTask.createdAt}}"
+                                },
+                                {
+                                  "label": "Due Date",
+                                  "value": "{{workflowTask.dueDate}}"
+                                },
+                                {
+                                  "label": "Workflow",
+                                  "value": "{{workflowTask.workflowName}}"
+                                },
+                                {
+                                  "label": "Step",
+                                  "value": "{{workflowTask.stepNumber}} of {{workflowTask.totalSteps}}"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "leave-request-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "leave-request-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Related Leave Request"
+                        },
+                        "children": [
+                          {
+                            "id": "employee-info",
+                            "type": "Row",
+                            "props": {
+                              "align": "center",
+                              "gap": "tokens.spacing.3"
+                            },
+                            "style": {
+                              "margin": "0 0 tokens.spacing.4 0"
+                            },
+                            "children": [
+                              {
+                                "id": "employee-avatar",
+                                "type": "Avatar",
+                                "props": {
+                                  "name": "{{employee.name}}",
+                                  "size": "md"
+                                }
+                              },
+                              {
+                                "id": "employee-details",
+                                "type": "Stack",
+                                "props": {
+                                  "direction": "vertical",
+                                  "gap": "tokens.spacing.1"
+                                },
+                                "children": [
+                                  {
+                                    "id": "employee-name",
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{employee.name}}"
+                                    }
+                                  },
+                                  {
+                                    "id": "employee-title",
+                                    "type": "Text",
+                                    "props": {
+                                      "content": "{{employee.title}} \u2022 {{employee.department}}"
+                                    },
+                                    "style": {
+                                      "color": "tokens.color.text.secondary"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": "leave-request-details",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Leave Type",
+                                  "value": "{{leaveRequest.type}}"
+                                },
+                                {
+                                  "label": "Start Date",
+                                  "value": "{{leaveRequest.startDate}}"
+                                },
+                                {
+                                  "label": "End Date",
+                                  "value": "{{leaveRequest.endDate}}"
+                                },
+                                {
+                                  "label": "Duration",
+                                  "value": "{{leaveRequest.duration}} days"
+                                },
+                                {
+                                  "label": "Reason",
+                                  "value": "{{leaveRequest.reason}}"
+                                },
+                                {
+                                  "label": "Status",
+                                  "value": "{{leaveRequest.status}}"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "task-history-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "task-history-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Task History",
+                          "subtitle": "Activity timeline for this task"
+                        },
+                        "children": [
+                          {
+                            "id": "task-history-repeat",
+                            "type": "Repeat",
+                            "bind": "taskHistory",
+                            "children": [
+                              {
+                                "id": "history-item",
+                                "type": "Row",
+                                "props": {
+                                  "justify": "between",
+                                  "align": "start",
+                                  "gap": "tokens.spacing.3"
+                                },
+                                "style": {
+                                  "padding": "tokens.spacing.3 0",
+                                  "borderBottom": "1px solid tokens.color.border.default"
+                                },
+                                "children": [
+                                  {
+                                    "id": "history-content",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "history-action",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.action}}"
+                                        }
+                                      },
+                                      {
+                                        "id": "history-details",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.details}}"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.secondary"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "id": "history-metadata",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "align": "end",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "history-user",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.user}}"
+                                        },
+                                        "style": {
+                                          "fontSize": "tokens.typography.scale.caption"
+                                        }
+                                      },
+                                      {
+                                        "id": "history-timestamp",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.timestamp}}"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.tertiary",
+                                          "fontSize": "tokens.typography.scale.caption"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "sidebar-content",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "assignee-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "assignee-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Assigned To"
+                        },
+                        "children": [
+                          {
+                            "id": "assignee-info",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "align": "center",
+                              "gap": "tokens.spacing.3"
+                            },
+                            "children": [
+                              {
+                                "id": "assignee-avatar",
+                                "type": "Avatar",
+                                "props": {
+                                  "name": "{{assignee.name}}",
+                                  "size": "lg",
+                                  "status": "{{assignee.status}}"
+                                }
+                              },
+                              {
+                                "id": "assignee-name",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{assignee.name}}"
+                                }
+                              },
+                              {
+                                "id": "assignee-title",
+                                "type": "Text",
+                                "props": {
+                                  "content": "{{assignee.title}}"
+                                },
+                                "style": {
+                                  "color": "tokens.color.text.secondary"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "assignee-contact",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Email",
+                                  "value": "{{assignee.email}}",
+                                  "copyable": true
+                                },
+                                {
+                                  "label": "Department",
+                                  "value": "{{assignee.department}}"
+                                },
+                                {
+                                  "label": "Manager",
+                                  "value": "{{assignee.manager}}"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "actions-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "actions-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Actions"
+                        },
+                        "children": [
+                          {
+                            "id": "actions-stack",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.3"
+                            },
+                            "children": [
+                              {
+                                "id": "approve-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "Approve Task",
+                                  "variant": "primary",
+                                  "workflow": "approveTask"
+                                }
+                              },
+                              {
+                                "id": "reject-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "Reject Task",
+                                  "variant": "danger",
+                                  "workflow": "rejectTask"
+                                }
+                              },
+                              {
+                                "id": "delegate-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "Delegate Task",
+                                  "variant": "secondary",
+                                  "workflow": "delegateTask"
+                                }
+                              },
+                              {
+                                "id": "request-info-button",
+                                "type": "Button",
+                                "props": {
+                                  "label": "Request More Info",
+                                  "variant": "ghost",
+                                  "workflow": "requestInfo"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "workflow-status-card",
+                    "type": "Card",
+                    "style": {
+                      "padding": "tokens.spacing.semantic.card",
+                      "background": "tokens.color.surface.0",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "workflow-status-section",
+                        "type": "Section",
+                        "props": {
+                          "variant": "plain",
+                          "title": "Workflow Progress"
+                        },
+                        "children": [
+                          {
+                            "id": "workflow-progress",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Current Step",
+                                  "value": "{{workflowTask.stepNumber}} of {{workflowTask.totalSteps}}"
+                                },
+                                {
+                                  "label": "Workflow Type",
+                                  "value": "{{workflowTask.workflowName}}"
+                                },
+                                {
+                                  "label": "Started",
+                                  "value": "{{workflowTask.workflowStartDate}}"
+                                },
+                                {
+                                  "label": "Next Step",
+                                  "value": "{{workflowTask.nextStep}}"
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

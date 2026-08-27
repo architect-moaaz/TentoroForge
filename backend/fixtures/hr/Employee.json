@@ -1,0 +1,12 @@
+[
+  { "id": "emp-001", "employeeId": "EMP-00542", "name": "Sarah Chen", "jobTitle": "Senior Engineer", "department": "Engineering", "manager": "Marcus Lee", "startDate": "2022-04-15", "status": "active" },
+  { "id": "emp-002", "employeeId": "EMP-00184", "name": "Marcus Lee", "jobTitle": "Engineering Manager", "department": "Engineering", "manager": "Diego Alvarez", "startDate": "2019-08-22", "status": "active" },
+  { "id": "emp-003", "employeeId": "EMP-01029", "name": "Ana Martins", "jobTitle": "Product Designer", "department": "Design", "manager": "Priya Shah", "startDate": "2023-02-08", "status": "active" },
+  { "id": "emp-004", "employeeId": "EMP-00763", "name": "Kenji Tanaka", "jobTitle": "Staff Engineer", "department": "Engineering", "manager": "Marcus Lee", "startDate": "2020-11-30", "status": "active" },
+  { "id": "emp-005", "employeeId": "EMP-00219", "name": "Priya Shah", "jobTitle": "VP of Design", "department": "Design", "manager": null, "startDate": "2018-06-14", "status": "active" },
+  { "id": "emp-006", "employeeId": "EMP-01284", "name": "Diego Alvarez", "jobTitle": "VP of Engineering", "department": "Engineering", "manager": null, "startDate": "2017-03-04", "status": "active" },
+  { "id": "emp-007", "employeeId": "EMP-00891", "name": "Fatima Rashid", "jobTitle": "Senior Engineer", "department": "Engineering", "manager": "Marcus Lee", "startDate": "2021-09-12", "status": "active" },
+  { "id": "emp-008", "employeeId": "EMP-00456", "name": "Noah Müller", "jobTitle": "Operations Lead", "department": "Operations", "manager": "Imani Okonkwo", "startDate": "2022-12-08", "status": "on-leave" },
+  { "id": "emp-009", "employeeId": "EMP-00328", "name": "Imani Okonkwo", "jobTitle": "VP of Operations", "department": "Operations", "manager": null, "startDate": "2019-04-22", "status": "active" },
+  { "id": "emp-010", "employeeId": "EMP-01437", "name": "Yuki Watanabe", "jobTitle": "Junior Engineer", "department": "Engineering", "manager": "Fatima Rashid", "startDate": "2024-09-02", "status": "probation" }
+]

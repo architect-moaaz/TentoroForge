@@ -1,0 +1,27 @@
+{
+  "capability": "deep_linking",
+  "permissions": {
+    "ios": {
+      "$associated_domains": ["applinks:${APP_DOMAIN}"]
+    },
+    "android": [],
+    "expo_plugins": ["expo-linking"],
+    "app_json_extras": {
+      "scheme": "${APP_SCHEME}",
+      "ios_associated_domains": true,
+      "android_intent_filters": true
+    }
+  },
+  "native_imports": {
+    "expo": ["expo-linking"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/DeepLinkProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useDeepLink", "useInitialURL"]
+  },
+  "integration_keys": [
+    {"provider": "app_domain", "env_var": "APP_DOMAIN", "optional": false, "docs": "The domain used for universal links (e.g. app.example.com). Must have apple-app-site-association file."}
+  ]
+}

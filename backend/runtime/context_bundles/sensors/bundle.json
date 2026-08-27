@@ -1,0 +1,23 @@
+{
+  "capability": "sensors",
+  "permissions": {
+    "ios": {
+      "NSMotionUsageDescription": "We use motion sensors to detect activity and step count."
+    },
+    "android": [
+      "android.permission.ACTIVITY_RECOGNITION",
+      "android.permission.BODY_SENSORS"
+    ],
+    "expo_plugins": ["expo-sensors"]
+  },
+  "native_imports": {
+    "expo": ["expo-sensors"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/SensorsProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useAccelerometer", "useGyroscope", "usePedometer"]
+  },
+  "integration_keys": []
+}

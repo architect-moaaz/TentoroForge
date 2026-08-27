@@ -1,0 +1,450 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/detail",
+  "route": "/leave-requests/:id",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Leave Request Details"
+  },
+  "dataSources": [
+    {
+      "name": "leaveRequest",
+      "entity": "LeaveRequest",
+      "op": "get"
+    },
+    {
+      "name": "employee",
+      "entity": "Employee",
+      "op": "get",
+      "filter": {
+        "id": "leaveRequest.employeeId"
+      }
+    },
+    {
+      "name": "approvalHistory",
+      "entity": "ApprovalHistory",
+      "op": "list",
+      "filter": {
+        "leaveRequestId": ":id"
+      },
+      "orderBy": [
+        {
+          "field": "createdAt",
+          "dir": "desc"
+        }
+      ]
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "request-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "LEAVE REQUEST",
+              "headline": "{{leaveRequest.type}} - {{employee.name}}",
+              "subhead": "{{leaveRequest.startDate}} to {{leaveRequest.endDate}} \u2022 {{leaveRequest.totalDays}} days",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "Approve Request",
+                  "action": {
+                    "type": "workflow",
+                    "name": "approveLeaveRequest"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "Reject Request",
+                  "action": {
+                    "type": "workflow",
+                    "name": "rejectLeaveRequest"
+                  },
+                  "variant": "danger"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 145
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "shadow": "tokens.shadow.md",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "status-metrics",
+            "type": "Row",
+            "props": {
+              "gap": "tokens.spacing.4",
+              "align": "center",
+              "justify": "center"
+            },
+            "children": [
+              {
+                "id": "status-badge",
+                "type": "Badge",
+                "props": {
+                  "content": "{{leaveRequest.status}}",
+                  "variant": "primary"
+                }
+              },
+              {
+                "id": "priority-badge",
+                "type": "Badge",
+                "props": {
+                  "content": "{{leaveRequest.priority}}",
+                  "variant": "neutral"
+                }
+              }
+            ]
+          },
+          {
+            "id": "main-split",
+            "type": "Split",
+            "props": {
+              "ratio": "1:2",
+              "breakpoint": "lg"
+            },
+            "children": [
+              {
+                "id": "employee-sidebar",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.4"
+                },
+                "style": {
+                  "background": {
+                    "type": "solid",
+                    "value": "tokens.color.surface.0"
+                  },
+                  "padding": "tokens.spacing.6",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                },
+                "children": [
+                  {
+                    "id": "employee-header",
+                    "type": "Heading",
+                    "props": {
+                      "content": "Employee Information",
+                      "level": 3
+                    }
+                  },
+                  {
+                    "id": "employee-profile",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.3",
+                      "align": "center"
+                    },
+                    "children": [
+                      {
+                        "id": "avatar",
+                        "type": "Avatar",
+                        "props": {
+                          "name": "{{employee.name}}",
+                          "size": "lg"
+                        }
+                      },
+                      {
+                        "id": "employee-name-title",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.1"
+                        },
+                        "children": [
+                          {
+                            "id": "employee-name",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{employee.name}}",
+                              "as": "h4"
+                            }
+                          },
+                          {
+                            "id": "employee-title",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{employee.title}}",
+                              "as": "p"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "employee-details",
+                    "type": "KeyValueList",
+                    "props": {
+                      "items": [
+                        {
+                          "label": "Department",
+                          "value": "{{employee.department}}"
+                        },
+                        {
+                          "label": "Manager",
+                          "value": "{{employee.managerName}}"
+                        },
+                        {
+                          "label": "Employee ID",
+                          "value": "{{employee.employeeId}}",
+                          "copyable": true
+                        },
+                        {
+                          "label": "Email",
+                          "value": "{{employee.email}}",
+                          "copyable": true
+                        },
+                        {
+                          "label": "Leave Balance",
+                          "value": "{{employee.leaveBalance}} days"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "main-content",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "request-details-section",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Request Details"
+                    },
+                    "style": {
+                      "background": {
+                        "type": "solid",
+                        "value": "tokens.color.surface.0"
+                      },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "request-info-grid",
+                        "type": "Grid",
+                        "props": {
+                          "columns": 2,
+                          "gap": "tokens.spacing.4"
+                        },
+                        "children": [
+                          {
+                            "id": "request-basic-info",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Leave Type",
+                                  "value": "{{leaveRequest.type}}"
+                                },
+                                {
+                                  "label": "Start Date",
+                                  "value": "{{leaveRequest.startDate}}"
+                                },
+                                {
+                                  "label": "End Date",
+                                  "value": "{{leaveRequest.endDate}}"
+                                },
+                                {
+                                  "label": "Total Days",
+                                  "value": "{{leaveRequest.totalDays}} days"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "id": "request-status-info",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Status",
+                                  "value": "{{leaveRequest.status}}"
+                                },
+                                {
+                                  "label": "Priority",
+                                  "value": "{{leaveRequest.priority}}"
+                                },
+                                {
+                                  "label": "Submitted Date",
+                                  "value": "{{leaveRequest.submittedDate}}"
+                                },
+                                {
+                                  "label": "Request ID",
+                                  "value": "{{leaveRequest.id}}",
+                                  "copyable": true
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "reason-section",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.2"
+                        },
+                        "children": [
+                          {
+                            "id": "reason-label",
+                            "type": "Heading",
+                            "props": {
+                              "content": "Reason",
+                              "level": 4
+                            }
+                          },
+                          {
+                            "id": "reason-text",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{leaveRequest.reason}}",
+                              "as": "p"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "approval-workflow-section",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Approval Workflow",
+                      "subtitle": "Review history and current status"
+                    },
+                    "style": {
+                      "background": {
+                        "type": "solid",
+                        "value": "tokens.color.surface.0"
+                      },
+                      "padding": "tokens.spacing.6",
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "approval-history-repeat",
+                        "type": "Repeat",
+                        "bind": "approvalHistory",
+                        "children": [
+                          {
+                            "id": "approval-item",
+                            "type": "Row",
+                            "props": {
+                              "gap": "tokens.spacing.4",
+                              "align": "center",
+                              "justify": "between"
+                            },
+                            "style": {
+                              "padding": "tokens.spacing.4",
+                              "radius": "tokens.radius.md",
+                              "background": {
+                                "type": "solid",
+                                "value": "tokens.color.surface.1"
+                              }
+                            },
+                            "children": [
+                              {
+                                "id": "approver-info",
+                                "type": "Row",
+                                "props": {
+                                  "gap": "tokens.spacing.3",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "id": "approver-avatar",
+                                    "type": "Avatar",
+                                    "props": {
+                                      "name": "{{item.approverName}}",
+                                      "size": "sm"
+                                    }
+                                  },
+                                  {
+                                    "id": "approver-details",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "approver-name",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.approverName}}",
+                                          "as": "span"
+                                        }
+                                      },
+                                      {
+                                        "id": "approval-date",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.createdAt}}",
+                                          "as": "small"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "approval-status",
+                                "type": "Badge",
+                                "props": {
+                                  "content": "{{item.status}}",
+                                  "variant": "success"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

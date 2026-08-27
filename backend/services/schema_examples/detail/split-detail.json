@@ -1,0 +1,289 @@
+{
+  "schemaVersion": "2",
+  "id": "projects/detail",
+  "route": "/projects/:id",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Project Detail" },
+  "dataSources": [
+    { "name": "project",   "entity": "Project",       "op": "get" },
+    { "name": "milestones","entity": "Milestone",      "op": "list",
+      "filter": { "projectId": ":id" },
+      "orderBy": [{ "field": "dueDate", "dir": "asc" }] },
+    { "name": "members",   "entity": "ProjectMember",  "op": "list",
+      "filter": { "projectId": ":id" } }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "page-header",
+        "type": "Row",
+        "props": { "justify": "between", "align": "center" },
+        "children": [
+          {
+            "id": "breadcrumb",
+            "type": "Text",
+            "props": { "content": "Projects / Q1 Workforce Analytics Dashboard", "as": "span" }
+          },
+          {
+            "id": "header-actions",
+            "type": "Cluster",
+            "props": { "gap": "tokens.spacing.3", "justify": "end", "align": "center" },
+            "children": [
+              {
+                "id": "btn-edit",
+                "type": "FadeIn",
+                "props": { "duration": 200 },
+                "children": [
+                  {
+                    "id": "edit-link",
+                    "type": "Text",
+                    "props": { "content": "Edit Project", "as": "span" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "project-stats",
+        "type": "Cluster",
+        "props": { "justify": "start", "align": "center", "gap": "tokens.spacing.4" },
+        "style": { "motion": "fade-up" },
+        "children": [
+          {
+            "id": "stat-progress",
+            "type": "MetricTile",
+            "props": {
+              "label": "Completion",
+              "value": 67,
+              "format": "percent",
+              "delta": { "value": 0.12, "direction": "up" },
+              "icon": "trending-up",
+              "importance": "primary"
+            }
+          },
+          {
+            "id": "stat-milestones",
+            "type": "MetricTile",
+            "props": {
+              "label": "Milestones",
+              "value": "5 / 8",
+              "format": "number",
+              "icon": "flag"
+            }
+          },
+          {
+            "id": "stat-days-left",
+            "type": "MetricTile",
+            "props": {
+              "label": "Days Remaining",
+              "value": 23,
+              "format": "number",
+              "delta": { "value": 0.15, "direction": "down" },
+              "icon": "clock"
+            }
+          },
+          {
+            "id": "stat-budget",
+            "type": "MetricTile",
+            "props": {
+              "label": "Budget Used",
+              "value": 84200,
+              "format": "currency",
+              "delta": { "value": 0.08, "direction": "up" },
+              "icon": "dollar-sign"
+            }
+          }
+        ]
+      },
+      {
+        "id": "body-split",
+        "type": "Split",
+        "props": { "ratio": "1:2", "breakpoint": "lg" },
+        "style": { "motion": "fade-up" },
+        "children": [
+          {
+            "id": "left-panel",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.surface.0" },
+              "padding": "tokens.spacing.6",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "project-meta",
+                "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Status",     "value": "In Progress",         "copyable": false },
+                    { "label": "Priority",   "value": "High",                "copyable": false },
+                    { "label": "Owner",      "value": "Marcus Chen",         "copyable": false },
+                    { "label": "Department", "value": "Engineering",         "copyable": false },
+                    { "label": "Start Date", "value": "November 1, 2024",    "copyable": true  },
+                    { "label": "Due Date",   "value": "February 28, 2025",   "copyable": true  },
+                    { "label": "Budget",     "value": "$120,000",            "copyable": false },
+                    { "label": "Spent",      "value": "$84,200 (70%)",       "copyable": false }
+                  ]
+                }
+              },
+              {
+                "id": "team-section",
+                "type": "Section",
+                "props": { "variant": "plain", "title": "Team Members" },
+                "children": [
+                  {
+                    "id": "members-cluster",
+                    "type": "Cluster",
+                    "props": { "gap": "tokens.spacing.2", "justify": "start", "align": "center" },
+                    "children": [
+                      {
+                        "id": "member-marcus",
+                        "type": "Avatar",
+                        "props": { "name": "Marcus Chen", "size": "md", "status": "online" }
+                      },
+                      {
+                        "id": "member-priya",
+                        "type": "Avatar",
+                        "props": { "name": "Priya Nair", "size": "md", "status": "busy" }
+                      },
+                      {
+                        "id": "member-jane",
+                        "type": "Avatar",
+                        "props": { "name": "Jane Doe", "size": "md", "status": "away" }
+                      },
+                      {
+                        "id": "member-tom",
+                        "type": "Avatar",
+                        "props": { "name": "Tom Bakker", "size": "md" }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "right-panel",
+            "type": "Tabs",
+            "props": {
+              "tabs": [
+                { "id": "tab-milestones", "label": "Milestones", "icon": "flag" },
+                { "id": "tab-risks",      "label": "Risks",      "icon": "alert-triangle" },
+                { "id": "tab-files",      "label": "Files",      "icon": "folder" }
+              ],
+              "value": "tab-milestones"
+            },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.surface.0" },
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "milestones-tab",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+                "style": { "padding": "tokens.spacing.6" },
+                "children": [
+                  {
+                    "id": "milestones-list",
+                    "type": "Repeat",
+                    "props": { "source": "milestones", "as": "milestone", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "milestone-row",
+                        "type": "Row",
+                        "props": { "justify": "between", "align": "center" },
+                        "children": [
+                          {
+                            "id": "milestone-name",
+                            "type": "Text",
+                            "props": { "content": "Milestone Name", "as": "p" }
+                          },
+                          {
+                            "id": "milestone-due",
+                            "type": "Text",
+                            "props": { "content": "Due Date", "as": "span" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "risks-tab",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+                "style": { "padding": "tokens.spacing.6" },
+                "children": [
+                  {
+                    "id": "risks-accordion",
+                    "type": "Accordion",
+                    "props": { "mode": "single", "defaultOpen": ["risk-1"] },
+                    "children": [
+                      {
+                        "id": "risk-1",
+                        "type": "AccordionPanel",
+                        "props": { "label": "Resource availability during holidays", "value": "risk-1" },
+                        "children": [
+                          {
+                            "id": "risk-1-body",
+                            "type": "Text",
+                            "props": {
+                              "content": "Key engineers have approved leave Dec 24–Jan 5. Milestone 6 may slip by 3 days if coverage plan is not confirmed by Dec 15.",
+                              "as": "p"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "risk-2",
+                        "type": "AccordionPanel",
+                        "props": { "label": "Third-party API rate limit increase", "value": "risk-2" },
+                        "children": [
+                          {
+                            "id": "risk-2-body",
+                            "type": "Text",
+                            "props": {
+                              "content": "Analytics vendor raised API rate limit from 10k to 2k reqs/hr without notice. Engineering investigating caching layer as mitigation.",
+                              "as": "p"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "files-tab",
+                "type": "Stack",
+                "props": { "direction": "vertical", "gap": "tokens.spacing.3" },
+                "style": { "padding": "tokens.spacing.6" },
+                "children": [
+                  {
+                    "id": "files-placeholder",
+                    "type": "Text",
+                    "props": { "content": "No files uploaded yet.", "as": "p" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

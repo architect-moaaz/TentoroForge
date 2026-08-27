@@ -1,0 +1,293 @@
+{
+  "schemaVersion": "2",
+  "id": "employees/profile",
+  "route": "/employees/:id",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Employee Profile" },
+  "dataSources": [
+    { "name": "employee",    "entity": "Employee",    "op": "get" },
+    { "name": "leaveHistory","entity": "LeaveRequest", "op": "list",
+      "filter": { "employeeId": ":id" },
+      "orderBy": [{ "field": "startDate", "dir": "desc" }], "limit": 10 },
+    { "name": "performance", "entity": "PerformanceReview", "op": "list",
+      "filter": { "employeeId": ":id" },
+      "orderBy": [{ "field": "reviewDate", "dir": "desc" }], "limit": 5 }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.8" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "profile-hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "EMPLOYEE PROFILE",
+          "headline": "Priya Nair",
+          "subhead": "Senior Software Engineer · Engineering · Joined March 2019",
+          "layout": "split",
+          "role": "headline",
+          "ctas": [
+            {
+              "label": "Send Message",
+              "action": { "type": "workflow", "name": "openDirectMessage" },
+              "variant": "primary"
+            },
+            {
+              "label": "Edit Profile",
+              "action": { "type": "navigate", "to": "/employees/:id/edit" },
+              "variant": "secondary"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.secondary.50",
+            "to": "tokens.color.surface.0",
+            "angle": 145
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "profile-body",
+        "type": "Split",
+        "props": { "ratio": "1:2", "breakpoint": "lg" },
+        "children": [
+          {
+            "id": "sidebar-panel",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.surface.0" },
+              "padding": "tokens.spacing.6",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "avatar-block",
+                "type": "Stack",
+                "props": { "direction": "vertical", "align": "center", "gap": "tokens.spacing.3" },
+                "children": [
+                  {
+                    "id": "profile-avatar",
+                    "type": "Avatar",
+                    "props": { "name": "Priya Nair", "size": "xl", "status": "busy" }
+                  },
+                  {
+                    "id": "profile-name",
+                    "type": "Text",
+                    "props": { "content": "Priya Nair", "as": "h2" }
+                  },
+                  {
+                    "id": "profile-title",
+                    "type": "Text",
+                    "props": { "content": "Senior Software Engineer", "as": "p" }
+                  }
+                ]
+              },
+              {
+                "id": "contact-details",
+                "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Email",      "value": "priya.nair@company.com", "copyable": true  },
+                    { "label": "Phone",      "value": "+44 7700 900 123",       "copyable": true  },
+                    { "label": "Location",   "value": "London, UK",             "copyable": false },
+                    { "label": "Timezone",   "value": "GMT / BST",              "copyable": false },
+                    { "label": "Slack",      "value": "@priya.nair",            "copyable": true  }
+                  ]
+                }
+              },
+              {
+                "id": "employment-details",
+                "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Employee ID",  "value": "EMP-00847",        "copyable": true  },
+                    { "label": "Department",   "value": "Engineering",      "copyable": false },
+                    { "label": "Team",         "value": "Platform",         "copyable": false },
+                    { "label": "Manager",      "value": "Marcus Chen",      "copyable": false },
+                    { "label": "Contract",     "value": "Full-time",        "copyable": false },
+                    { "label": "Start Date",   "value": "March 4, 2019",    "copyable": false },
+                    { "label": "Leave Balance","value": "12 days",          "copyable": false }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "main-panel",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+            "children": [
+              {
+                "id": "career-stats",
+                "type": "Stagger",
+                "props": { "interval": 60 },
+                "children": [
+                  {
+                    "id": "stats-cluster",
+                    "type": "Cluster",
+                    "props": { "justify": "start", "align": "center", "gap": "tokens.spacing.4" },
+                    "children": [
+                      {
+                        "id": "stat-tenure",
+                        "type": "MetricTile",
+                        "props": {
+                          "label": "Tenure",
+                          "value": "5.8 yrs",
+                          "format": "number",
+                          "icon": "briefcase"
+                        }
+                      },
+                      {
+                        "id": "stat-projects",
+                        "type": "MetricTile",
+                        "props": {
+                          "label": "Projects Delivered",
+                          "value": 34,
+                          "format": "number",
+                          "delta": { "value": 0.21, "direction": "up" },
+                          "icon": "check-square",
+                          "importance": "primary"
+                        }
+                      },
+                      {
+                        "id": "stat-leave-used",
+                        "type": "MetricTile",
+                        "props": {
+                          "label": "Leave Used YTD",
+                          "value": 13,
+                          "format": "number",
+                          "icon": "calendar"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "leave-history-section",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Leave History",
+                  "subtitle": "Last 10 requests"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm",
+                  "padding": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "leave-history-repeat",
+                    "type": "Repeat",
+                    "props": { "source": "leaveHistory", "as": "leave", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "leave-row",
+                        "type": "Row",
+                        "props": { "justify": "between", "align": "center" },
+                        "children": [
+                          {
+                            "id": "leave-type",
+                            "type": "Text",
+                            "props": { "content": "Leave Type", "as": "p" }
+                          },
+                          {
+                            "id": "leave-dates",
+                            "type": "Text",
+                            "props": { "content": "Date Range", "as": "span" }
+                          },
+                          {
+                            "id": "leave-days",
+                            "type": "Text",
+                            "props": { "content": "Days", "as": "span" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "performance-section",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Performance Reviews",
+                  "subtitle": "Most recent 5 cycles"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm",
+                  "padding": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "performance-accordion",
+                    "type": "Accordion",
+                    "props": { "mode": "single", "defaultOpen": ["perf-2024"] },
+                    "children": [
+                      {
+                        "id": "perf-2024",
+                        "type": "AccordionPanel",
+                        "props": { "label": "2024 Annual Review — Exceeds Expectations", "value": "perf-2024" },
+                        "children": [
+                          {
+                            "id": "perf-2024-detail",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                { "label": "Rating",   "value": "Exceeds Expectations" },
+                                { "label": "Reviewer", "value": "Marcus Chen"          },
+                                { "label": "Date",     "value": "November 15, 2024"    },
+                                { "label": "Summary",  "value": "Led platform migration with zero downtime. Mentored 3 junior engineers." }
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "perf-2023",
+                        "type": "AccordionPanel",
+                        "props": { "label": "2023 Annual Review — Meets Expectations", "value": "perf-2023" },
+                        "children": [
+                          {
+                            "id": "perf-2023-detail",
+                            "type": "KeyValueList",
+                            "props": {
+                              "items": [
+                                { "label": "Rating",   "value": "Meets Expectations"  },
+                                { "label": "Reviewer", "value": "James Whitfield"     },
+                                { "label": "Date",     "value": "November 8, 2023"    },
+                                { "label": "Summary",  "value": "Delivered all sprint commitments. Solid technical leadership on Q3 data pipeline." }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

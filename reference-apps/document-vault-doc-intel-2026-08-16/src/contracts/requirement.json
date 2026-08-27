@@ -1,0 +1,94 @@
+{
+  "original_prompt": "Build \"Document Vault\" \u2014 an internal admin tool for digitising and searching paper/PDF records.\n\nOne user role: Admin.\n\nOne entity \u2014 Document:\n\nfile (file upload)\noriginal_filename (text)\nuploaded_at (timestamp)\nstatus (queued | processing | complete | failed)\nocr_text (text, searchable)\nextracted_fields (jsonb \u2014 key/value pairs from AI extraction)\nconfidence (numeric 0-1)\nerror_message (text)\norg_id\nOne workflow \u2014 ProcessDocument (dispatched per file on upload):\n\nocr_document (PaddleOCR sidecar) \u2192 writes text + confidence\nai_extract with fields [customer_name, account_number, amount, date, reference_number] \u2192 writes each key/value into extracted_fields\ndb_update Document \u2192 ocr_text, extracted_fields, confidence, status=complete, processed_at=CURRENT_TIMESTAMP\nOn failure \u2192 status=failed, error_message=<reason>\nThree pages:\n\n/upload (landing) \u2014 Multi-file dropzone + Upload button. Dispatches ProcessDocument once per file. On submit, navigates to /documents.\n/documents \u2014 Table of all documents, newest first. Columns: filename, uploaded_at, status (coloured Tag), extracted-field count. Auto-refresh every 5s while any row is processing. Row click \u2192 /documents/{id}.\n/documents/{id} \u2014 Two-column viewer. Left: original file inline (PDF/image preview). Right: extracted fields as a DescriptionList (key \u2192 value with confidence chip). Collapsed panel below: full ocr_text.\n/search \u2014 Single SearchInput. Full-text search across ocr_text + all values in extracted_fields. Results show filename, matched snippet, and any customer_name / account_number in the result.\nNav: Upload, Documents, Search.\n\nSeed: ~10 documents across mixed statuses (at least one still processing so the auto-refresh is visible), ~5 with customer_name=\"Acme Corp\" and account_number containing \"4477\" so /search returns hits out of the box.\n\nNot building: batches, per-batch rollup, multiple roles, edit-extracted-field workflow, retention policies, tenant portal.",
+  "parsed_directives": {
+    "archetype_vocabulary": "field-service",
+    "row_click_target": "/documents/",
+    "contract": {
+      "named_routes": [
+        {
+          "path": "/upload"
+        },
+        {
+          "path": "/documents"
+        },
+        {
+          "path": "/documents/{id}"
+        },
+        {
+          "path": "/search"
+        }
+      ],
+      "named_components": [
+        {
+          "page": "/upload",
+          "component": "FileUpload"
+        },
+        {
+          "page": "/documents",
+          "component": "Table"
+        },
+        {
+          "page": "/documents",
+          "component": "Tag"
+        },
+        {
+          "page": "/documents/{id}",
+          "component": "DescriptionList"
+        },
+        {
+          "page": "/search",
+          "component": "SearchInput"
+        }
+      ],
+      "named_action_types": [
+        {
+          "action_type": "ocr_document",
+          "workflow": "One"
+        },
+        {
+          "action_type": "ai_extract",
+          "workflow": "One"
+        },
+        {
+          "action_type": "db_update",
+          "workflow": "One"
+        }
+      ],
+      "landing_route": null,
+      "out_of_scope": []
+    }
+  },
+  "amendments": [
+    {
+      "at": "2026-08-15T16:49:08.421062+00:00",
+      "who": "user",
+      "text": "Internal admin tool for uploading paper/PDF records, running OCR via PaddleOCR sidecar and AI field extraction, and searching the resulting structured and full-text content.",
+      "parsed_directives": {}
+    },
+    {
+      "at": "2026-08-15T17:12:10.105977+00:00",
+      "who": "user",
+      "text": "Verify the app and fix anything that's broken.",
+      "parsed_directives": {}
+    },
+    {
+      "at": "2026-08-15T17:19:03.520050+00:00",
+      "who": "user",
+      "text": "verify and fix the full app",
+      "parsed_directives": {}
+    },
+    {
+      "at": "2026-08-15T18:00:20.910194+00:00",
+      "who": "user",
+      "text": "verify and fix",
+      "parsed_directives": {}
+    },
+    {
+      "at": "2026-08-15T18:09:57.853968+00:00",
+      "who": "user",
+      "text": "Fix the faults from the last verify run",
+      "parsed_directives": {}
+    }
+  ],
+  "version": 1
+}

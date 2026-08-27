@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "2",
+  "id": "leads/detail",
+  "route": "/leads/:id",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Lead Detail" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "children": [
+      {
+        "id": "detail-tabs",
+        "type": "Tabs",
+        "props": {
+          "tabs": [
+            { "id": "overview",  "label": "Overview" },
+            { "id": "history",   "label": "History" },
+            { "id": "settings",  "label": "Settings" },
+            { "id": "comments",  "label": "Comments" },
+            { "id": "files",     "label": "Files" },
+            { "id": "audit",     "label": "Audit Log" }
+          ],
+          "value": "overview"
+        },
+        "children": [
+          {
+            "type": "TabPanel",
+            "props": { "value": "overview" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "Overview" } },
+              { "type": "Text",    "props": { "content": "Summary information about this record." } }
+            ]
+          },
+          {
+            "type": "TabPanel",
+            "props": { "value": "history" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "History" } },
+              { "type": "Text",    "props": { "content": "Timeline of changes to this record." } }
+            ]
+          },
+          {
+            "type": "TabPanel",
+            "props": { "value": "settings" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "Settings" } },
+              { "type": "Text",    "props": { "content": "Configuration options for this record." } }
+            ]
+          },
+          {
+            "type": "TabPanel",
+            "props": { "value": "comments" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "Comments" } },
+              { "type": "Text",    "props": { "content": "Discussion thread for this record." } }
+            ]
+          },
+          {
+            "type": "TabPanel",
+            "props": { "value": "files" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "Files" } },
+              { "type": "Text",    "props": { "content": "Attachments related to this record." } }
+            ]
+          },
+          {
+            "type": "TabPanel",
+            "props": { "value": "audit" },
+            "children": [
+              { "type": "Heading", "props": { "level": 2, "content": "Audit Log" } },
+              { "type": "Text",    "props": { "content": "Compliance trail for this record." } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

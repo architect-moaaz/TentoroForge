@@ -1,0 +1,63 @@
+/* Global motion stylesheet — drives the [data-motion] selectors emitted by
+ * library components. Tokens come from defaultTokens.motion.{duration, easing}
+ * via `--token-motion-*` CSS variables compiled at the app root.
+ *
+ * Per-component overrides via inline custom properties (--fadein-delay,
+ * --fadein-duration, --stagger-interval, --stagger-delay).
+ *
+ * Honors prefers-reduced-motion: reduce by disabling animations entirely.
+ */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+[data-motion="fade-in"] {
+  animation: fade-in
+    var(--fadein-duration, var(--token-motion-duration-normal, 300ms))
+    var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
+    var(--fadein-delay, 0ms)
+    both;
+}
+
+[data-motion="fade-up"] {
+  animation: fade-up
+    var(--token-motion-duration-normal, 300ms)
+    var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
+    both;
+}
+
+[data-motion="slide-in"] {
+  animation: slide-in
+    var(--token-motion-duration-normal, 300ms)
+    var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
+    both;
+}
+
+[data-motion="stagger"] > .motion-stagger-item {
+  animation: fade-up
+    var(--token-motion-duration-normal, 300ms)
+    var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
+    calc(var(--stagger-delay, 0ms) + var(--motion-stagger-i, 0) * var(--stagger-interval, 80ms))
+    both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-motion="fade-in"],
+  [data-motion="fade-up"],
+  [data-motion="slide-in"],
+  [data-motion="stagger"] > .motion-stagger-item {
+    animation: none;
+  }
+}

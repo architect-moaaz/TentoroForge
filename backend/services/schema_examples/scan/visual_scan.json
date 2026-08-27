@@ -1,0 +1,302 @@
+{
+  "schemaVersion": "2",
+  "id": "scan/identify",
+  "route": "/scan",
+  "layout": "MobileLayout",
+  "meta": {
+    "title": "Scan & Identify",
+    "description": "Snap a photo of any product and see instant matches from across the web."
+  },
+  "state": [
+    { "name": "capturedImageId", "type": "string", "initial": null },
+    { "name": "lastReply",       "type": "object", "initial": null,
+      "boundTo": "hook:useAgentChat.lastReply" },
+    { "name": "isIdentifying",   "type": "boolean", "initial": false,
+      "boundTo": "hook:useAgentChat.isLoading" },
+    { "name": "identifyError",   "type": "object",  "initial": null,
+      "boundTo": "hook:useAgentChat.error" }
+  ],
+  "hooks": [
+    { "name": "agentChat", "hook": "useAgentChat" }
+  ],
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "scan-header",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Scan a product",
+          "subtitle": "Point your camera at anything — we'll find where to buy it."
+        },
+        "style": {
+          "padding": "tokens.spacing.4",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "capture-card",
+        "type": "Section",
+        "props": { "variant": "plain" },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.6",
+          "radius": "tokens.radius.xl",
+          "shadow": "tokens.shadow.md",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "capture-stack",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+            "children": [
+              {
+                "id": "camera",
+                "type": "CameraCapture",
+                "props": {
+                  "name": "capturedImageId",
+                  "label": "Take a photo",
+                  "captureLabel": "Capture",
+                  "bind": "capturedImageId"
+                }
+              },
+              {
+                "id": "or-divider",
+                "type": "Divider",
+                "props": { "label": "or upload from device" }
+              },
+              {
+                "id": "upload-fallback",
+                "type": "FileUpload",
+                "props": {
+                  "name": "capturedImageId",
+                  "label": "Choose an image",
+                  "accept": "image/*",
+                  "multiple": false,
+                  "maxSizeMb": 10,
+                  "hint": "PNG or JPG, up to 10 MB",
+                  "bind": "capturedImageId"
+                }
+              },
+              {
+                "id": "identify-actions",
+                "type": "Row",
+                "props": { "justify": "end", "align": "center" },
+                "children": [
+                  {
+                    "id": "identify-btn",
+                    "type": "Button",
+                    "props": {
+                      "label": "Identify",
+                      "variant": "primary",
+                      "size": "lg",
+                      "disabled": { "expr": "!capturedImageId || isIdentifying" },
+                      "loading": { "bind": "isIdentifying" },
+                      "action": {
+                        "type": "hook.call",
+                        "hook": "agentChat",
+                        "method": "send",
+                        "args": {
+                          "message": "Identify this product",
+                          "attachments": [{ "bind": "capturedImageId" }]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "loading-state",
+        "type": "Conditional",
+        "props": { "when": "isIdentifying" },
+        "children": [
+          {
+            "id": "loading-row",
+            "type": "Row",
+            "props": { "justify": "center", "align": "center" },
+            "style": { "padding": "tokens.spacing.6" },
+            "children": [
+              {
+                "id": "loading-spinner",
+                "type": "Spinner",
+                "props": { "size": "md", "label": "Searching the web…" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "error-banner",
+        "type": "Conditional",
+        "props": { "when": "!!identifyError" },
+        "children": [
+          {
+            "id": "error-alert",
+            "type": "Alert",
+            "props": {
+              "variant": "destructive",
+              "title": "We couldn't identify that",
+              "description": { "bind": "identifyError.message" }
+            },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.danger.50" },
+              "padding": "tokens.spacing.4",
+              "radius": "tokens.radius.md"
+            }
+          }
+        ]
+      },
+      {
+        "id": "empty-state",
+        "type": "Conditional",
+        "props": { "when": "!lastReply && !isIdentifying && !identifyError" },
+        "children": [
+          {
+            "id": "empty-panel",
+            "type": "EmptyState",
+            "props": {
+              "icon": "camera",
+              "title": "No scans yet",
+              "description": "Capture or upload a product photo above to see matches from across the web."
+            },
+            "style": {
+              "padding": "tokens.spacing.8",
+              "motion": "fade-in"
+            }
+          }
+        ]
+      },
+      {
+        "id": "results-section",
+        "type": "Conditional",
+        "props": { "when": "lastReply && !isIdentifying" },
+        "children": [
+          {
+            "id": "results-wrap",
+            "type": "Section",
+            "props": { "variant": "plain", "title": "Matches" },
+            "style": {
+              "padding": "tokens.spacing.4",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "results-grid",
+                "type": "Grid",
+                "props": {
+                  "columns": { "base": 1, "sm": 2, "lg": 3 },
+                  "gap": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "match-repeat",
+                    "type": "Repeat",
+                    "props": {
+                      "source": "lastReply",
+                      "path": "data.matches",
+                      "as": "match",
+                      "keyPath": "id"
+                    },
+                    "children": [
+                      {
+                        "id": "match-card",
+                        "type": "Card",
+                        "props": { "variant": "elevated" },
+                        "style": {
+                          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                          "padding": "tokens.spacing.4",
+                          "radius": "tokens.radius.lg",
+                          "shadow": "tokens.shadow.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "match-stack",
+                            "type": "Stack",
+                            "props": { "direction": "vertical", "gap": "tokens.spacing.3" },
+                            "children": [
+                              {
+                                "id": "match-image",
+                                "type": "Image",
+                                "props": {
+                                  "src": { "bind": "match.image" },
+                                  "alt": { "bind": "match.title" },
+                                  "aspectRatio": "1:1",
+                                  "fit": "cover"
+                                },
+                                "style": {
+                                  "radius": "tokens.radius.md"
+                                }
+                              },
+                              {
+                                "id": "match-title",
+                                "type": "Text",
+                                "props": {
+                                  "content": { "bind": "match.title" },
+                                  "as": "strong"
+                                }
+                              },
+                              {
+                                "id": "match-meta-row",
+                                "type": "Row",
+                                "props": { "justify": "between", "align": "center" },
+                                "children": [
+                                  {
+                                    "id": "match-price",
+                                    "type": "Text",
+                                    "props": {
+                                      "content": { "bind": "match.price" },
+                                      "as": "strong"
+                                    }
+                                  },
+                                  {
+                                    "id": "match-seller",
+                                    "type": "Badge",
+                                    "props": {
+                                      "label": { "bind": "match.seller" },
+                                      "variant": "outline"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "match-cta",
+                                "type": "Button",
+                                "props": {
+                                  "label": "View",
+                                  "variant": "secondary",
+                                  "size": "sm",
+                                  "action": {
+                                    "type": "navigate",
+                                    "to": { "bind": "match.url" },
+                                    "external": true
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

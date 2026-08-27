@@ -1,0 +1,441 @@
+{
+  "9aeb82d1b65dc6dc4668d42643199dacfda01f03f6e853b737b38e9353ffa3dc": {
+    "provenance": {
+      "candidates": [
+        "document-intelligence-platform"
+      ],
+      "changes": {
+        "fonts_rejected": [],
+        "hexes_rejected": [
+          "accent:#0EA5E9 (contrast 2.66:1 < 3.0:1 vs bg #FAFAFA)",
+          "badge:#F97316 (contrast 2.69:1 < 3.0:1 vs bg #FAFAFA)"
+        ],
+        "locked_field_kept": [],
+        "personas_added": [],
+        "personas_removed": [
+          "analyst",
+          "data_reviewer",
+          "reviewer",
+          "uploader",
+          "user"
+        ],
+        "primary_component_rejected": [],
+        "sections_added": [
+          "upload:processing",
+          "upload:completed",
+          "upload:failed",
+          "search:by-relevance",
+          "search:by-date"
+        ],
+        "sections_removed": [
+          "retention",
+          "history",
+          "review-queue"
+        ],
+        "shapes_rejected": [],
+        "warnings": []
+      },
+      "preset_source": "single",
+      "primary_preset": "data-dense",
+      "primary_vocab": "document-intelligence-platform",
+      "reason": null,
+      "reasoning": "The document-intelligence-platform vocabulary already models the full OCR workflow (documents, extraction, review queue, search) and the data-dense preset provides the professional, high-contrast foundation needed for scanning status chips and confidence indicators.",
+      "source": "composed"
+    },
+    "timestamp": 1786812797.269662,
+    "visual_lock": {
+      "palette": {
+        "accent": "#0EA5E9",
+        "badge": "#F97316",
+        "bg": "#FAFAFA",
+        "danger": "#DC2626",
+        "fg": "#171717",
+        "muted": "#525252",
+        "subtle": "#E5E5E5",
+        "success": "#16A34A"
+      },
+      "preset_name": "data-dense",
+      "radius": {
+        "lg": 6,
+        "md": 4,
+        "sm": 2
+      },
+      "shadow": {
+        "md": "0 4px 12px rgba(23,23,23,0.08)",
+        "sm": "0 1px 2px rgba(23,23,23,0.06)"
+      },
+      "typography": {
+        "body": "IBM Plex Sans",
+        "display": "IBM Plex Sans",
+        "mono": "IBM Plex Mono"
+      }
+    },
+    "vocab": {
+      "component_preferences": {
+        "batches": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "batchId",
+          "shape": "ledger-list"
+        },
+        "connectors": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "name",
+          "shape": "card-grid"
+        },
+        "document_batches": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "batchId",
+          "shape": "ledger-list"
+        },
+        "documents": {
+          "context": "Main table polling for async job status; shows filename, status badge, confidence chip, extracted field callouts",
+          "primary_component": "Table",
+          "primary_field": "filename",
+          "shape": "table"
+        },
+        "extracted_fields": {
+          "context": "Right-panel DescriptionList in two-column viewer; each field shows key, value, and confidence chip",
+          "primary_component": "DescriptionList",
+          "primary_field": "field_name",
+          "shape": "table"
+        },
+        "extraction_results": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "field_name",
+          "shape": "table"
+        },
+        "extraction_rules": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "name",
+          "shape": "table"
+        },
+        "extractions": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "field_name",
+          "shape": "table"
+        },
+        "review_items": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "documentName",
+          "shape": "kanban"
+        },
+        "review_queue": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "documentName",
+          "shape": "kanban"
+        },
+        "search_results": {
+          "context": "Snippet search with highlighted ocr_text and extracted field callouts (customer_name, account_number) as badges",
+          "primary_component": "",
+          "primary_field": "filename",
+          "shape": "card-list"
+        },
+        "sources": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "name",
+          "shape": "card-grid"
+        },
+        "templates": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "name",
+          "shape": "table"
+        },
+        "upload_batches": {
+          "context": "",
+          "primary_component": "",
+          "primary_field": "batchId",
+          "shape": "ledger-list"
+        }
+      },
+      "id": "document-intelligence-platform",
+      "primary_screens_per_persona": {
+        "admin": [
+          "upload",
+          "documents",
+          "search",
+          "sources"
+        ]
+      },
+      "section_filters": {
+        "active": {
+          "status": [
+            "active",
+            "retained"
+          ]
+        },
+        "archived": {
+          "status": [
+            "archived"
+          ]
+        },
+        "by-date": {},
+        "by-relevance": {},
+        "completed": {
+          "status": [
+            "complete",
+            "extracted"
+          ]
+        },
+        "connected": {
+          "status": [
+            "connected"
+          ]
+        },
+        "corrections-pending": {
+          "status": [
+            "in_correction",
+            "pending_submit"
+          ]
+        },
+        "disconnected": {
+          "status": [
+            "disconnected"
+          ]
+        },
+        "extracted": {
+          "status": [
+            "extracted",
+            "complete"
+          ]
+        },
+        "extraction-failed": {
+          "status": [
+            "extraction_failed",
+            "failed"
+          ]
+        },
+        "failed": {
+          "status": [
+            "failed",
+            "extraction_failed"
+          ]
+        },
+        "flagged": {
+          "status": [
+            "flagged",
+            "escalated"
+          ]
+        },
+        "low-confidence": {
+          "status": [
+            "low_confidence",
+            "flagged_low"
+          ]
+        },
+        "needs-review": {
+          "status": [
+            "needs_review",
+            "low_confidence"
+          ]
+        },
+        "processing": {
+          "status": [
+            "queued",
+            "processing"
+          ]
+        },
+        "purged": {
+          "status": [
+            "purged",
+            "deleted"
+          ]
+        }
+      },
+      "section_recipes": {
+        "batches": [
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "documents": [
+          "extracted",
+          "needs-review",
+          "extraction-failed"
+        ],
+        "search": [
+          "by-relevance",
+          "by-date"
+        ],
+        "search-results": [
+          "by-relevance",
+          "by-date"
+        ],
+        "sources": [
+          "connected",
+          "disconnected",
+          "failed"
+        ],
+        "upload": [
+          "processing",
+          "completed",
+          "failed"
+        ]
+      },
+      "signature_states": {
+        "empty_active": "No active documents in this policy.",
+        "empty_archived": "Nothing archived yet.",
+        "empty_batches": "No uploads yet. Drop files to get started.",
+        "empty_by_date": "No matches for the selected date range.",
+        "empty_by_relevance": "No matches found. Try different keywords or check spelling.",
+        "empty_completed": "No completed uploads yet.",
+        "empty_confidence-low": "No low-confidence extractions right now.",
+        "empty_connected": "No active sources.",
+        "empty_corrections_pending": "No corrections in progress.",
+        "empty_dashboard": "No activity yet. Metrics will appear here once uploads start processing.",
+        "empty_disconnected": "No disconnected sources.",
+        "empty_documents": "No documents yet. Uploads will appear here after OCR completes.",
+        "empty_extracted": "No extracted documents in this view.",
+        "empty_extraction-errors": "No extraction errors on file.",
+        "empty_extraction-rules": "No extraction rules configured. Add your first template to start extracting structured data.",
+        "empty_extraction_failed": "No extraction failures. Every upload parsed successfully.",
+        "empty_failed": "No failed uploads. Everything processed cleanly.",
+        "empty_flagged": "Nothing flagged.",
+        "empty_history": "No uploads yet. Drop files to get started.",
+        "empty_low_confidence": "No low-confidence extractions right now.",
+        "empty_needs_review": "No documents need review. All extractions meet confidence thresholds.",
+        "empty_processing": "No documents currently processing.",
+        "empty_purged": "Nothing purged yet.",
+        "empty_retention": "No retention policy configured. All documents are retained indefinitely.",
+        "empty_review-queue": "Queue is clear. All extractions look good.",
+        "empty_search": "Search across document text and extracted fields.",
+        "empty_search-results": "No matches found. Try different keywords or check spelling.",
+        "empty_sources": "No upload sources configured. Add an endpoint or storage integration to begin.",
+        "empty_upload": "Drop files here to begin processing, or browse from your device.",
+        "empty_users": "No users provisioned yet.",
+        "no_results": "No matches for the current filter. Adjust your criteria or clear filters."
+      },
+      "status_badges": {
+        "active": {
+          "label": "Active",
+          "variant": "success"
+        },
+        "archived": {
+          "label": "Archived",
+          "variant": "neutral"
+        },
+        "complete": {
+          "label": "Complete",
+          "variant": "success"
+        },
+        "completed": {
+          "label": "Completed",
+          "variant": "success"
+        },
+        "connected": {
+          "label": "Connected",
+          "variant": "success"
+        },
+        "deleted": {
+          "label": "Deleted",
+          "variant": "neutral"
+        },
+        "disconnected": {
+          "label": "Disconnected",
+          "variant": "warning"
+        },
+        "done": {
+          "label": "Done",
+          "variant": "success"
+        },
+        "error": {
+          "label": "Error",
+          "variant": "danger"
+        },
+        "escalated": {
+          "label": "Escalated",
+          "variant": "danger"
+        },
+        "extracted": {
+          "label": "Extracted",
+          "variant": "success"
+        },
+        "extraction_failed": {
+          "label": "Extraction failed",
+          "variant": "danger"
+        },
+        "failed": {
+          "label": "Failed",
+          "variant": "danger"
+        },
+        "flagged": {
+          "label": "Flagged",
+          "variant": "danger"
+        },
+        "flagged_low": {
+          "label": "Low confidence",
+          "variant": "warning"
+        },
+        "healthy": {
+          "label": "Healthy",
+          "variant": "success"
+        },
+        "in_correction": {
+          "label": "In correction",
+          "variant": "warning"
+        },
+        "in_progress": {
+          "label": "In progress",
+          "variant": "warning"
+        },
+        "inactive": {
+          "label": "Inactive",
+          "variant": "neutral"
+        },
+        "low_confidence": {
+          "label": "Low confidence",
+          "variant": "warning"
+        },
+        "needs_review": {
+          "label": "Needs review",
+          "variant": "warning"
+        },
+        "pending_submit": {
+          "label": "Pending submit",
+          "variant": "warning"
+        },
+        "processing": {
+          "label": "Processing",
+          "variant": "warning"
+        },
+        "purged": {
+          "label": "Purged",
+          "variant": "neutral"
+        },
+        "queued": {
+          "label": "Queued",
+          "variant": "neutral"
+        },
+        "rejected": {
+          "label": "Rejected",
+          "variant": "danger"
+        },
+        "retained": {
+          "label": "Retained",
+          "variant": "success"
+        },
+        "running": {
+          "label": "Running",
+          "variant": "warning"
+        },
+        "unparseable": {
+          "label": "Unparseable",
+          "variant": "danger"
+        },
+        "verified": {
+          "label": "Verified",
+          "variant": "success"
+        }
+      }
+    }
+  }
+}

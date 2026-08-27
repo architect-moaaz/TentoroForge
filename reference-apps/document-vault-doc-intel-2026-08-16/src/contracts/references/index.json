@@ -1,0 +1,19 @@
+{
+  "references": [
+    {
+      "slug": "dashboard_header",
+      "query": "modern admin dashboard header with page title and primary action",
+      "path": "src/contracts/references/dashboard_header.json"
+    },
+    {
+      "slug": "metric_row",
+      "query": "row of four metric tiles with label, value, and trend indicator",
+      "path": "src/contracts/references/metric_row.json"
+    },
+    {
+      "slug": "data_table",
+      "query": "clean data table with column headers, row hover, and action column",
+      "path": "src/contracts/references/data_table.json"
+    }
+  ]
+}

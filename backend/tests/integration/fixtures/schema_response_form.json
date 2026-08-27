@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1",
+  "id": "accounts/form",
+  "route": "/accounts/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "New Account" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "background": "tokens.color.surface.0"
+    },
+    "children": [
+      {
+        "id": "form-card",
+        "type": "Stack",
+        "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+        "style": {
+          "background": "tokens.color.surface.1",
+          "padding": "tokens.spacing.semantic.card",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm"
+        },
+        "children": [
+          {
+            "id": "owner-input",
+            "type": "Input",
+            "props": {
+              "label": "Owner",
+              "name": "owner",
+              "placeholder": "Enter account owner name"
+            },
+            "style": {
+              "radius": "tokens.radius.md"
+            }
+          },
+          {
+            "id": "balance-input",
+            "type": "Input",
+            "props": {
+              "label": "Initial Balance",
+              "name": "balance",
+              "type": "number",
+              "placeholder": "0.00"
+            },
+            "style": {
+              "radius": "tokens.radius.md"
+            }
+          },
+          {
+            "id": "account-type-select",
+            "type": "Select",
+            "props": {
+              "label": "Account Type",
+              "name": "accountType",
+              "options": [
+                { "value": "checking", "label": "Checking" },
+                { "value": "savings",  "label": "Savings" }
+              ]
+            },
+            "style": {
+              "radius": "tokens.radius.md"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

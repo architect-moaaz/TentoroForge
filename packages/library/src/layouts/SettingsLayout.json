@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1",
+  "id": "SettingsLayout",
+  "root": {
+    "id": "settings-shell",
+    "type": "Stack",
+    "props": {
+      "direction": "horizontal",
+      "gap": "spacing.0",
+      "align": "stretch"
+    },
+    "children": [
+      {
+        "id": "settings-sidebar",
+        "type": "Container",
+        "props": { "maxWidth": "sm" },
+        "children": [
+          {
+            "id": "settings-sidebar-stack",
+            "type": "Stack",
+            "props": {
+              "direction": "vertical",
+              "gap": "spacing.4",
+              "align": "stretch"
+            },
+            "children": [
+              {
+                "id": "settings-sidebar-slot",
+                "type": "Slot",
+                "props": { "name": "sidebar" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "settings-main-area",
+        "type": "Container",
+        "props": { "maxWidth": "2xl" },
+        "children": [
+          {
+            "id": "settings-main-stack",
+            "type": "Stack",
+            "props": {
+              "direction": "vertical",
+              "gap": "spacing.6",
+              "align": "stretch"
+            },
+            "children": [
+              {
+                "id": "settings-content-slot",
+                "type": "Slot",
+                "props": { "name": "content" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "master-detail-edit",
+  "description": "List on the left, focused edit form on the right. Selection drives the form; unsaved-changes guard on selection switch.",
+  "when_to_use": {"page_type_any_of": ["detail", "list"], "modality": "route"},
+  "invariants": ["unsaved-changes-guard", "success-toast", "restore-selection-on-return"],
+  "shape": {
+    "type": "Split", "props": {"ratio": "1:2"}, "children": [
+      {"type": "Card", "children": [{"type": "List", "props": {"bind": "{{items}}", "selectable": true}}]},
+      {"type": "Card", "children": [
+        {"type": "Form", "children": [
+          {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [{"$slot": "edit-fields"}]}
+        ]},
+        {"type": "Row", "props": {"justify": "end", "gap": "tokens.spacing.2"}, "children": [
+          {"type": "Button", "props": {"variant": "ghost", "label": "Discard"}},
+          {"type": "Button", "props": {"variant": "primary", "label": "Save changes", "submit": true}}
+        ]}
+      ]}
+    ]
+  }
+}

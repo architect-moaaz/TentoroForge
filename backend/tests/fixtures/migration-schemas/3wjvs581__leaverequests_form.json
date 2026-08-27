@@ -1,0 +1,544 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/new",
+  "route": "/leave-requests/new",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Request Leave",
+    "description": "Submit a new leave request for approval"
+  },
+  "dataSources": [
+    {
+      "name": "leaveTypes",
+      "entity": "LeaveType",
+      "op": "list"
+    },
+    {
+      "name": "managers",
+      "entity": "Employee",
+      "op": "list",
+      "filter": {
+        "isManager": true
+      }
+    },
+    {
+      "name": "employees",
+      "entity": "Employee",
+      "op": "list"
+    },
+    {
+      "name": "currentUser",
+      "entity": "Employee",
+      "op": "get",
+      "filter": {
+        "id": "current"
+      }
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "style": {
+      "padding": "tokens.spacing.semantic.page"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "children": [
+          {
+            "id": "form-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "TIME OFF",
+              "headline": "Request Leave",
+              "subhead": "Submit your leave request for manager approval. You'll receive email notifications as your request moves through the approval process.",
+              "layout": "stacked",
+              "ctas": []
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.100",
+                "to": "tokens.color.surface.0",
+                "angle": 160
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "section-basic-details",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Leave Details",
+              "subtitle": "What type of leave are you requesting?"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "basic-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "employee-type-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-employee",
+                        "type": "Select",
+                        "props": {
+                          "name": "employeeId",
+                          "label": "Employee",
+                          "options": [
+                            {
+                              "value": "{{currentUser.id}}",
+                              "label": "{{currentUser.name}} (Me)"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-leave-type",
+                        "type": "Select",
+                        "props": {
+                          "name": "leaveTypeId",
+                          "label": "Leave Type",
+                          "options": [
+                            {
+                              "value": "vacation",
+                              "label": "Vacation"
+                            },
+                            {
+                              "value": "sick",
+                              "label": "Sick Leave"
+                            },
+                            {
+                              "value": "personal",
+                              "label": "Personal Leave"
+                            },
+                            {
+                              "value": "bereavement",
+                              "label": "Bereavement"
+                            },
+                            {
+                              "value": "maternity",
+                              "label": "Maternity Leave"
+                            },
+                            {
+                              "value": "paternity",
+                              "label": "Paternity Leave"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "field-reason",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "reason",
+                      "label": "Reason for Leave",
+                      "placeholder": "Brief description of your leave request (optional for vacation, required for extended leave)",
+                      "rows": 3,
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-dates",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Dates & Duration",
+              "subtitle": "When do you plan to take this leave?"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "dates-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "dates-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-start-date",
+                        "type": "DatePicker",
+                        "props": {
+                          "name": "startDate",
+                          "label": "Start Date",
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-end-date",
+                        "type": "DatePicker",
+                        "props": {
+                          "name": "endDate",
+                          "label": "End Date",
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "duration-options",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-duration-type",
+                        "type": "Select",
+                        "props": {
+                          "name": "durationType",
+                          "label": "Duration Type",
+                          "options": [
+                            {
+                              "value": "full-day",
+                              "label": "Full Day(s)"
+                            },
+                            {
+                              "value": "half-day-am",
+                              "label": "Half Day (Morning)"
+                            },
+                            {
+                              "value": "half-day-pm",
+                              "label": "Half Day (Afternoon)"
+                            },
+                            {
+                              "value": "hourly",
+                              "label": "Specific Hours"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-total-hours",
+                        "type": "Input",
+                        "props": {
+                          "name": "totalHours",
+                          "label": "Total Hours",
+                          "type": "number",
+                          "placeholder": "e.g. 8",
+                          "validators": {
+                            "required": false,
+                            "min": 1,
+                            "max": 40
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "field-half-day-schedule",
+                    "type": "Checkbox",
+                    "props": {
+                      "name": "returnToWorkSameDay",
+                      "label": "I will return to work the same day (for half-day or hourly leave)"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-approval",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Approval & Coverage",
+              "subtitle": "Who should approve this request and cover your responsibilities?"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "approval-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "approval-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-approving-manager",
+                        "type": "Select",
+                        "props": {
+                          "name": "approvingManagerId",
+                          "label": "Approving Manager",
+                          "options": [
+                            {
+                              "value": "{{currentUser.managerId}}",
+                              "label": "{{currentUser.manager.name}} (Default)"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-coverage-contact",
+                        "type": "Select",
+                        "props": {
+                          "name": "coverageContactId",
+                          "label": "Coverage Contact",
+                          "options": [
+                            {
+                              "value": "",
+                              "label": "No coverage needed"
+                            }
+                          ],
+                          "validators": {
+                            "required": false
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "field-coverage-notes",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "coverageNotes",
+                      "label": "Coverage & Handover Notes",
+                      "placeholder": "Describe how your work will be covered, any handover instructions, or urgent items to be aware of during your absence",
+                      "rows": 4,
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  },
+                  {
+                    "id": "field-emergency-contact",
+                    "type": "Input",
+                    "props": {
+                      "name": "emergencyContact",
+                      "label": "Emergency Contact (Optional)",
+                      "type": "text",
+                      "placeholder": "Name and phone number in case of work emergency",
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-additional",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Additional Information",
+              "subtitle": "Any special circumstances or requests?"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "additional-fields",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.5"
+                },
+                "children": [
+                  {
+                    "id": "field-additional-notes",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "additionalNotes",
+                      "label": "Additional Notes",
+                      "placeholder": "Any additional information relevant to your leave request",
+                      "rows": 3,
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  },
+                  {
+                    "id": "special-requests",
+                    "type": "Stack",
+                    "props": {
+                      "direction": "vertical",
+                      "gap": "tokens.spacing.3"
+                    },
+                    "children": [
+                      {
+                        "id": "field-urgent-request",
+                        "type": "Checkbox",
+                        "props": {
+                          "name": "isUrgent",
+                          "label": "This is an urgent request requiring expedited approval"
+                        }
+                      },
+                      {
+                        "id": "field-no-email-notifications",
+                        "type": "Checkbox",
+                        "props": {
+                          "name": "suppressNotifications",
+                          "label": "Do not send email notifications while I'm away"
+                        }
+                      },
+                      {
+                        "id": "field-extend-if-needed",
+                        "type": "Checkbox",
+                        "props": {
+                          "name": "mayExtend",
+                          "label": "I may need to extend this leave (will submit additional request if needed)"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "form-actions",
+            "type": "Row",
+            "props": {
+              "justify": "end",
+              "align": "center",
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "padding": "tokens.spacing.6",
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.1"
+              },
+              "radius": "tokens.radius.lg",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "btn-cancel",
+                "type": "Button",
+                "props": {
+                  "label": "Cancel",
+                  "variant": "ghost",
+                  "size": "md",
+                  "navigate": "/leave-requests"
+                }
+              },
+              {
+                "id": "btn-save-draft",
+                "type": "Button",
+                "props": {
+                  "label": "Save Draft",
+                  "variant": "secondary",
+                  "size": "md",
+                  "workflow": "saveLeaveRequestDraft"
+                }
+              },
+              {
+                "id": "btn-submit",
+                "type": "Button",
+                "props": {
+                  "label": "Submit Request",
+                  "variant": "primary",
+                  "size": "md",
+                  "workflow": "submitLeaveRequest"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

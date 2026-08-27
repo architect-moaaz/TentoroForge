@@ -1,0 +1,82 @@
+{
+  "templates": [
+    {
+      "id": "arctic-ops",
+      "name": "Arctic Ops",
+      "vibe": "Clinical, airy, precision-focused",
+      "provenance": "sampled from OCR pipeline dashboards (DeepSeek-OCR UI, Dropbox DropTurk), document management SaaS layouts on SaaSUI \u2014 observed: white canvas with high-contrast blue action accents, generous whitespace between record rows, topbar with breadcrumb trails, sharp table edges, monospace readouts for extracted field values",
+      "palette": {
+        "primary": "#1D4ED8",
+        "accent": "#06B6D4",
+        "mode": "light"
+      },
+      "typography": {
+        "headingFont": "IBM Plex Sans",
+        "bodyFont": "Inter",
+        "scale": "airy"
+      },
+      "tokens": {
+        "density": "comfortable",
+        "radiusScale": "sharp",
+        "elevation": "flat",
+        "motionLevel": "subtle"
+      },
+      "shell": {
+        "frame": "topbar",
+        "tone": "light"
+      }
+    },
+    {
+      "id": "terminal-intelligence",
+      "name": "Terminal Intelligence",
+      "vibe": "Dark, dense, power-user control",
+      "provenance": "sampled from OCR processing dashboards (FastAPI+Vue OCR UIs on GitHub, web analytics admin dark themes noted on Mockitt) \u2014 observed: near-black backgrounds with deep navy sidebar rails, amber/green status indicators for pipeline job states, monospace field extraction readouts, compact row density, progress bars rendered inline, bounding-box visualization panels in dark slate",
+      "palette": {
+        "primary": "#6366F1",
+        "accent": "#F59E0B",
+        "mode": "dark"
+      },
+      "typography": {
+        "headingFont": "Space Grotesk",
+        "bodyFont": "JetBrains Mono",
+        "scale": "compact"
+      },
+      "tokens": {
+        "density": "compact",
+        "radiusScale": "sharp",
+        "elevation": "soft",
+        "motionLevel": "subtle"
+      },
+      "shell": {
+        "frame": "rail",
+        "tone": "dark"
+      }
+    },
+    {
+      "id": "warm-paper",
+      "name": "Warm Paper",
+      "vibe": "Approachable, document-native, grounded",
+      "provenance": "sampled from document management redesign case studies (updivision WebGed redesign, Behance document management dashboard projects) \u2014 observed: warm off-white canvas evoking physical paper, amber-tinted sidebar navigation, rounded card components for each uploaded document record, comfortable row spacing, soft drop shadows under upload zones and result cards, humanist sans body type",
+      "palette": {
+        "primary": "#92400E",
+        "accent": "#D97706",
+        "mode": "light"
+      },
+      "typography": {
+        "headingFont": "Plus Jakarta Sans",
+        "bodyFont": "Nunito",
+        "scale": "balanced"
+      },
+      "tokens": {
+        "density": "comfortable",
+        "radiusScale": "rounded",
+        "elevation": "raised",
+        "motionLevel": "expressive"
+      },
+      "shell": {
+        "frame": "sidebar",
+        "tone": "light"
+      }
+    }
+  ]
+}

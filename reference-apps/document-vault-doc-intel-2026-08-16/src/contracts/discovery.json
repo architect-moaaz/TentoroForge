@@ -1,0 +1,188 @@
+{
+  "commonPitfalls": [
+    "Forgetting to set status=failed in the catch block of ProcessDocumentJob \u2014 documents can get stuck at status=processing indefinitely.",
+    "Not stopping the 5-second polling on /documents when all rows reach a terminal status \u2014 causes unnecessary backend load.",
+    "Using a plain text column for ocr_text without a tsvector/GIN index \u2014 full-text search becomes a sequential scan on large archives.",
+    "Omitting to concatenate JSONB values into the tsvector \u2014 searches miss hits that are only in extracted_fields.",
+    "Serving the uploaded file directly from the API without streaming or presigned URLs \u2014 blocks the Node process on large PDFs.",
+    "Not handling multi-page PDFs in the PaddleOCR sidecar \u2014 only the first page gets OCR'd unless pages are split before dispatch.",
+    "Confidence stored as FLOAT with no CHECK constraint \u2014 values outside 0-1 can break colour-coding chips silently.",
+    "Seed data with all documents in terminal status \u2014 the auto-refresh feature is invisible; ensure at least one row stays in status=processing at app start."
+  ],
+  "complianceNotes": [
+    "none"
+  ],
+  "confidence": 0.88,
+  "description": "Internal admin tool for uploading paper/PDF records, running OCR via PaddleOCR sidecar and AI field extraction, and searching the resulting structured + full-text content.",
+  "designPatterns": [
+    {
+      "description": "After upload, the /documents table polls GET /api/documents every 5 s when hasProcessing is true. The API returns a top-level hasProcessing flag so the client can halt polling once all jobs are terminal, avoiding unnecessary requests.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "Async Job Status Polling"
+    },
+    {
+      "description": "POST /api/documents accepts multipart/form-data with multiple files, writes a Document row per file at status=queued, dispatches ProcessDocumentJob per document ID, and returns 202 Accepted with an array of document IDs.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "Multipart Upload + Immediate Job Dispatch"
+    },
+    {
+      "description": "PaddleOCR runs as a separate process or HTTP sidecar. The workflow calls it per-document (image or PDF page), receives raw text and per-character/region confidence scores, and aggregates a document-level confidence scalar (mean or min).",
+      "evidence": [
+        "https://deepwiki.com/PaddlePaddle/PaddleOCR/2-core-pipelines-and-models",
+        "https://arxiv.org/pdf/2601.21957"
+      ],
+      "name": "PaddleOCR Sidecar Integration"
+    },
+    {
+      "description": "extracted_fields is stored as PostgreSQL JSONB. A GIN index on the column (jsonb_ops) allows containment queries. A generated tsvector column concatenates ocr_text with all JSONB string values for unified full-text search via a second GIN index.",
+      "evidence": [
+        "https://medium.com/@vedantthakkar1003/mastering-postgresql-gin-indexes-the-ultimate-guide-to-faster-jsonb-array-and-full-text-search-f1f8ec3e67af",
+        "https://www.depesz.com/2017/04/04/waiting-for-postgresql-10-full-text-search-support-for-json-and-jsonb/"
+      ],
+      "name": "JSONB Extracted Fields with GIN Index"
+    },
+    {
+      "description": "Detail page splits horizontally: left panel shows the original file inline (PDF iframe or <img> for images), right panel shows a DescriptionList of extracted key\u2192value pairs, each with a colour-coded confidence Chip. A collapsible accordion below reveals raw OCR text in a monospace pre block.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "Two-Column Document Viewer"
+    },
+    {
+      "description": "Document status is rendered as a coloured Tag/Badge: queued=slate, processing=amber+spinner, complete=green, failed=red. Lets operators scan the table for actionable rows at a glance.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "Coloured Status Tag"
+    },
+    {
+      "description": "Search results surface a highlighted text snippet from ocr_text (using ts_headline in Postgres or client-side highlight). If the matching document has customer_name or account_number in extracted_fields, those are shown as prominent callout badges beside the filename.",
+      "evidence": [
+        "https://platform.veevavault.help/en/gr/3569/",
+        "training_data"
+      ],
+      "name": "Snippet Search with Field Callouts"
+    },
+    {
+      "description": "Numeric confidence (0-1) is rendered as a small Chip: green (\u22650.8), amber (0.5-0.79), red (<0.5). Applied both to individual extracted fields and as a document-level indicator in the table.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "Confidence Chip Colour Coding"
+    },
+    {
+      "description": "react-dropzone (or equivalent) multi-file dropzone shows each accepted file as a row with filename, size, and a pending/uploading/done chip. Upload button triggers batch POST. On success, navigate to /documents.",
+      "evidence": [
+        "training_data"
+      ],
+      "name": "File Dropzone with Per-File Status"
+    }
+  ],
+  "domain": "Document Intelligence / Record Digitisation",
+  "domainAliases": [
+    "document vault",
+    "OCR pipeline",
+    "record digitisation",
+    "document management",
+    "paper digitisation",
+    "document extraction"
+  ],
+  "elapsedSeconds": 73.42,
+  "entitySuggestions": [
+    {
+      "likelyFields": [
+        "id",
+        "org_id",
+        "file",
+        "original_filename",
+        "uploaded_at",
+        "processed_at",
+        "status",
+        "ocr_text",
+        "extracted_fields",
+        "confidence",
+        "error_message"
+      ],
+      "name": "Document"
+    },
+    {
+      "likelyFields": [
+        "id",
+        "document_id",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "step",
+        "error"
+      ],
+      "name": "ProcessDocumentJob"
+    },
+    {
+      "likelyFields": [
+        "org_id",
+        "name"
+      ],
+      "name": "OrgContext"
+    }
+  ],
+  "formPatterns": [
+    {
+      "contexts": [
+        "/upload \u2014 primary landing page action"
+      ],
+      "pattern": "Multi-File Dropzone Upload"
+    },
+    {
+      "contexts": [
+        "/search \u2014 full-text query across ocr_text + extracted_fields values"
+      ],
+      "pattern": "Single SearchInput"
+    },
+    {
+      "contexts": [
+        "Auth page \u2014 email + password, redirect to /upload on success"
+      ],
+      "pattern": "Inline Login Form"
+    }
+  ],
+  "model": "claude-sonnet-4-6",
+  "personas": {
+    "api_generator": "You generate REST/RPC API endpoints for a document vault: POST /api/documents (multipart upload, dispatches ProcessDocumentJob per file), GET /api/documents (paginated, ordered by uploaded_at DESC), GET /api/documents/:id, GET /api/search?q= (full-text across ocr_text + extracted_fields values). Polling: the /api/documents response includes a hasProcessing boolean so the client knows whether to keep auto-refreshing. Return 202 on upload dispatch.",
+    "auth_agent": "Single role: Admin. Use session-based or JWT auth with a simple email+password login. No MFA required (internal tool). Protect all /api/* routes with a middleware guard that checks the session/token. No RBAC complexity needed \u2014 any authenticated user is an Admin.",
+    "business_logic": "You implement async document processing workflows: on upload, write Document with status=queued, then dispatch ProcessDocumentJob. The job calls the PaddleOCR sidecar (HTTP or subprocess), writes ocr_text + confidence, then calls the AI extraction step for [customer_name, account_number, amount, date, reference_number], merges results into extracted_fields JSONB, and does a final DB update to status=complete + processed_at=NOW(). On any step failure, catch and write status=failed + error_message. Never throw unhandled \u2014 always land in one terminal status.",
+    "component_builder": "You build React/TSX components for a document vault admin UI: FileDropzone (react-dropzone, multi-file, shows per-file status chips), DocumentsTable (TanStack Table, coloured status Tag, auto-refresh every 5 s while hasProcessing), DocumentViewer (two-column: PDF/image iframe left, DescriptionList of extracted_fields with confidence Chip right, collapsible OCR text panel below), SearchResults (snippet highlight, customer_name + account_number callout badges). Use a neutral dark-slate + electric-indigo colour scheme with monospace text for OCR output.",
+    "contract_writer": "You write TypeScript contracts (interfaces, enums, Zod schemas) for a document-vault domain. Key entities: Document (file, original_filename, uploaded_at, status enum [queued|processing|complete|failed], ocr_text, extracted_fields JSONB, confidence 0-1, error_message, org_id, processed_at). Workflow payload: ProcessDocumentJob { documentId }. Use domain language: OCR confidence, extracted fields, processing status.",
+    "default": "You are a senior full-stack engineer working on an internal document digitisation admin tool with OCR and AI field extraction. Prioritise correctness of async workflow state, accurate full-text search across JSONB, and a clean data-dense UI. Scope strictly to the described spec.",
+    "design": "Neutral, utilitarian admin aesthetic \u2014 dark slate backgrounds with electric indigo accents and warm amber status highlights. Typography is monospace-influenced for OCR/data fidelity, with a clean sans-serif for UI chrome. Density is compact to fit data-heavy document tables without scrolling fatigue.",
+    "page_assembler": "You assemble pages for a single-role admin tool. Three main pages: /upload (centred dropzone card, prominent Upload button, navigates to /documents on submit), /documents (full-width table with top-bar status legend and live refresh indicator), /documents/:id (two-column split viewer, breadcrumb back to /documents), /search (single SearchInput hero, results list below). Shell: fixed left sidebar with icons+labels for Upload, Documents, Search.",
+    "planner": "You are an expert product architect for internal document-intelligence admin tools. You understand async OCR pipelines (queue \u2192 sidecar \u2192 AI extract \u2192 DB write), polling-based status UIs, and single-role admin workflows. Keep every feature scoped to the described spec \u2014 no multi-tenancy, no batch rollups, no edit workflows.",
+    "qa_tester": "You write tests for a document vault. Critical paths: multi-file upload dispatches one job per file and redirects; status polling stops when no rows are processing; document viewer renders PDF inline and shows all extracted_fields; search returns snippets and highlights matching terms in ocr_text and extracted_fields values; failed documents show error_message clearly; confidence chips reflect numeric value with colour coding (green \u22650.8, amber 0.5-0.79, red <0.5).",
+    "schema_designer": "You design PostgreSQL schemas for OCR document vaults. The documents table carries a tsvector generated column over ocr_text concatenated with the JSONB values of extracted_fields for unified full-text search. Add a GIN index on the tsvector column and a separate GIN index on extracted_fields (jsonb_ops). Status is a PG enum. Index uploaded_at DESC for the default list sort.",
+    "shell": "Fixed left sidebar (240 px), icon + label nav items: Upload (cloud-arrow-up icon), Documents (document-text icon), Search (magnifying-glass icon). Top bar shows org name + logged-in user avatar. Main content area scrolls independently. Active nav item highlighted with indigo left-border accent."
+  },
+  "searchedWeb": true,
+  "source": "domain_agent",
+  "uncertainAreas": [
+    "Exact sidecar communication protocol for PaddleOCR (HTTP REST vs subprocess stdout) \u2014 spec says 'sidecar' but does not clarify; assuming HTTP.",
+    "Whether PDF preview uses an iframe (native browser PDF renderer) or a library like pdf.js \u2014 both are viable; choice affects bundle size.",
+    "Storage backend for uploaded files (local disk, S3, GCS) \u2014 not specified; assumed local or S3-compatible object storage.",
+    "Job queue implementation (BullMQ, pg-boss, simple DB polling) \u2014 not specified; any of these are compatible with the described workflow.",
+    "Whether confidence is document-level (single scalar) or per-field \u2014 spec implies both (a single confidence column on Document and per-field in extracted_fields); resolution needs confirmation.",
+    "Whether /search should support phrase queries or just keyword OR matching \u2014 Postgres tsvector defaults to OR; phrase search needs tsquery adjustments."
+  ],
+  "visualLanguage": {
+    "colorAnchors": {
+      "accent": "#F59E0B",
+      "primary": "#1E2433",
+      "secondary": "#4F46E5"
+    },
+    "densityPreference": "compact",
+    "fontFamily": "\"IBM Plex Sans\", system-ui, sans-serif",
+    "paletteCharacter": "dark slate utility with electric indigo accents and warm amber status highlights",
+    "typographyTone": "technical"
+  }
+}

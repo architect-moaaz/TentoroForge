@@ -1,0 +1,466 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-balances/list",
+  "route": "/leave-balances",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Leave Balances"
+  },
+  "dataSources": [
+    {
+      "name": "balances",
+      "entity": "LeaveBalance",
+      "op": "list"
+    },
+    {
+      "name": "stats",
+      "entity": "LeaveBalance",
+      "op": "stats"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "EMPLOYEE BENEFITS",
+              "headline": "Leave Balances",
+              "subhead": "Track vacation, sick time, and other leave balances across your organization.",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "Export Report",
+                  "action": {
+                    "type": "workflow",
+                    "name": "export_balances"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "Manage Policies",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/leave-policies"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.lg",
+              "motion": "fade-in"
+            }
+          },
+          {
+            "id": "metrics-row",
+            "type": "Grid",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "metric-total-employees",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Total Employees",
+                  "value": "{{stats.totalEmployees}}",
+                  "format": "number",
+                  "icon": "users"
+                }
+              },
+              {
+                "id": "metric-avg-vacation",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Avg Vacation Balance",
+                  "value": "{{stats.avgVacationBalance}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.vacationBalanceTrend}}",
+                    "direction": "up"
+                  },
+                  "icon": "calendar-days"
+                }
+              },
+              {
+                "id": "metric-avg-sick",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Avg Sick Balance",
+                  "value": "{{stats.avgSickBalance}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{stats.sickBalanceTrend}}",
+                    "direction": "flat"
+                  },
+                  "icon": "heart-pulse"
+                }
+              },
+              {
+                "id": "metric-low-balances",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Low Balances",
+                  "value": "{{stats.lowBalanceCount}}",
+                  "format": "number",
+                  "icon": "alert-triangle"
+                }
+              }
+            ]
+          },
+          {
+            "id": "results-section",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Employee Leave Balances"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "results-grid",
+                "type": "Grid",
+                "props": {
+                  "columns": 3,
+                  "gap": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "balance-cards",
+                    "type": "Repeat",
+                    "bind": "balances",
+                    "children": [
+                      {
+                        "id": "balance-card",
+                        "type": "Card",
+                        "style": {
+                          "background": "tokens.color.surface.0",
+                          "padding": "tokens.spacing.6",
+                          "radius": "tokens.radius.lg",
+                          "shadow": "tokens.shadow.md"
+                        },
+                        "children": [
+                          {
+                            "id": "card-content",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.4"
+                            },
+                            "children": [
+                              {
+                                "id": "card-header",
+                                "type": "Row",
+                                "props": {
+                                  "justify": "between",
+                                  "align": "center"
+                                },
+                                "children": [
+                                  {
+                                    "id": "employee-info",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "horizontal",
+                                      "gap": "tokens.spacing.3",
+                                      "align": "center"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "employee-avatar",
+                                        "type": "Avatar",
+                                        "props": {
+                                          "name": "{{item.employee.name}}",
+                                          "src": "{{item.employee.avatar}}",
+                                          "size": "sm",
+                                          "status": "{{item.employee.status}}"
+                                        }
+                                      },
+                                      {
+                                        "id": "employee-details",
+                                        "type": "Stack",
+                                        "props": {
+                                          "direction": "vertical",
+                                          "gap": "tokens.spacing.1"
+                                        },
+                                        "children": [
+                                          {
+                                            "id": "employee-name",
+                                            "type": "Text",
+                                            "props": {
+                                              "content": "{{item.employee.name}}",
+                                              "as": "strong"
+                                            }
+                                          },
+                                          {
+                                            "id": "employee-title",
+                                            "type": "Text",
+                                            "props": {
+                                              "content": "{{item.employee.title}}",
+                                              "as": "p"
+                                            },
+                                            "style": {
+                                              "color": "tokens.color.text.secondary"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "id": "department-badge",
+                                    "type": "Badge",
+                                    "props": {
+                                      "content": "{{item.employee.department}}",
+                                      "variant": "neutral"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "balance-info",
+                                "type": "Grid",
+                                "props": {
+                                  "columns": 2,
+                                  "gap": "tokens.spacing.4"
+                                },
+                                "children": [
+                                  {
+                                    "id": "vacation-section",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "vacation-label",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "Vacation",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.secondary"
+                                        }
+                                      },
+                                      {
+                                        "id": "vacation-balance",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.vacationBalance}} days",
+                                          "as": "strong"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.success.600"
+                                        }
+                                      },
+                                      {
+                                        "id": "vacation-accrued",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.vacationAccrued}} accrued",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.tertiary"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "id": "sick-section",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "sick-label",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "Sick Leave",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.secondary"
+                                        }
+                                      },
+                                      {
+                                        "id": "sick-balance",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.sickBalance}} days",
+                                          "as": "strong"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.info.600"
+                                        }
+                                      },
+                                      {
+                                        "id": "sick-accrued",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.sickAccrued}} accrued",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.tertiary"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "id": "personal-section",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "personal-label",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "Personal",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.secondary"
+                                        }
+                                      },
+                                      {
+                                        "id": "personal-balance",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.personalBalance}} days",
+                                          "as": "strong"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.warning.600"
+                                        }
+                                      },
+                                      {
+                                        "id": "personal-accrued",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.personalAccrued}} accrued",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.tertiary"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "id": "total-section",
+                                    "type": "Stack",
+                                    "props": {
+                                      "direction": "vertical",
+                                      "gap": "tokens.spacing.1"
+                                    },
+                                    "children": [
+                                      {
+                                        "id": "total-label",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "Total Available",
+                                          "as": "p"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.text.secondary"
+                                        }
+                                      },
+                                      {
+                                        "id": "total-balance",
+                                        "type": "Text",
+                                        "props": {
+                                          "content": "{{item.totalBalance}} days",
+                                          "as": "strong"
+                                        },
+                                        "style": {
+                                          "color": "tokens.color.primary.600"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "card-actions",
+                                "type": "Row",
+                                "props": {
+                                  "gap": "tokens.spacing.3",
+                                  "justify": "end"
+                                },
+                                "children": [
+                                  {
+                                    "id": "view-details-btn",
+                                    "type": "Button",
+                                    "props": {
+                                      "label": "View Details",
+                                      "variant": "ghost",
+                                      "size": "sm",
+                                      "navigate": "/leave-balances/{{item.id}}"
+                                    }
+                                  },
+                                  {
+                                    "id": "adjust-balance-btn",
+                                    "type": "Button",
+                                    "props": {
+                                      "label": "Adjust",
+                                      "variant": "secondary",
+                                      "size": "sm",
+                                      "workflow": "adjust_balance",
+                                      "args": {
+                                        "balanceId": "{{item.id}}"
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

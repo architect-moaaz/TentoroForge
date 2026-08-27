@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1",
+  "id": "products/form",
+  "route": "/products/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "New Product" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "spacing.6" },
+    "children": [
+      {
+        "id": "breadcrumb",
+        "type": "Breadcrumb",
+        "props": {
+          "items": [
+            { "label": "Products", "href": "/products" },
+            { "label": "New Product" }
+          ]
+        }
+      },
+      {
+        "id": "form-heading",
+        "type": "Heading",
+        "props": { "level": 1, "content": "New Product" }
+      },
+      {
+        "id": "form-card",
+        "type": "Card",
+        "props": {},
+        "children": [
+          {
+            "id": "form-stack",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "spacing.4" },
+            "children": [
+              {
+                "id": "name-field",
+                "type": "Input",
+                "props": {
+                  "name": "name",
+                  "label": "Name",
+                  "required": true,
+                  "placeholder": "Widget"
+                }
+              },
+              {
+                "id": "description-field",
+                "type": "Textarea",
+                "props": {
+                  "name": "description",
+                  "label": "Description",
+                  "rows": 3
+                }
+              },
+              {
+                "id": "price-field",
+                "type": "Input",
+                "props": {
+                  "name": "price",
+                  "label": "Price",
+                  "inputType": "number",
+                  "required": true,
+                  "placeholder": "0.00"
+                }
+              },
+              {
+                "id": "category-field",
+                "type": "Select",
+                "props": {
+                  "name": "category",
+                  "label": "Category",
+                  "options": [
+                    { "value": "electronics", "label": "Electronics" },
+                    { "value": "apparel", "label": "Apparel" }
+                  ]
+                }
+              },
+              {
+                "id": "stock-field",
+                "type": "Checkbox",
+                "props": {
+                  "name": "in_stock",
+                  "label": "In stock"
+                }
+              },
+              {
+                "id": "form-actions",
+                "type": "Row",
+                "props": { "justify": "end", "gap": "spacing.3" },
+                "children": [
+                  {
+                    "id": "cancel-btn",
+                    "type": "Button",
+                    "props": {
+                      "label": "Cancel",
+                      "variant": "secondary",
+                      "navigate": "/products"
+                    }
+                  },
+                  {
+                    "id": "submit-btn",
+                    "type": "Button",
+                    "props": {
+                      "label": "Save",
+                      "variant": "primary",
+                      "workflow": "createProduct"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

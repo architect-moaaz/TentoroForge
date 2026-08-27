@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "2",
+  "id": "documents-search-page",
+  "route": "/documents/search",
+  "layout": "main",
+  "dataSources": [],
+  "root": {
+    "type": "Stack",
+    "props": {
+      "gap": "tokens.spacing.6",
+      "className": "px-6 py-6 md:px-8 md:py-8"
+    },
+    "children": [
+      {
+        "type": "Stack",
+        "props": { "gap": "tokens.spacing.1" },
+        "children": [
+          { "type": "Heading", "props": { "content": "Search documents", "level": 1 } },
+          { "type": "Text",    "props": { "content": "Full-text search over OCR text and every value in extracted fields.", "variant": "caption" } }
+        ]
+      },
+      {
+        "type": "SearchInput",
+        "props": {
+          "endpoint": "/api/search",
+          "placeholder": "customer name, account number, reference — any word",
+          "debounceMs": 250,
+          "minChars": 2
+        }
+      },
+      {
+        "type": "Card",
+        "props": {
+          "density": "comfortable",
+          "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+        },
+        "children": [
+          {
+            "type": "SearchResults",
+            "props": {
+              "hrefPattern": "/documents/${id}",
+              "pristineText": "Type a query above. Search runs across every OCR-scanned document.",
+              "emptyText": "No matches. Try broader terms or check spelling.",
+              "skeletonRows": 5
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {}
+}

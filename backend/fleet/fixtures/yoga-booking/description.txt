@@ -1,0 +1,1 @@
+Multi-role yoga studio platform for class booking, membership management, instructor scheduling, and admin analytics.

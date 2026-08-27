@@ -1,0 +1,75 @@
+{
+  "nodes": [
+    {
+      "action": "materialized",
+      "binding_name": "documentByCreatedAt",
+      "binding_prop": "data",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "Chart",
+      "op": "series",
+      "resolved": true
+    },
+    {
+      "action": "materialized",
+      "binding_name": "documentByStatus",
+      "binding_prop": "data",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "Chart",
+      "op": "series",
+      "resolved": true
+    },
+    {
+      "action": "resolved",
+      "binding_name": "documents",
+      "binding_prop": "rows",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "Table",
+      "op": "list",
+      "resolved": true
+    },
+    {
+      "action": "resolved",
+      "binding_name": "documentStat",
+      "binding_prop": "value",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "MetricTile",
+      "op": "aggregate",
+      "resolved": true
+    },
+    {
+      "action": "resolved",
+      "binding_name": "documentStat2",
+      "binding_prop": "value",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "MetricTile",
+      "op": "aggregate",
+      "resolved": true
+    },
+    {
+      "action": "resolved",
+      "binding_name": "documentStat3",
+      "binding_prop": "value",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "MetricTile",
+      "op": "aggregate",
+      "resolved": true
+    },
+    {
+      "action": "resolved",
+      "binding_name": "documentStat4",
+      "binding_prop": "value",
+      "entity": "Document",
+      "file": "home.json",
+      "node_type": "MetricTile",
+      "op": "aggregate",
+      "resolved": true
+    }
+  ],
+  "version": 1
+}

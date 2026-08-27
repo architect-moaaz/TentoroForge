@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1",
+  "id": "MarketingLayout",
+  "root": {
+    "id": "marketing-shell",
+    "type": "Stack",
+    "props": {
+      "direction": "vertical",
+      "gap": "spacing.0",
+      "align": "stretch"
+    },
+    "children": [
+      {
+        "id": "marketing-header",
+        "type": "Container",
+        "props": { "maxWidth": "2xl" },
+        "children": [
+          {
+            "id": "marketing-header-slot",
+            "type": "Slot",
+            "props": { "name": "header" }
+          }
+        ]
+      },
+      {
+        "id": "marketing-content",
+        "type": "Container",
+        "props": { "maxWidth": "2xl" },
+        "children": [
+          {
+            "id": "marketing-content-slot",
+            "type": "Slot",
+            "props": { "name": "content" }
+          }
+        ]
+      },
+      {
+        "id": "marketing-footer",
+        "type": "Container",
+        "props": { "maxWidth": "2xl" },
+        "children": [
+          {
+            "id": "marketing-footer-slot",
+            "type": "Slot",
+            "props": { "name": "footer" }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,190 @@
+# Production compose for the Tentoro Forge platform.
+# Runs on a single VM (EC2). Everything behind nginx on :80 — swap
+# in Caddy on :443 once you have a DNS name pointing at the box.
+#
+# Volumes are bind-mounted to /opt/tentoro-forge/data/* so upgrades that
+# recreate containers can't lose Postgres or per-app git repos.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tentoroforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tentoroforge}
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    # NO published ports — only reachable inside the compose network.
+    # Add a temporary `ports:` block if you need to attach a client.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tentoroforge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - ./data/redis:/data
+    # NO published ports — internal only.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tentoroforge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tentoroforge}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
+      # --- deploy providers (generated-app publish flow) ---
+      VERCEL_TOKEN: ${VERCEL_TOKEN:-}
+      VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
+      NEON_API_KEY: ${NEON_API_KEY:-}
+      NEON_ORG_ID: ${NEON_ORG_ID:-}
+      # --- feature flags (mirror local dev defaults) ---
+      FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
+      FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}
+      # Planner critic OFF on UAT: the REVISE loop adds ~1–2m to Complete
+      # generation for marginal gain on the current fixture set — testers
+      # want faster round-trips over one-more-guardrail.
+      FORGE_PLANNER_CRITIC: ${FORGE_PLANNER_CRITIC:-0}
+      # Wizard emission ON on UAT: multi-step wizard-page archetypes are
+      # part of the tester scope; the emitter is off by default until we
+      # opt an environment in.
+      FORGE_WIZARD: ${FORGE_WIZARD:-1}
+      # --- optional third-party ---
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      # Per-app git repos + generated code. Bind mount so a container
+      # rebuild never orphans a user's project. Path is /output (repo
+      # root), not /app/output — services/project_service.py resolves
+      # OUTPUT_BASE via `.parent.parent.parent` from /app/services/*,
+      # landing at /output. Get the mount wrong and every generation
+      # crashes on PermissionError.
+      - ./data/output:/output
+      # Vendor source for `@tentoroforge/*` packages. app_emitter's
+      # `_vendor_engine_packages` resolves `workspace_root/packages/<pkg>`
+      # from `/app/services/app_emitter.py.parents[2]` = `/`, so the
+      # mount HAS to land at `/packages` for the vendor step to find
+      # dist/ + package.json and copy them into the generated app.
+      # Read-only — the container never writes here.
+      - ./packages:/packages:ro
+    # No published ports — nginx is the only entrypoint.
+
+  # Self-Verify Pass runner — headless Chromium + Fastify.
+  # Fires when the backend calls POST http://forge-verify:6600/run with an
+  # Interaction[] payload. Async by design (backend polls or subscribes to
+  # the SSE stream) so generation isn't blocked.
+  forge-verify:
+    build:
+      context: ./docker/forge-verify
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "6600"
+      FORGE_VERIFY_MAX_CONTEXTS: "3"
+      # Chromium needs a bigger /dev/shm than the docker default
+      # (64MB) or it OOMs during page navigation. --disable-dev-shm-usage
+      # in browser args handles this at the process level too.
+    shm_size: 512mb
+    # No published ports — only backend talks to it.
+
+  frontend:
+    build:
+      # Repo-root context so pnpm workspaces can resolve @tentoroforge/* +
+      # @forge/* to the local packages/ dirs instead of the npm registry.
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        # Baked into the browser JS bundle. Empty means "call the same
+        # origin" — the browser hits nginx on / and nginx routes /api/*
+        # to the backend container.
+        NEXT_PUBLIC_API_URL: ""
+        # Editor "Preview" button base URL. Empty → same origin, so the
+        # generated-app preview loads from `/p/{shortId}/...` and caddy
+        # routes it to the render-scaffold container. Fallback to
+        # localhost:6503 (baked in EditorToolbar.tsx) only applies when
+        # NEXT_PUBLIC_PREVIEW_URL is undefined at build time.
+        NEXT_PUBLIC_PREVIEW_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Browser talks to nginx (relative /api), NOT the container hostname.
+      NEXT_PUBLIC_API_URL: ""
+      # Next.js SSR rewrites (next.config.ts) forward /api/projects/* to
+      # FastAPI. That call is server-to-server inside the compose network,
+      # so we point it at the backend service name, not localhost.
+      FASTAPI_URL: "http://backend:6500"
+    # No published ports.
+
+  render-scaffold:
+    # Serves the generated-app preview iframe at /p/{shortId}/{slug}.
+    # Reads schema + contract JSON from the backend's /output bind mount
+    # (mounted read-only here — the scaffold never writes back).
+    build:
+      context: .
+      dockerfile: apps/render-scaffold/Dockerfile.prod
+      args:
+        # Same-origin: browser hits caddy on /api/* which routes to
+        # backend. The scaffold only calls it for schema/contract fetches.
+        NEXT_PUBLIC_API_URL: ""
+        # basePath uniformly scopes every route + asset URL under /p so
+        # scaffold pages resolve at /p/{projectId}/{slug} and its own
+        # /_next/static/... bundle assets serve from /p/_next/*, all
+        # caught by caddy's /p/* handle.
+        NEXT_BASE_PATH: "/p"
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Points at the shared output tree the backend writes to. Same
+      # bind mount as backend's `./data/output:/output`.
+      OUTPUT_ROOT: /output
+      # SSR call from scaffold → backend runs on the compose network.
+      NEXT_PUBLIC_API_URL: "http://backend:6500"
+    volumes:
+      - ./data/output:/output:ro
+    # No published ports — caddy is the only entrypoint (routes /p/*).
+
+  caddy:
+    # Replaces nginx. Routes /api → backend, /p → render-scaffold,
+    # / → frontend, PLUS auto Let's Encrypt for forge-uat.tentoro.ai
+    # on port 443. Without HTTPS, browsers refuse to expose crypto.subtle
+    # / crypto.randomUUID, which the editor UI depends on.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+      - render-scaffold
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"      # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data       # cert + account state (survives recreate)
+      - ./data/caddy/config:/config

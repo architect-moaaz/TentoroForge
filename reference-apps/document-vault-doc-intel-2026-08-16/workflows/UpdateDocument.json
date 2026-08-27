@@ -1,0 +1,143 @@
+{
+  "id": "update-document",
+  "name": "UpdateDocument",
+  "description": "Update a Document record.",
+  "processVariables": [
+    {
+      "name": "id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "originalFilename",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "fileUrl",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "mimeType",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "fileSizeBytes",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "ocrText",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "extractedFields",
+      "type": "object",
+      "required": false
+    },
+    {
+      "name": "confidence",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "pageCount",
+      "type": "number",
+      "required": false
+    },
+    {
+      "name": "uploadedBy",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "uploadedByName",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "processedAt",
+      "type": "date",
+      "required": false
+    },
+    {
+      "name": "errorMessage",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "definition": {
+    "trigger": {
+      "type": "manual"
+    },
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "type": "manual"
+          },
+          "label": "Start"
+        }
+      },
+      {
+        "id": "db_update",
+        "type": "action",
+        "position": {
+          "x": 200,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "actionType": "db_update",
+            "table": "documents",
+            "where": {
+              "id": "id"
+            },
+            "values": {
+              "id": "{{id}}"
+            }
+          },
+          "label": "Update Document"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "position": {
+          "x": 400,
+          "y": 0
+        },
+        "data": {
+          "config": {},
+          "label": "End"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_trigger_action",
+        "source": "trigger",
+        "target": "db_update"
+      },
+      {
+        "id": "e_action_end",
+        "source": "db_update",
+        "target": "end"
+      }
+    ]
+  }
+}

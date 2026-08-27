@@ -1,0 +1,165 @@
+{
+  "identity": {
+    "domain": "Document Intelligence / Record Digitisation",
+    "register": [
+      "precise_authoritative",
+      "methodical"
+    ],
+    "voice": "formal_technical",
+    "voice_free": "precise and methodical, quietly",
+    "modes": [
+      "light",
+      "dark"
+    ],
+    "source": "authored",
+    "visual_stance": null,
+    "auth_taglines": [],
+    "product_name_candidates": [],
+    "tone_intensity": null,
+    "compliance_flags": []
+  },
+  "palette": {
+    "brand": "#0F4C75",
+    "accent": "#0369A1",
+    "neutrals_base": "#E8EDF2",
+    "neutrals_tint": "cool",
+    "neutrals_tint_free": "cool with slate",
+    "surface_bg": "#F4F7FA",
+    "surface_elevated": "#FFFFFF",
+    "foreground_primary": "#0D1B2A",
+    "foreground_muted": "#4A5E72",
+    "foreground_hint": null,
+    "locked_fields": []
+  },
+  "typography": {
+    "display_family": "DM Sans",
+    "display_weights": [
+      500,
+      700
+    ],
+    "body_family": "IBM Plex Sans",
+    "body_weights": [
+      400,
+      500,
+      600
+    ],
+    "utility_family": "IBM Plex Mono",
+    "scale": "conservative_1.20",
+    "locked_fields": []
+  },
+  "layout": {
+    "density": "comfortable",
+    "radius": "sharp_2",
+    "grid": "12-col fixed 1280px max, 24px gutters",
+    "whitespace": "generous vertical rhythm, tight horizontal card padding",
+    "locked_fields": [],
+    "radius_px": 3,
+    "density_pt": 10,
+    "nav_language": null
+  },
+  "signature_moves": [
+    {
+      "kind": "document_status_rail",
+      "detail": "A left-edge 3px vertical bar on every document card changes colour by processing state \u2014 slate for queued, amber for processing, teal for extracted, red for failed \u2014 no badge or chip needed."
+    },
+    {
+      "kind": "monospaced_metadata_strip",
+      "detail": "File size, page count, and job ID render in IBM Plex Mono at 11px inside a hairline-bordered strip at the card footer, evoking a file manifest rather than a UI label."
+    }
+  ],
+  "anti_patterns": [
+    "centered_layout_default",
+    "confetti_success_animations",
+    "cream_serif_over_beige",
+    "dashboard_dark_blue_default",
+    "dashboard_dark_blue_primary",
+    "decorative_illustration_in_empty_states",
+    "emoji_as_section_markers",
+    "emoji_section_markers",
+    "everything_centered",
+    "hero_gradient_overlays",
+    "inter_everywhere",
+    "purple_blue_gradient",
+    "purple_to_blue_gradient_hero",
+    "rounded_card_corners_above_4px",
+    "rounded_lg_uniformly",
+    "warm_cream_plus_terracotta",
+    "warm_cream_serif_terracotta"
+  ],
+  "content_bank": {
+    "empty_states": {
+      "list": "No {entity_plural} have been ingested yet. Upload a file to begin extraction.",
+      "search": "No {entity_plural} matched \"{query}\". Try adjusting your search terms or filters.",
+      "filtered": "No {entity_plural} match the active filters. Clear one or more criteria to broaden results.",
+      "first_use": "Your document repository is empty. Upload your first {entity_singular} to start the digitisation pipeline."
+    },
+    "toasts": {
+      "created": "{entity_singular} queued for processing.",
+      "updated": "{entity_singular} record updated.",
+      "deleted": "{entity_singular} removed from repository.",
+      "error_generic": "An error occurred. Please try again.",
+      "error_permission": "You do not have permission to perform this action."
+    },
+    "notifications": {
+      "task_assigned": "{task_kind} assigned to your queue",
+      "approval_needed": "{entity_singular} extraction requires your review"
+    },
+    "cta_verbs": {
+      "primary": "Ingest",
+      "create": "Upload",
+      "delete": "Remove",
+      "save": "Save"
+    }
+  },
+  "motion": {
+    "duration_fast_ms": 120,
+    "duration_medium_ms": 240,
+    "duration_slow_ms": 480,
+    "ease_out": "cubic-bezier(0.2, 0.0, 0.0, 1.0)",
+    "ease_in_out": "cubic-bezier(0.4, 0.0, 0.2, 1.0)",
+    "reduce_motion_respect": true
+  },
+  "responsive": {
+    "primary_form_factor": "desktop",
+    "breakpoints_priority": [
+      "desktop",
+      "tablet",
+      "mobile"
+    ],
+    "layout_variants": []
+  },
+  "cta_hierarchy": null,
+  "page_recipes": {
+    "/documents": "admin_table",
+    "/documents/[id]": "record_detail",
+    "/documents/search": "admin_table",
+    "/admins": "admin_table"
+  },
+  "visual_lock": {
+    "palette": {
+      "bg": "#FAFAFA",
+      "fg": "#171717",
+      "accent": "#0EA5E9",
+      "muted": "#525252",
+      "badge": "#F97316",
+      "danger": "#DC2626",
+      "success": "#16A34A",
+      "subtle": "#E5E5E5"
+    },
+    "typography": {
+      "display": "IBM Plex Sans",
+      "body": "IBM Plex Sans",
+      "mono": "IBM Plex Mono"
+    },
+    "radius": {
+      "sm": 2,
+      "md": 4,
+      "lg": 6
+    },
+    "shadow": {
+      "sm": "0 1px 2px rgba(23,23,23,0.06)",
+      "md": "0 4px 12px rgba(23,23,23,0.08)"
+    },
+    "preset_name": "data-dense"
+  }
+}

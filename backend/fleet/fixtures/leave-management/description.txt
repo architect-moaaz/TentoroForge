@@ -1,0 +1,1 @@
+An employee leave request management system. Employees submit leave requests with a date range and reason. Managers review pending requests and can approve or reject them. Show a list of leave requests with their status, a detail view, and a dashboard summarizing pending vs approved.

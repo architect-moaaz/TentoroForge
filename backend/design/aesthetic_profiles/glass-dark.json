@@ -1,0 +1,58 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "glass-dark",
+  "description": "Dark radial background + glassmorphic cards. Snap2App / AC10 signature.",
+  "when_to_use": {
+    "identity.usageMode": ["single-session", "public-anonymous"],
+    "layout.hero_any_of": ["full-bleed-gradient", "media-hero", "now-playing"]
+  },
+  "tokens": {
+    "color": {
+      "background": "radial-gradient(ellipse at 50% -10%, hsl(220 25% 12%), hsl(230 30% 6%))",
+      "surface": "hsl(230 30% 10% / 0.62)",
+      "surfaceHover": "hsl(230 30% 14% / 0.72)",
+      "border": "hsl(220 25% 30% / 0.35)",
+      "primary": "hsl(215 100% 60%)",
+      "primaryGlow": "0 0 24px hsl(215 100% 60% / 0.55)",
+      "foreground": "hsl(220 15% 92%)",
+      "muted": "hsl(220 12% 60%)"
+    },
+    "radius": {
+      "sm": "6px",
+      "md": "12px",
+      "lg": "20px",
+      "xl": "28px"
+    },
+    "shadow": {
+      "sm": "0 1px 2px hsl(0 0% 0% / 0.35)",
+      "card": "0 8px 32px hsl(0 0% 0% / 0.45), inset 0 1px 0 hsl(220 25% 60% / 0.10)",
+      "elevated": "0 20px 60px hsl(0 0% 0% / 0.55), inset 0 1px 0 hsl(220 25% 60% / 0.14)"
+    },
+    "backdrop": {
+      "blur": "20px",
+      "saturation": "180%"
+    },
+    "spacing": "comfortable",
+    "typography": {
+      "display": "'Instrument Serif', 'Fraunces', 'DM Serif Display', serif",
+      "body": "'Inter', 'SF Pro Text', system-ui, sans-serif"
+    }
+  },
+  "css_variables": {
+    "--background": "222 30% 6%",
+    "--foreground": "220 15% 92%",
+    "--card": "230 30% 10%",
+    "--card-foreground": "220 15% 92%",
+    "--border": "220 25% 30%",
+    "--primary": "215 100% 60%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "230 22% 16%",
+    "--muted-foreground": "220 12% 60%",
+    "--ring": "215 100% 60%"
+  },
+  "surface_treatment": {
+    "root": {"background": "radial-gradient(ellipse at 50% -10%, hsl(220 25% 12%), hsl(230 30% 6%))"},
+    "card": {"backdropFilter": "blur(20px) saturate(180%)", "background": "hsl(230 30% 10% / 0.62)"},
+    "button.primary": {"boxShadow": "0 0 24px hsl(215 100% 60% / 0.55)"}
+  }
+}

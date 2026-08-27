@@ -1,0 +1,17 @@
+{
+  "critical": 0,
+  "engine": "heuristic",
+  "ok": true,
+  "pages": [
+    {
+      "incomplete": [],
+      "page": "<static heuristic scan>",
+      "violations": []
+    }
+  ],
+  "pages_audited": 1,
+  "serious": 0,
+  "strict": false,
+  "total_violations": 0,
+  "would_fail_build": false
+}

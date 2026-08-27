@@ -1,0 +1,18 @@
+{
+  "app_shape": {
+    "layout": {"shell": "map-canvas", "hero": "map-canvas", "primaryInteraction": "map", "density": "spacious"},
+    "auth": {"surface": "route", "gating": "on-load"},
+    "nav": {"menu": "drawer", "back": "history"},
+    "workflows": {"executionMode": "streaming"},
+    "data": {"readShape": "map-pins", "denormalization": "aggressive"},
+    "identity": {"usageMode": "returning-personal"},
+    "label": "map-canvas-booking"
+  },
+  "archetypes": [
+    {"name": "ride_request", "recipe": "wizard", "entities": ["ride"], "routes": ["/request"]},
+    {"name": "payment_methods", "recipe": "crud", "entities": ["payment_method"], "routes": ["/payment"]},
+    {"name": "chat", "recipe": "chat", "entities": ["message"], "routes": ["/chat"]}
+  ],
+  "industry": "consumer-mobility",
+  "runtime_context": ["geo", "push_notifications", "background_tasks"]
+}

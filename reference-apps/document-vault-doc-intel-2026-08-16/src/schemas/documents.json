@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "2",
+  "id": "documents-list-page",
+  "route": "/documents",
+  "layout": "main",
+  "dataSources": [
+    {
+      "name": "documents",
+      "entity": "Document",
+      "op": "list",
+      "orderBy": [{ "field": "createdAt", "dir": "desc" }]
+    }
+  ],
+  "root": {
+    "type": "Stack",
+    "props": {
+      "gap": "tokens.spacing.6",
+      "className": "px-6 py-6 md:px-8 md:py-8"
+    },
+    "children": [
+      {
+        "type": "Row",
+        "props": { "justify": "space-between", "align": "center", "gap": "tokens.spacing.4" },
+        "children": [
+          { "type": "Heading", "props": { "content": "Documents", "level": 1 } },
+          {
+            "type": "Button",
+            "props": {
+              "label": "Upload",
+              "icon": "upload",
+              "onClick": { "action": "navigate", "target": "/" }
+            }
+          }
+        ]
+      },
+      {
+        "type": "Card",
+        "props": {
+          "density": "comfortable",
+          "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "rows": "{{documents}}",
+              "rowKey": "id",
+              "columns": [
+                { "key": "originalFilename", "label": "Filename",   "width": "40%" },
+                { "key": "createdAt",        "label": "Uploaded",   "format": "date",    "width": "25%" },
+                { "key": "status",           "label": "Status",     "format": "badge",   "width": "15%" },
+                { "key": "confidence",       "label": "Confidence", "format": "percent", "width": "20%" }
+              ],
+              "emptyDescription": "No documents yet. Uploads will appear here after OCR completes.",
+              "rowHref": "/documents/{id}",
+              "rowActions": [
+                { "label": "View", "navigate": "/documents/{id}" }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {}
+}

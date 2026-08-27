@@ -1,0 +1,252 @@
+{
+  "schemaVersion": "2",
+  "id": "exemplar-dashboard-domain-overview",
+  "route": "/example/practice-overview",
+  "layout": "main",
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.semantic.section" },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "Practice Overview",
+          "headline": "How your practice is performing",
+          "subhead": "Last 12 months at a glance",
+          "layout": "stacked",
+          "ctas": [
+            {
+              "label": "Export report",
+              "action": { "type": "workflow", "name": "export-practice-report" },
+              "variant": "secondary"
+            }
+          ]
+        }
+      },
+      {
+        "id": "kpi-row",
+        "type": "Grid",
+        "props": { "columns": 3, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "kpi-rating",
+            "type": "MetricTile",
+            "props": {
+              "label": "Overall rating",
+              "value": "4.0",
+              "format": "number",
+              "delta": { "value": "+0.5", "direction": "up" },
+              "icon": "star",
+              "importance": "primary"
+            }
+          },
+          {
+            "id": "kpi-reviews",
+            "type": "MetricTile",
+            "props": {
+              "label": "Public reviews",
+              "value": "3,431",
+              "format": "number",
+              "delta": { "value": "+1,725 this year", "direction": "up" },
+              "icon": "message-square",
+              "importance": "primary"
+            }
+          },
+          {
+            "id": "kpi-sentiment",
+            "type": "MetricTile",
+            "props": {
+              "label": "Patient sentiment",
+              "value": "91%",
+              "format": "percent",
+              "delta": { "value": "Superb", "direction": "flat" },
+              "icon": "heart",
+              "importance": "primary"
+            }
+          }
+        ]
+      },
+      {
+        "id": "reviews-metrics-row",
+        "type": "Grid",
+        "props": { "columns": 2, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "latest-reviews-card",
+            "type": "Card",
+            "children": [
+              {
+                "id": "latest-reviews-feed",
+                "type": "ActivityFeed",
+                "props": {
+                  "title": "Latest reviews",
+                  "entries": [
+                    {
+                      "timestamp": "2025-11-15T10:30:00Z",
+                      "actor": { "name": "Sarah M." },
+                      "action": "left a",
+                      "target": "5-star review",
+                      "detail": "Staff was incredibly kind and attentive"
+                    },
+                    {
+                      "timestamp": "2025-11-14T14:00:00Z",
+                      "actor": { "name": "James T." },
+                      "action": "left a",
+                      "target": "4-star review",
+                      "detail": "Short wait time, very professional"
+                    },
+                    {
+                      "timestamp": "2025-11-13T09:15:00Z",
+                      "actor": { "name": "Patricia L." },
+                      "action": "left a",
+                      "target": "5-star review",
+                      "detail": "Dr. was thorough and answered all questions"
+                    },
+                    {
+                      "timestamp": "2025-11-12T16:45:00Z",
+                      "actor": { "name": "Robert K." },
+                      "action": "left a",
+                      "target": "3-star review",
+                      "detail": "Long wait in reception area"
+                    },
+                    {
+                      "timestamp": "2025-11-11T11:00:00Z",
+                      "actor": { "name": "Diane W." },
+                      "action": "left a",
+                      "target": "5-star review",
+                      "detail": "Best practice I've visited, highly recommend"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "online-phone-stack",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.semantic.card" },
+            "children": [
+              {
+                "id": "online-requests-card",
+                "type": "Card",
+                "children": [
+                  {
+                    "id": "kpi-online-requests",
+                    "type": "MetricTile",
+                    "props": {
+                      "label": "Online requests",
+                      "value": "847",
+                      "format": "number",
+                      "delta": { "value": "+23%", "direction": "up" },
+                      "icon": "globe",
+                      "importance": "primary"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "phone-leads-card",
+                "type": "Card",
+                "children": [
+                  {
+                    "id": "kpi-phone-leads",
+                    "type": "MetricTile",
+                    "props": {
+                      "label": "Phone leads",
+                      "value": "1,204",
+                      "format": "number",
+                      "delta": { "value": "+9%", "direction": "up" },
+                      "icon": "phone",
+                      "importance": "secondary"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "traffic-search-row",
+        "type": "Grid",
+        "props": { "columns": 2, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "website-traffic-card",
+            "type": "Card",
+            "children": [
+              {
+                "id": "website-traffic-chart",
+                "type": "Chart",
+                "props": {
+                  "chartType": "bar",
+                  "data": [
+                    { "month": "Dec", "visitors": 4200 },
+                    { "month": "Jan", "visitors": 4800 },
+                    { "month": "Feb", "visitors": 5100 },
+                    { "month": "Mar", "visitors": 5600 },
+                    { "month": "Apr", "visitors": 6200 },
+                    { "month": "May", "visitors": 5900 },
+                    { "month": "Jun", "visitors": 6400 },
+                    { "month": "Jul", "visitors": 7100 },
+                    { "month": "Aug", "visitors": 6800 },
+                    { "month": "Sep", "visitors": 7500 },
+                    { "month": "Oct", "visitors": 8200 },
+                    { "month": "Nov", "visitors": 8600 }
+                  ],
+                  "xKey": "month",
+                  "series": [{ "name": "Website visitors", "dataKey": "visitors" }]
+                }
+              }
+            ]
+          },
+          {
+            "id": "search-positions-card",
+            "type": "Card",
+            "children": [
+              {
+                "id": "search-positions-feed",
+                "type": "ActivityFeed",
+                "props": {
+                  "title": "Search position increases",
+                  "entries": [
+                    {
+                      "timestamp": "2025-11-10T00:00:00Z",
+                      "actor": { "name": "pediatric dentist near me" },
+                      "action": "moved up to",
+                      "target": "position #2",
+                      "detail": "Was #5 last month"
+                    },
+                    {
+                      "timestamp": "2025-11-08T00:00:00Z",
+                      "actor": { "name": "family doctor accepting patients" },
+                      "action": "moved up to",
+                      "target": "position #4",
+                      "detail": "Was #11 last month"
+                    },
+                    {
+                      "timestamp": "2025-11-05T00:00:00Z",
+                      "actor": { "name": "urgent care open sunday" },
+                      "action": "moved up to",
+                      "target": "position #1",
+                      "detail": "Was #3 last month"
+                    },
+                    {
+                      "timestamp": "2025-11-02T00:00:00Z",
+                      "actor": { "name": "same day appointment clinic" },
+                      "action": "moved up to",
+                      "target": "position #6",
+                      "detail": "Was #14 last month"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

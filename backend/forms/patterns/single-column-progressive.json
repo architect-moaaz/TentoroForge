@@ -1,0 +1,23 @@
+{
+  "name": "single-column-progressive",
+  "description": "One question per screen, focus flows top→bottom. Sensible default for 3-8 field forms.",
+  "when_to_use": {"field_count_range": [3, 8], "modality": "route"},
+  "invariants": ["required-marker", "blur-validation", "in-flight-disable"],
+  "shape": {
+    "type": "Stack", "props": {"gap": "tokens.spacing.6"}, "children": [
+      {"type": "Heading", "props": {"level": 1}},
+      {"type": "Text", "props": {"variant": "muted"}},
+      {"type": "Card", "children": [
+        {"type": "Form", "children": [
+          {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [
+            {"$slot": "fields"}
+          ]},
+          {"type": "Row", "props": {"justify": "end", "gap": "tokens.spacing.2"}, "children": [
+            {"type": "Button", "props": {"variant": "ghost", "label": "Cancel"}},
+            {"type": "Button", "props": {"variant": "primary", "submit": true, "label": "Save"}}
+          ]}
+        ]}
+      ]}
+    ]
+  }
+}

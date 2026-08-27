@@ -1,0 +1,16 @@
+{
+  "app_shape": {
+    "layout": {"shell": "none", "hero": "none", "primaryInteraction": "form", "density": "spacious"},
+    "auth": {"surface": "none", "gating": "none"},
+    "nav": {"menu": "none", "back": "none"},
+    "workflows": {"executionMode": "fire-and-forget"},
+    "data": {"readShape": "single-record", "denormalization": "none"},
+    "identity": {"usageMode": "single-session"},
+    "label": "single-purpose-utility"
+  },
+  "archetypes": [
+    {"name": "calc", "entities": ["bill"], "routes": ["/"]}
+  ],
+  "industry": "consumer-utility",
+  "runtime_context": []
+}

@@ -1,0 +1,127 @@
+[
+  {
+    "entity": "Document",
+    "route": "/documents/upload",
+    "mode": "create",
+    "section_grouping": [
+      {
+        "label": "Upload",
+        "fields": [
+          "originalFilename",
+          "fileUrl",
+          "mimeType",
+          "fileSizeBytes"
+        ],
+        "tone": "primary"
+      },
+      {
+        "label": "Processing Pipeline",
+        "fields": [
+          "status",
+          "confidence",
+          "pageCount",
+          "ocrText",
+          "extractedFields",
+          "processedAt",
+          "errorMessage"
+        ],
+        "tone": "advanced",
+        "collapsible": true,
+        "subhead": "Populated automatically once OCR and extraction complete"
+      },
+      {
+        "label": "Record Info",
+        "fields": [
+          "uploadedBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "tone": "meta"
+      }
+    ],
+    "field_ordering": [],
+    "control_hints": {
+      "fileUrl": "file-upload",
+      "confidence": "slider",
+      "ocrText": "textarea"
+    },
+    "hero": {
+      "kind": "page-header",
+      "title": "Upload a document",
+      "subtitle": "Add a paper or PDF record for OCR and AI field extraction"
+    },
+    "footer": null,
+    "signature_moves": [
+      "sticky-save-bar",
+      "inline-validation-tick"
+    ]
+  },
+  {
+    "entity": "Document",
+    "route": "/documents/[id]",
+    "mode": "view",
+    "section_grouping": [
+      {
+        "label": "Document",
+        "fields": [
+          "originalFilename",
+          "fileUrl",
+          "mimeType",
+          "fileSizeBytes",
+          "pageCount",
+          "status"
+        ],
+        "tone": "primary"
+      },
+      {
+        "label": "Extraction Results",
+        "fields": [
+          "extractedFields",
+          "confidence",
+          "ocrText"
+        ],
+        "tone": "secondary",
+        "subhead": "AI-extracted fields and raw OCR output from PaddleOCR"
+      },
+      {
+        "label": "Processing",
+        "fields": [
+          "uploadedBy",
+          "processedAt",
+          "errorMessage"
+        ],
+        "tone": "secondary"
+      },
+      {
+        "label": "Record Metadata",
+        "fields": [
+          "id",
+          "createdAt",
+          "updatedAt"
+        ],
+        "tone": "meta",
+        "collapsible": true
+      }
+    ],
+    "field_ordering": [],
+    "control_hints": {
+      "confidence": "slider",
+      "ocrText": "code-block",
+      "errorMessage": "textarea"
+    },
+    "hero": {
+      "kind": "status-led",
+      "title": "{{originalFilename}}",
+      "subtitle": "Uploaded document \u2014 OCR & extraction pipeline status",
+      "status_field": "status"
+    },
+    "footer": {
+      "kind": "audit",
+      "content": "Processing history and extraction confidence over time"
+    },
+    "signature_moves": [
+      "audit-history-drawer",
+      "field-help-drawer"
+    ]
+  }
+]

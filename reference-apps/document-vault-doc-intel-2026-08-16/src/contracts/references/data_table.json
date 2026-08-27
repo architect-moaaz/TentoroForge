@@ -1,0 +1,11 @@
+{
+  "slug": "data_table",
+  "query": "clean data table with column headers, row hover, and action column",
+  "source": "21st.dev",
+  "fragment": {
+    "type": "Text",
+    "props": {
+      "content": ""
+    }
+  }
+}

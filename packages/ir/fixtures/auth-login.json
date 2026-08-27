@@ -1,0 +1,138 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "Tentoro Forge"
+  },
+  "tokens": {},
+  "dataSources": {
+    "login": {
+      "type": "rest",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "body": { "from": "state:form" },
+      "onSuccess": { "action": "navigate:/dashboard" },
+      "onError": { "action": "toast:error" }
+    }
+  },
+  "pages": [
+    {
+      "$id": "login",
+      "route": "/login",
+      "title": "Sign In",
+      "state": {
+        "form": {
+          "email": "",
+          "password": ""
+        },
+        "error": null
+      },
+      "root": {
+        "node": "Stack",
+        "align": "center",
+        "justify": "center",
+        "height": "screen",
+        "padding": "lg",
+        "children": [
+          {
+            "node": "Stack",
+            "width": "400px",
+            "gap": "lg",
+            "align": "center",
+            "children": [
+              {
+                "node": "Stack",
+                "align": "center",
+                "gap": "sm",
+                "children": [
+                  {
+                    "node": "Text",
+                    "content": "TF",
+                    "typography": "heading-2",
+                    "color": "primary"
+                  },
+                  {
+                    "node": "Text",
+                    "content": "Welcome back",
+                    "typography": "heading-1"
+                  },
+                  {
+                    "node": "Text",
+                    "content": "Sign in to your account",
+                    "typography": "body-sm"
+                  }
+                ]
+              },
+              {
+                "node": "Card",
+                "padding": "lg",
+                "children": [
+                  {
+                    "node": "Form",
+                    "bind": "state:form",
+                    "onSubmit": {
+                      "type": "mutate",
+                      "source": "login"
+                    },
+                    "layout": "single-column",
+                    "fields": [
+                      {
+                        "field": "email",
+                        "label": "Email",
+                        "required": true,
+                        "node": "TextInput",
+                        "type": "email",
+                        "placeholder": "you@company.com",
+                        "validation": [
+                          { "rule": "required" },
+                          { "rule": "email", "message": "Enter a valid email address" }
+                        ]
+                      },
+                      {
+                        "field": "password",
+                        "label": "Password",
+                        "required": true,
+                        "node": "TextInput",
+                        "type": "password",
+                        "placeholder": "Enter your password",
+                        "validation": [
+                          { "rule": "required" }
+                        ]
+                      }
+                    ],
+                    "actions": [
+                      {
+                        "node": "Stack",
+                        "gap": "md",
+                        "children": [
+                          {
+                            "node": "Button",
+                            "label": "Sign In",
+                            "variant": "primary",
+                            "width": "full"
+                          },
+                          {
+                            "node": "Text",
+                            "content": "Forgot password?",
+                            "typography": "body-sm",
+                            "color": "primary",
+                            "align": "center"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "node": "Text",
+                "content": "Don't have an account? Sign up",
+                "typography": "body-sm",
+                "align": "center"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

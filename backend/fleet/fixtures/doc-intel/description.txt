@@ -1,0 +1,1 @@
+Internal admin tool for uploading, OCR-processing, AI field-extracting, and full-text searching paper/PDF records via a PaddleOCR sidecar pipeline.

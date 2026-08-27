@@ -1,0 +1,26 @@
+{
+  "processdocumentjob": {
+    "documentId": {
+      "targetEntity": "Document",
+      "labelField": "id"
+    }
+  },
+  "processdocumentjobs": {
+    "documentId": {
+      "targetEntity": "Document",
+      "labelField": "id"
+    }
+  },
+  "process-document-job": {
+    "documentId": {
+      "targetEntity": "Document",
+      "labelField": "id"
+    }
+  },
+  "process-document-jobs": {
+    "documentId": {
+      "targetEntity": "Document",
+      "labelField": "id"
+    }
+  }
+}

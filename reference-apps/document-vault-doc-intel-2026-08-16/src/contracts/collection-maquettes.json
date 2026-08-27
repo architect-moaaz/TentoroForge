@@ -1,0 +1,223 @@
+[
+  {
+    "entity": "Document",
+    "route": "/documents",
+    "layout": "table",
+    "columns": [
+      {
+        "name": "originalFilename",
+        "label": "Filename",
+        "kind": "text",
+        "emphasis": true
+      },
+      {
+        "name": "status",
+        "label": "Status",
+        "kind": "badge"
+      },
+      {
+        "name": "confidence",
+        "label": "Confidence",
+        "kind": "text"
+      },
+      {
+        "name": "pageCount",
+        "label": "Pages",
+        "kind": "text"
+      },
+      {
+        "name": "processedAt",
+        "label": "Processed",
+        "kind": "date"
+      },
+      {
+        "name": "createdAt",
+        "label": "Uploaded",
+        "kind": "date"
+      }
+    ],
+    "row_treatment": "compact",
+    "filter_presets": [
+      {
+        "label": "Processing",
+        "expr": "status=processing"
+      },
+      {
+        "label": "Failed",
+        "expr": "status=failed"
+      },
+      {
+        "label": "Low confidence",
+        "expr": "confidence<70"
+      },
+      {
+        "label": "Uploaded today",
+        "expr": "createdAt > 1 day ago"
+      }
+    ],
+    "hero": {
+      "title": "Documents",
+      "subtitle": "Uploaded records, OCR status, and extracted fields",
+      "badge": "queue status"
+    },
+    "empty_state": {
+      "illustration": "clipboard-blank",
+      "headline": "No documents yet. Upload a file to start extraction.",
+      "subhead": "PDFs and scans are run through OCR and AI field extraction automatically.",
+      "cta_label": "Upload document",
+      "cta_action": "upload-document"
+    },
+    "footer": {
+      "kind": "insight",
+      "content": "Showing OCR/extraction throughput \u2014 failed and low-confidence items surface first."
+    },
+    "signature_moves": [
+      "sticky-first-column",
+      "quick-peek-on-hover"
+    ]
+  },
+  {
+    "entity": "Document",
+    "route": "/documents/search",
+    "layout": "table",
+    "columns": [
+      {
+        "name": "originalFilename",
+        "label": "Filename",
+        "kind": "text",
+        "emphasis": true
+      },
+      {
+        "name": "status",
+        "label": "Status",
+        "kind": "badge"
+      },
+      {
+        "name": "confidence",
+        "label": "Confidence",
+        "kind": "text"
+      },
+      {
+        "name": "pageCount",
+        "label": "Pages",
+        "kind": "text"
+      },
+      {
+        "name": "processedAt",
+        "label": "Processed",
+        "kind": "date"
+      },
+      {
+        "name": "fileSizeBytes",
+        "label": "Size",
+        "kind": "text"
+      }
+    ],
+    "row_treatment": "compact",
+    "filter_presets": [
+      {
+        "label": "Needs review",
+        "expr": "status=needs_review"
+      },
+      {
+        "label": "Failed OCR",
+        "expr": "status=failed"
+      },
+      {
+        "label": "Low confidence",
+        "expr": "confidence<70"
+      },
+      {
+        "label": "Processed today",
+        "expr": "processedAt > 24 hours ago"
+      }
+    ],
+    "hero": {
+      "title": "Document Search",
+      "subtitle": "Full-text and field search across OCR-processed records",
+      "badge": "queued for review"
+    },
+    "empty_state": {
+      "illustration": "empty-inbox",
+      "headline": "No documents indexed yet",
+      "subhead": "Upload a PDF or scanned record to kick off OCR and field extraction.",
+      "cta_label": "Upload document",
+      "cta_action": "upload-document"
+    },
+    "footer": {
+      "kind": "insight",
+      "content": "Average OCR confidence and processing throughput across current filter"
+    },
+    "signature_moves": [
+      "sticky-first-column",
+      "quick-peek-on-hover"
+    ]
+  },
+  {
+    "entity": "User",
+    "route": "/admins",
+    "layout": "table",
+    "columns": [
+      {
+        "name": "name",
+        "label": "Name",
+        "kind": "text",
+        "emphasis": true
+      },
+      {
+        "name": "email",
+        "label": "Email",
+        "kind": "text"
+      },
+      {
+        "name": "role",
+        "label": "Role",
+        "kind": "badge"
+      },
+      {
+        "name": "createdAt",
+        "label": "Added",
+        "kind": "date"
+      },
+      {
+        "name": "updatedAt",
+        "label": "Last Active",
+        "kind": "date"
+      }
+    ],
+    "row_treatment": "compact",
+    "filter_presets": [
+      {
+        "label": "Admins",
+        "expr": "role=admin"
+      },
+      {
+        "label": "Reviewers",
+        "expr": "role=reviewer"
+      },
+      {
+        "label": "Added this month",
+        "expr": "createdAt > 30 days ago"
+      }
+    ],
+    "hero": {
+      "title": "Admin Users",
+      "subtitle": "Manage access to the document intelligence console"
+    },
+    "empty_state": {
+      "illustration": "clipboard-blank",
+      "headline": "No admins added yet",
+      "subhead": "Invite teammates to review OCR output and manage extraction pipelines.",
+      "cta_label": "Invite admin",
+      "cta_action": "invite-admin"
+    },
+    "footer": {
+      "kind": "total-row",
+      "content": "Total admin accounts"
+    },
+    "signature_moves": [
+      "sticky-first-column",
+      "quick-peek-on-hover"
+    ]
+  }
+]

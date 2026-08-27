@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1",
+  "id": "AuthLayout",
+  "root": {
+    "id": "auth-shell",
+    "type": "Stack",
+    "props": {
+      "direction": "vertical",
+      "align": "center",
+      "justify": "center",
+      "gap": "spacing.0"
+    },
+    "children": [
+      {
+        "id": "auth-container",
+        "type": "Container",
+        "props": { "maxWidth": "sm" },
+        "children": [
+          {
+            "id": "auth-card-children",
+            "type": "Stack",
+            "props": {
+              "direction": "vertical",
+              "gap": "spacing.6",
+              "align": "stretch"
+            },
+            "children": [
+              {
+                "id": "auth-slot",
+                "type": "Slot",
+                "props": { "name": "main" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

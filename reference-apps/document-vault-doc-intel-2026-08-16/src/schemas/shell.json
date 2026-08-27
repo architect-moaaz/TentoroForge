@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "2",
+  "title": "App Shell",
+  "id": "shell",
+  "frame": "sidebar",
+  "appName": "Document Vault",
+  "children": [
+    {
+      "type": "Row",
+      "props": { "className": "w-full h-screen overflow-hidden items-stretch" },
+      "children": [
+        {
+          "type": "SideNav",
+          "props": {
+            "groups": [
+              { "label": "Upload",    "route": "/",                 "icon": "upload" },
+              { "label": "Documents", "route": "/documents",        "icon": "file-text" },
+              { "label": "Search",    "route": "/documents/search", "icon": "search" }
+            ],
+            "appName": "Document Vault",
+            "mode": "light",
+            "accent": "#0369A1",
+            "expandedWidth": 256,
+            "bg": "#0B1220",
+            "text": "#CBD5E1",
+            "muted": "#7C8BA0"
+          }
+        },
+        {
+          "type": "Stack",
+          "props": { "className": "flex-1 flex-col overflow-hidden h-screen overflow-y-auto main-scroll min-w-0" },
+          "children": [
+            { "type": "PageOutlet", "id": "page-outlet" }
+          ]
+        }
+      ]
+    }
+  ],
+  "meta": { "shell_deterministic_composed": true }
+}

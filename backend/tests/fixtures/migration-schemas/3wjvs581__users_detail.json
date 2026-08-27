@@ -1,0 +1,419 @@
+{
+  "schemaVersion": "2",
+  "id": "users/detail",
+  "route": "/users/:id",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "User Profile"
+  },
+  "dataSources": [
+    {
+      "name": "user",
+      "entity": "User",
+      "op": "get"
+    },
+    {
+      "name": "recentRequests",
+      "entity": "LeaveRequest",
+      "op": "list",
+      "filter": {
+        "userId": ":id"
+      },
+      "orderBy": [
+        {
+          "field": "createdAt",
+          "dir": "desc"
+        }
+      ],
+      "limit": 5
+    },
+    {
+      "name": "userStats",
+      "entity": "UserStats",
+      "op": "get",
+      "filter": {
+        "userId": ":id"
+      }
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "style": {
+      "padding": "tokens.spacing.semantic.page"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "children": [
+          {
+            "id": "user-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "USER PROFILE",
+              "headline": "{{user.name}}",
+              "subhead": "{{user.role}} \u00b7 {{user.department}} \u00b7 Member since {{user.createdAt}}",
+              "layout": "split",
+              "ctas": [
+                {
+                  "label": "Edit Profile",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/users/{{user.id}}/edit"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "Send Message",
+                  "action": {
+                    "type": "workflow",
+                    "name": "sendMessage"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 145
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "user-body",
+            "type": "Split",
+            "props": {
+              "ratio": "1:2",
+              "breakpoint": "lg"
+            },
+            "children": [
+              {
+                "id": "sidebar-panel",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "style": {
+                  "background": {
+                    "type": "solid",
+                    "value": "tokens.color.surface.0"
+                  },
+                  "padding": "tokens.spacing.6",
+                  "radius": "tokens.radius.lg",
+                  "shadow": "tokens.shadow.sm"
+                },
+                "children": [
+                  {
+                    "id": "avatar-block",
+                    "type": "Stack",
+                    "props": {
+                      "direction": "vertical",
+                      "align": "center",
+                      "gap": "tokens.spacing.3"
+                    },
+                    "children": [
+                      {
+                        "id": "profile-avatar",
+                        "type": "Avatar",
+                        "props": {
+                          "name": "{{user.name}}",
+                          "src": "{{user.avatar}}",
+                          "size": "lg",
+                          "status": "{{user.status}}"
+                        }
+                      },
+                      {
+                        "id": "profile-name",
+                        "type": "Text",
+                        "props": {
+                          "content": "{{user.name}}",
+                          "as": "h2"
+                        }
+                      },
+                      {
+                        "id": "profile-title",
+                        "type": "Text",
+                        "props": {
+                          "content": "{{user.role}}",
+                          "as": "p"
+                        }
+                      },
+                      {
+                        "id": "user-status-badge",
+                        "type": "Badge",
+                        "props": {
+                          "content": "{{user.status}}",
+                          "variant": "primary"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "contact-details",
+                    "type": "KeyValueList",
+                    "props": {
+                      "items": [
+                        {
+                          "label": "Email",
+                          "value": "{{user.email}}",
+                          "copyable": true
+                        },
+                        {
+                          "label": "Phone",
+                          "value": "{{user.phone}}",
+                          "copyable": true
+                        },
+                        {
+                          "label": "Department",
+                          "value": "{{user.department}}",
+                          "copyable": false
+                        },
+                        {
+                          "label": "Manager",
+                          "value": "{{user.manager}}",
+                          "copyable": false
+                        },
+                        {
+                          "label": "Employee ID",
+                          "value": "{{user.employeeId}}",
+                          "copyable": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "employment-details",
+                    "type": "KeyValueList",
+                    "props": {
+                      "items": [
+                        {
+                          "label": "Start Date",
+                          "value": "{{user.startDate}}",
+                          "copyable": false
+                        },
+                        {
+                          "label": "Employment Type",
+                          "value": "{{user.employmentType}}",
+                          "copyable": false
+                        },
+                        {
+                          "label": "Leave Balance",
+                          "value": "{{user.leaveBalance}} days",
+                          "copyable": false
+                        },
+                        {
+                          "label": "Access Level",
+                          "value": "{{user.accessLevel}}",
+                          "copyable": false
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "main-panel",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "user-stats",
+                    "type": "Stagger",
+                    "props": {
+                      "interval": 60
+                    },
+                    "children": [
+                      {
+                        "id": "stats-cluster",
+                        "type": "Cluster",
+                        "props": {
+                          "justify": "start",
+                          "align": "center",
+                          "gap": "tokens.spacing.4"
+                        },
+                        "children": [
+                          {
+                            "id": "stat-leave-balance",
+                            "type": "MetricTile",
+                            "props": {
+                              "label": "Leave Balance",
+                              "value": "{{userStats.leaveBalance}}",
+                              "format": "number",
+                              "icon": "calendar"
+                            }
+                          },
+                          {
+                            "id": "stat-total-requests",
+                            "type": "MetricTile",
+                            "props": {
+                              "label": "Total Requests",
+                              "value": "{{userStats.totalRequests}}",
+                              "format": "number",
+                              "delta": {
+                                "value": "{{userStats.requestsDelta}}",
+                                "direction": "{{userStats.requestsDirection}}"
+                              },
+                              "icon": "file-text"
+                            }
+                          },
+                          {
+                            "id": "stat-approved-rate",
+                            "type": "MetricTile",
+                            "props": {
+                              "label": "Approval Rate",
+                              "value": "{{userStats.approvalRate}}",
+                              "format": "percent",
+                              "icon": "check-circle"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "recent-requests-section",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Recent Leave Requests",
+                      "subtitle": "Last 5 submissions"
+                    },
+                    "style": {
+                      "background": {
+                        "type": "solid",
+                        "value": "tokens.color.surface.0"
+                      },
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm",
+                      "padding": "tokens.spacing.6"
+                    },
+                    "children": [
+                      {
+                        "id": "requests-table",
+                        "type": "Table",
+                        "props": {
+                          "columns": [
+                            {
+                              "key": "type",
+                              "label": "Type"
+                            },
+                            {
+                              "key": "startDate",
+                              "label": "Start Date"
+                            },
+                            {
+                              "key": "endDate",
+                              "label": "End Date"
+                            },
+                            {
+                              "key": "status",
+                              "label": "Status"
+                            },
+                            {
+                              "key": "days",
+                              "label": "Days"
+                            }
+                          ]
+                        },
+                        "bind": "recentRequests"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "permissions-section",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Access & Permissions",
+                      "subtitle": "Role-based access control"
+                    },
+                    "style": {
+                      "background": {
+                        "type": "solid",
+                        "value": "tokens.color.surface.0"
+                      },
+                      "radius": "tokens.radius.lg",
+                      "shadow": "tokens.shadow.sm",
+                      "padding": "tokens.spacing.6"
+                    },
+                    "children": [
+                      {
+                        "id": "permissions-accordion",
+                        "type": "Accordion",
+                        "props": {
+                          "mode": "single",
+                          "defaultOpen": [
+                            "permissions"
+                          ]
+                        },
+                        "children": [
+                          {
+                            "id": "permissions",
+                            "type": "AccordionPanel",
+                            "props": {
+                              "label": "Current Permissions & Access",
+                              "value": "permissions"
+                            },
+                            "children": [
+                              {
+                                "id": "permissions-detail",
+                                "type": "KeyValueList",
+                                "props": {
+                                  "items": [
+                                    {
+                                      "label": "Can Submit Requests",
+                                      "value": "{{user.canSubmitRequests}}"
+                                    },
+                                    {
+                                      "label": "Can Approve Requests",
+                                      "value": "{{user.canApproveRequests}}"
+                                    },
+                                    {
+                                      "label": "Department Access",
+                                      "value": "{{user.departmentAccess}}"
+                                    },
+                                    {
+                                      "label": "Admin Access",
+                                      "value": "{{user.isAdmin}}"
+                                    },
+                                    {
+                                      "label": "Last Login",
+                                      "value": "{{user.lastLoginAt}}"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

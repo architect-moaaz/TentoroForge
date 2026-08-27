@@ -1,0 +1,380 @@
+"""A projection is a translation, not a decision.
+
+The generated app is a scaffold plus vendored engines that read Blueprint-derived
+files at run time, so producing those files is deterministic. These tests pin
+the translation against the shape `app-foundation` already ships — an emitted
+module that does not match what the data engine expects is worse than no module,
+because it compiles and then behaves wrongly.
+"""
+import json
+import pathlib
+from pathlib import Path
+
+import pytest
+
+from services.blueprint.projection import (
+    REMAINING,
+    apply_data_projection,
+    drizzle_column,
+    emit_entity_module,
+    project_data_layer,
+    to_snake,
+)
+from services.blueprint.service import BlueprintService
+
+SCAFFOLD = (Path(__file__).resolve().parents[2]
+            / "templates/app-foundation/src/db/schema/user.ts")
+
+
+def doc(**over):
+    base = {
+        "schemaVersion": "1", "version": 1,
+        "application": {"id": "a", "name": "R", "domain": "ATS"},
+        "data": {"entities": [{
+            "id": "ENTITY-001", "name": "Candidate", "table": "candidates",
+            "labelField": "fullName",
+            "fields": [
+                {"name": "id", "type": "uuid", "primaryKey": True},
+                {"name": "fullName", "type": "string", "required": True,
+                 "sensitive": True},
+                {"name": "email", "type": "string", "required": True,
+                 "unique": True},
+                {"name": "score", "type": "integer"},
+                {"name": "isActive", "type": "boolean"},
+                {"name": "appliedAt", "type": "datetime"},
+                {"name": "meta", "type": "json"},
+            ]}]},
+    }
+    base.update(over)
+    return base
+
+
+# --- the translation --------------------------------------------------------
+
+def test_column_names_use_the_scaffold_convention():
+    assert to_snake("fullName") == "full_name"
+    assert to_snake("changedByUserId") == "changed_by_user_id"
+    assert to_snake("id") == "id"
+
+
+def test_types_map_to_real_drizzle_builders():
+    for ftype, builder in (("string", "text"), ("integer", "integer"),
+                           ("boolean", "boolean"), ("datetime", "timestamp"),
+                           ("json", "jsonb"), ("uuid", "uuid"),
+                           ("decimal", "numeric"), ("date", "date")):
+        _, got = drizzle_column({"name": "x", "type": ftype})
+        assert got == builder, ftype
+
+
+def test_an_unknown_type_falls_back_to_text_rather_than_breaking():
+    _, builder = drizzle_column({"name": "x", "type": "wat"})
+    assert builder == "text"
+
+
+def test_modifiers_are_emitted():
+    line, _ = drizzle_column({"name": "email", "type": "string",
+                              "required": True, "unique": True})
+    assert ".notNull()" in line and ".unique()" in line
+    pk, _ = drizzle_column({"name": "id", "type": "uuid", "primaryKey": True})
+    assert ".primaryKey().defaultRandom()" in pk
+    assert ".notNull()" not in pk, "a primary key is implicitly not-null"
+
+
+def test_emitted_module_matches_the_scaffolds_shape():
+    """The scaffold's own user.ts is the reference; ours must look like it."""
+    src = emit_entity_module(doc()["data"]["entities"][0], doc())
+    assert 'from "drizzle-orm/pg-core"' in src
+    assert 'export const candidates = pgTable("candidates", {' in src
+    assert 'fullName: text("full_name").notNull(),' in src
+    assert 'id: uuid("id").primaryKey().defaultRandom(),' in src
+    if SCAFFOLD.exists():
+        ref = SCAFFOLD.read_text()
+        assert "pgTable(" in ref and "drizzle-orm/pg-core" in ref
+
+
+def test_an_entity_with_no_primary_key_gets_a_uuid_one():
+    d = doc()
+    d["data"]["entities"][0]["fields"] = [{"name": "name", "type": "string"}]
+    src = emit_entity_module(d["data"]["entities"][0], d)
+    assert 'id: uuid("id").primaryKey().defaultRandom(),' in src
+
+
+# --- relationships become real foreign keys ---------------------------------
+
+def test_a_declared_relationship_becomes_a_reference():
+    d = doc()
+    d["data"]["entities"].append({
+        "id": "ENTITY-002", "name": "Application", "table": "applications",
+        "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]})
+    d["data"]["relationships"] = [{
+        "from": "ENTITY-002", "to": "ENTITY-001", "kind": "one_to_many",
+        "fromField": "candidateId"}]
+    src = emit_entity_module(d["data"]["entities"][1], d)
+    assert 'candidateId: uuid("candidate_id").references(() => candidates.id),' in src
+    assert 'import { candidates } from "./candidate";' in src
+
+
+def test_a_relationship_whose_column_already_exists_is_not_duplicated():
+    d = doc()
+    d["data"]["entities"].append({
+        "id": "ENTITY-002", "name": "Application", "table": "applications",
+        "fields": [{"name": "candidateId", "type": "uuid"}]})
+    d["data"]["relationships"] = [{
+        "from": "ENTITY-002", "to": "ENTITY-001", "kind": "one_to_many",
+        "fromField": "candidateId"}]
+    src = emit_entity_module(d["data"]["entities"][1], d)
+    assert src.count("candidateId:") == 1
+
+
+# --- the projection as a whole ---------------------------------------------
+
+def test_projection_writes_a_module_per_entity_plus_a_barrel(tmp_path):
+    r = project_data_layer(doc(), tmp_path)
+    assert r["entities"] == 1
+    assert (tmp_path / "src/db/schema/candidate.ts").exists()
+    barrel = (tmp_path / "src/db/schema/index.ts").read_text()
+    assert 'export * from "./candidate";' in barrel
+
+
+def test_projection_is_byte_identical_on_a_re_run(tmp_path):
+    """A projection that churns diffs cannot be trusted to be a translation."""
+    project_data_layer(doc(), tmp_path)
+    first = (tmp_path / "src/db/schema/candidate.ts").read_bytes()
+    project_data_layer(doc(), tmp_path)
+    assert (tmp_path / "src/db/schema/candidate.ts").read_bytes() == first
+
+
+def test_deprecated_entities_are_not_projected(tmp_path):
+    d = doc()
+    d["data"]["entities"][0]["status"] = "DEPRECATED"
+    r = project_data_layer(d, tmp_path)
+    assert r["entities"] == 0
+
+
+# --- codeMap: what makes Blueprint<->Implementation checkable ---------------
+
+def test_projection_records_real_paths_in_codemap(tmp_path):
+    svc = BlueprintService.create(output_dir=tmp_path / "bp", app_id="a",
+                                  name="n", domain="d")
+    svc.doc["data"] = doc()["data"]
+    r = apply_data_projection(svc, tmp_path / "app")
+
+    entry = svc.doc["codeMap"][0]
+    assert entry["artifact"] == "ENTITY-001"
+    assert entry["service"] == ["src/db/schema/candidate.ts"]
+    assert (tmp_path / "app" / entry["service"][0]).exists(), (
+        "codeMap must point at a file that exists — the whole point of §21")
+    svc.validate()
+
+
+def test_remaining_work_is_declared_so_green_is_not_mistaken_for_done():
+    """REMAINING is the honesty check: what a green run still does not give you."""
+    # Every projection now lands on disk; what a green run still does not give
+    # you is an app that has been assembled, installed, migrated and served.
+    assert any("assembly" in r for r in REMAINING)
+    # And it must not keep advertising work that is done, or it stops being read.
+    for done in ("frontend", "workflows:", "navigation:", "design:", "seed:"):
+        assert not any(r.startswith(done) for r in REMAINING), done
+
+
+# ---------------------------------------------------------------------------
+# frontend — page contracts instantiated from their pattern templates
+# ---------------------------------------------------------------------------
+
+def _frontend_doc():
+    return {
+        "data": {
+            "entities": [{
+                "id": "ENTITY-001", "name": "Candidate", "table": "candidates",
+                "fields": [
+                    {"name": "id", "type": "uuid", "primaryKey": True},
+                    {"name": "fullName", "type": "text", "required": True},
+                    {"name": "stage", "type": "text"},
+                ],
+            }],
+            "relationships": [],
+        },
+        "pages": [{
+            "id": "PAGE-001", "name": "Candidates", "route": "/candidates",
+            "purpose": "Every candidate in the pipeline.",
+            "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-001"},
+            "actions": ["create_candidate", "search_candidates"],
+        }],
+        "widgets": [],
+        "patternTemplates": [{
+            "pattern": "entity_list", "requires": {"primaryEntity": True},
+            "root": {"type": "Stack", "props": {}, "children": [
+                {"type": "Heading", "props": {"content": "$entity.plural"},
+                 "children": []},
+                {"type": "TableSortable",
+                 "props": {"columns": "$columns", "rows": "{{rows}}"},
+                 "children": []},
+            ]},
+        }],
+    }
+
+
+def test_frontend_projection_writes_a_renderable_schema_per_page(tmp_path):
+    from services.blueprint.projection import project_frontend
+
+    result = project_frontend(_frontend_doc(), tmp_path / "app")
+    assert result["pages"] == 1
+    assert result["failed"] == [] and result["skipped"] == []
+
+    written = tmp_path / "app" / "src" / "schemas" / "candidates.json"
+    schema = json.loads(written.read_text())
+    assert schema["route"] == "/candidates"
+    assert schema["root"]["type"] == "Stack"
+    # The columns are real definitions, derived from the entity's own fields.
+    table = schema["root"]["children"][1]
+    assert [c["key"] for c in table["props"]["columns"]] == ["fullName", "stage"]
+    assert schema["dataSources"] == [
+        {"name": "rows", "source": "/api/candidates", "op": "list"}]
+
+
+def test_frontend_projection_is_idempotent(tmp_path):
+    from services.blueprint.projection import project_frontend
+
+    doc = _frontend_doc()
+    project_frontend(doc, tmp_path / "app")
+    first = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text()
+    project_frontend(doc, tmp_path / "app")
+    second = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text()
+    assert first == second
+
+
+def test_a_page_with_no_template_is_reported_not_silently_omitted(tmp_path):
+    """Eleven of eighteen pages emitted must not look like success."""
+    from services.blueprint.projection import project_frontend
+
+    doc = _frontend_doc()
+    doc["pages"].append({
+        "id": "PAGE-002", "name": "Board", "route": "/board",
+        "purpose": "Pipeline board.", "pattern": "kanban",
+        "data": {"primaryEntity": "ENTITY-001"}, "actions": [],
+    })
+    result = project_frontend(doc, tmp_path / "app")
+    assert result["pages"] == 1
+    assert result["skipped"][0]["page"] == "PAGE-002"
+    assert result["skipped"][0]["pattern"] == "kanban"
+
+
+def test_frontend_projection_records_every_file_in_code_map(tmp_path):
+    from services.blueprint.projection import apply_frontend_projection
+
+    svc = BlueprintService.create(output_dir=tmp_path / "bp", app_id="a",
+                                  name="n", domain="d")
+    svc.doc.update(_frontend_doc())
+    result = apply_frontend_projection(svc, tmp_path / "app")
+
+    entry = next(e for e in svc.doc["codeMap"] if e["artifact"] == "PAGE-001")
+    assert entry["service"] == ["src/schemas/candidates.json"]
+    assert (tmp_path / "app" / entry["service"][0]).exists(), (
+        "codeMap must point at a file that exists — the whole point of §21")
+    assert result["pages"] == 1
+
+
+def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):
+    """Otherwise the directory still looks complete while one file is stale."""
+    from services.blueprint.projection import project_frontend
+
+    doc = _frontend_doc()
+    project_frontend(doc, tmp_path / "app")
+    assert (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
+
+    # The pattern's template is withdrawn; the page can no longer be planned.
+    doc["patternTemplates"] = []
+    result = project_frontend(doc, tmp_path / "app")
+    assert result["pages"] == 0
+    assert result["removed"] == ["candidates.json"]
+    assert not (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# platform tables — the Blueprint may extend them, never redefine them
+# ---------------------------------------------------------------------------
+
+def _platform_source() -> str:
+    from services.blueprint.projection import PLATFORM_TABLE_SOURCES
+    root = pathlib.Path(__file__).resolve().parents[2]
+    return (root / PLATFORM_TABLE_SOURCES["users"]).read_text("utf-8")
+
+
+def test_the_platform_declaration_is_parsed_not_transcribed():
+    """Three separate login-breaking bugs came from a hand-copy of this table
+    drifting off the original: wrong column names, then a lost
+    `.default(true)` on `isActive`, then `createdAt` omitted entirely. Parsing
+    the scaffold's own declaration is what makes a fourth impossible."""
+    from services.blueprint.projection import parse_platform_table, platform_table
+
+    declared = {f["name"]: f for f in platform_table("users")}
+    assert set(declared) == {"id", "email", "password", "name",
+                             "isActive", "createdAt"}
+    assert declared["email"] == {"name": "email", "type": "text",
+                                 "required": True, "unique": True}
+    # The default `authorize()` depends on — a falsy isActive rejects the login.
+    assert declared["isActive"]["default"] is True
+    assert declared["createdAt"]["defaultNow"] is True
+    assert declared["id"]["primaryKey"] is True
+
+    # And it is genuinely read from the file, not a constant behind a function.
+    assert parse_platform_table(_platform_source()) == platform_table("users")
+
+
+def test_every_platform_column_survives_projection():
+    """The regression net for the whole class.
+
+    A generated app's `users` table is written by the Blueprint but read by
+    auth. Any platform column the projection drops, renames or strips a
+    constraint from breaks signup or login — and the failure surfaces as a
+    baffling runtime error, never as a projection error.
+    """
+    from services.blueprint.projection import emit_entity_module, platform_table
+
+    # A User entity that disagrees with the platform on every point it can.
+    entity = {
+        "id": "ENTITY-001", "name": "User", "table": "users",
+        "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "fullName", "type": "text", "required": True},
+            {"name": "email", "type": "text", "required": True},
+            {"name": "passwordHash", "type": "text", "required": True},
+            {"name": "userRole", "type": "enum", "required": True},
+        ],
+    }
+    emitted = emit_entity_module(entity, {"data": {"entities": [entity]}})
+
+    for field in platform_table("users"):
+        name = field["name"]
+        assert f"{name}: " in emitted, f"platform column {name} was dropped"
+        if field.get("required"):
+            assert f"{name}: " in emitted and ".notNull()" in \
+                emitted.split(f"{name}: ")[1].split("\n")[0], name
+        if field.get("unique"):
+            assert ".unique()" in emitted.split(f"{name}: ")[1].split("\n")[0], name
+        if field.get("default") is True:
+            assert ".default(true)" in emitted.split(f"{name}: ")[1].split("\n")[0], name
+        if field.get("defaultNow"):
+            assert ".defaultNow()" in emitted.split(f"{name}: ")[1].split("\n")[0], name
+
+    # The Blueprint's own additions survive too — but nullable, because
+    # platform code inserts rows without knowing they exist.
+    row = emitted.split("userRole: ")[1].split("\n")[0]
+    assert "user_role" in row and ".notNull()" not in row
+
+
+def test_a_blueprint_field_never_shadows_a_platform_column():
+    """`passwordHash` and `fullName` mean what `password` and `name` mean, so
+    they must fold into the platform column rather than sit beside it."""
+    from services.blueprint.projection import reconcile_platform_table
+
+    entity = {"name": "User", "table": "users", "fields": [
+        {"name": "passwordHash", "type": "text", "required": True},
+        {"name": "fullName", "type": "text", "required": True},
+        {"name": "userRole", "type": "text"},
+    ]}
+    fields, folded = reconcile_platform_table(entity)
+    names = [f["name"] for f in fields]
+    assert "passwordHash" not in names and "fullName" not in names
+    assert sorted(folded) == ["fullName", "passwordHash"]
+    assert "userRole" in names

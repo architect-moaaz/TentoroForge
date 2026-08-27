@@ -1,0 +1,64 @@
+# Dockerfile.verify — image for the JV-15 verify runner.
+#
+# Purpose: fully containerized boot of the generated Next.js app so the
+# journey verifier can hit a clean instance with a clean Postgres. NOT
+# for production deploys (Vercel handles those). Verify-only, torn down
+# after each run.
+#
+# Design decisions:
+#   - Single stage. Verify is dev-adjacent: we want `next start` to work
+#     against a `next build`d tree without splitting into a slim standalone
+#     stage that would require the app's next.config to declare
+#     `output: "standalone"`. Trades image size (~800MB) for build
+#     reliability across app shapes.
+#   - node:20-slim, not alpine — sharp/next-image + postgres binaries
+#     link to glibc on official Next.js docs.
+#   - Vendored packages (`file:./vendor/…`) are copied BEFORE `npm install`
+#     so lockfile resolution succeeds without the network.
+#   - Entrypoint is start.sh from the app foundation — same script the
+#     host-mode boot uses. It waits for Postgres, runs drizzle push, seeds,
+#     then `next start`. Zero divergence between host + container flows.
+
+FROM node:20-slim
+
+# curl for the health probe in start.sh; postgresql-client for pg_isready
+# so start.sh can wait on the DB service before drizzle push.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy dependency manifests + vendor first so `npm install` is cached
+# when only app source changes on a re-verify.
+COPY package.json ./
+COPY package-lock.json* ./
+COPY vendor ./vendor
+
+# --legacy-peer-deps: next-auth@4.24.x declared a peerOptional bump of
+# nodemailer to ^7 while our template pins ^6 (the version our SMTP handler
+# is tested against). Peer-optional means it only matters if you actually
+# use the Email provider — the flag lets npm ignore the noise. Same flag
+# runs in the generated app's start.sh, preview_manager.py, and vercel.json;
+# without it here, `docker compose build` fails ERESOLVE and the verify
+# runner silently falls back to host-mode boot.
+RUN npm install --legacy-peer-deps --no-audit --no-fund --loglevel=error
+
+# App source. We accept the whole tree — omitting node_modules via
+# .dockerignore is cheap insurance against COPY dragging in local host
+# artifacts.
+COPY . .
+
+# next build — takes 60–180s on a fresh image. Failing the build fails the
+# container (the verify pipeline surfaces that as "app didn't compile").
+RUN npm run build
+
+ENV PORT=3000
+ENV NODE_ENV=production
+EXPOSE 3000
+
+# start.sh: wait for pg_isready → drizzle push → seed → next start.
+# Same script as the host-mode boot, so a container failure and a host
+# failure produce identical logs — Smith learns one pattern.
+CMD ["/bin/sh", "./start.sh"]

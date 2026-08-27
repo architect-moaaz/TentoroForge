@@ -1,0 +1,25 @@
+{
+  "capability": "push_notifications",
+  "permissions": {
+    "ios": {
+      "NSUserNotificationUsageDescription": "We use notifications to let you know about important updates."
+    },
+    "android": [
+      "android.permission.POST_NOTIFICATIONS"
+    ],
+    "expo_plugins": ["expo-notifications"]
+  },
+  "native_imports": {
+    "expo": ["expo-notifications", "expo-device"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/NotificationsProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useNotifications", "usePushToken", "useNotificationTap"]
+  },
+  "integration_keys": [
+    {"provider": "fcm", "env_var": "FCM_SERVER_KEY", "optional": false, "docs": "Firebase Cloud Messaging server key. Required for Android + fallback for iOS."},
+    {"provider": "apns", "env_var": "APNS_KEY_ID", "optional": true, "docs": "Apple Push Notification service key ID. Preferred over FCM on iOS."}
+  ]
+}

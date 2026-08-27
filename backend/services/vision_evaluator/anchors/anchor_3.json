@@ -1,0 +1,26 @@
+{
+  "scores": {
+    "visualPolish": 2, "domainFeel": 3, "informationDensity": 4,
+    "componentCoherence": 2, "brandReflection": 1
+  },
+  "compositeScore": 2.5,
+  "pass": false,
+  "topIssues": [
+    {
+      "severity": "high",
+      "axis": "visualPolish",
+      "nodeIdHint": null,
+      "issue": "Page has no header / Hero — opens directly into a raw table with no context.",
+      "suggestion": "Add a Hero with eyebrow, headline, subhead, and a primary CTA."
+    },
+    {
+      "severity": "high",
+      "axis": "componentCoherence",
+      "nodeIdHint": "users-table",
+      "issue": "Table uses browser defaults — visible black borders, system fonts.",
+      "suggestion": "Wrap in a Card; switch to TableSortable; apply default StyleSlot with shadow.sm and radius.lg."
+    }
+  ],
+  "strengths": [],
+  "designerApprovalRecommended": false
+}

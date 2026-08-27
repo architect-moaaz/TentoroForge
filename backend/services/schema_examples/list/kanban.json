@@ -1,0 +1,321 @@
+{
+  "schemaVersion": "2",
+  "id": "projects/kanban",
+  "route": "/projects",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Project Board", "description": "Track projects across all delivery stages" },
+  "dataSources": [
+    { "name": "backlog",     "entity": "Project", "op": "list",
+      "filter": { "status": "backlog" } },
+    { "name": "inProgress",  "entity": "Project", "op": "list",
+      "filter": { "status": "in_progress" } },
+    { "name": "inReview",    "entity": "Project", "op": "list",
+      "filter": { "status": "in_review" } },
+    { "name": "done",        "entity": "Project", "op": "list",
+      "filter": { "status": "done" } }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "DELIVERY",
+          "headline": "Project Board",
+          "subhead": "Track all active projects from backlog to delivery. Drag cards to move between stages.",
+          "layout": "stacked",
+          "ctas": [
+            {
+              "label": "New Project",
+              "action": { "type": "navigate", "to": "/projects/new" },
+              "variant": "primary"
+            },
+            {
+              "label": "Quarterly Report",
+              "action": { "type": "workflow", "name": "generateQuarterlyReport" },
+              "variant": "secondary"
+            }
+          ]
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.secondary.50",
+            "to": "tokens.color.surface.0",
+            "angle": 135
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "board-stats",
+        "type": "Cluster",
+        "props": { "justify": "start", "align": "center", "gap": "tokens.spacing.4" },
+        "style": { "motion": "fade-up" },
+        "children": [
+          {
+            "id": "stat-backlog",
+            "type": "MetricTile",
+            "props": {
+              "label": "Backlog",
+              "value": 14,
+              "format": "number",
+              "icon": "inbox"
+            }
+          },
+          {
+            "id": "stat-in-progress",
+            "type": "MetricTile",
+            "props": {
+              "label": "In Progress",
+              "value": 7,
+              "format": "number",
+              "delta": { "value": 0.17, "direction": "up" },
+              "icon": "activity"
+            }
+          },
+          {
+            "id": "stat-in-review",
+            "type": "MetricTile",
+            "props": {
+              "label": "In Review",
+              "value": 3,
+              "format": "number",
+              "icon": "eye"
+            }
+          },
+          {
+            "id": "stat-done",
+            "type": "MetricTile",
+            "props": {
+              "label": "Done This Month",
+              "value": 22,
+              "format": "number",
+              "delta": { "value": 0.10, "direction": "up" },
+              "icon": "check-square"
+            }
+          }
+        ]
+      },
+      {
+        "id": "kanban-columns",
+        "type": "Stagger",
+        "props": { "interval": 80 },
+        "children": [
+          {
+            "id": "columns-row",
+            "type": "Row",
+            "props": { "align": "start", "justify": "start" },
+            "children": [
+              {
+                "id": "col-backlog",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Backlog",
+                  "subtitle": "14 projects"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.neutral.50" },
+                  "radius": "tokens.radius.lg",
+                  "padding": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "backlog-repeat",
+                    "type": "Repeat",
+                    "props": { "source": "backlog", "as": "project", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "backlog-card",
+                        "type": "Stack",
+                        "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                        "style": {
+                          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                          "padding": "tokens.spacing.4",
+                          "radius": "tokens.radius.md",
+                          "shadow": "tokens.shadow.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "backlog-card-title",
+                            "type": "Text",
+                            "props": { "content": "Project Title", "as": "strong" }
+                          },
+                          {
+                            "id": "backlog-card-team",
+                            "type": "Text",
+                            "props": { "content": "Engineering · Q1 2025", "as": "p" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "col-in-progress",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "In Progress",
+                  "subtitle": "7 projects"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.primary.50" },
+                  "radius": "tokens.radius.lg",
+                  "padding": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "inprogress-repeat",
+                    "type": "Repeat",
+                    "props": { "source": "inProgress", "as": "project", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "inprogress-card",
+                        "type": "Stack",
+                        "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                        "style": {
+                          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                          "padding": "tokens.spacing.4",
+                          "radius": "tokens.radius.md",
+                          "shadow": "tokens.shadow.md"
+                        },
+                        "children": [
+                          {
+                            "id": "inprogress-card-title",
+                            "type": "Text",
+                            "props": { "content": "Project Title", "as": "strong" }
+                          },
+                          {
+                            "id": "inprogress-card-owner",
+                            "type": "Row",
+                            "props": { "align": "center" },
+                            "children": [
+                              {
+                                "id": "inprogress-card-avatar",
+                                "type": "Avatar",
+                                "props": { "name": "Owner Name", "size": "xs", "status": "online" }
+                              },
+                              {
+                                "id": "inprogress-card-owner-name",
+                                "type": "Text",
+                                "props": { "content": "Owner", "as": "span" }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "col-in-review",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "In Review",
+                  "subtitle": "3 projects"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.warning.50" },
+                  "radius": "tokens.radius.lg",
+                  "padding": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "review-repeat",
+                    "type": "Repeat",
+                    "props": { "source": "inReview", "as": "project", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "review-card",
+                        "type": "Stack",
+                        "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                        "style": {
+                          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                          "padding": "tokens.spacing.4",
+                          "radius": "tokens.radius.md",
+                          "shadow": "tokens.shadow.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "review-card-title",
+                            "type": "Text",
+                            "props": { "content": "Project Title", "as": "strong" }
+                          },
+                          {
+                            "id": "review-card-reviewer",
+                            "type": "Text",
+                            "props": { "content": "Reviewer: Team Lead", "as": "p" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "col-done",
+                "type": "Section",
+                "props": {
+                  "variant": "plain",
+                  "title": "Done",
+                  "subtitle": "22 this month"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.success.50" },
+                  "radius": "tokens.radius.lg",
+                  "padding": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "done-repeat",
+                    "type": "Repeat",
+                    "props": { "source": "done", "as": "project", "keyPath": "id" },
+                    "children": [
+                      {
+                        "id": "done-card",
+                        "type": "Stack",
+                        "props": { "direction": "vertical", "gap": "tokens.spacing.2" },
+                        "style": {
+                          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+                          "padding": "tokens.spacing.4",
+                          "radius": "tokens.radius.md",
+                          "shadow": "tokens.shadow.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "done-card-title",
+                            "type": "Text",
+                            "props": { "content": "Project Title", "as": "strong" }
+                          },
+                          {
+                            "id": "done-card-date",
+                            "type": "Text",
+                            "props": { "content": "Completed Jan 15, 2025", "as": "p" }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

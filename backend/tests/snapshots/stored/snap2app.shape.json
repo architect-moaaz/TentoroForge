@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-action",
+    "surface": "modal"
+  },
+  "data": {
+    "denormalization": "aggressive",
+    "readShape": "list"
+  },
+  "identity": {
+    "usageMode": "single-session"
+  },
+  "label": "hero-cta-capture-utility",
+  "layout": {
+    "density": "spacious",
+    "hero": "full-bleed-gradient",
+    "primaryInteraction": "capture",
+    "shell": "none"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "none"
+  },
+  "workflows": {
+    "executionMode": "fire-and-forget"
+  }
+}

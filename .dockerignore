@@ -1,0 +1,21 @@
+# Keep the frontend build context small so pnpm/next don't have to
+# scan the entire monorepo.
+.git
+**/node_modules
+**/.next
+**/dist
+!packages/*/dist
+!apps/*/dist
+**/__pycache__
+**/.venv
+**/*.pyc
+**/.pytest_cache
+**/.DS_Store
+output/
+data/
+logs/
+backend/
+docs/
+docker-compose*.yml
+Dockerfile*
+!frontend/Dockerfile.prod

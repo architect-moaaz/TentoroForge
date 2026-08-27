@@ -1,0 +1,21 @@
+{
+  "app_shape": {
+    "layout": {"shell": "sidebar", "hero": "kpi-strip", "primaryInteraction": "dashboard", "density": "compact"},
+    "auth": {"surface": "route", "gating": "on-load"},
+    "nav": {"menu": "sidebar-links", "back": "history"},
+    "workflows": {"executionMode": "await-with-progress"},
+    "data": {"readShape": "grid", "denormalization": "moderate"},
+    "identity": {"usageMode": "returning-personal"},
+    "label": "admin-back-office"
+  },
+  "archetypes": [
+    {"name": "home", "recipe": "dashboard", "entities": ["order", "sale"], "routes": ["/"]},
+    {"name": "orders", "recipe": "data_grid", "entities": ["order"], "routes": ["/orders"]},
+    {"name": "order_detail", "recipe": "detail_view", "entities": ["order", "customer", "fulfillment"], "routes": ["/orders/[id]"]},
+    {"name": "products", "recipe": "crud", "entities": ["product", "variant"], "routes": ["/products"]},
+    {"name": "customers", "recipe": "crud", "entities": ["customer"], "routes": ["/customers"]},
+    {"name": "analytics", "recipe": "dashboard", "entities": ["metric"], "routes": ["/analytics"]}
+  ],
+  "industry": "ecommerce-admin",
+  "runtime_context": ["push_notifications", "deep_linking"]
+}

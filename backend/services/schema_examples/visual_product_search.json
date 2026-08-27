@@ -1,0 +1,201 @@
+{
+  "__doc__": "Planner-level exemplar for the visual-product-search app archetype. Documents the entities, pages, agent-graph, and integrations the planner should emit when a brief matches this archetype (see services.app_design_catalog.classify_app_archetype). Used both as documentation and as a few-shot exemplar in the planner prompt. Slice 4 supplies the concrete /scan page schema at backend/services/schema_examples/scan/visual_scan.json (assumed path — Slice 4 owns it).",
+  "app_archetype": "visual-product-search",
+  "module_name": "visual-product-search",
+  "name": "PriceScan",
+  "description": "Users scan/upload a product photo; the app identifies it via Claude vision and returns live prices from admin-approved retailers via the Firecrawl MCP server.",
+  "domain": "E-Commerce & Retail",
+
+  "entities": [
+    {
+      "name": "users",
+      "table": "users",
+      "roles": ["user", "admin"],
+      "fields": [
+        { "name": "id",         "type": "uuid",      "primary": true },
+        { "name": "email",      "type": "varchar",   "unique": true },
+        { "name": "name",       "type": "varchar" },
+        { "name": "role",       "type": "varchar",   "enum": ["user", "admin"], "default": "user" },
+        { "name": "createdAt",  "type": "timestamp" },
+        { "name": "updatedAt",  "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "scan_events",
+      "table": "scan_events",
+      "description": "One row per user scan; holds the uploaded image, the Claude-identified product, and the retailer matches.",
+      "fields": [
+        { "name": "id",                       "type": "uuid",      "primary": true },
+        { "name": "user_id",                  "type": "uuid",      "references": "users.id" },
+        { "name": "image_id",                 "type": "uuid",      "references": "forge_files.id" },
+        { "name": "identified_product_json",  "type": "jsonb",     "description": "{brand, model, category, attributes, confidence}" },
+        { "name": "matches",                  "type": "jsonb",     "description": "[{title, price, currency, seller, url, image}, ...]" },
+        { "name": "ts",                       "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "retail_sources",
+      "table": "retail_sources",
+      "description": "Admin-controlled allow-list of retailers the app-agent is permitted to query.",
+      "fields": [
+        { "name": "id",         "type": "uuid",      "primary": true },
+        { "name": "name",       "type": "varchar",   "description": "Human-readable label, e.g. 'Amazon US'" },
+        { "name": "source_key", "type": "varchar",   "unique": true, "description": "Stable key referenced by the agent guardrail, e.g. 'amazon_us'" },
+        { "name": "url",        "type": "varchar",   "description": "Retailer domain, e.g. 'https://amazon.com'" },
+        { "name": "enabled",    "type": "boolean",   "default": true },
+        { "name": "priority",   "type": "integer",   "default": 100, "description": "Lower = higher priority in the results ordering." },
+        { "name": "region",     "type": "varchar",   "description": "ISO-ish region code, e.g. 'US', 'IN', 'EU'" },
+        { "name": "createdAt",  "type": "timestamp" },
+        { "name": "updatedAt",  "type": "timestamp" }
+      ]
+    }
+  ],
+
+  "pages": [
+    {
+      "route": "/login",
+      "name": "LoginPage",
+      "archetype": "form",
+      "type": "auth",
+      "template_key": "auth",
+      "description": "Sign-in for users and admins."
+    },
+    {
+      "route": "/scan",
+      "name": "ScanPage",
+      "archetype": "computational",
+      "type": "visual_scan",
+      "template_key": "visual_scan",
+      "description": "Mobile-first camera + upload surface that calls the app agent (see agent_graph) and renders match cards.",
+      "agent": "PriceScanAgent",
+      "components_hint": ["CameraCapture", "FileUpload", "Button", "Grid", "Card"]
+    },
+    {
+      "route": "/admin/retail-sources",
+      "name": "RetailSourcesListPage",
+      "archetype": "list",
+      "type": "retail_sources_admin",
+      "template_key": "retail_sources_admin",
+      "entity": "retail_sources",
+      "description": "Admin list of retail sources with per-row enable/disable toggle, priority, region, and edit/delete actions.",
+      "role_required": "admin"
+    },
+    {
+      "route": "/admin/retail-sources/new",
+      "name": "RetailSourceCreatePage",
+      "archetype": "form",
+      "type": "form",
+      "template_key": "form",
+      "entity": "retail_sources",
+      "description": "Admin form to add a new retail source (name, source_key, url, enabled, priority, region).",
+      "role_required": "admin"
+    },
+    {
+      "route": "/admin/retail-sources/:id/edit",
+      "name": "RetailSourceEditPage",
+      "archetype": "form",
+      "type": "form",
+      "template_key": "form",
+      "entity": "retail_sources",
+      "description": "Admin form to edit an existing retail source.",
+      "role_required": "admin"
+    }
+  ],
+
+  "agent_graph": {
+    "name": "PriceScanAgent",
+    "description": "Identifies products from a scanned image and returns live prices from admin-approved retailers via the Firecrawl MCP server.",
+    "system_prompt": {
+      "prompt": "You identify products from images and return live prices from admin-approved retailers. Return JSON of shape {product: {brand, model, category, attributes, confidence}, matches: [{title, price, currency, seller, url, image}]}. If confidence < 0.5, return matches: [] and a friendly message.",
+      "model": "claude-sonnet-4-5",
+      "temperature": 0.2
+    },
+    "tools": [
+      {
+        "name": "identify_product",
+        "tool_type": "function",
+        "description": "Given the uploaded image file_id, identify the product via Claude vision (ai_extract with image input) and return {brand, model, category, attributes, confidence}.",
+        "code": "// materialised by code_editor — reads forge_files[image_id], calls ai_extract with the identify_product_from_image preset, returns typed JSON"
+      },
+      {
+        "name": "search_prices",
+        "tool_type": "mcp",
+        "mcp_server_name": "Firecrawl",
+        "mcp_tool_name": "firecrawl_search",
+        "description": "Discover candidate product URLs across retailers via Firecrawl search. Returns [{title, url, description}]. Feed each result's `url` into `extract_price` — search alone does not return prices.",
+        "args_mapping": {
+          "query": "{{identify_product.brand}} {{identify_product.model}} price",
+          "limit": 20
+        }
+      },
+      {
+        "name": "extract_price",
+        "tool_type": "mcp",
+        "mcp_server_name": "Firecrawl",
+        "mcp_tool_name": "firecrawl_extract",
+        "description": "Extract structured {productUrl, price, currency, inStock} from a specific retailer product page. Call once per candidate URL from search_prices. Product pages parse reliably; search-result pages (amazon.com/s?k=..., target.com/s?searchTerm=...) parse ~30-50% of the time — always pass a product/detail URL, not a search URL. Two-step flow is O7 in the pipeline remediation plan (docs/superpowers/plans/2026-08-04-generation-pipeline-remediation.md).",
+        "args_mapping": {
+          "urls": ["{{search_prices.results[*].url}}"],
+          "prompt": "Extract the primary offer price for the exact product page.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "productUrl": { "type": "string" },
+              "price": { "type": "number" },
+              "currency": { "type": "string" },
+              "inStock": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    ],
+    "guardrails": [
+      {
+        "name": "confidence_gate",
+        "guardrail_type": "output_filter",
+        "rules": [
+          {
+            "name": "min_confidence",
+            "type": "custom",
+            "expr": "identify_product.confidence >= 0.5"
+          }
+        ]
+      },
+      {
+        "name": "retailer_allow_list",
+        "guardrail_type": "output_filter",
+        "rules": [
+          {
+            "name": "seller_in_enabled_sources",
+            "type": "custom",
+            "expr": "match.seller in retail_sources WHERE enabled=true; order by retail_sources.priority asc"
+          }
+        ]
+      }
+    ],
+    "memory": {
+      "memory_type": "key_value",
+      "capacity": 500,
+      "ttl_seconds": 86400
+    },
+    "router": null,
+    "human_handoff": null
+  },
+
+  "integrations": {
+    "mcp_servers": [
+      {
+        "server_key": "firecrawl",
+        "name": "Firecrawl",
+        "description": "Shopping-search + scrape MCP server used by the product_identifier agent to fetch live retailer prices.",
+        "transport": "http",
+        "url_env": "FIRECRAWL_MCP_URL",
+        "auth_env": "FIRECRAWL_API_KEY",
+        "tools_used": ["search", "scrape"]
+      }
+    ],
+    "platform_features": ["file_storage", "ai_extract_vision", "agent_builder", "rbac"]
+  },
+
+  "default_features": ["camera_upload", "admin_source_control", "outbound_links"]
+}

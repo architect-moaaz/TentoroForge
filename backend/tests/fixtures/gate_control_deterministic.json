@@ -1,0 +1,2443 @@
+{
+  "schemaVersion": "2.0",
+  "id": "n_7e0f3c49",
+  "title": "Cemex_gate_mangement",
+  "dataSources": [],
+  "children": [
+    {
+      "id": "n_07ca75b1",
+      "type": "Stack",
+      "props": {
+        "className": "flex-1 min-h-[2184px] bg-[#f9fafb]"
+      },
+      "children": [
+        {
+          "id": "n_c06055bd",
+          "type": "Stack",
+          "props": {
+            "className": "w-[1271px] min-h-[121px] bg-[#ffffff] shadow-[0px_1px_2px_-1px_rgba(0,0,0,0.1),0px_1px_3px_rgba(0,0,0,0.1)]"
+          },
+          "children": [
+            {
+              "id": "n_4b57040a",
+              "type": "Row",
+              "props": {
+                "wrap": false,
+                "className": "w-[1223px] min-h-[36px] gap-16 justify-between items-center"
+              },
+              "children": [
+                {
+                  "id": "n_9138376c",
+                  "type": "Row",
+                  "props": {
+                    "wrap": false,
+                    "className": "w-[201px] min-h-[33px] gap-4 items-center"
+                  },
+                  "children": [
+                    {
+                      "id": "n_ace262ec",
+                      "type": "Image",
+                      "props": {
+                        "alt": "Layer_1",
+                        "className": "w-[122px] min-h-[22px]"
+                      },
+                      "children": []
+                    },
+                    {
+                      "id": "n_d0410cc4",
+                      "type": "Container",
+                      "props": {
+                        "className": "w-[174px] min-h-[33px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_e3a53424",
+                          "type": "Heading",
+                          "props": {
+                            "level": 1,
+                            "content": "Gate Management",
+                            "className": "text-[#00338d] text-[14px] font-semibold"
+                          },
+                          "children": []
+                        },
+                        {
+                          "id": "n_9c5fb98f",
+                          "type": "Text",
+                          "props": {
+                            "className": "w-[157px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                            "content": "United Arab Emirates"
+                          },
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "n_2ff1c607",
+                  "type": "Row",
+                  "props": {
+                    "wrap": false,
+                    "className": "w-[132px] min-h-[36px] gap-3 items-center"
+                  },
+                  "children": [
+                    {
+                      "id": "n_96922baf",
+                      "type": "Button",
+                      "props": {
+                        "className": "w-[36px] min-h-[36px] rounded-md pl-2.5 justify-center items-center bg-[#ffffff]",
+                        "iconSrc": "/api/asset/muiznxod/figma/c5a9b40ec69a.svg"
+                      },
+                      "children": []
+                    },
+                    {
+                      "id": "n_8bf85f87",
+                      "type": "Button",
+                      "props": {
+                        "className": "w-[36px] min-h-[36px] rounded-md pl-2.5 justify-center items-center bg-[#ffffff]",
+                        "iconSrc": "/api/asset/muiznxod/figma/d71645d8beed.svg"
+                      },
+                      "children": []
+                    },
+                    {
+                      "id": "n_6fce12f0",
+                      "type": "Button",
+                      "props": {
+                        "className": "w-[36px] min-h-[36px] rounded-md pl-2.5 justify-center items-center bg-[#ffffff]",
+                        "iconSrc": "/api/asset/muiznxod/figma/5533abdcde0d.svg"
+                      },
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "n_d6e89475",
+              "type": "Stack",
+              "props": {
+                "className": "w-[1271px] min-h-[53px] pt-2 pl-4"
+              },
+              "children": [
+                {
+                  "id": "n_6cd9d7f1",
+                  "type": "Row",
+                  "props": {
+                    "wrap": false,
+                    "className": "flex-1 min-h-[36px] gap-2 items-center"
+                  },
+                  "children": [
+                    {
+                      "id": "n_187e03a8",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[118px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_e48d8470",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[118px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "Dashboard"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_d4db1411",
+                      "type": "Row",
+                      "props": {
+                        "wrap": false,
+                        "className": "w-[129px] min-h-[36px] rounded-md py-2 pl-3 gap-2 items-center bg-[#00338d]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_75d75986",
+                          "type": "Image",
+                          "props": {
+                            "alt": "Icon",
+                            "className": "w-[16px] min-h-[16px]",
+                            "src": "/api/asset/muiznxod/figma/fdafdbee3e16.svg"
+                          },
+                          "children": []
+                        },
+                        {
+                          "id": "n_12efa980",
+                          "type": "Box",
+                          "props": {
+                            "className": "w-[81px] min-h-[20px]"
+                          },
+                          "children": [
+                            {
+                              "id": "n_d223224f",
+                              "type": "Text",
+                              "props": {
+                                "content": "Gate Control",
+                                "className": "text-[#ffffff] text-[14px] font-medium leading-[20px]"
+                              },
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_d5baf8f0",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[175px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_b4ed5193",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[175px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "Queue Management"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_1433a068",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[156px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_174fe670",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[156px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "QC Management"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_99891aea",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[99px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_679e5ac4",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[99px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "Vendors"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_0e6ca4c1",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[127px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_00353815",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[127px] min-h-[36px] rounded-md px-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "Master Data"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_1cd0049f",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[163px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_b4d21c0f",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[163px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "En-Route Tracking"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_d4b79362",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[97px] min-h-[36px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_9e5fc217",
+                          "type": "Link",
+                          "props": {
+                            "className": "w-[97px] min-h-[36px] rounded-md pl-3 gap-2 items-center text-[#364153] text-[14px] font-medium",
+                            "label": "Reports"
+                          },
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "n_6c68a43c",
+          "type": "Stack",
+          "props": {
+            "className": "w-[1271px] min-h-[2063px] pt-6 pl-6 gap-6"
+          },
+          "children": [
+            {
+              "id": "n_d5d3fe82",
+              "type": "Stack",
+              "props": {
+                "className": "flex-1 gap-6"
+              },
+              "children": [
+                {
+                  "id": "n_a4137afd",
+                  "type": "Row",
+                  "props": {
+                    "wrap": false,
+                    "className": "flex-1 min-h-[58px] gap-16 justify-between items-center"
+                  },
+                  "children": [
+                    {
+                      "id": "n_6903f9dd",
+                      "type": "Container",
+                      "props": {
+                        "className": "w-[350px] min-h-[58px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_7cbaaeaf",
+                          "type": "Text",
+                          "props": {
+                            "content": "Gate Control",
+                            "className": "text-[#00338d] text-[24px] font-semibold tracking-[-0.23999999463558197px] leading-[32px]"
+                          },
+                          "children": []
+                        },
+                        {
+                          "id": "n_92ce9789",
+                          "type": "Text",
+                          "props": {
+                            "content": "Entry and exit management with UAE compliance",
+                            "className": "text-[#6b6b6b] text-[16px]"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_04331d03",
+                      "type": "Row",
+                      "props": {
+                        "wrap": false,
+                        "className": "gap-2 justify-end items-center"
+                      },
+                      "children": [
+                        {
+                          "id": "n_c40a75a2",
+                          "type": "Row",
+                          "props": {
+                            "wrap": false,
+                            "className": "gap-2 items-center"
+                          },
+                          "children": [
+                            {
+                              "id": "n_6cff65bb",
+                              "type": "Button",
+                              "props": {
+                                "className": "w-[122px] min-h-[36px] rounded-md bg-[#ffffff] text-[#3d3d3d] text-[14px] font-medium",
+                                "label": "Scan RFID",
+                                "iconSrc": "/api/asset/muiznxod/figma/27514bcc4e7a.svg"
+                              },
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "n_b6761331",
+                  "type": "Stack",
+                  "props": {
+                    "className": "flex-1 min-h-[85px] rounded-lg pt-0 pl-0 bg-[#ffffff]"
+                  },
+                  "children": [
+                    {
+                      "id": "n_80787cd0",
+                      "type": "Stack",
+                      "props": {
+                        "className": "w-[1221px] min-h-[84px] pt-6 pl-6"
+                      },
+                      "children": [
+                        {
+                          "id": "n_a1b54fec",
+                          "type": "Box",
+                          "props": {
+                            "className": "flex-1 min-h-[36px]"
+                          },
+                          "children": [
+                            {
+                              "id": "n_aef17942",
+                              "type": "Input",
+                              "props": {
+                                "type": "text",
+                                "className": "w-[1173px] min-h-[36px] rounded-md py-1 pl-10 items-center bg-[#f8f8f8]",
+                                "placeholder": "Search by truck plate, Emirates ID, or driver name..."
+                              },
+                              "children": []
+                            },
+                            {
+                              "id": "n_55910d19",
+                              "type": "Image",
+                              "props": {
+                                "alt": "Icon",
+                                "src": "/api/asset/muiznxod/figma/314a2e3ce7cc.svg"
+                              },
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "n_090ba9dd",
+                  "type": "Stack",
+                  "props": {
+                    "className": "flex-1 min-h-[1442px]"
+                  },
+                  "children": [
+                    {
+                      "id": "n_8d7dfdf6",
+                      "type": "Heading",
+                      "props": {
+                        "level": 3,
+                        "content": "Pending Entry Requests",
+                        "className": "text-[#3d3d3d] text-[18px] font-medium"
+                      },
+                      "children": []
+                    },
+                    {
+                      "id": "n_4f1fc00b",
+                      "type": "Stack",
+                      "props": {
+                        "className": "w-[1223px] min-h-[455px] rounded-lg pl-0 bg-[#ffffff]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_00bcd3d1",
+                          "type": "Stack",
+                          "props": {
+                            "className": "w-[1221px] min-h-[454px] pt-6 pl-6 gap-4"
+                          },
+                          "children": [
+                            {
+                              "id": "n_da30764d",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "flex-1 min-h-[325px] gap-16 justify-between"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_af2878fb",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[385px] min-h-[325px] gap-4"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_f8b693ab",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "w-[48px] min-h-[48px] rounded-md pt-3 pl-3 bg-[#eff6ff]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_79ba310e",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "flex-1 min-h-[24px]",
+                                            "src": "/api/asset/muiznxod/figma/37ec82af25a0.svg"
+                                          },
+                                          "children": []
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_7bef7d47",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "flex-1 min-h-[325px]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_da84fb91",
+                                          "type": "Heading",
+                                          "props": {
+                                            "level": 4,
+                                            "className": "w-[97px] min-h-[24px] text-[#3d3d3d] text-[16px] font-semibold",
+                                            "content": "DXB-T-12345"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_8951deff",
+                                          "type": "Text",
+                                          "props": {
+                                            "content": "Appointment: 10:00 AM",
+                                            "className": "text-[#6b6b6b] text-[14px]"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_90084950",
+                                          "type": "Row",
+                                          "props": {
+                                            "wrap": false
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_48b328f1",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[153px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_e0b86c4b",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/aa42b6b54812.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_cfcdb69a",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[125px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_a7fc4f29",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Ahmed Al-Mansoori",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_5156de5a",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[153px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_a2559b37",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/fa9c088b0342.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_19269209",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[125px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_0a0bc158",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "784-1990-1234567-1",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_514e5cae",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[153px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_e48a6ee1",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/d601d0dff3c9.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_247f474c",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[126px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_9a1e0072",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Al Khaleej Transport",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_b0bf1c04",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[153px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_e9b15190",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/99f76429a4b6.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_8776e206",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[129px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_22e3f4e1",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "License: CN-1234567",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_dc0d7a39",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "flex-1 min-h-[21px] rounded-md bg-[#eff6ff]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_8782e91e",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Cement Delivery",
+                                                "className": "text-[#1447e6] text-[12px] font-medium leading-[16px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_4273f08b",
+                                          "type": "Stack",
+                                          "props": {
+                                            "className": "w-[321px] min-h-[165px] pt-4 gap-3"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_858c5314",
+                                              "type": "Text",
+                                              "props": {
+                                                "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                                "content": "RFID Scan Captures:"
+                                              },
+                                              "children": []
+                                            },
+                                            {
+                                              "id": "n_a2e40da2",
+                                              "type": "Container",
+                                              "props": {
+                                                "className": "flex-1 min-h-[116px]"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_144e4c3b",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Truck Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/cc37bed330ee.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_2e48f048",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Truck"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_f73f5367",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_9dbf3936",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Driver Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/402faf6ac11c.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_1fe439dd",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Driver"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_0973dcbe",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_31e11526",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[227px] min-h-[32px] gap-2"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_2b9920da",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[81px] min-h-[32px] rounded-md bg-[#ffffff] text-[#e7000b] text-[14px] font-medium",
+                                        "label": "Deny",
+                                        "iconSrc": "/api/asset/muiznxod/figma/2c81eeaa2a9d.svg"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_0a68aae2",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[138px] min-h-[32px] rounded-md bg-[#00a63e] text-[#ffffff] text-[14px] font-medium",
+                                        "label": "Approve Entry",
+                                        "iconSrc": "/api/asset/muiznxod/figma/d92276d44eeb.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_eade0cd0",
+                              "type": "Stack",
+                              "props": {
+                                "className": "flex-1 min-h-[65px] pt-4 gap-2"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_980f7367",
+                                  "type": "Text",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                    "content": "Validation Status:"
+                                  },
+                                  "children": []
+                                },
+                                {
+                                  "id": "n_5d0f6072",
+                                  "type": "Row",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px]",
+                                    "wrap": false
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_85213439",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_6e2f0e1f",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/e52b4566b4e7.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_a2c70fa0",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[64px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_f4ba2bf5",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid RFID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_392e49db",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_5d4c69b4",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/b1004fc1ff1f.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_b837930b",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[110px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_4e8299e7",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Approved Vendor",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_d21adb74",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_563d169a",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/3ed45b74f966.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_57da3733",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[83px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_25715348",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Active Permit",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_d810ab45",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_018094a2",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/b98db7c34fa4.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_b5fb740a",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[56px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_f886bd7e",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid EID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_dc8c8556",
+                      "type": "Stack",
+                      "props": {
+                        "className": "w-[1223px] min-h-[455px] rounded-lg pl-0 bg-[#ffffff]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_500c53fc",
+                          "type": "Stack",
+                          "props": {
+                            "className": "w-[1221px] min-h-[454px] pt-6 pl-6 gap-4"
+                          },
+                          "children": [
+                            {
+                              "id": "n_5e13b1c9",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "flex-1 min-h-[325px] gap-16 justify-between"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_39431ac3",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[385px] min-h-[325px] gap-4"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_83fd05fc",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "w-[48px] min-h-[48px] rounded-md pt-3 pl-3 bg-[#eff6ff]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_3c991d0d",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "flex-1 min-h-[24px]",
+                                            "src": "/api/asset/muiznxod/figma/55e5b74207c4.svg"
+                                          },
+                                          "children": []
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_7ec35ce4",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "flex-1 min-h-[325px]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_617167b7",
+                                          "type": "Heading",
+                                          "props": {
+                                            "level": 4,
+                                            "className": "w-[102px] min-h-[24px] text-[#3d3d3d] text-[16px] font-semibold",
+                                            "content": "AUH-L-67890"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_11b59084",
+                                          "type": "Text",
+                                          "props": {
+                                            "content": "Appointment: 10:30 AM",
+                                            "className": "text-[#6b6b6b] text-[14px]"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_20eebf85",
+                                          "type": "Row",
+                                          "props": {
+                                            "wrap": false
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_2cf33556",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[152px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_e7f591a9",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/36f555e321af.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_ca22dce4",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[94px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_492f282b",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Mohammed Ali",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_e44e15cd",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[152px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_38850dec",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/d8ca8065d32a.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_31a4a3aa",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[126px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_29bfe394",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "784-1988-7654321-2",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_b9304e30",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[152px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_55c0420e",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/738b14ea8622.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_583e18f3",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[112px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_9a538836",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Emirates Logistics",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_c866e699",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[152px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_93047192",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/812efb95c5fe.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_77a63c8f",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[128px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_2c20e852",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "License: CN-7654321",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_ef293a9c",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "flex-1 min-h-[21px] rounded-md bg-[#eff6ff]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_52699175",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Aggregate Pickup",
+                                                "className": "text-[#1447e6] text-[12px] font-medium leading-[16px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_9bed1822",
+                                          "type": "Stack",
+                                          "props": {
+                                            "className": "w-[321px] min-h-[165px] pt-4 gap-3"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_05958d1c",
+                                              "type": "Text",
+                                              "props": {
+                                                "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                                "content": "RFID Scan Captures:"
+                                              },
+                                              "children": []
+                                            },
+                                            {
+                                              "id": "n_b1c83486",
+                                              "type": "Container",
+                                              "props": {
+                                                "className": "flex-1 min-h-[116px]"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_ce6c1e98",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Truck Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/01f4661b6617.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_a2a3a66c",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Truck"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_ab23e3be",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_116714e6",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Driver Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/942832b1ca5c.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_1b9dd73f",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Driver"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_8ef045d3",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_02564e13",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[227px] min-h-[32px] gap-2"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_a6965b20",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[81px] min-h-[32px] rounded-md bg-[#ffffff] text-[#e7000b] text-[14px] font-medium",
+                                        "label": "Deny",
+                                        "iconSrc": "/api/asset/muiznxod/figma/9f974c83757a.svg"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_5b40d416",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[138px] min-h-[32px] rounded-md bg-[#00a63e] text-[#ffffff] text-[14px] font-medium",
+                                        "label": "Approve Entry",
+                                        "iconSrc": "/api/asset/muiznxod/figma/383813ceafa8.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_f5fab375",
+                              "type": "Stack",
+                              "props": {
+                                "className": "flex-1 min-h-[65px] pt-4 gap-2"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_74c6300a",
+                                  "type": "Text",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                    "content": "Validation Status:"
+                                  },
+                                  "children": []
+                                },
+                                {
+                                  "id": "n_96bc776a",
+                                  "type": "Row",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px]",
+                                    "wrap": false
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_352b8f42",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_e5cdb9f7",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/e84231192d8c.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_d48f71dc",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[64px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_fb74053f",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid RFID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_3bdee836",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_cddddebd",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/f4007ede21c5.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_22f79ce7",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[110px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_e2be2b8e",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Approved Vendor",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_4bbfa20d",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_c3207bf8",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/5374c11cb279.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_a9015569",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[83px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_bd4b49ec",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Active Permit",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_d4a660bc",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_85e106bd",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/4f160e1e6a32.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_13f919a6",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[56px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_da053d2b",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid EID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_20a5bac7",
+                      "type": "Stack",
+                      "props": {
+                        "className": "w-[1223px] min-h-[455px] rounded-lg pt-0 pl-0 bg-[#ffffff]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_4c8e48ca",
+                          "type": "Stack",
+                          "props": {
+                            "className": "w-[1221px] min-h-[454px] pt-6 pl-6 gap-4"
+                          },
+                          "children": [
+                            {
+                              "id": "n_bfff5321",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "flex-1 min-h-[325px] gap-16 justify-between"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_17e07044",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[400px] min-h-[325px] gap-4"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_ecab85c2",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "w-[48px] min-h-[48px] rounded-md pt-3 pl-3 bg-[#eff6ff]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_ceae4736",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "flex-1 min-h-[24px]",
+                                            "src": "/api/asset/muiznxod/figma/fbfd3d071d59.svg"
+                                          },
+                                          "children": []
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_5363330f",
+                                      "type": "Stack",
+                                      "props": {
+                                        "className": "flex-1 min-h-[325px]"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_f33fd210",
+                                          "type": "Row",
+                                          "props": {
+                                            "wrap": false,
+                                            "className": "w-[336px] min-h-[24px] gap-2 items-center"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_99ec784a",
+                                              "type": "Heading",
+                                              "props": {
+                                                "level": 4,
+                                                "className": "w-[101px] min-h-[24px] text-[#3d3d3d] text-[16px] font-semibold",
+                                                "content": "SHJ-M-34567"
+                                              },
+                                              "children": []
+                                            },
+                                            {
+                                              "id": "n_2c3ba461",
+                                              "type": "Box",
+                                              "props": {
+                                                "className": "w-[100px] min-h-[21px] rounded-md bg-[#fffbeb]"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_e2fbc00b",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "src": "/api/asset/muiznxod/figma/0ee2eea7ec1a.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_6b1a2e43",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "content": "Late Arrival",
+                                                    "className": "text-[#bb4d00] text-[12px] font-medium leading-[16px]"
+                                                  },
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_aa0777ad",
+                                          "type": "Text",
+                                          "props": {
+                                            "content": "Appointment: 11:00 AM",
+                                            "className": "text-[#6b6b6b] text-[14px]"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_2a388942",
+                                          "type": "Row",
+                                          "props": {
+                                            "wrap": false
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_148f53f5",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[160px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_ce7ede03",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/cf5ca3315d5c.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_62beb86d",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[88px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_40d80dde",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Khalid Hassan",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_2547743d",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[160px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_b112df01",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/e543990a316f.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_39f3235b",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[129px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_ee390d69",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "784-1992-9876543-3",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_b3ecb952",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[160px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_1f6b4972",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/2e21115dc962.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_13eb4724",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "flex-1 min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_373a39be",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "Sharjah Transport Co.",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "id": "n_f633d790",
+                                              "type": "Row",
+                                              "props": {
+                                                "wrap": false,
+                                                "className": "w-[160px] min-h-[20px] gap-2 items-center shrink-0"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_c5543ccd",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Icon",
+                                                    "className": "w-[16px] min-h-[16px]",
+                                                    "src": "/api/asset/muiznxod/figma/224d07c0b212.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_0ce01e47",
+                                                  "type": "Box",
+                                                  "props": {
+                                                    "className": "w-[132px] min-h-[20px]"
+                                                  },
+                                                  "children": [
+                                                    {
+                                                      "id": "n_03f9784f",
+                                                      "type": "Text",
+                                                      "props": {
+                                                        "content": "License: CN-9876543",
+                                                        "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                                      },
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_efe7f535",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "flex-1 min-h-[21px] rounded-md bg-[#eff6ff]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_8b3960d1",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Ready-Mix Collection",
+                                                "className": "text-[#1447e6] text-[12px] font-medium leading-[16px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "n_9e4dbc68",
+                                          "type": "Stack",
+                                          "props": {
+                                            "className": "w-[321px] min-h-[165px] pt-4 gap-3"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_307b663e",
+                                              "type": "Text",
+                                              "props": {
+                                                "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                                "content": "RFID Scan Captures:"
+                                              },
+                                              "children": []
+                                            },
+                                            {
+                                              "id": "n_e0c425d2",
+                                              "type": "Container",
+                                              "props": {
+                                                "className": "flex-1 min-h-[116px]"
+                                              },
+                                              "children": [
+                                                {
+                                                  "id": "n_dbbeafde",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Truck Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/a45ce84139d6.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_85603db8",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Truck"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_a8f03b20",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_1dffcf0e",
+                                                  "type": "Image",
+                                                  "props": {
+                                                    "alt": "Image (Driver Photo)",
+                                                    "className": "rounded-md",
+                                                    "src": "/api/asset/muiznxod/figma/95eab8fd7ad5.svg"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_7dc33924",
+                                                  "type": "Text",
+                                                  "props": {
+                                                    "className": "w-[96px] min-h-[16px] text-[#6b6b6b] text-[12px]",
+                                                    "content": "Driver"
+                                                  },
+                                                  "children": []
+                                                },
+                                                {
+                                                  "id": "n_a7964387",
+                                                  "type": "Container",
+                                                  "props": {
+                                                    "className": "rounded-md"
+                                                  },
+                                                  "children": []
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_d0a50210",
+                                  "type": "Row",
+                                  "props": {
+                                    "wrap": false,
+                                    "className": "w-[227px] min-h-[32px] gap-2"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_e51f3716",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[81px] min-h-[32px] rounded-md bg-[#ffffff] text-[#e7000b] text-[14px] font-medium",
+                                        "label": "Deny",
+                                        "iconSrc": "/api/asset/muiznxod/figma/d2cfdd711780.svg"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_6a14129a",
+                                      "type": "Button",
+                                      "props": {
+                                        "className": "w-[138px] min-h-[32px] rounded-md bg-[#00a63e] text-[#ffffff] text-[14px] font-medium",
+                                        "label": "Approve Entry",
+                                        "iconSrc": "/api/asset/muiznxod/figma/68538a04370c.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_f7412904",
+                              "type": "Stack",
+                              "props": {
+                                "className": "flex-1 min-h-[65px] pt-4 gap-2"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_eb37c274",
+                                  "type": "Text",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px] text-[#3d3d3d] text-[14px]",
+                                    "content": "Validation Status:"
+                                  },
+                                  "children": []
+                                },
+                                {
+                                  "id": "n_76a6f518",
+                                  "type": "Row",
+                                  "props": {
+                                    "className": "flex-1 min-h-[20px]",
+                                    "wrap": false
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_7a53740a",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_8e7bf418",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/7da2e0b64e48.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_f15dea86",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[64px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_fe3bd44c",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid RFID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_f6d534db",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_fe2e5367",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/0e3f8257f2c5.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_af58b727",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[110px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_5aeb9a24",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Approved Vendor",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_810a3417",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_909b3301",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/f520fd790905.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_1b83664f",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[83px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_0db3dc29",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Active Permit",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "id": "n_aecdf181",
+                                      "type": "Row",
+                                      "props": {
+                                        "wrap": false,
+                                        "className": "w-[284px] min-h-[20px] gap-2 items-center"
+                                      },
+                                      "children": [
+                                        {
+                                          "id": "n_fe897964",
+                                          "type": "Image",
+                                          "props": {
+                                            "alt": "Icon",
+                                            "className": "w-[16px] min-h-[16px]",
+                                            "src": "/api/asset/muiznxod/figma/3bcee244381a.svg"
+                                          },
+                                          "children": []
+                                        },
+                                        {
+                                          "id": "n_c32b0a23",
+                                          "type": "Box",
+                                          "props": {
+                                            "className": "w-[56px] min-h-[20px]"
+                                          },
+                                          "children": [
+                                            {
+                                              "id": "n_e3717962",
+                                              "type": "Text",
+                                              "props": {
+                                                "content": "Valid EID",
+                                                "className": "text-[#3d3d3d] text-[14px] leading-[20px]"
+                                              },
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "n_3cd65608",
+                  "type": "Stack",
+                  "props": {
+                    "className": "flex-1 min-h-[333px] rounded-lg pt-0 pl-0 gap-6 bg-[#ffffff]"
+                  },
+                  "children": [
+                    {
+                      "id": "n_9368d01b",
+                      "type": "Box",
+                      "props": {
+                        "className": "w-[1221px] min-h-[46px]"
+                      },
+                      "children": [
+                        {
+                          "id": "n_c8225041",
+                          "type": "Text",
+                          "props": {
+                            "content": "Recent Approved Entries",
+                            "className": "text-[#3d3d3d] text-[16px] font-medium leading-[16px]"
+                          },
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "n_49b618c2",
+                      "type": "Stack",
+                      "props": {
+                        "className": "w-[1221px] min-h-[261px] pl-6 gap-3"
+                      },
+                      "children": [
+                        {
+                          "id": "n_f368b432",
+                          "type": "Row",
+                          "props": {
+                            "wrap": false,
+                            "className": "flex-1 min-h-[71px] rounded-md py-3 pl-3 gap-16 justify-between items-center"
+                          },
+                          "children": [
+                            {
+                              "id": "n_9afe4304",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "w-[143px] min-h-[46px] gap-3 items-center"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_24831b29",
+                                  "type": "Stack",
+                                  "props": {
+                                    "className": "w-[32px] min-h-[32px] rounded-sm pt-2 pl-2 bg-[#f0fdf4]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_1f250f77",
+                                      "type": "Image",
+                                      "props": {
+                                        "alt": "Icon",
+                                        "className": "flex-1 min-h-[16px]",
+                                        "src": "/api/asset/muiznxod/figma/e46b5e4ee6bb.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_f0b42c63",
+                                  "type": "Container",
+                                  "props": {
+                                    "className": "w-[99px] min-h-[46px]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_05a9ffd7",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "DXB-P-89012",
+                                        "className": "text-[#3d3d3d] text-[16px] font-medium"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_08fe39be",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "Omar Abdullah",
+                                        "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_544393f2",
+                              "type": "Box",
+                              "props": {
+                                "className": "w-[60px] min-h-[20px]"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_1b9f74e1",
+                                  "type": "Text",
+                                  "props": {
+                                    "content": "09:45 AM",
+                                    "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                  },
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "n_4c9bf978",
+                          "type": "Row",
+                          "props": {
+                            "wrap": false,
+                            "className": "flex-1 min-h-[71px] rounded-md py-3 pl-3 gap-16 justify-between items-center"
+                          },
+                          "children": [
+                            {
+                              "id": "n_9447847b",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "w-[145px] min-h-[46px] gap-3 items-center"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_c64d157e",
+                                  "type": "Stack",
+                                  "props": {
+                                    "className": "w-[32px] min-h-[32px] rounded-sm pt-2 pl-2 bg-[#f0fdf4]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_fb34f8e9",
+                                      "type": "Image",
+                                      "props": {
+                                        "alt": "Icon",
+                                        "className": "flex-1 min-h-[16px]",
+                                        "src": "/api/asset/muiznxod/figma/a68625a5ba56.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_11d52367",
+                                  "type": "Container",
+                                  "props": {
+                                    "className": "flex-1 min-h-[46px]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_f9c9c258",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "AUH-K-56789",
+                                        "className": "text-[#3d3d3d] text-[16px] font-medium"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_1abcb27d",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "Salem Ahmed",
+                                        "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_5200d0d3",
+                              "type": "Box",
+                              "props": {
+                                "className": "w-[61px] min-h-[20px]"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_6eb35176",
+                                  "type": "Text",
+                                  "props": {
+                                    "content": "09:30 AM",
+                                    "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                  },
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "n_067cb5c1",
+                          "type": "Row",
+                          "props": {
+                            "wrap": false,
+                            "className": "flex-1 min-h-[71px] rounded-md py-3 pl-3 gap-16 justify-between items-center"
+                          },
+                          "children": [
+                            {
+                              "id": "n_e5ad90ba",
+                              "type": "Row",
+                              "props": {
+                                "wrap": false,
+                                "className": "w-[140px] min-h-[46px] gap-3 items-center"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_5af2f54a",
+                                  "type": "Stack",
+                                  "props": {
+                                    "className": "w-[32px] min-h-[32px] rounded-sm pt-2 pl-2 bg-[#f0fdf4]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_2d5f35f4",
+                                      "type": "Image",
+                                      "props": {
+                                        "alt": "Icon",
+                                        "className": "flex-1 min-h-[16px]",
+                                        "src": "/api/asset/muiznxod/figma/c9d70106413d.svg"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                },
+                                {
+                                  "id": "n_59a91d06",
+                                  "type": "Container",
+                                  "props": {
+                                    "className": "w-[96px] min-h-[46px]"
+                                  },
+                                  "children": [
+                                    {
+                                      "id": "n_2e9402b3",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "RAK-J-23456",
+                                        "className": "text-[#3d3d3d] text-[16px] font-medium"
+                                      },
+                                      "children": []
+                                    },
+                                    {
+                                      "id": "n_c1d38f58",
+                                      "type": "Text",
+                                      "props": {
+                                        "content": "Rashid Ali",
+                                        "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                      },
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "id": "n_b2a7fc40",
+                              "type": "Box",
+                              "props": {
+                                "className": "w-[57px] min-h-[20px]"
+                              },
+                              "children": [
+                                {
+                                  "id": "n_4692d187",
+                                  "type": "Text",
+                                  "props": {
+                                    "content": "09:15 AM",
+                                    "className": "text-[#6b6b6b] text-[14px] leading-[20px]"
+                                  },
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+{
+  "schemaVersion": "2",
+  "id": "users/list",
+  "route": "/users",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Users"
+  },
+  "dataSources": [
+    {
+      "name": "users",
+      "entity": "User",
+      "op": "list"
+    },
+    {
+      "name": "userStats",
+      "entity": "User",
+      "op": "stats"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "main-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "EMPLOYEE MANAGEMENT",
+              "headline": "Users",
+              "subhead": "Manage employee accounts, roles, and access permissions across your organization.",
+              "layout": "centered",
+              "ctas": [
+                {
+                  "label": "Add New User",
+                  "action": {
+                    "type": "navigate",
+                    "to": "/users/new"
+                  },
+                  "variant": "primary"
+                },
+                {
+                  "label": "Import Users",
+                  "action": {
+                    "type": "workflow",
+                    "name": "importUsers"
+                  },
+                  "variant": "secondary"
+                }
+              ]
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.lg",
+              "motion": "fade-in"
+            }
+          },
+          {
+            "id": "stats-grid",
+            "type": "Grid",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "stat-total",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Total Users",
+                  "value": "{{userStats.total}}",
+                  "format": "number",
+                  "icon": "users"
+                }
+              },
+              {
+                "id": "stat-active",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Active Users",
+                  "value": "{{userStats.active}}",
+                  "format": "number",
+                  "delta": {
+                    "value": "{{userStats.activeGrowth}}",
+                    "direction": "up"
+                  },
+                  "icon": "user-check"
+                }
+              },
+              {
+                "id": "stat-pending",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Pending Approval",
+                  "value": "{{userStats.pending}}",
+                  "format": "number",
+                  "icon": "clock"
+                }
+              },
+              {
+                "id": "stat-departments",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Departments",
+                  "value": "{{userStats.departments}}",
+                  "format": "number",
+                  "icon": "building"
+                }
+              }
+            ]
+          },
+          {
+            "id": "users-section",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "All Users"
+            },
+            "style": {
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "users-grid",
+                "type": "Grid",
+                "props": {
+                  "columns": 3,
+                  "gap": "tokens.spacing.4"
+                },
+                "children": [
+                  {
+                    "id": "users-repeat",
+                    "type": "Repeat",
+                    "bind": "users",
+                    "children": [
+                      {
+                        "id": "user-card",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.3"
+                        },
+                        "style": {
+                          "background": {
+                            "type": "solid",
+                            "value": "tokens.color.surface.0"
+                          },
+                          "padding": "tokens.spacing.6",
+                          "radius": "tokens.radius.lg",
+                          "shadow": "tokens.shadow.md"
+                        },
+                        "children": [
+                          {
+                            "id": "user-header",
+                            "type": "Row",
+                            "props": {
+                              "justify": "between",
+                              "align": "center"
+                            },
+                            "children": [
+                              {
+                                "id": "user-avatar",
+                                "type": "Avatar",
+                                "props": {
+                                  "name": "{{item.name}}",
+                                  "src": "{{item.avatar}}",
+                                  "size": "md",
+                                  "status": "{{item.status}}"
+                                }
+                              },
+                              {
+                                "id": "user-status-badge",
+                                "type": "Badge",
+                                "props": {
+                                  "content": "{{item.status}}",
+                                  "variant": "neutral"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "user-name",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{item.name}}",
+                              "as": "strong"
+                            }
+                          },
+                          {
+                            "id": "user-email",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{item.email}}",
+                              "as": "p"
+                            }
+                          },
+                          {
+                            "id": "user-department",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{item.department}}",
+                              "as": "p"
+                            }
+                          },
+                          {
+                            "id": "user-role",
+                            "type": "Text",
+                            "props": {
+                              "content": "{{item.role}}",
+                              "as": "p"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

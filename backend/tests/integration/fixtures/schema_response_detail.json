@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1",
+  "id": "accounts/detail",
+  "route": "/accounts/:id",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Account Detail" },
+  "dataSources": [
+    { "id": "account-ds", "type": "rest", "url": "/api/accounts/:id" }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "background": "tokens.color.surface.0"
+    },
+    "children": [
+      {
+        "id": "detail-section",
+        "type": "Section",
+        "props": { "title": "Account Overview" },
+        "style": {
+          "background": "tokens.color.surface.1",
+          "padding": "tokens.spacing.semantic.card",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.md"
+        }
+      },
+      {
+        "id": "metrics-row",
+        "type": "Row",
+        "props": { "gap": "tokens.spacing.4" },
+        "style": {
+          "padding": "tokens.spacing.4"
+        },
+        "children": [
+          {
+            "id": "metric-balance",
+            "type": "MetricTile",
+            "props": { "label": "Balance", "dataSource": "account-ds", "field": "balance" },
+            "style": {
+              "background": "tokens.color.primary.50",
+              "radius": "tokens.radius.md",
+              "shadow": "tokens.shadow.sm"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,4278 @@
+{
+  "name": "Vinyasa Flow Studio",
+  "pages": [
+    {
+      "name": "MemberSchedulePage",
+      "type": "dashboard",
+      "route": "/schedule",
+      "entity": "ClassSession",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "calendar",
+      "dataSource": {
+        "op": "list",
+        "entity": "ClassSession"
+      },
+      "description": "Weekly timetable grid (7 columns by day). Each cell shows a ClassSessionCard with instructor name, level badge, spots-remaining pill, and duration. Filters above for instructor, level, time-of-day. Clicking a session opens the 3-step quick-book modal."
+    },
+    {
+      "name": "BookingConfirmPage",
+      "type": "form",
+      "route": "/sessions/[id]/book",
+      "entity": "Booking",
+      "fields": [
+        {
+          "name": "sessionId",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "creditUsed",
+          "label": "Use Membership Credit",
+          "order": 2
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "BookClassWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "wizard",
+      "description": "3-step quick-book flow: Step 1 session summary (instructor, room, duration, level); Step 2 credit or payment confirmation; Step 3 confirmation with add-to-calendar link."
+    },
+    {
+      "name": "MemberDashboardPage",
+      "type": "dashboard",
+      "route": "/member/dashboard",
+      "entity": "Member",
+      "actions": [],
+      "widgets": [
+        {
+          "type": "table",
+          "entity": "Booking",
+          "title": "Upcoming Bookings",
+          "limit": 5,
+          "columns": [
+            "sessionId",
+            "status",
+            "bookedAt"
+          ]
+        },
+        {
+          "type": "stat",
+          "entity": "Booking",
+          "title": "Total Classes Attended",
+          "metric": {
+            "fn": "count"
+          }
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "description": "Member home: upcoming bookings list, credits remaining, active subscription plan, and quick links to browse schedule and manage membership.",
+      "entity_summary": [
+        "User",
+        "Instructor",
+        "Room",
+        "ClassSession",
+        "Booking",
+        "WaitlistEntry",
+        "MembershipPlan",
+        "Subscription",
+        "InstructorAvailability",
+        "Review",
+        "StudioSetting"
+      ]
+    },
+    {
+      "name": "MemberBookingsPage",
+      "type": "list",
+      "route": "/member/bookings",
+      "entity": "Booking",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Booking"
+      },
+      "description": "Member's booking history and upcoming classes. Status filter tabs (Upcoming, Past, Cancelled). Each row shows session title, instructor, date, status, waitlist position if applicable."
+    },
+    {
+      "name": "MemberMembershipPage",
+      "type": "detail",
+      "route": "/member/membership",
+      "entity": "Subscription",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Active subscription detail: plan name, credits remaining, expiry, renewal status. Side-by-side plan comparison cards below for upgrade/downgrade."
+    },
+    {
+      "name": "PlansPage",
+      "type": "list",
+      "route": "/plans",
+      "entity": "MembershipPlan",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "MembershipPlan"
+      },
+      "description": "Plan comparison card grid: drop-in, class packs, unlimited monthly. Best Value badge on isFeatured plan. Price in plain language, no hidden maths. Subscribe button per plan."
+    },
+    {
+      "name": "MemberReviewsPage",
+      "type": "list",
+      "route": "/member/reviews",
+      "entity": "Review",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Review"
+      },
+      "description": "Member's submitted reviews list with star rating, instructor, session, and date."
+    },
+    {
+      "name": "ReviewFormPage",
+      "type": "form",
+      "route": "/member/reviews/new",
+      "entity": "Review",
+      "fields": [
+        {
+          "name": "sessionId",
+          "label": "Class Session",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "rating",
+          "label": "Rating (1-5)",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "comment",
+          "semanticType": "multiline",
+          "label": "Comments",
+          "order": 3
+        },
+        {
+          "name": "isPublic",
+          "label": "Share publicly",
+          "order": 4
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "SubmitReviewWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "InstructorDashboardPage",
+      "type": "dashboard",
+      "route": "/instructor/dashboard",
+      "entity": "Instructor",
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "Review",
+          "title": "Average Rating",
+          "metric": {
+            "fn": "avg",
+            "field": "rating"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "ClassSession",
+          "title": "Upcoming Classes",
+          "limit": 5,
+          "columns": [
+            "title",
+            "startTime",
+            "spotsRemaining",
+            "status"
+          ]
+        },
+        {
+          "type": "stat",
+          "entity": "Booking",
+          "title": "Students This Month",
+          "metric": {
+            "fn": "count"
+          }
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "description": "Instructor home: today's classes, upcoming schedule, avg rating tile, total students taught this month, and link to manage availability."
+    },
+    {
+      "name": "InstructorSchedulePage",
+      "type": "list",
+      "route": "/instructor/schedule",
+      "entity": "ClassSession",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "calendar",
+      "dataSource": {
+        "op": "list",
+        "entity": "ClassSession"
+      },
+      "description": "Instructor's own class calendar. Week view. Clicking a session opens attendance management for that session."
+    },
+    {
+      "name": "InstructorAttendancePage",
+      "type": "list",
+      "route": "/instructor/sessions/[id]/attendance",
+      "entity": "Booking",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Booking"
+      },
+      "description": "Attendance roster for a specific session. List of booked members with status (confirmed, attended, no_show). Toggle attendance per member."
+    },
+    {
+      "name": "InstructorAvailabilityPage",
+      "type": "form",
+      "route": "/instructor/availability",
+      "entity": "InstructorAvailability",
+      "fields": [
+        {
+          "name": "dayOfWeek",
+          "label": "Day",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "startTime",
+          "label": "Start Time",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "endTime",
+          "label": "End Time",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "isRecurring",
+          "label": "Recurring Weekly",
+          "order": 4
+        },
+        {
+          "name": "effectiveFrom",
+          "label": "Effective From",
+          "order": 5
+        },
+        {
+          "name": "effectiveTo",
+          "label": "Effective To",
+          "order": 6
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "UpdateAvailabilityWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form",
+      "description": "Recurring-weekly availability grid (Mon-Sun rows, time slot columns). Instructor blocks or opens time slots. Changes propagate live to the member-facing schedule."
+    },
+    {
+      "name": "InstructorReviewsPage",
+      "type": "list",
+      "route": "/instructor/reviews",
+      "entity": "Review",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Review"
+      },
+      "description": "Instructor's received reviews with rating, comment, session, member display name, and date. Aggregate rating chart at top."
+    },
+    {
+      "name": "AdminDashboardPage",
+      "type": "dashboard",
+      "route": "/admin/dashboard",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "Subscription",
+          "title": "Active Members",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "ClassSession",
+          "title": "Classes This Month",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "chart",
+          "entity": "Subscription",
+          "title": "Revenue by Month",
+          "groupBy": "createdAt",
+          "bucket": "month"
+        },
+        {
+          "type": "chart",
+          "entity": "ClassSession",
+          "title": "Bookings by Level",
+          "groupBy": "level"
+        },
+        {
+          "type": "chart",
+          "entity": "Review",
+          "title": "Rating Distribution",
+          "groupBy": "rating"
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "description": "Studio overview: revenue this month, total active members, classes scheduled, utilisation rate. Charts for revenue by month, bookings by class level, top instructors by rating.",
+      "entity_summary": [
+        "User",
+        "Instructor",
+        "Room",
+        "ClassSession",
+        "Booking",
+        "WaitlistEntry",
+        "MembershipPlan",
+        "Subscription",
+        "InstructorAvailability",
+        "Review",
+        "StudioSetting"
+      ]
+    },
+    {
+      "name": "AdminSessionsPage",
+      "type": "list",
+      "route": "/admin/sessions",
+      "entity": "ClassSession",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "kanban",
+      "dataSource": {
+        "op": "list",
+        "entity": "ClassSession"
+      },
+      "description": "Kanban of class sessions grouped by status (Scheduled, Completed, Cancelled). Cards show title, instructor, room, time, spots. Admin can cancel or reassign instructor."
+    },
+    {
+      "name": "AdminSessionFormPage",
+      "type": "form",
+      "route": "/admin/sessions/new",
+      "entity": "ClassSession",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Class Title",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "instructorId",
+          "label": "Instructor",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "roomId",
+          "label": "Room",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "startTime",
+          "label": "Start Time",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "endTime",
+          "label": "End Time",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "level",
+          "label": "Level",
+          "required": true,
+          "order": 6
+        },
+        {
+          "name": "spotsTotal",
+          "label": "Capacity",
+          "required": true,
+          "order": 7
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "CreateSessionWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminSessionDetailPage",
+      "type": "detail",
+      "route": "/admin/sessions/[id]",
+      "entity": "ClassSession",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Full session detail: instructor, room, bookings list, waitlist, attendance summary. Admin actions to cancel or reassign instructor."
+    },
+    {
+      "name": "AdminRoomsPage",
+      "type": "list",
+      "route": "/admin/rooms",
+      "entity": "Room",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Room"
+      },
+      "description": "Room management list. Name, capacity, amenities, active status. Add/edit/deactivate rooms."
+    },
+    {
+      "name": "AdminRoomFormPage",
+      "type": "form",
+      "route": "/admin/rooms/new",
+      "entity": "Room",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Room Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "capacity",
+          "label": "Capacity",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "description",
+          "semanticType": "multiline",
+          "label": "Description",
+          "order": 3
+        },
+        {
+          "name": "amenities",
+          "label": "Amenities (JSON)",
+          "order": 4
+        },
+        {
+          "name": "isActive",
+          "label": "Active",
+          "order": 5
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "Room"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminPlansPage",
+      "type": "list",
+      "route": "/admin/plans",
+      "entity": "MembershipPlan",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "MembershipPlan"
+      },
+      "description": "Membership plan management. List of all plans with type, price, credits, interval, active status. Add/edit plans."
+    },
+    {
+      "name": "AdminPlanFormPage",
+      "type": "form",
+      "route": "/admin/plans/new",
+      "entity": "MembershipPlan",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Plan Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "planType",
+          "label": "Plan Type",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "classCredits",
+          "label": "Class Credits",
+          "order": 3
+        },
+        {
+          "name": "price",
+          "semanticType": "currency",
+          "label": "Price (cents)",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "billingInterval",
+          "label": "Billing Interval",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "expiryDays",
+          "label": "Credits Expiry (days)",
+          "order": 6
+        },
+        {
+          "name": "isAutoRenew",
+          "label": "Auto-Renew",
+          "order": 7
+        },
+        {
+          "name": "isFeatured",
+          "label": "Best Value Badge",
+          "order": 8
+        },
+        {
+          "name": "isActive",
+          "label": "Active",
+          "order": 9
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "MembershipPlan"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminMembersPage",
+      "type": "list",
+      "route": "/admin/members",
+      "entity": "User",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "User"
+      },
+      "description": "Member management list filtered to role=member. Name, email, active subscription, credits, last active. Click to view member detail."
+    },
+    {
+      "name": "AdminMemberDetailPage",
+      "type": "detail",
+      "route": "/admin/members/[id]",
+      "entity": "User",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Member detail: profile, active subscription, booking history, credits log, reviews left. Admin can adjust credits or cancel subscription."
+    },
+    {
+      "name": "AdminInstructorsPage",
+      "type": "list",
+      "route": "/admin/instructors",
+      "entity": "Instructor",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Instructor"
+      },
+      "description": "Instructor roster. Name, specialties, avg rating, active status. Invite new instructor."
+    },
+    {
+      "name": "AdminInstructorDetailPage",
+      "type": "detail",
+      "route": "/admin/instructors/[id]",
+      "entity": "Instructor",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Instructor detail: bio, certifications, specialties, upcoming sessions, avg rating, reviews. Admin can deactivate or substitute instructor."
+    },
+    {
+      "name": "AdminSettingsPage",
+      "type": "form",
+      "route": "/admin/settings",
+      "entity": "StudioSetting",
+      "fields": [
+        {
+          "name": "key",
+          "label": "Setting Key",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "value",
+          "label": "Value",
+          "required": true,
+          "order": 2
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "StudioSetting"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "settings",
+      "description": "Studio-wide settings: cancellation window hours, waitlist confirmation window minutes, timezone, studio name, notification preferences."
+    },
+    {
+      "name": "AdminAnalyticsPage",
+      "type": "dashboard",
+      "route": "/admin/analytics",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "chart",
+          "entity": "Subscription",
+          "title": "Revenue by Plan",
+          "groupBy": "planId"
+        },
+        {
+          "type": "chart",
+          "entity": "ClassSession",
+          "title": "Utilisation by Room",
+          "groupBy": "roomId"
+        },
+        {
+          "type": "chart",
+          "entity": "Booking",
+          "title": "Bookings by Month",
+          "groupBy": "createdAt",
+          "bucket": "month"
+        },
+        {
+          "type": "table",
+          "entity": "Instructor",
+          "title": "Top Instructors",
+          "limit": 10,
+          "columns": [
+            "userId",
+            "avgRating",
+            "isActive"
+          ]
+        },
+        {
+          "type": "stat",
+          "entity": "Subscription",
+          "title": "Active Subscriptions",
+          "metric": {
+            "fn": "count"
+          }
+        }
+      ],
+      "features": [],
+      "archetype": "report",
+      "description": "Revenue analytics: monthly revenue chart, class utilisation by room, top instructors by student count and rating, membership type breakdown, churn rate.",
+      "entity_summary": [
+        "User",
+        "Instructor",
+        "Room",
+        "ClassSession",
+        "Booking",
+        "WaitlistEntry",
+        "MembershipPlan",
+        "Subscription",
+        "InstructorAvailability",
+        "Review",
+        "StudioSetting"
+      ]
+    },
+    {
+      "name": "Login",
+      "type": "auth",
+      "route": "/login",
+      "entity": null,
+      "actions": [],
+      "features": [],
+      "archetype": "list"
+    },
+    {
+      "name": "Sign Up",
+      "type": "auth",
+      "route": "/signup",
+      "entity": null,
+      "actions": [],
+      "features": [],
+      "archetype": "list"
+    },
+    {
+      "id": "members-list",
+      "name": "members",
+      "type": "list",
+      "route": "/members",
+      "entity": "User",
+      "filter": {
+        "role": "member"
+      },
+      "source": "actor_onboarding",
+      "visibleTo": [
+        "admin",
+        "member"
+      ],
+      "description": "Directory of members in the app.",
+      "actions": [],
+      "archetype": "list",
+      "features": []
+    },
+    {
+      "id": "members-new",
+      "name": "Add member",
+      "type": "form",
+      "route": "/members/new",
+      "entity": "User",
+      "source": "actor_onboarding",
+      "prefill": {
+        "role": "member"
+      },
+      "visibleTo": [
+        "admin"
+      ],
+      "description": "Internal creation form for member. Public path is /signup; this page lets admins and other internal roles add a member directly (walk-ins, CV imports, admin-initiated registration).",
+      "submit": {
+        "kind": "data_api",
+        "target": "User"
+      },
+      "actions": [],
+      "archetype": "form",
+      "features": []
+    },
+    {
+      "id": "instructors-list",
+      "name": "instructors",
+      "type": "list",
+      "route": "/instructors",
+      "entity": "User",
+      "filter": {
+        "role": "instructor"
+      },
+      "source": "actor_onboarding",
+      "visibleTo": [
+        "admin",
+        "instructor"
+      ],
+      "description": "Directory of instructors in the app.",
+      "actions": [],
+      "archetype": "list",
+      "features": []
+    },
+    {
+      "id": "admins-list",
+      "name": "admins",
+      "type": "list",
+      "route": "/admins",
+      "entity": "User",
+      "filter": {
+        "role": "admin"
+      },
+      "source": "actor_onboarding",
+      "visibleTo": [
+        "admin"
+      ],
+      "description": "Directory of admins in the app.",
+      "actions": [],
+      "archetype": "list",
+      "features": []
+    }
+  ],
+  "actors": [
+    {
+      "name": "member",
+      "role": "member",
+      "access": "authenticated",
+      "onboarding": {
+        "source": "self_signup"
+      }
+    },
+    {
+      "name": "instructor",
+      "role": "instructor",
+      "access": "authenticated",
+      "onboarding": {
+        "source": "invited"
+      }
+    },
+    {
+      "name": "admin",
+      "role": "admin",
+      "access": "authenticated",
+      "onboarding": {
+        "source": "seeded"
+      }
+    }
+  ],
+  "domain": "Hospitality & Food",
+  "wizards": [
+    {
+      "name": "class_quick_book",
+      "route": "/sessions/:id/book",
+      "steps": [
+        {
+          "title": "Session Summary",
+          "fields": [
+            "sessionId"
+          ]
+        },
+        {
+          "title": "Payment & Credits",
+          "fields": [
+            "creditUsed"
+          ]
+        },
+        {
+          "title": "Confirmation",
+          "fields": []
+        }
+      ],
+      "entity": "Booking",
+      "workflow": "BookClassWorkflow"
+    }
+  ],
+  "entities": {
+    "Plan": {
+      "name": "Plan",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    },
+    "Room": {
+      "table": "rooms",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "capacity",
+          "type": "integer"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "amenities",
+          "type": "jsonb"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "schema": "src/db/schema/rooms.ts"
+    },
+    "User": {
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar"
+        },
+        {
+          "name": "passwordHash",
+          "type": "varchar",
+          "hidden_from_roles": [
+            "instructor",
+            "member"
+          ]
+        },
+        {
+          "name": "displayName",
+          "type": "varchar"
+        },
+        {
+          "name": "avatarUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "member",
+              "instructor",
+              "admin"
+            ]
+          },
+          "enum_values": [
+            "member",
+            "instructor",
+            "admin"
+          ]
+        },
+        {
+          "name": "phone",
+          "type": "varchar"
+        },
+        {
+          "name": "timezone",
+          "type": "varchar"
+        },
+        {
+          "name": "lastActiveAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        }
+      ],
+      "schema": "src/db/schema/users.ts"
+    },
+    "Member": {
+      "name": "Member",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    },
+    "Review": {
+      "table": "reviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "rating",
+          "type": "integer"
+        },
+        {
+          "name": "comment",
+          "type": "text",
+          "hidden_from_roles": [
+            "instructor"
+          ]
+        },
+        {
+          "name": "isPublic",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/reviews.ts",
+      "depends_on": [
+        "User",
+        "ClassSession",
+        "Instructor"
+      ]
+    },
+    "Booking": {
+      "table": "bookings",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "confirmed",
+              "cancelled",
+              "attended",
+              "no_show"
+            ]
+          },
+          "enum_values": [
+            "confirmed",
+            "cancelled",
+            "attended",
+            "no_show"
+          ]
+        },
+        {
+          "name": "bookedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "cancelledAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "cancellationReason",
+          "type": "text"
+        },
+        {
+          "name": "creditUsed",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/bookings.ts",
+      "depends_on": [
+        "User",
+        "ClassSession"
+      ]
+    },
+    "Session": {
+      "name": "Session",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    },
+    "Instructor": {
+      "table": "instructors",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "bio",
+          "type": "text"
+        },
+        {
+          "name": "specialties",
+          "type": "jsonb"
+        },
+        {
+          "name": "certifications",
+          "type": "jsonb"
+        },
+        {
+          "name": "profilePhotoUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "avgRating",
+          "type": "integer"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/instructors.ts",
+      "depends_on": [
+        "User"
+      ]
+    },
+    "ClassSession": {
+      "table": "class_sessions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "roomId",
+          "type": "uuid"
+        },
+        {
+          "name": "startTime",
+          "type": "timestamp"
+        },
+        {
+          "name": "endTime",
+          "type": "timestamp"
+        },
+        {
+          "name": "durationMinutes",
+          "type": "integer"
+        },
+        {
+          "name": "level",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "Beginner",
+              "Intermediate",
+              "Advanced",
+              "All Levels"
+            ]
+          },
+          "enum_values": [
+            "Beginner",
+            "Intermediate",
+            "Advanced",
+            "All Levels"
+          ]
+        },
+        {
+          "name": "spotsTotal",
+          "type": "integer"
+        },
+        {
+          "name": "spotsRemaining",
+          "type": "integer"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "scheduled",
+              "cancelled",
+              "completed"
+            ]
+          },
+          "enum_values": [
+            "scheduled",
+            "cancelled",
+            "completed"
+          ]
+        },
+        {
+          "name": "recurringRuleId",
+          "type": "uuid"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/class_sessions.ts",
+      "depends_on": [
+        "Instructor",
+        "Room"
+      ]
+    },
+    "Subscription": {
+      "table": "subscriptions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "planId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "active",
+              "cancelled",
+              "expired",
+              "paused"
+            ]
+          },
+          "enum_values": [
+            "active",
+            "cancelled",
+            "expired",
+            "paused"
+          ]
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "creditsRemaining",
+          "type": "integer"
+        },
+        {
+          "name": "creditsExpiry",
+          "type": "timestamp"
+        },
+        {
+          "name": "stripeSubscriptionId",
+          "type": "varchar"
+        },
+        {
+          "name": "autoRenew",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/subscriptions.ts",
+      "depends_on": [
+        "User",
+        "MembershipPlan"
+      ]
+    },
+    "RecurringRule": {
+      "name": "RecurringRule",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "synthesized": true
+    },
+    "StudioSetting": {
+      "table": "studio_settings",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "key",
+          "type": "varchar"
+        },
+        {
+          "name": "value",
+          "type": "text"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/studio_settings.ts"
+    },
+    "WaitlistEntry": {
+      "table": "waitlist_entries",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "position",
+          "type": "integer"
+        },
+        {
+          "name": "joinedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "notifiedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "expiresAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "waiting",
+              "notified",
+              "confirmed",
+              "expired"
+            ]
+          },
+          "enum_values": [
+            "waiting",
+            "notified",
+            "confirmed",
+            "expired"
+          ]
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/waitlist_entries.ts",
+      "depends_on": [
+        "User",
+        "ClassSession"
+      ]
+    },
+    "MembershipPlan": {
+      "table": "membership_plans",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "planType",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "drop_in",
+              "class_pack",
+              "unlimited_monthly"
+            ]
+          },
+          "enum_values": [
+            "drop_in",
+            "class_pack",
+            "unlimited_monthly"
+          ]
+        },
+        {
+          "name": "classCredits",
+          "type": "integer"
+        },
+        {
+          "name": "price",
+          "type": "integer"
+        },
+        {
+          "name": "billingInterval",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "once",
+              "monthly",
+              "annual"
+            ]
+          },
+          "enum_values": [
+            "once",
+            "monthly",
+            "annual"
+          ]
+        },
+        {
+          "name": "expiryDays",
+          "type": "integer"
+        },
+        {
+          "name": "isAutoRenew",
+          "type": "boolean"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "isFeatured",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/membership_plans.ts"
+    },
+    "InstructorAvailability": {
+      "table": "instructor_availability",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "dayOfWeek",
+          "type": "integer"
+        },
+        {
+          "name": "startTime",
+          "type": "varchar"
+        },
+        {
+          "name": "endTime",
+          "type": "varchar"
+        },
+        {
+          "name": "isRecurring",
+          "type": "boolean"
+        },
+        {
+          "name": "effectiveFrom",
+          "type": "timestamp"
+        },
+        {
+          "name": "effectiveTo",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/instructor_availability.ts",
+      "depends_on": [
+        "Instructor"
+      ]
+    }
+  },
+  "register": "workday",
+  "authGated": true,
+  "relations": [
+    {
+      "to": "User",
+      "from": "Instructor",
+      "foreignKey": "userId"
+    },
+    {
+      "to": "Instructor",
+      "from": "ClassSession",
+      "foreignKey": "instructorId"
+    },
+    {
+      "to": "Room",
+      "from": "ClassSession",
+      "foreignKey": "roomId"
+    },
+    {
+      "to": "User",
+      "from": "Booking",
+      "foreignKey": "memberId"
+    },
+    {
+      "to": "ClassSession",
+      "from": "Booking",
+      "foreignKey": "sessionId"
+    },
+    {
+      "to": "User",
+      "from": "WaitlistEntry",
+      "foreignKey": "memberId"
+    },
+    {
+      "to": "ClassSession",
+      "from": "WaitlistEntry",
+      "foreignKey": "sessionId"
+    },
+    {
+      "to": "User",
+      "from": "Subscription",
+      "foreignKey": "memberId"
+    },
+    {
+      "to": "MembershipPlan",
+      "from": "Subscription",
+      "foreignKey": "planId"
+    },
+    {
+      "to": "Instructor",
+      "from": "InstructorAvailability",
+      "foreignKey": "instructorId"
+    },
+    {
+      "to": "User",
+      "from": "Review",
+      "foreignKey": "memberId"
+    },
+    {
+      "to": "ClassSession",
+      "from": "Review",
+      "foreignKey": "sessionId"
+    },
+    {
+      "to": "Instructor",
+      "from": "Review",
+      "foreignKey": "instructorId"
+    }
+  ],
+  "seed_data": {
+    "StudioSetting": [
+      {
+        "key": "cancellationWindowHours",
+        "value": "12"
+      },
+      {
+        "key": "waitlistConfirmationWindowMinutes",
+        "value": "30"
+      },
+      {
+        "key": "timezone",
+        "value": "America/New_York"
+      },
+      {
+        "key": "studioName",
+        "value": "Vinyasa Flow Studio"
+      }
+    ],
+    "MembershipPlan": [
+      {
+        "name": "Drop-In",
+        "price": 2500,
+        "isActive": true,
+        "planType": "drop_in",
+        "expiryDays": 30,
+        "isFeatured": false,
+        "isAutoRenew": false,
+        "classCredits": 1,
+        "billingInterval": "once"
+      },
+      {
+        "name": "5-Class Pack",
+        "price": 10000,
+        "isActive": true,
+        "planType": "class_pack",
+        "expiryDays": 60,
+        "isFeatured": false,
+        "isAutoRenew": false,
+        "classCredits": 5,
+        "billingInterval": "once"
+      },
+      {
+        "name": "10-Class Pack",
+        "price": 18000,
+        "isActive": true,
+        "planType": "class_pack",
+        "expiryDays": 90,
+        "isFeatured": true,
+        "isAutoRenew": false,
+        "classCredits": 10,
+        "billingInterval": "once"
+      },
+      {
+        "name": "Unlimited Monthly",
+        "price": 14900,
+        "isActive": true,
+        "planType": "unlimited_monthly",
+        "expiryDays": 30,
+        "isFeatured": false,
+        "isAutoRenew": true,
+        "classCredits": 999,
+        "billingInterval": "monthly"
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "name": "BookClassWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "check_spots",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "check_spots",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "session.spotsRemaining > 0"
+          },
+          "branches": {
+            "true": "check_credits",
+            "false": "route_waitlist"
+          }
+        },
+        {
+          "id": "route_waitlist",
+          "next": "notify_waitlist",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "fields": [
+              "memberId",
+              "sessionId",
+              "position",
+              "joinedAt",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_waitlist",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "You have been added to the waitlist.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "check_credits",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "creditUsed == true"
+          },
+          "branches": {
+            "true": "deduct_credit",
+            "false": "create_booking"
+          }
+        },
+        {
+          "id": "deduct_credit",
+          "next": "create_booking",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "memberId": "{{memberId}}"
+            },
+            "fields": [
+              "creditsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "create_booking",
+          "next": "decrement_spots",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "fields": [
+              "memberId",
+              "sessionId",
+              "status",
+              "bookedAt",
+              "creditUsed"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "decrement_spots",
+          "next": "notify_confirmed",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "fields": [
+              "spotsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_confirmed",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your class booking is confirmed!",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "creditUsed",
+          "type": "boolean",
+          "source": {
+            "kind": "form_field",
+            "field": "creditUsed"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "BookingConfirmPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "CancelBookingWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "check_window",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "check_window",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "hoursUntilClass > cancellationWindowHours"
+          },
+          "branches": {
+            "true": "cancel_booking",
+            "false": "cancel_no_refund"
+          }
+        },
+        {
+          "id": "cancel_no_refund",
+          "next": "restore_spot_no_credit",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "where": {
+              "id": "{{bookingId}}"
+            },
+            "fields": [
+              "status",
+              "cancelledAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "restore_spot_no_credit",
+          "next": "notify_no_refund",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "fields": [
+              "spotsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_no_refund",
+          "next": "trigger_waitlist",
+          "type": "action",
+          "config": {
+            "message": "Booking cancelled. Credits not refunded due to late cancellation.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "cancel_booking",
+          "next": "restore_credit",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "where": {
+              "id": "{{bookingId}}"
+            },
+            "fields": [
+              "status",
+              "cancelledAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "restore_credit",
+          "next": "restore_spot",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "memberId": "{{memberId}}"
+            },
+            "fields": [
+              "creditsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "restore_spot",
+          "next": "notify_cancelled",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "fields": [
+              "spotsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_cancelled",
+          "next": "trigger_waitlist",
+          "type": "action",
+          "config": {
+            "message": "Booking cancelled. Credit restored to your account.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "trigger_waitlist",
+          "next": "check_waitlist",
+          "type": "action",
+          "config": {
+            "limit": 1,
+            "table": "waitlist_entries",
+            "where": {
+              "status": "waiting",
+              "sessionId": "{{sessionId}}"
+            },
+            "orderBy": "position ASC",
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "check_waitlist",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "waitlistEntry != null"
+          },
+          "branches": {
+            "true": "notify_waitlist_member",
+            "false": "end"
+          }
+        },
+        {
+          "id": "notify_waitlist_member",
+          "next": "send_waitlist_notification",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "id": "{{waitlistEntry.id}}"
+            },
+            "fields": [
+              "status",
+              "notifiedAt",
+              "expiresAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "send_waitlist_notification",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "A spot opened up! Confirm your booking within 30 minutes.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "bookingId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "MemberBookingsPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "JoinWaitlistWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "get_position",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "get_position",
+          "next": "insert_waitlist",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "sessionId": "{{sessionId}}"
+            },
+            "metric": "count",
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "insert_waitlist",
+          "next": "notify_joined",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "fields": [
+              "memberId",
+              "sessionId",
+              "position",
+              "joinedAt",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_joined",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "You are on the waitlist. We'll notify you if a spot opens.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "MemberSchedulePage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "WaitlistExpiryCheckWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "find_expired",
+          "type": "trigger",
+          "config": {
+            "triggerType": "schedule"
+          }
+        },
+        {
+          "id": "find_expired",
+          "next": "expire_entries",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "status": "notified",
+              "expiresAt_lt": "{{now}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "expire_entries",
+          "next": "find_next_waitlist",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "status": "notified",
+              "expiresAt_lt": "{{now}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "find_next_waitlist",
+          "next": "check_next",
+          "type": "action",
+          "config": {
+            "limit": 1,
+            "table": "waitlist_entries",
+            "where": {
+              "status": "waiting"
+            },
+            "orderBy": "position ASC",
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "check_next",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "nextEntry != null"
+          },
+          "branches": {
+            "true": "notify_next",
+            "false": "end"
+          }
+        },
+        {
+          "id": "notify_next",
+          "next": "send_next_notification",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "id": "{{nextEntry.id}}"
+            },
+            "fields": [
+              "status",
+              "notifiedAt",
+              "expiresAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "send_next_notification",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "A spot is available! Confirm within 30 minutes.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [],
+      "source": {
+        "kind": "cron",
+        "schedule": "*/5 * * * *"
+      },
+      "trigger": "schedule"
+    },
+    {
+      "name": "SubmitReviewWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "get_session",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "get_session",
+          "next": "insert_review",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "insert_review",
+          "next": "update_avg_rating",
+          "type": "action",
+          "config": {
+            "table": "reviews",
+            "fields": [
+              "memberId",
+              "sessionId",
+              "instructorId",
+              "rating",
+              "comment",
+              "isPublic"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "update_avg_rating",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "instructors",
+            "where": {
+              "id": "{{session.instructorId}}"
+            },
+            "fields": [
+              "avgRating"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid",
+          "source": {
+            "kind": "form_field",
+            "field": "sessionId"
+          },
+          "required": true
+        },
+        {
+          "name": "rating",
+          "type": "integer",
+          "source": {
+            "kind": "form_field",
+            "field": "rating"
+          },
+          "required": true
+        },
+        {
+          "name": "comment",
+          "type": "text",
+          "source": {
+            "kind": "form_field",
+            "field": "comment"
+          },
+          "required": false
+        },
+        {
+          "name": "isPublic",
+          "type": "boolean",
+          "source": {
+            "kind": "form_field",
+            "field": "isPublic"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "ReviewFormPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "PostClassReviewPromptWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "find_completed",
+          "type": "trigger",
+          "config": {
+            "triggerType": "schedule"
+          }
+        },
+        {
+          "id": "find_completed",
+          "next": "send_review_prompts",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "where": {
+              "status": "attended",
+              "session.endTime_gt": "24h_ago",
+              "session.endTime_lt": "now"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "send_review_prompts",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "How was your class? Leave a review for your instructor.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [],
+      "source": {
+        "kind": "cron",
+        "schedule": "0 * * * *"
+      },
+      "trigger": "schedule"
+    },
+    {
+      "name": "SubscribeToPlanWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "get_plan",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "get_plan",
+          "next": "create_subscription",
+          "type": "action",
+          "config": {
+            "table": "membership_plans",
+            "where": {
+              "id": "{{planId}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "create_subscription",
+          "next": "notify_subscribed",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "fields": [
+              "memberId",
+              "planId",
+              "status",
+              "startDate",
+              "endDate",
+              "creditsRemaining",
+              "creditsExpiry",
+              "autoRenew"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_subscribed",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Welcome! Your membership is now active.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "planId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "PlansPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "CancelSubscriptionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "cancel_subscription",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "cancel_subscription",
+          "next": "notify_cancelled",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "id": "{{subscriptionId}}"
+            },
+            "fields": [
+              "status",
+              "autoRenew"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_cancelled",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your subscription has been cancelled. Remaining credits are valid until expiry.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "subscriptionId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "MemberMembershipPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "AdjustCreditsWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_credits",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_credits",
+          "next": "notify_member",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "memberId": "{{memberId}}"
+            },
+            "fields": [
+              "creditsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_member",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your credit balance has been adjusted by an admin.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "memberId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "creditAdjustment",
+          "type": "integer",
+          "source": {
+            "kind": "static",
+            "value": "0"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminMemberDetailPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "CreateSessionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "insert_session",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "insert_session",
+          "next": "notify_instructor",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "fields": [
+              "title",
+              "instructorId",
+              "roomId",
+              "startTime",
+              "endTime",
+              "durationMinutes",
+              "level",
+              "spotsTotal",
+              "spotsRemaining",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_instructor",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "A new class has been scheduled for you.",
+            "actionType": "send_notification",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "title",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "title"
+          },
+          "required": true
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid",
+          "source": {
+            "kind": "form_field",
+            "field": "instructorId"
+          },
+          "required": true
+        },
+        {
+          "name": "roomId",
+          "type": "uuid",
+          "source": {
+            "kind": "form_field",
+            "field": "roomId"
+          },
+          "required": true
+        },
+        {
+          "name": "startTime",
+          "type": "timestamp",
+          "source": {
+            "kind": "form_field",
+            "field": "startTime"
+          },
+          "required": true
+        },
+        {
+          "name": "endTime",
+          "type": "timestamp",
+          "source": {
+            "kind": "form_field",
+            "field": "endTime"
+          },
+          "required": true
+        },
+        {
+          "name": "level",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "level"
+          },
+          "required": true
+        },
+        {
+          "name": "spotsTotal",
+          "type": "integer",
+          "source": {
+            "kind": "form_field",
+            "field": "spotsTotal"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "AdminSessionFormPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "CancelSessionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "cancel_session",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "cancel_session",
+          "next": "restore_credits",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "restore_credits",
+          "next": "update_bookings",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "memberId_in": "bookedMembers"
+            },
+            "fields": [
+              "creditsRemaining"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "update_bookings",
+          "next": "clear_waitlist",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "where": {
+              "status": "confirmed",
+              "sessionId": "{{sessionId}}"
+            },
+            "fields": [
+              "status",
+              "cancelledAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "clear_waitlist",
+          "next": "notify_members",
+          "type": "action",
+          "config": {
+            "table": "waitlist_entries",
+            "where": {
+              "sessionId": "{{sessionId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_members",
+          "next": "notify_instructor",
+          "type": "action",
+          "config": {
+            "message": "Your class has been cancelled. Credits have been restored.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "notify_instructor",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your class session has been cancelled by the admin.",
+            "actionType": "send_notification",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminSessionDetailPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "ReassignInstructorWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_session",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_session",
+          "next": "notify_old_instructor",
+          "type": "action",
+          "config": {
+            "table": "class_sessions",
+            "where": {
+              "id": "{{sessionId}}"
+            },
+            "fields": [
+              "instructorId"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_old_instructor",
+          "next": "notify_new_instructor",
+          "type": "action",
+          "config": {
+            "message": "You have been substituted on a class session.",
+            "actionType": "send_notification",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "notify_new_instructor",
+          "next": "notify_members",
+          "type": "action",
+          "config": {
+            "message": "You have been assigned to teach a class.",
+            "actionType": "send_notification",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "notify_members",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "The instructor for your upcoming class has changed. You may cancel penalty-free.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "sessionId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "newInstructorId",
+          "type": "uuid",
+          "source": {
+            "kind": "static",
+            "value": "{{newInstructorId}}"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminSessionDetailPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "MarkAttendanceWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_booking",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_booking",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "bookings",
+            "where": {
+              "id": "{{bookingId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "bookingId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "attendanceStatus",
+          "type": "varchar",
+          "source": {
+            "kind": "static",
+            "value": "attended"
+          },
+          "required": true
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "InstructorAttendancePage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "UpdateAvailabilityWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "upsert_availability",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "upsert_availability",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "instructor_availability",
+            "fields": [
+              "instructorId",
+              "dayOfWeek",
+              "startTime",
+              "endTime",
+              "isRecurring",
+              "effectiveFrom",
+              "effectiveTo"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "instructorId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "dayOfWeek",
+          "type": "integer",
+          "source": {
+            "kind": "form_field",
+            "field": "dayOfWeek"
+          },
+          "required": true
+        },
+        {
+          "name": "startTime",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "startTime"
+          },
+          "required": true
+        },
+        {
+          "name": "endTime",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "endTime"
+          },
+          "required": true
+        },
+        {
+          "name": "isRecurring",
+          "type": "boolean",
+          "source": {
+            "kind": "form_field",
+            "field": "isRecurring"
+          },
+          "required": false
+        },
+        {
+          "name": "effectiveFrom",
+          "type": "timestamp",
+          "source": {
+            "kind": "form_field",
+            "field": "effectiveFrom"
+          },
+          "required": false
+        },
+        {
+          "name": "effectiveTo",
+          "type": "timestamp",
+          "source": {
+            "kind": "form_field",
+            "field": "effectiveTo"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "InstructorAvailabilityPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "InviteInstructorWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "create_user",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "create_user",
+          "next": "create_instructor",
+          "type": "action",
+          "config": {
+            "table": "users",
+            "fields": [
+              "email",
+              "displayName",
+              "role"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "create_instructor",
+          "next": "send_invite",
+          "type": "action",
+          "config": {
+            "table": "instructors",
+            "fields": [
+              "userId",
+              "isActive"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "send_invite",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "You have been invited to join Vinyasa Flow Studio as an instructor. Click to set your password.",
+            "actionType": "send_email",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "email",
+          "type": "varchar",
+          "source": {
+            "kind": "static",
+            "value": "{{email}}"
+          },
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "varchar",
+          "source": {
+            "kind": "static",
+            "value": "{{displayName}}"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminInstructorsPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "DeactivateInstructorWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "deactivate_instructor",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "deactivate_instructor",
+          "next": "notify_instructor",
+          "type": "action",
+          "config": {
+            "table": "instructors",
+            "where": {
+              "id": "{{instructorId}}"
+            },
+            "fields": [
+              "isActive"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_instructor",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your instructor account has been deactivated.",
+            "actionType": "send_notification",
+            "recipientRole": "instructor"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "instructorId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "adminId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminInstructorDetailPage"
+      },
+      "trigger": "manual"
+    },
+    {
+      "name": "SubscriptionRenewalCheckWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "find_expiring",
+          "type": "trigger",
+          "config": {
+            "triggerType": "schedule"
+          }
+        },
+        {
+          "id": "find_expiring",
+          "next": "check_found",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "status": "active",
+              "autoRenew": true,
+              "endDate_lt": "3_days_from_now"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "check_found",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "expiringSubscriptions.length > 0"
+          },
+          "branches": {
+            "true": "renew_subscriptions",
+            "false": "check_expired"
+          }
+        },
+        {
+          "id": "renew_subscriptions",
+          "next": "notify_renewed",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "id_in": "{{expiringSubscriptions}}"
+            },
+            "fields": [
+              "startDate",
+              "endDate",
+              "creditsRemaining",
+              "creditsExpiry"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_renewed",
+          "next": "check_expired",
+          "type": "action",
+          "config": {
+            "message": "Your membership has been renewed. New credits are ready.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "check_expired",
+          "next": "notify_expired",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "status": "active",
+              "autoRenew": false,
+              "endDate_lt": "{{now}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_expired",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your membership has expired. Renew to continue booking classes.",
+            "actionType": "send_notification",
+            "recipientRole": "member"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [],
+      "source": {
+        "kind": "cron",
+        "schedule": "0 6 * * *"
+      },
+      "trigger": "schedule"
+    }
+  ],
+  "api_routes": [],
+  "assumptions": [
+    "Online payment processing \u2014 resolved: Stripe integration modeled via stripeSubscriptionId on Subscription; PCI scope acknowledged. Full Stripe webhook flows deferred to post-MVP.",
+    "Recurring vs ad-hoc sessions \u2014 resolved: ClassSession has a recurringRuleId FK stub; admin creates individual sessions for MVP. Recurring rule entity is a v2 concern.",
+    "Private 1:1 sessions \u2014 resolved: out of scope. Only group classes modeled.",
+    "Multi-location \u2014 resolved: single studio with multiple Rooms. No site/location entity added.",
+    "Cancellation refund policy \u2014 resolved: configurable via StudioSetting (key=cancellationWindowHours). Late cancellations forfeit credits; on-time cancellations restore them.",
+    "Instructor payroll \u2014 resolved: out of scope. Platform does not calculate instructor pay."
+  ],
+  "audit_trail": [
+    {
+      "on": [
+        "create",
+        "update",
+        "delete"
+      ],
+      "entity": "Booking"
+    },
+    {
+      "on": [
+        "create",
+        "update",
+        "delete"
+      ],
+      "entity": "Subscription"
+    },
+    {
+      "on": [
+        "create",
+        "update"
+      ],
+      "entity": "Review"
+    }
+  ],
+  "data_models": [
+    {
+      "name": "User",
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar"
+        },
+        {
+          "name": "passwordHash",
+          "type": "varchar",
+          "hidden_from_roles": [
+            "instructor",
+            "member"
+          ]
+        },
+        {
+          "name": "displayName",
+          "type": "varchar"
+        },
+        {
+          "name": "avatarUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "member",
+              "instructor",
+              "admin"
+            ]
+          },
+          "enum_values": [
+            "member",
+            "instructor",
+            "admin"
+          ]
+        },
+        {
+          "name": "phone",
+          "type": "varchar"
+        },
+        {
+          "name": "timezone",
+          "type": "varchar"
+        },
+        {
+          "name": "lastActiveAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Instructor",
+      "table": "instructors",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "bio",
+          "type": "text"
+        },
+        {
+          "name": "specialties",
+          "type": "jsonb"
+        },
+        {
+          "name": "certifications",
+          "type": "jsonb"
+        },
+        {
+          "name": "profilePhotoUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "avgRating",
+          "type": "integer"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Room",
+      "table": "rooms",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "capacity",
+          "type": "integer"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "amenities",
+          "type": "jsonb"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "ClassSession",
+      "table": "class_sessions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "roomId",
+          "type": "uuid"
+        },
+        {
+          "name": "startTime",
+          "type": "timestamp"
+        },
+        {
+          "name": "endTime",
+          "type": "timestamp"
+        },
+        {
+          "name": "durationMinutes",
+          "type": "integer"
+        },
+        {
+          "name": "level",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "Beginner",
+              "Intermediate",
+              "Advanced",
+              "All Levels"
+            ]
+          },
+          "enum_values": [
+            "Beginner",
+            "Intermediate",
+            "Advanced",
+            "All Levels"
+          ]
+        },
+        {
+          "name": "spotsTotal",
+          "type": "integer"
+        },
+        {
+          "name": "spotsRemaining",
+          "type": "integer"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "scheduled",
+              "cancelled",
+              "completed"
+            ]
+          },
+          "enum_values": [
+            "scheduled",
+            "cancelled",
+            "completed"
+          ]
+        },
+        {
+          "name": "recurringRuleId",
+          "type": "uuid"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Booking",
+      "table": "bookings",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "confirmed",
+              "cancelled",
+              "attended",
+              "no_show"
+            ]
+          },
+          "enum_values": [
+            "confirmed",
+            "cancelled",
+            "attended",
+            "no_show"
+          ]
+        },
+        {
+          "name": "bookedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "cancelledAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "cancellationReason",
+          "type": "text"
+        },
+        {
+          "name": "creditUsed",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "WaitlistEntry",
+      "table": "waitlist_entries",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "position",
+          "type": "integer"
+        },
+        {
+          "name": "joinedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "notifiedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "expiresAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "waiting",
+              "notified",
+              "confirmed",
+              "expired"
+            ]
+          },
+          "enum_values": [
+            "waiting",
+            "notified",
+            "confirmed",
+            "expired"
+          ]
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "MembershipPlan",
+      "table": "membership_plans",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "planType",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "drop_in",
+              "class_pack",
+              "unlimited_monthly"
+            ]
+          },
+          "enum_values": [
+            "drop_in",
+            "class_pack",
+            "unlimited_monthly"
+          ]
+        },
+        {
+          "name": "classCredits",
+          "type": "integer"
+        },
+        {
+          "name": "price",
+          "type": "integer"
+        },
+        {
+          "name": "billingInterval",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "once",
+              "monthly",
+              "annual"
+            ]
+          },
+          "enum_values": [
+            "once",
+            "monthly",
+            "annual"
+          ]
+        },
+        {
+          "name": "expiryDays",
+          "type": "integer"
+        },
+        {
+          "name": "isAutoRenew",
+          "type": "boolean"
+        },
+        {
+          "name": "isActive",
+          "type": "boolean"
+        },
+        {
+          "name": "isFeatured",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Subscription",
+      "table": "subscriptions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "planId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "semantic": {
+            "control": "Select",
+            "enum_values": [
+              "active",
+              "cancelled",
+              "expired",
+              "paused"
+            ]
+          },
+          "enum_values": [
+            "active",
+            "cancelled",
+            "expired",
+            "paused"
+          ]
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "creditsRemaining",
+          "type": "integer"
+        },
+        {
+          "name": "creditsExpiry",
+          "type": "timestamp"
+        },
+        {
+          "name": "stripeSubscriptionId",
+          "type": "varchar"
+        },
+        {
+          "name": "autoRenew",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "InstructorAvailability",
+      "table": "instructor_availability",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "dayOfWeek",
+          "type": "integer"
+        },
+        {
+          "name": "startTime",
+          "type": "varchar"
+        },
+        {
+          "name": "endTime",
+          "type": "varchar"
+        },
+        {
+          "name": "isRecurring",
+          "type": "boolean"
+        },
+        {
+          "name": "effectiveFrom",
+          "type": "timestamp"
+        },
+        {
+          "name": "effectiveTo",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Review",
+      "table": "reviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "memberId",
+          "type": "uuid"
+        },
+        {
+          "name": "sessionId",
+          "type": "uuid"
+        },
+        {
+          "name": "instructorId",
+          "type": "uuid"
+        },
+        {
+          "name": "rating",
+          "type": "integer"
+        },
+        {
+          "name": "comment",
+          "type": "text",
+          "hidden_from_roles": [
+            "instructor"
+          ]
+        },
+        {
+          "name": "isPublic",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "StudioSetting",
+      "table": "studio_settings",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "key",
+          "type": "varchar"
+        },
+        {
+          "name": "value",
+          "type": "text"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    }
+  ],
+  "description": "Multi-role yoga studio platform for class booking, membership management, instructor scheduling, and admin analytics.",
+  "module_name": "vinyasa-flow-studio",
+  "immutability": [
+    {
+      "when": "after_submit",
+      "entity": "Review",
+      "exception_roles": [
+        "admin"
+      ]
+    }
+  ],
+  "field_visibility": [
+    {
+      "field": "comment",
+      "entity": "Review",
+      "hide_from_roles": [
+        "instructor"
+      ]
+    },
+    {
+      "field": "passwordHash",
+      "entity": "User",
+      "hide_from_roles": [
+        "member",
+        "instructor"
+      ]
+    }
+  ],
+  "capacity_constraints": [
+    {
+      "entity": "Booking",
+      "message": "This class is full. Join the waitlist?",
+      "limit_field": "spotsTotal",
+      "scope_field": "sessionId"
+    }
+  ],
+  "industry": "general",
+  "app_shape": {
+    "$comment": "Used by shape_profile_detector.py as the last-resort fallback when no LLM signal AND no keyword signal is available. Matches today's implicit default output shape so a missing-API-key fallback still generates a working (if unadventurous) app.",
+    "layout": {
+      "shell": "sidebar",
+      "hero": "none",
+      "primaryInteraction": "form",
+      "density": "comfortable"
+    },
+    "auth": {
+      "surface": "route",
+      "gating": "on-load"
+    },
+    "nav": {
+      "menu": "sidebar-links",
+      "back": "crumb"
+    },
+    "workflows": {
+      "executionMode": "await-with-progress"
+    },
+    "data": {
+      "readShape": "list",
+      "denormalization": "moderate"
+    },
+    "identity": {
+      "usageMode": "multi-user-team"
+    }
+  },
+  "runtime_context": [],
+  "archetypes": [
+    {
+      "name": "main",
+      "recipe": "dashboard",
+      "entities": [],
+      "routes": [
+        "/"
+      ]
+    }
+  ],
+  "coverage_verdict": {
+    "status": "in_scope",
+    "reason": "no explicit verdict emitted by planner; defaulted to in_scope"
+  }
+}

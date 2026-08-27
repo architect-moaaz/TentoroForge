@@ -1,0 +1,26 @@
+{
+  "name": "@tentoroforge/figma-parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "figma-parser": "./dist/index.js"
+  },
+  "scripts": {
+    "prebuild": "tsc",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@babel/parser": "*",
+    "@babel/traverse": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.1"
+  }
+}

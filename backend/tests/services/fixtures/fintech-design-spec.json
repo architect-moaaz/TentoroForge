@@ -1,0 +1,77 @@
+{
+  "designRationale": "Trustworthy, data-dense, professional. Deep blue + crisp typography.",
+  "colorPalette": {
+    "primary":         "#1d4ed8",
+    "secondary":       "#0ea5e9",
+    "accent":          "#7c3aed",
+    "background":      "#ffffff",
+    "surface":         "#f8fafc",
+    "surfaceHover":    "#f1f5f9",
+    "border":          "#e2e8f0",
+    "muted":           "#94a3b8",
+    "textPrimary":     "#0f172a",
+    "textSecondary":   "#475569",
+    "textTertiary":    "#94a3b8",
+    "sidebarBg":       "#0f172a",
+    "sidebarText":     "#cbd5e1",
+    "sidebarActiveItem": "#1e293b",
+    "success":         "#22c55e",
+    "warning":         "#f59e0b",
+    "error":           "#ef4444",
+    "info":            "#0ea5e9"
+  },
+  "typography": {
+    "fontFamily":     "Inter, system-ui, sans-serif",
+    "headingWeight":  "700",
+    "lineHeight":     "1.5",
+    "letterSpacing":  "-0.01em",
+    "scale": {
+      "h1":      "2.25rem",
+      "h2":      "1.5rem",
+      "h3":      "1.125rem",
+      "body":    "0.875rem",
+      "caption": "0.75rem"
+    }
+  },
+  "spacing": {
+    "scale":         "4px base: 4/8/12/16/24/32/48/64",
+    "pagePadding":   "px-8 py-6",
+    "cardPadding":   "p-5",
+    "sectionGap":    "gap-8",
+    "elementGap":    "gap-4",
+    "inputGap":      "gap-3"
+  },
+  "borderRadius": {
+    "sm":   "0.25rem",
+    "md":   "0.375rem",
+    "lg":   "0.5rem",
+    "xl":   "0.75rem",
+    "full": "9999px"
+  },
+  "shadows": {
+    "sm": "0 1px 2px rgba(15,23,42,0.04)",
+    "md": "0 4px 12px rgba(15,23,42,0.08)",
+    "lg": "0 8px 24px rgba(15,23,42,0.10)",
+    "xl": "0 16px 40px rgba(15,23,42,0.12)"
+  },
+  "animation": {
+    "duration": "150ms for micro, 300ms for transitions",
+    "easing":   "cubic-bezier(0.4, 0, 0.2, 1)"
+  },
+  "imagery": {
+    "loginBackground":  "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1920",
+    "dashboardHero":    null,
+    "emptyStateStyle":  "line-art",
+    "iconStyle":        "outline",
+    "avatarStyle":      "initials"
+  },
+  "statusColors": {
+    "Pending":  { "color": "yellow", "label": "Pending" },
+    "Approved": { "color": "green",  "label": "Approved" },
+    "Rejected": { "color": "red",    "label": "Rejected" }
+  },
+  "layout": {
+    "navigation": "sidebar-dark",
+    "density":    "compact"
+  }
+}

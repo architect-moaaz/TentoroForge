@@ -1,0 +1,53 @@
+{
+  "domains": {
+    "saas": {
+      "page_types": {
+        "dashboard": { "file": "saas/dashboard.png", "license_note": "Hand-curated reference — internal use only, not redistributable" },
+        "login":     { "file": "saas/login.png",     "license_note": "Hand-curated reference — internal use only" },
+        "list":      { "file": "saas/list.png",      "license_note": "Hand-curated reference — internal use only" },
+        "detail":    { "file": "saas/detail.png",    "license_note": "Hand-curated reference — internal use only" },
+        "form":      { "file": "saas/form.png",      "license_note": "Hand-curated reference — internal use only" }
+      }
+    },
+    "healthcare": {
+      "page_types": {
+        "dashboard": { "file": "healthcare/dashboard.png", "license_note": "Hand-curated reference — internal use only, not redistributable" },
+        "login":     { "file": "healthcare/login.png",     "license_note": "Hand-curated reference — internal use only" },
+        "list":      { "file": "healthcare/list.png",      "license_note": "Hand-curated reference — internal use only" },
+        "detail":    { "file": "healthcare/detail.png",    "license_note": "Hand-curated reference — internal use only" },
+        "form":      { "file": "healthcare/form.png",      "license_note": "Hand-curated reference — internal use only" }
+      }
+    },
+    "ecommerce": {
+      "page_types": {
+        "dashboard": { "file": "ecommerce/dashboard.png", "license_note": "Hand-curated reference — internal use only, not redistributable" },
+        "login":     { "file": "ecommerce/login.png",     "license_note": "Hand-curated reference — internal use only" },
+        "list":      { "file": "ecommerce/list.png",      "license_note": "Hand-curated reference — internal use only" },
+        "detail":    { "file": "ecommerce/detail.png",    "license_note": "Hand-curated reference — internal use only" },
+        "form":      { "file": "ecommerce/form.png",      "license_note": "Hand-curated reference — internal use only" }
+      }
+    },
+    "recipe": {
+      "page_types": {
+        "dashboard": { "file": "recipe/dashboard.png", "license_note": "Hand-curated reference — internal use only, not redistributable" },
+        "login":     { "file": "recipe/login.png",     "license_note": "Hand-curated reference — internal use only" },
+        "list":      { "file": "recipe/list.png",      "license_note": "Hand-curated reference — internal use only" },
+        "detail":    { "file": "recipe/detail.png",    "license_note": "Hand-curated reference — internal use only" }
+      },
+      "_note": "form.png not yet curated for recipe domain"
+    },
+    "admin": {
+      "page_types": {
+        "dashboard": { "file": "admin/dashboard.png", "license_note": "Hand-curated reference — internal use only, not redistributable" },
+        "login":     { "file": "admin/login.png",     "license_note": "Hand-curated reference — internal use only" },
+        "calendar":  { "file": "admin/calendar.png",  "license_note": "Hand-curated reference — internal use only" },
+        "detail":    { "file": "admin/detail.png",    "license_note": "Hand-curated reference — internal use only" },
+        "form":      { "file": "admin/form.png",      "license_note": "Hand-curated reference — internal use only" }
+      }
+    },
+    "fitness": {
+      "page_types": {},
+      "_status": "deferred — references not yet curated"
+    }
+  }
+}

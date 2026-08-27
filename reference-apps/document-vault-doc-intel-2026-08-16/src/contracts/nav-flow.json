@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "initialPage": "home",
+  "pages": [
+    {
+      "id": "home",
+      "route": "/",
+      "title": "Upload",
+      "schemaFile": "src/schemas/index.json",
+      "layout": null,
+      "guard": null,
+      "params": [],
+      "shell": true
+    },
+    {
+      "id": "documents",
+      "route": "/documents",
+      "title": "Documents",
+      "schemaFile": "src/schemas/documents.json",
+      "layout": null,
+      "guard": null,
+      "params": [],
+      "shell": true
+    },
+    {
+      "id": "documents-detail",
+      "route": "/documents/[id]",
+      "title": "Document",
+      "schemaFile": "src/schemas/documents/[id].json",
+      "layout": null,
+      "guard": null,
+      "params": [
+        "id"
+      ],
+      "shell": true
+    },
+    {
+      "id": "documents-search",
+      "route": "/documents/search",
+      "title": "Search",
+      "schemaFile": "src/schemas/documents/search.json",
+      "layout": null,
+      "guard": null,
+      "params": [],
+      "shell": true
+    },
+    {
+      "id": "login",
+      "route": "/login",
+      "title": "Login",
+      "schemaFile": "src/schemas/login.json",
+      "layout": null,
+      "guard": null,
+      "params": [],
+      "shell": false
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t-upload-done",
+      "from": "home",
+      "trigger": "submit:ProcessDocument",
+      "to": "documents",
+      "navType": "redirect"
+    },
+    {
+      "id": "t-detail-back",
+      "from": "documents-detail",
+      "trigger": "button:Back",
+      "to": "documents",
+      "navType": "link"
+    },
+    {
+      "id": "t-login",
+      "from": "login",
+      "trigger": "submit:login",
+      "to": "home",
+      "navType": "redirect"
+    }
+  ],
+  "guards": {},
+  "auth_routes": [
+    "/login"
+  ],
+  "post_login_redirect": "/",
+  "post_logout_redirect": "/login",
+  "authGated": true
+}

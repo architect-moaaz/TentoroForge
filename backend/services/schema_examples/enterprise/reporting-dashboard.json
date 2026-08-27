@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "2",
+  "id": "analytics/dashboard",
+  "route": "/analytics",
+  "meta": { "title": "Analytics Dashboard", "archetype": "dashboard" },
+  "dataSources": [
+    { "kind": "stats",  "name": "kpis",       "table": "analyticsMetrics" },
+    { "kind": "list",   "name": "chartData",   "table": "analyticsTimeSeries",
+      "filter": { "range": "{{url.dateRange}}" },
+      "orderBy": [{ "field": "date", "dir": "asc" }] },
+    { "kind": "list",   "name": "tableRows",   "table": "analyticsBreakdown",
+      "filter": { "range": "{{url.dateRange}}", "dept": "{{url.dept}}" },
+      "orderBy": [{ "field": "revenue", "dir": "desc" }] },
+    { "kind": "list",   "name": "activity",    "table": "activityEntries",
+      "orderBy": [{ "field": "timestamp", "dir": "desc" }], "limit": 20 }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": {
+      "topbar": { "$ref": "node:breadcrumb" },
+      "rightRail": {
+        "id": "activity-feed-rail", "type": "ActivityFeed",
+        "props": {
+          "title": "Recent Activity",
+          "entries": "{{activity}}",
+          "showFilter": true,
+          "maxHeight": "calc(100vh - 80px)"
+        }
+      }
+    },
+    "children": [
+      {
+        "id": "metric-row", "type": "Grid",
+        "props": { "columns": 4, "gap": "tokens.spacing.4" },
+        "children": [
+          { "id": "tile-revenue", "type": "MetricTile",
+            "props": { "label": "Total Revenue", "value": "{{kpis.revenue}}",
+                       "format": "currency", "importance": "primary",
+                       "delta": { "value": "{{kpis.revenueDelta}}", "direction": "{{kpis.revenueDeltaDir}}" },
+                       "trend": "{{kpis.revenueTrend}}", "icon": "trending-up" } },
+          { "id": "tile-orders", "type": "MetricTile",
+            "props": { "label": "Orders", "value": "{{kpis.orders}}",
+                       "format": "number",
+                       "delta": { "value": "{{kpis.ordersDelta}}", "direction": "{{kpis.ordersDeltaDir}}" },
+                       "trend": "{{kpis.ordersTrend}}", "icon": "shopping-cart" } },
+          { "id": "tile-aov", "type": "MetricTile",
+            "props": { "label": "Avg Order Value", "value": "{{kpis.aov}}",
+                       "format": "currency",
+                       "delta": { "value": "{{kpis.aovDelta}}", "direction": "{{kpis.aovDeltaDir}}" },
+                       "icon": "dollar-sign" } },
+          { "id": "tile-churn", "type": "MetricTile",
+            "props": { "label": "Churn Rate", "value": "{{kpis.churnRate}}",
+                       "format": "percent",
+                       "delta": { "value": "{{kpis.churnDelta}}", "direction": "{{kpis.churnDeltaDir}}" },
+                       "icon": "user-minus" } }
+        ]
+      },
+      {
+        "id": "filter-row", "type": "Row",
+        "props": { "gap": "tokens.spacing.3", "align": "center" },
+        "children": [
+          { "id": "date-range", "type": "DateRangePicker",
+            "props": { "name": "dateRange", "label": "Date Range",
+                       "presets": ["last-7-days", "last-30-days", "quarter-to-date", "year-to-date"] } },
+          { "id": "dept-filter", "type": "FilterBar",
+            "props": {
+              "showSearch": false,
+              "chips": [
+                { "key": "dept", "label": "Department",
+                  "options": [
+                    { "value": "eng",    "label": "Engineering" },
+                    { "value": "sales",  "label": "Sales" },
+                    { "value": "ops",    "label": "Operations" }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "revenue-chart", "type": "Chart",
+        "props": {
+          "chartType": "area",
+          "data": "{{chartData}}",
+          "xKey": "date",
+          "series": [
+            { "name": "Revenue", "dataKey": "revenue", "color": "tokens.color.primary.500" },
+            { "name": "Target",  "dataKey": "target",  "color": "tokens.color.muted.default" }
+          ],
+          "height": 280,
+          "showGrid": true,
+          "showLegend": true
+        }
+      },
+      {
+        "id": "breakdown-grid", "type": "DataGrid",
+        "props": {
+          "columns": [
+            { "key": "name",     "label": "Segment",  "sortable": true, "frozen": true },
+            { "key": "revenue",  "label": "Revenue",  "sortable": true, "align": "right" },
+            { "key": "orders",   "label": "Orders",   "sortable": true, "align": "right" },
+            { "key": "aov",      "label": "AOV",      "sortable": true, "align": "right" },
+            { "key": "trend",    "label": "Trend" }
+          ],
+          "rows": "{{tableRows}}",
+          "rowKey": "id",
+          "virtualise": true
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "registers": [
+    {
+      "id": "modern-minimal",
+      "name": "Modern Minimal",
+      "description": "Inter throughout. Tight tracking. SaaS default.",
+      "heading_font": "Inter",
+      "body_font": "Inter",
+      "heading_weight": 600,
+      "body_weight": 400,
+      "heading_tracking": "-0.02em",
+      "best_for": ["saas", "internal-tool", "dashboard", "developer-tool"]
+    },
+    {
+      "id": "editorial-luxe",
+      "name": "Editorial Luxe",
+      "description": "Playfair Display headings, Source Sans body. Luxury / editorial.",
+      "heading_font": "Playfair Display",
+      "body_font": "Source Sans 3",
+      "heading_weight": 700,
+      "body_weight": 400,
+      "heading_tracking": "-0.01em",
+      "best_for": ["luxury", "media", "fashion", "real-estate"]
+    },
+    {
+      "id": "technical-mono",
+      "name": "Technical Mono",
+      "description": "Space Grotesk headings, JetBrains Mono accents. Dev-tool / data-heavy.",
+      "heading_font": "Space Grotesk",
+      "body_font": "Inter",
+      "heading_weight": 700,
+      "body_weight": 400,
+      "heading_tracking": "0em",
+      "best_for": ["developer-tool", "data", "ai", "infra"]
+    },
+    {
+      "id": "consumer-playful",
+      "name": "Consumer Playful",
+      "description": "DM Sans throughout. Slightly loose tracking. Consumer apps.",
+      "heading_font": "DM Sans",
+      "body_font": "DM Sans",
+      "heading_weight": 700,
+      "body_weight": 400,
+      "heading_tracking": "-0.01em",
+      "best_for": ["consumer", "education", "fitness", "social"]
+    }
+  ]
+}

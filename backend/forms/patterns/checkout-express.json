@@ -1,0 +1,24 @@
+{
+  "name": "checkout-express",
+  "description": "Single-page checkout: cart summary rail + payment + address in one composed page. No shell chrome during checkout.",
+  "when_to_use": {"archetype_any_of": ["checkout"], "shape.layout.hero": "none"},
+  "invariants": ["error-describes-fix", "in-flight-disable", "required-marker", "numeric-inputMode-money"],
+  "shape": {
+    "type": "Split", "props": {"ratio": "2:1"}, "children": [
+      {"type": "Stack", "props": {"gap": "tokens.spacing.6"}, "children": [
+        {"type": "Heading", "props": {"level": 2, "content": "Payment"}},
+        {"type": "Card", "children": [
+          {"type": "Form", "children": [{"$slot": "payment-fields"}]}
+        ]},
+        {"type": "Heading", "props": {"level": 2, "content": "Delivery address"}},
+        {"type": "Card", "children": [
+          {"type": "Form", "children": [{"$slot": "address-fields"}]}
+        ]}
+      ]},
+      {"type": "Card", "props": {"title": "Order summary", "sticky": true}, "children": [
+        {"$slot": "cart-summary"},
+        {"type": "Button", "props": {"variant": "primary", "label": "Place order", "fullWidth": true, "submit": true}}
+      ]}
+    ]
+  }
+}

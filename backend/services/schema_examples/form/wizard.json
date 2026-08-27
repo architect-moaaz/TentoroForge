@@ -1,0 +1,424 @@
+{
+  "schemaVersion": "2",
+  "id": "projects/new-wizard",
+  "route": "/projects/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "New Project — Setup Wizard" },
+  "dataSources": [
+    { "name": "templates",   "entity": "ProjectTemplate", "op": "list" },
+    { "name": "departments", "entity": "Department",      "op": "list" },
+    { "name": "employees",   "entity": "Employee",        "op": "list",
+      "filter": { "status": "active" },
+      "select": ["id", "firstName", "lastName", "department"] }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.8" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "wizard-hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "PROJECT SETUP",
+          "headline": "Create a New Project",
+          "subhead": "Follow the three steps below to configure your project, assign a team, and set milestones before kickoff.",
+          "layout": "centered",
+          "ctas": []
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.secondary.50",
+            "to": "tokens.color.surface.0",
+            "angle": 135
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "step-progress",
+        "type": "FadeIn",
+        "props": { "duration": 300 },
+        "children": [
+          {
+            "id": "step-indicators",
+            "type": "Cluster",
+            "props": { "justify": "center", "align": "center", "gap": "tokens.spacing.6" },
+            "style": {
+              "background": { "type": "solid", "value": "tokens.color.surface.0" },
+              "padding": "tokens.spacing.4",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "step-1-indicator",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Step 1",
+                  "value": "Basics",
+                  "format": "number",
+                  "icon": "file-text"
+                },
+                "style": {
+                  "background": { "type": "solid", "value": "tokens.color.primary.50" },
+                  "radius": "tokens.radius.md",
+                  "padding": "tokens.spacing.3"
+                }
+              },
+              {
+                "id": "step-2-indicator",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Step 2",
+                  "value": "Team",
+                  "format": "number",
+                  "icon": "users"
+                }
+              },
+              {
+                "id": "step-3-indicator",
+                "type": "MetricTile",
+                "props": {
+                  "label": "Step 3",
+                  "value": "Milestones",
+                  "format": "number",
+                  "icon": "flag"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "step-1-section",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Step 1: Project Basics",
+          "subtitle": "Define the project name, type, and budget envelope"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.md",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "step-1-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "field-project-name",
+                "type": "Input",
+                "props": {
+                  "name": "projectName",
+                  "label": "Project Name",
+                  "type": "text",
+                  "placeholder": "e.g. Q2 Workforce Analytics Dashboard",
+                  "validators": { "required": true, "min": 5, "max": 120 }
+                }
+              },
+              {
+                "id": "field-project-desc",
+                "type": "Textarea",
+                "props": {
+                  "name": "description",
+                  "label": "Description",
+                  "placeholder": "What does this project deliver and why does it matter?",
+                  "rows": 3,
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-template",
+                "type": "Select",
+                "props": {
+                  "name": "templateId",
+                  "label": "Project Template",
+                  "options": [
+                    { "value": "blank",       "label": "Blank — start from scratch" },
+                    { "value": "agile-sprint","label": "Agile Sprint — 2-week sprint cycles" },
+                    { "value": "waterfall",   "label": "Waterfall — phase-gated delivery" },
+                    { "value": "okr",         "label": "OKR — objective-key-results tracker" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "budget-dates-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "field-budget",
+                    "type": "Input",
+                    "props": {
+                      "name": "budgetGbp",
+                      "label": "Budget (GBP)",
+                      "type": "number",
+                      "placeholder": "e.g. 120000",
+                      "validators": { "required": true, "min": 0 }
+                    }
+                  },
+                  {
+                    "id": "field-priority",
+                    "type": "Select",
+                    "props": {
+                      "name": "priority",
+                      "label": "Priority",
+                      "options": [
+                        { "value": "critical", "label": "Critical" },
+                        { "value": "high",     "label": "High" },
+                        { "value": "medium",   "label": "Medium" },
+                        { "value": "low",      "label": "Low" }
+                      ],
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "dates-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "field-kick-off",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "kickOffDate",
+                      "label": "Kick-off Date",
+                      "validators": { "required": true }
+                    }
+                  },
+                  {
+                    "id": "field-target-delivery",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "targetDeliveryDate",
+                      "label": "Target Delivery Date",
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "step-2-section",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Step 2: Assign Team",
+          "subtitle": "Search for employees by name or department to add them to the project"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "step-2-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "field-project-lead",
+                "type": "Select",
+                "props": {
+                  "name": "projectLead",
+                  "label": "Project Lead",
+                  "options": [
+                    { "value": "marcus-chen",  "label": "Marcus Chen — Engineering Lead" },
+                    { "value": "priya-nair",   "label": "Priya Nair — Senior Engineer" },
+                    { "value": "jane-doe",     "label": "Jane Doe — Product Manager" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-department-filter",
+                "type": "Select",
+                "props": {
+                  "name": "primaryDepartment",
+                  "label": "Primary Department",
+                  "options": [
+                    { "value": "engineering", "label": "Engineering" },
+                    { "value": "design",      "label": "Design" },
+                    { "value": "product",     "label": "Product" },
+                    { "value": "hr",          "label": "People & HR" },
+                    { "value": "finance",     "label": "Finance" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-notify-team",
+                "type": "Checkbox",
+                "props": {
+                  "name": "notifyTeamOnCreate",
+                  "label": "Send Slack notification to team channel when project is created"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "step-3-section",
+        "type": "Section",
+        "props": {
+          "variant": "plain",
+          "title": "Step 3: Initial Milestones",
+          "subtitle": "Add your first set of milestones — more can be added once the project is live"
+        },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.sm",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "step-3-fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "milestone-1-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "milestone-1-name",
+                    "type": "Input",
+                    "props": {
+                      "name": "milestone1Name",
+                      "label": "Milestone 1 — Name",
+                      "type": "text",
+                      "placeholder": "e.g. Discovery & Requirements Sign-off",
+                      "validators": { "required": false }
+                    }
+                  },
+                  {
+                    "id": "milestone-1-due",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "milestone1Due",
+                      "label": "Due Date",
+                      "validators": { "required": false }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "milestone-2-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "milestone-2-name",
+                    "type": "Input",
+                    "props": {
+                      "name": "milestone2Name",
+                      "label": "Milestone 2 — Name",
+                      "type": "text",
+                      "placeholder": "e.g. Design Prototype Approved",
+                      "validators": { "required": false }
+                    }
+                  },
+                  {
+                    "id": "milestone-2-due",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "milestone2Due",
+                      "label": "Due Date",
+                      "validators": { "required": false }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "milestone-3-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "milestone-3-name",
+                    "type": "Input",
+                    "props": {
+                      "name": "milestone3Name",
+                      "label": "Milestone 3 — Name",
+                      "type": "text",
+                      "placeholder": "e.g. Beta Release to Internal Users",
+                      "validators": { "required": false }
+                    }
+                  },
+                  {
+                    "id": "milestone-3-due",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "milestone3Due",
+                      "label": "Due Date",
+                      "validators": { "required": false }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "wizard-footer",
+        "type": "Row",
+        "props": { "justify": "between", "align": "center" },
+        "style": { "padding": "tokens.spacing.4" },
+        "children": [
+          {
+            "id": "btn-back",
+            "type": "Text",
+            "props": { "content": "Back", "as": "span" }
+          },
+          {
+            "id": "footer-spacer",
+            "type": "Spacer",
+            "props": { "size": "tokens.spacing.4" }
+          },
+          {
+            "id": "btn-save-draft",
+            "type": "Text",
+            "props": { "content": "Save Draft", "as": "span" }
+          },
+          {
+            "id": "footer-spacer-2",
+            "type": "Spacer",
+            "props": { "size": "tokens.spacing.3" }
+          },
+          {
+            "id": "btn-create",
+            "type": "Text",
+            "props": { "content": "Create Project", "as": "span" }
+          }
+        ]
+      }
+    ]
+  }
+}

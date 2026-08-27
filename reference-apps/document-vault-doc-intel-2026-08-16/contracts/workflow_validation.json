@@ -1,0 +1,162 @@
+[
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{id}}\" references \"id\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "UpdateDocument.json",
+    "node_id": "db_update",
+    "config_path": "values.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{id}}\" references \"id\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "UpdateUser.json",
+    "node_id": "db_update",
+    "config_path": "values.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "set_processing",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_started",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{env.PADDLEOCR_SIDECAR_URL}}\" references \"env\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "call_paddleocr",
+    "config_path": "url"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{fileUrl}}\" references \"fileUrl\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "call_paddleocr",
+    "config_path": "body.fileUrl"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_step_ai",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "persist_results",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_done",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{ocrResult.confidence}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "notify_complete",
+    "config_path": "message"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "set_failed",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{ocrResult.error}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "set_failed",
+    "config_path": "values.errorMessage"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_failed",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{ocrResult.error}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "notify_failed",
+    "config_path": "message"
+  },
+  {
+    "severity": "error",
+    "code": "sql-literal-in-value",
+    "message": "\"CURRENT_TIMESTAMP\" is a SQL literal used as a runtime value. Use a runtime sentinel (e.g. \"$now\") or a real template expression instead.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_started",
+    "config_path": "values.startedAt"
+  },
+  {
+    "severity": "error",
+    "code": "sql-literal-in-value",
+    "message": "\"CURRENT_TIMESTAMP\" is a SQL literal used as a runtime value. Use a runtime sentinel (e.g. \"$now\") or a real template expression instead.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_done",
+    "config_path": "values.completedAt"
+  },
+  {
+    "severity": "error",
+    "code": "sql-literal-in-value",
+    "message": "\"CURRENT_TIMESTAMP\" is a SQL literal used as a runtime value. Use a runtime sentinel (e.g. \"$now\") or a real template expression instead.",
+    "workflow_file": "processdocumentworkflow.json",
+    "node_id": "update_job_failed",
+    "config_path": "values.completedAt"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "reprocessdocumentworkflow.json",
+    "node_id": "reset_document",
+    "config_path": "where.id"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "reprocessdocumentworkflow.json",
+    "node_id": "notify_requeued",
+    "config_path": "message"
+  },
+  {
+    "severity": "error",
+    "code": "undefined-ref",
+    "message": "\"{{originalFilename}}\" references \"originalFilename\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+    "workflow_file": "uploaddocumentsworkflow.json",
+    "node_id": "notify_queued",
+    "config_path": "message"
+  }
+]

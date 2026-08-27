@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: __CSS_BACKGROUND__;
+    --foreground: __CSS_FOREGROUND__;
+    --card: 0 0% 100%;
+    --card-foreground: __CSS_FOREGROUND__;
+    --popover: 0 0% 100%;
+    --popover-foreground: __CSS_FOREGROUND__;
+    --primary: __CSS_PRIMARY__;
+    --primary-foreground: 0 0% 100%;
+    --secondary: __CSS_SECONDARY__;
+    --secondary-foreground: __CSS_FOREGROUND__;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: __CSS_FOREGROUND__;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: __CSS_PRIMARY__;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 222 84% 5%;
+    --foreground: 210 20% 98%;
+    --card: 222 84% 8%;
+    --card-foreground: 210 20% 98%;
+    --popover: 222 84% 8%;
+    --popover-foreground: 210 20% 98%;
+    --primary: __CSS_PRIMARY__;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 25% 20%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 215 25% 15%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 215 25% 15%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 25% 20%;
+    --input: 215 25% 20%;
+    --ring: __CSS_PRIMARY__;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ===== GLOBAL INTERACTIONS ===== */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* ===== CARD HOVER ===== */
+.card-hover {
+  transition: box-shadow 200ms, transform 200ms;
+}
+
+.card-hover:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+/* ===== LOADING SKELETON ===== */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--muted) / 0.5) 50%, hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius);
+}
+
+/* ===== STATUS COLORS ===== */
+.status-success { color: hsl(142 76% 36%); background: hsl(142 76% 36% / 0.1); }
+.status-warning { color: hsl(38 92% 50%); background: hsl(38 92% 50% / 0.1); }
+.status-error { color: hsl(0 84% 60%); background: hsl(0 84% 60% / 0.1); }
+.status-info { color: hsl(221 83% 53%); background: hsl(221 83% 53% / 0.1); }
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}

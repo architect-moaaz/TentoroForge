@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "2",
+  "id": "leads/new",
+  "route": "/leads/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Quick Add Lead" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "children": [
+      {
+        "id": "lead-form",
+        "type": "Form",
+        "props": {},
+        "children": [
+          {
+            "id": "fields",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+            "children": [
+              { "type": "Input", "props": { "name": "name",  "label": "Full Name", "type": "text" } },
+              { "type": "Input", "props": { "name": "email", "label": "Email",     "type": "email" } },
+              { "type": "Input", "props": { "name": "phone", "label": "Phone",     "type": "tel" } },
+              { "type": "Input", "props": { "name": "company", "label": "Company", "type": "text" } }
+            ]
+          },
+          {
+            "id": "btn-submit",
+            "type": "Button",
+            "props": { "label": "Add Lead", "variant": "primary", "workflow": "createLead" }
+          }
+        ]
+      }
+    ]
+  }
+}

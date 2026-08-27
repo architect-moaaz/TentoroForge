@@ -1,0 +1,22 @@
+{
+  "name": "wizard-3-step",
+  "description": "3-step wizard with progress bar. Use for high-stakes multi-section forms (signup with plan choice, onboarding, complex intake).",
+  "when_to_use": {"field_count_range": [8, 30], "modality": "route", "shape.write.pattern": "wizard"},
+  "invariants": ["step-progress-bar", "back-continue-rail", "per-step-validation", "in-flight-disable"],
+  "shape": {
+    "type": "Stack", "props": {"gap": "tokens.spacing.6"}, "children": [
+      {"type": "Stepper", "props": {"steps": 3, "current": 0}},
+      {"type": "Card", "children": [
+        {"type": "Form", "children": [
+          {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [
+            {"$slot": "step-fields"}
+          ]}
+        ]}
+      ]},
+      {"type": "Row", "props": {"justify": "between"}, "children": [
+        {"type": "Button", "props": {"variant": "ghost", "label": "Back"}},
+        {"type": "Button", "props": {"variant": "primary", "label": "Continue"}}
+      ]}
+    ]
+  }
+}

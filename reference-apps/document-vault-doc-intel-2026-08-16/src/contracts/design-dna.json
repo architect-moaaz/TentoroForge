@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "archetype": "creative",
+  "principles": "Confident and expressive: big display type, high-contrast ink/white with one electric accent, dramatic scale jumps.",
+  "seed": "053bffd4473d0985",
+  "typography": {
+    "pairing": "space-grotesk-terminal",
+    "heading": "'IBM Plex Sans', system-ui, sans-serif",
+    "headingWeight": "600",
+    "body": "'IBM Plex Sans', system-ui, sans-serif",
+    "bodyWeight": "400",
+    "numeric": "'IBM Plex Mono', monospace",
+    "tabularNumbers": true,
+    "letterSpacing": "-0.01em",
+    "googleImports": [
+      "IBM+Plex+Sans:wght@400;500;700",
+      "IBM+Plex+Mono:wght@400;500"
+    ],
+    "scaleMode": "display",
+    "scale": {
+      "h1": "2.25rem",
+      "h2": "1.625rem",
+      "h3": "1.1875rem",
+      "body": "0.9375rem",
+      "caption": "0.75rem"
+    }
+  },
+  "color": {
+    "primary": "#0EA5E9",
+    "secondary": "#383744",
+    "accent": "#F97316",
+    "background": "#FAFAFA",
+    "surface": "#E5E5E5",
+    "surfaceHover": "#E5E5E5",
+    "border": "#525252",
+    "muted": "#525252",
+    "textPrimary": "#171717",
+    "textSecondary": "#525252",
+    "textTertiary": "#525252",
+    "success": "#16A34A",
+    "warning": "#d7a650",
+    "error": "#DC2626",
+    "info": "#6491c4",
+    "sidebarBg": "#0a090e",
+    "sidebarText": "#c3c1cd",
+    "sidebarActive": "#0EA5E9",
+    "neutralTemperature": "neutral-ink"
+  },
+  "shape": {
+    "radiusScale": "round",
+    "radius": {
+      "sm": "0.5rem",
+      "md": "0.75rem",
+      "lg": "1rem",
+      "xl": "1.5rem",
+      "full": "9999px"
+    },
+    "elevation": "floating",
+    "shadows": {
+      "sm": "0 1px 2px 0 rgb(15 18 20 / 0.14)",
+      "md": "0 4px 10px -2px rgb(15 18 20 / 0.14)",
+      "lg": "0 12px 24px -6px rgb(15 18 20 / 0.18)",
+      "xl": "0 24px 48px -12px rgb(15 18 20 / 0.22)"
+    }
+  },
+  "rhythm": {
+    "density": "compact",
+    "motionLevel": "expressive",
+    "motion": {
+      "fast": "180ms",
+      "normal": "320ms",
+      "easing": "cubic-bezier(0.34, 1.3, 0.64, 1)"
+    }
+  },
+  "shell": {
+    "rail": "dark",
+    "frame": "sidebar",
+    "surfaceTreatment": "plain",
+    "chrome": "wide-rail"
+  },
+  "icon": {
+    "stroke": 2.0
+  },
+  "layout": {
+    "auth": "brand-wash",
+    "dashboard": "feed-led",
+    "list": "card-grid",
+    "detail": "profile-detail",
+    "chrome": "wide-rail",
+    "form": "single-column"
+  },
+  "mode": "dark",
+  "language": {
+    "navShape": "rail-blocks",
+    "kpiAnatomy": "hero-asymmetric",
+    "cardTreatment": "soft-shadow",
+    "radiusRegime": "rounded",
+    "typeClass": "geometric",
+    "density": "editorial",
+    "activeMark": "invert",
+    "headerStyle": "eyebrow-num",
+    "surface": "grain",
+    "chrome": "wide-rail",
+    "navWidth": 252,
+    "navInset": 0,
+    "navSide": "left",
+    "kpiTemplate": "2fr 1fr 1fr 1fr",
+    "kpiGap": 24,
+    "cardBorder": 0,
+    "cardShadow": "soft",
+    "cardFill": "surface",
+    "radius": 14,
+    "chamfer": false,
+    "cornerShape": null,
+    "gutter": 72,
+    "cardGap": 32,
+    "cardPad": 0,
+    "sectionGap": 56,
+    "display": "'Poppins', system-ui, sans-serif",
+    "numFamily": "'Chivo', system-ui, sans-serif",
+    "h1": [
+      30,
+      600,
+      "none",
+      "-0.02em"
+    ],
+    "labelCase": "none",
+    "labelTrack": ".02em",
+    "signature": "rail-blocks\u00b7hero-asymmetric\u00b7soft-shadow\u00b7rounded\u00b7geometric\u00b7grain",
+    "skinKey": "lang5f57104e",
+    "register": "default"
+  },
+  "skin": "lang5f57104e",
+  "register": "default",
+  "brand": {
+    "name": "PrismPress"
+  },
+  "authCopy": {
+    "title": "Hey, you",
+    "sub": "Let's make something today."
+  },
+  "voice": {
+    "create": "Add",
+    "view": "Open"
+  }
+}

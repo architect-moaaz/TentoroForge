@@ -1,0 +1,55 @@
+{
+  "$schema_version": "1.0.0",
+  "$description": "Closed value set for each capability primitive. Used by ArchetypeInstance.capabilities when the LLM composes a module from primitives (as opposed to picking a recipe). See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "primitives": {
+    "read.pattern": {
+      "description": "How primary data of this module is presented.",
+      "values": ["single-record", "list", "grid", "board", "tree", "timeline", "feed", "map-pins", "chart"]
+    },
+    "read.grouping": {
+      "description": "How rows/cards are grouped for scanning.",
+      "values": ["none", "status", "date", "category", "assignee", "hierarchy"]
+    },
+    "write.pattern": {
+      "description": "How writes happen in this module.",
+      "values": ["none", "inline", "create-form", "edit-form", "wizard", "drag", "bulk-action", "capture"]
+    },
+    "write.integrity": {
+      "description": "Governance / audit stance for writes.",
+      "values": ["direct", "approval-required", "audit-logged"]
+    },
+    "interactions": {
+      "description": "Multi-select. Interactions the module supports.",
+      "values": [
+        "drag-reorder",
+        "drag-between-groups",
+        "bulk-select",
+        "filter",
+        "sort",
+        "group-by",
+        "inline-edit",
+        "live-follow",
+        "infinite-scroll",
+        "pinch-zoom",
+        "keyboard-nav",
+        "right-click-context"
+      ]
+    },
+    "presentation.itemShape": {
+      "description": "The visual atom rendered per record.",
+      "values": ["card", "row", "tile", "dot", "node", "bar", "pin"]
+    },
+    "state.realtime": {
+      "description": "Freshness strategy for the module's data.",
+      "values": ["none", "poll", "stream"]
+    }
+  },
+  "safe_defaults": {
+    "$comment": "Used by archetype_recipe_detector.py as last-resort fallback when LLM emits invalid capabilities. Conservative crud-like defaults.",
+    "read": {"pattern": "list", "grouping": "none"},
+    "write": {"pattern": "create-form", "integrity": "direct"},
+    "interactions": ["filter", "sort"],
+    "presentation": {"itemShape": "row"},
+    "state": {"realtime": "none"}
+  }
+}

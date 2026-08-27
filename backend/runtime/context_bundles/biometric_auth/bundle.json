@@ -1,0 +1,22 @@
+{
+  "capability": "biometric_auth",
+  "permissions": {
+    "ios": {
+      "NSFaceIDUsageDescription": "Face ID lets you sign in and confirm sensitive actions."
+    },
+    "android": [
+      "android.permission.USE_BIOMETRIC"
+    ],
+    "expo_plugins": ["expo-local-authentication"]
+  },
+  "native_imports": {
+    "expo": ["expo-local-authentication", "expo-secure-store"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/BiometricProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useBiometric", "useBiometricUnlock"]
+  },
+  "integration_keys": []
+}

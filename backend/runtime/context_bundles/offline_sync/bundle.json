@@ -1,0 +1,20 @@
+{
+  "capability": "offline_sync",
+  "permissions": {
+    "ios": {},
+    "android": [
+      "android.permission.ACCESS_NETWORK_STATE"
+    ],
+    "expo_plugins": ["expo-network", "expo-sqlite"]
+  },
+  "native_imports": {
+    "expo": ["expo-network", "expo-sqlite"],
+    "web": ["@tanstack/query-persist-client-core"]
+  },
+  "provider": {
+    "template_path": "providers/OfflineSyncProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useOfflineStatus", "useSyncQueue"]
+  },
+  "integration_keys": []
+}

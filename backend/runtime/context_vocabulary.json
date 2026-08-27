@@ -1,0 +1,21 @@
+{
+  "$schema_version": "1.0.0",
+  "$description": "Closed value set for plan.runtime_context — the platform capabilities the app declares it needs. Not derivable from app_shape/archetype/industry. Each value corresponds to a folder under backend/runtime/context_bundles/<name>/ with permissions + native imports + provider templates. Adding a new capability = new folder + append here. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "capabilities": {
+    "geo": "GPS + geocoding + reverse-geocoding; 'near me' queries; live location follow.",
+    "camera": "Photo + video capture; barcode / QR scan.",
+    "microphone": "Audio input; voice notes; speech-to-text.",
+    "push_notifications": "Background delivery; badge counts; deep-link on tap.",
+    "offline_sync": "Local-first storage; conflict resolution; sync queue.",
+    "background_tasks": "Long uploads; workers that survive app-close.",
+    "sensors": "Accelerometer + gyro + health (HealthKit / Health Connect).",
+    "contacts": "Phonebook read; invite flows.",
+    "photo_library": "Gallery picker; album access.",
+    "biometric_auth": "Face ID / Touch ID / Android biometrics.",
+    "wallet_pass": "Apple Wallet / Google Pay pass issuance.",
+    "deep_linking": "Universal-link URL handlers; app-scheme; app-to-app share receive.",
+    "voice_assistant": "Siri Shortcuts / Google Assistant intents.",
+    "haptic_feedback": "Rumble; success / warning taptic.",
+    "clipboard_share": "Cross-app share sheet; paste-detect."
+  }
+}

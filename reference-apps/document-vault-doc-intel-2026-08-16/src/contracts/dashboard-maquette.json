@@ -1,0 +1,151 @@
+{
+  "kpis": [
+    {
+      "label": "Documents Processed",
+      "entity": "Document",
+      "op": "count",
+      "format": "number",
+      "filter": "status=processed",
+      "trend_window": "week",
+      "breakdown": [
+        {
+          "label": "Pending",
+          "entity": "Document",
+          "op": "count",
+          "filter": "status=pending"
+        },
+        {
+          "label": "Failed",
+          "entity": "Document",
+          "op": "count",
+          "filter": "status=failed"
+        }
+      ],
+      "threshold": {
+        "warn_above": 20,
+        "critical_above": 50,
+        "color_on_value": false
+      }
+    },
+    {
+      "label": "Avg OCR Confidence",
+      "entity": "Document",
+      "op": "avg",
+      "format": "number",
+      "field": "confidence",
+      "trend_window": "week",
+      "threshold": {
+        "warn_above": 70,
+        "critical_above": 50,
+        "color_on_value": true
+      },
+      "extremes": {
+        "max_label": "Highest Confidence",
+        "min_label": "Lowest Confidence"
+      }
+    },
+    {
+      "label": "Total Pages Scanned",
+      "entity": "Document",
+      "op": "sum",
+      "format": "number",
+      "field": "pageCount",
+      "trend_window": "week"
+    },
+    {
+      "label": "Processing Jobs Failed",
+      "entity": "ProcessDocumentJob",
+      "op": "count",
+      "format": "number",
+      "filter": "error=notnull",
+      "trend_window": "week",
+      "threshold": {
+        "warn_above": 5,
+        "critical_above": 15,
+        "color_on_value": true
+      }
+    }
+  ],
+  "primary_chart": {
+    "kind": "bar",
+    "title": "Documents Ingested by Day",
+    "entity": "Document",
+    "group_by": "processedAt",
+    "aggregate": "count",
+    "window": "month",
+    "help": "Counts documents reaching 'processed' status per day; spikes may indicate batch uploads or pipeline backlogs",
+    "overlay": {
+      "kind": "line",
+      "aggregate": "avg",
+      "aggregate_field": "confidence",
+      "curve": "smooth"
+    },
+    "view_toggles": [
+      {
+        "label": "Daily",
+        "modifier": {
+          "window": "month"
+        },
+        "default": true
+      },
+      {
+        "label": "Weekly",
+        "modifier": {
+          "window": "week"
+        }
+      }
+    ]
+  },
+  "activity": {
+    "entity": "Document",
+    "title": "Recently Uploaded Documents",
+    "limit": 5,
+    "order_by": "createdAt"
+  },
+  "hero": {
+    "kind": "kpi-strip",
+    "greeting": "{n} documents in the pipeline \u2014 {f} awaiting extraction",
+    "subhead": "OCR \u00b7 AI field extraction \u00b7 full-text search"
+  },
+  "signature_moves": [
+    "sparkline-preview",
+    "status-badge-rows",
+    "inline-search-bar"
+  ],
+  "section_rhythm": "tight",
+  "empty_state": null,
+  "ornament": null,
+  "footer": null,
+  "subtitle": "Evaluating document ingestion throughput, OCR quality, and pipeline health",
+  "filters": [
+    {
+      "kind": "select",
+      "field": "status",
+      "label": "Status",
+      "options": [
+        "pending",
+        "processing",
+        "processed",
+        "failed"
+      ]
+    },
+    {
+      "kind": "date-range",
+      "field": "processedAt",
+      "label": "Processed Date",
+      "options": []
+    },
+    {
+      "kind": "select",
+      "field": "mimeType",
+      "label": "File Type",
+      "options": [
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/tiff"
+      ]
+    }
+  ],
+  "reset_filters": true
+}

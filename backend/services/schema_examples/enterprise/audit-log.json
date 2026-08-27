@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "2",
+  "id": "audit/log",
+  "route": "/audit",
+  "meta": { "title": "Audit Log", "archetype": "audit" },
+  "dataSources": [
+    { "kind": "list", "name": "auditEntries", "table": "auditLog",
+      "filter": {
+        "dateRange": "{{url.dateRange}}",
+        "actors":    "{{url.actors}}",
+        "categories":"{{url.categories}}"
+      },
+      "orderBy": [{ "field": "timestamp", "dir": "desc" }],
+      "limit": 100 },
+    { "kind": "list", "name": "actorOptions", "table": "users",
+      "orderBy": [{ "field": "displayName", "dir": "asc" }] }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": {
+      "topbar": { "$ref": "node:breadcrumb" },
+      "actions": {
+        "id": "export-btn", "type": "Button",
+        "props": { "label": "Export CSV", "variant": "secondary",
+                   "workflow": "exportAuditLog" }
+      },
+      "rightRail": {
+        "id": "actor-filter-rail", "type": "Stack",
+        "props": { "direction": "vertical", "gap": "tokens.spacing.4" },
+        "children": [
+          { "id": "actor-multiselect", "type": "MultiSelect",
+            "props": { "name": "actors", "label": "Filter by Actor",
+                       "placeholder": "All actors",
+                       "options": "{{actorOptions}}",
+                       "showSearch": true } },
+          { "id": "category-multiselect", "type": "MultiSelect",
+            "props": { "name": "categories", "label": "Event Category",
+                       "placeholder": "All categories",
+                       "options": [
+                         { "value": "create",  "label": "Create" },
+                         { "value": "update",  "label": "Update" },
+                         { "value": "delete",  "label": "Delete" },
+                         { "value": "approve", "label": "Approve" },
+                         { "value": "reject",  "label": "Reject" },
+                         { "value": "login",   "label": "Login" },
+                         { "value": "system",  "label": "System" }
+                       ],
+                       "showSearch": false } }
+        ]
+      }
+    },
+    "children": [
+      {
+        "id": "filter-row", "type": "Row",
+        "props": { "gap": "tokens.spacing.3", "align": "center" },
+        "children": [
+          { "id": "date-range", "type": "DateRangePicker",
+            "props": { "name": "dateRange", "label": "Date Range",
+                       "presets": ["today", "yesterday", "last-7-days", "last-30-days"] } },
+          { "id": "search-bar", "type": "FilterBar",
+            "props": {
+              "showSearch": true,
+              "chips": []
+            }
+          }
+        ]
+      },
+      {
+        "id": "activity-feed", "type": "ActivityFeed",
+        "props": {
+          "title": "Audit Events",
+          "entries": "{{auditEntries}}",
+          "showFilter": false,
+          "maxHeight": "calc(100vh - 240px)"
+        }
+      }
+    ]
+  }
+}

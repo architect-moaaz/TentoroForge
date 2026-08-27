@@ -1,0 +1,17 @@
+{
+  "name": "onboarding-carousel",
+  "description": "First-run walkthrough with per-slide progress dots + skip.",
+  "when_to_use": {"page_type_any_of": ["onboarding"], "identity.usageMode_any_of": ["single-session", "returning-personal"]},
+  "invariants": ["skip-affordance", "swipe-and-arrow-navigation", "resume-later"],
+  "shape": {
+    "type": "Stack", "props": {"gap": "tokens.spacing.6", "align": "center"}, "children": [
+      {"type": "Carousel", "props": {"showDots": true, "swipeable": true}, "children": [
+        {"$slot": "slides"}
+      ]},
+      {"type": "Row", "props": {"gap": "tokens.spacing.2", "justify": "between"}, "children": [
+        {"type": "Button", "props": {"variant": "ghost", "label": "Skip"}},
+        {"type": "Button", "props": {"variant": "primary", "label": "Next"}}
+      ]}
+    ]
+  }
+}

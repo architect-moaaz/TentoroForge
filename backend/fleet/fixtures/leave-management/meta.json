@@ -1,0 +1,13 @@
+{
+  "archetype": "approval-workflow",
+  "source_app": null,
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "plan": "missing \u2014 seed with `python -m scripts.fleet run --only leave-management --replan`",
+  "stresses": [
+    "approval workflow lifecycle",
+    "role-scoped nav (employee vs manager)",
+    "task inbox + resume",
+    "status dashboard"
+  ]
+}

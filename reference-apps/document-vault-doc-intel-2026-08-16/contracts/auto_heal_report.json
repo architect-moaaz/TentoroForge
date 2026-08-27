@@ -1,0 +1,10 @@
+{
+  "iterations": 2,
+  "converged": false,
+  "fixes_by_type": {
+    "sql-literal": 3
+  },
+  "fixes_by_file": {},
+  "remaining_errors": 18,
+  "remaining_warnings": 8
+}

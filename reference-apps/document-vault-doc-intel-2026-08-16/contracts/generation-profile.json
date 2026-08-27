@@ -1,0 +1,19 @@
+{
+  "id": "fast",
+  "label": "Fast",
+  "description": "~10 min \u00b7 Quick build with rich dashboard authoring \u2014 same domain entities as Complete, faster loop. Best for iteration.",
+  "eta_minutes": 10,
+  "narrative_expansion": false,
+  "decomposition": false,
+  "full_post_generate": true,
+  "review_cycles": 2,
+  "planner_revise": false,
+  "planner_v2_retry": false,
+  "planner_critic": false,
+  "max_entities": 0,
+  "max_pages": 0,
+  "require_kpi_row": true,
+  "require_primary_chart": true,
+  "require_activity_feed": true,
+  "require_hero": true
+}

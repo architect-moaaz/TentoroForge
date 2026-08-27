@@ -1,0 +1,1 @@
+On-premises back-office app for batch-uploading, OCR-processing, classifying, and full-text-searching bank paper and PDF records using PaddleOCR and AI extraction pipelines.

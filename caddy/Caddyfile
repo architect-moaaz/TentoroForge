@@ -1,0 +1,54 @@
+# Auto-TLS via Let's Encrypt. Caddy fetches + renews the cert for
+# forge-uat.tentoro.ai the first time the box is reached on 443.
+# The plain-HTTP variant on the same block auto-redirects to HTTPS,
+# which is what the browser needs before crypto.subtle / crypto.randomUUID
+# stop returning undefined.
+#
+# SSE endpoints (/api/projects/{id}/publish, /api/chat) must NOT get
+# buffered or compressed — flush_interval keeps them chunked live.
+{
+    email admin@tentoro.ai
+}
+
+forge-uat.tentoro.ai {
+    encode zstd gzip
+
+    # Render-scaffold: generated-app preview iframe. The scaffold is built
+    # with basePath=/p, so its pages live at /p/{projectId}/{slug} and its
+    # own bundle assets serve from /p/_next/*. One handle catches both.
+    # (Figma per-project assets — /api/asset/* — are served by the frontend
+    # container's own copy of that route, so no separate rule is needed.)
+    handle /p/* {
+        reverse_proxy render-scaffold:6503 {
+            flush_interval -1
+        }
+    }
+
+    # Backend: FastAPI on port 6500 (container name "backend").
+    handle /api/* {
+        reverse_proxy backend:6500 {
+            flush_interval -1
+            transport http {
+                read_timeout 600s
+                write_timeout 600s
+            }
+        }
+    }
+
+    # Next.js dev HMR — harmless in prod, kept for completeness.
+    handle /_next/webpack-hmr {
+        reverse_proxy frontend:3000
+    }
+
+    # Frontend: Next.js standalone on port 3000 (container name "frontend").
+    handle {
+        reverse_proxy frontend:3000 {
+            flush_interval -1
+        }
+    }
+
+    # 25 MB upload cap — matches previous nginx client_max_body_size.
+    request_body {
+        max_size 25MB
+    }
+}

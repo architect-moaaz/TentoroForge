@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "2",
+  "id": "employees/new",
+  "route": "/employees/new",
+  "meta": { "title": "Add Employee", "archetype": "wizard" },
+  "dataSources": [
+    { "kind": "list", "name": "departments", "table": "departments" },
+    { "kind": "list", "name": "managers", "table": "employees",
+      "filter": { "isManager": true } }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": { "topbar": { "$ref": "node:breadcrumb" } },
+    "children": [
+      {
+        "id": "stepper", "type": "ApprovalStepper",
+        "props": {
+          "orientation": "horizontal",
+          "steps": [
+            { "id": "personal", "label": "Personal Info", "status": "current" },
+            { "id": "job",      "label": "Job Details",   "status": "pending" },
+            { "id": "review",   "label": "Review",        "status": "pending" }
+          ]
+        }
+      },
+      {
+        "id": "wizard-tabs", "type": "TabPanelWithDeepLink",
+        "props": {
+          "paramKey": "step",
+          "defaultTab": "personal",
+          "tabs": [
+            { "id": "personal", "label": "Personal Info" },
+            { "id": "job",      "label": "Job Details" },
+            { "id": "review",   "label": "Review" }
+          ]
+        },
+        "children": [
+          {
+            "id": "personal-tab", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              {
+                "id": "personal-form", "type": "Form",
+                "props": { "action": { "type": "workflow", "name": "saveWizardStep" } },
+                "children": [
+                  { "id": "first-name", "type": "Input",
+                    "props": { "name": "firstName", "label": "First Name", "type": "text",
+                               "validators": { "required": true } } },
+                  { "id": "last-name", "type": "Input",
+                    "props": { "name": "lastName", "label": "Last Name", "type": "text",
+                               "validators": { "required": true } } },
+                  { "id": "email", "type": "Input",
+                    "props": { "name": "email", "label": "Work Email", "type": "email",
+                               "validators": { "required": true } } },
+                  { "id": "phone", "type": "Input",
+                    "props": { "name": "phone", "label": "Phone", "type": "tel" } },
+                  { "id": "next-btn", "type": "Button",
+                    "props": { "label": "Next: Job Details", "variant": "primary",
+                               "navigate": "?step=job" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "job-tab", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              {
+                "id": "job-form", "type": "Form",
+                "props": { "action": { "type": "workflow", "name": "saveWizardStep" } },
+                "children": [
+                  { "id": "department", "type": "Select",
+                    "props": { "name": "departmentId", "label": "Department",
+                               "options": "{{departments}}",
+                               "validators": { "required": true } } },
+                  { "id": "role", "type": "Input",
+                    "props": { "name": "role", "label": "Job Title", "type": "text",
+                               "validators": { "required": true } } },
+                  { "id": "manager", "type": "Select",
+                    "props": { "name": "managerId", "label": "Manager",
+                               "options": "{{managers}}" } },
+                  { "id": "start-date", "type": "DatePicker",
+                    "props": { "name": "startDate", "label": "Start Date",
+                               "validators": { "required": true } } },
+                  { "id": "job-next-btn", "type": "Button",
+                    "props": { "label": "Next: Review", "variant": "primary",
+                               "navigate": "?step=review" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "review-tab", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              { "id": "review-heading", "type": "Heading",
+                "props": { "weight": "bold" } },
+              { "id": "review-kv", "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Name",       "value": "{{wizard.firstName}} {{wizard.lastName}}" },
+                    { "label": "Email",      "value": "{{wizard.email}}" },
+                    { "label": "Department", "value": "{{wizard.departmentId}}" },
+                    { "label": "Job Title",  "value": "{{wizard.role}}" },
+                    { "label": "Start Date", "value": "{{wizard.startDate}}" }
+                  ]
+                }
+              },
+              { "id": "submit-btn", "type": "Button",
+                "props": { "label": "Create Employee", "variant": "primary",
+                           "workflow": "createEmployee",
+                           "args": { "data": "{{wizard}}" } } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

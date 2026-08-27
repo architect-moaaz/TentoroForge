@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-08-15T16:52:52.651570+00:00",
+  "verdicts": [
+    {
+      "directive": "archetype_vocabulary",
+      "asked": "field-service",
+      "status": "ok",
+      "evidence": "plan.archetype = field-service",
+      "auto_repair": null
+    },
+    {
+      "directive": "row_click_target",
+      "asked": "/documents/",
+      "status": "missing",
+      "evidence": "no Table on the /documents collection page has rowHref = /documents/",
+      "auto_repair": "apply_hints_to_pages"
+    },
+    {
+      "directive": "named_routes",
+      "asked": [
+        "/upload",
+        "/documents",
+        "/documents/{id}",
+        "/search"
+      ],
+      "status": "missing",
+      "missing": [
+        "/upload",
+        "/search"
+      ],
+      "evidence": "missing routes: ['/upload', '/search']",
+      "auto_repair": "add_page"
+    },
+    {
+      "directive": "named_components",
+      "asked": [
+        {
+          "page": "/upload",
+          "component": "FileUpload"
+        },
+        {
+          "page": "/documents",
+          "component": "Table"
+        },
+        {
+          "page": "/documents",
+          "component": "Tag"
+        },
+        {
+          "page": "/documents/{id}",
+          "component": "DescriptionList"
+        },
+        {
+          "page": "/search",
+          "component": "SearchInput"
+        }
+      ],
+      "status": "partial",
+      "hits": [
+        "/documents/{id}\u2192DescriptionList"
+      ],
+      "missing": [
+        "/upload\u2192FileUpload (page missing)",
+        "/documents\u2192Table",
+        "/documents\u2192Tag",
+        "/search\u2192SearchInput (page missing)"
+      ],
+      "evidence": "missing: ['/upload\u2192FileUpload (page missing)', '/documents\u2192Table', '/documents\u2192Tag', '/search\u2192SearchInput (page missing)']",
+      "auto_repair": "add_component"
+    },
+    {
+      "directive": "named_action_types",
+      "asked": [
+        {
+          "action_type": "ocr_document",
+          "workflow": "One"
+        },
+        {
+          "action_type": "ai_extract",
+          "workflow": "One"
+        },
+        {
+          "action_type": "db_update",
+          "workflow": "One"
+        }
+      ],
+      "status": "missing",
+      "hits": [],
+      "missing": [
+        "ocr_document (expected in One)",
+        "ai_extract (expected in One)",
+        "db_update (expected in One)"
+      ],
+      "evidence": "missing action-types: ['ocr_document (expected in One)', 'ai_extract (expected in One)', 'db_update (expected in One)']",
+      "auto_repair": "rewrite_workflow_step"
+    }
+  ],
+  "summary": {
+    "ok": 1,
+    "missing": 3,
+    "partial": 1
+  },
+  "auto_repairs_fired": [
+    "apply_hints_to_pages",
+    "stamp plan.archetype from requirement"
+  ]
+}

@@ -1,0 +1,1058 @@
+{
+  "prompt": "Internal admin tool for uploading paper/PDF records, running OCR via PaddleOCR sidecar and AI field extraction, and searching the resulting structured and full-text content.",
+  "plan": {
+    "name": "Document Intelligence",
+    "pages": [
+      {
+        "name": "DocumentsListPage",
+        "type": "list",
+        "route": "/documents",
+        "entity": "Document",
+        "actions": [],
+        "features": [
+          "status-pipeline",
+          "notify"
+        ],
+        "archetype": "list",
+        "dataSource": {
+          "op": "list",
+          "entity": "Document"
+        },
+        "description": "Table of all documents with columns: original filename, status (coloured badge: queued=slate, processing=amber+spinner, complete=green, failed=red), confidence %, page count, uploaded by, createdAt. Auto-refreshes every 5 s while any row has status=queued or status=processing; halts polling once all rows are terminal. Toolbar has Upload button."
+      },
+      {
+        "name": "DocumentUploadPage",
+        "type": "form",
+        "route": "/documents/upload",
+        "entity": "Document",
+        "fields": [
+          {
+            "name": "files",
+            "label": "Files (PDF or images)",
+            "order": 1,
+            "required": true
+          }
+        ],
+        "submit": {
+          "kind": "workflow",
+          "target": "UploadDocumentsWorkflow"
+        },
+        "actions": [],
+        "features": [],
+        "archetype": "form",
+        "description": "Multi-file upload form. Accepts PDF and image files. Submits multipart/form-data to the upload workflow. Shows a drag-and-drop zone. On submit, dispatches ProcessDocumentWorkflow per file and navigates to /documents."
+      },
+      {
+        "name": "DocumentDetailPage",
+        "type": "detail",
+        "route": "/documents/[id]",
+        "entity": "Document",
+        "actions": [],
+        "features": [],
+        "archetype": "detail",
+        "description": "Two-column layout. Left panel: inline file preview (PDF iframe or <img>). Right panel: DescriptionList of extracted key-value pairs from extractedFields JSONB, each with a confidence colour chip. Collapsible accordion below shows raw ocrText in a monospace pre block. Status badge at top. If status=failed, shows errorMessage."
+      },
+      {
+        "name": "DocumentSearchPage",
+        "type": "list",
+        "route": "/documents/search",
+        "entity": "Document",
+        "actions": [],
+        "features": [],
+        "archetype": "list",
+        "dataSource": {
+          "op": "list",
+          "entity": "Document"
+        },
+        "description": "Full-text + structured search page. Search bar at top runs against the tsvector index (ocr_text + all JSONB string values). Results table shows filename, status, confidence, matched snippet. Filters: status, date range, confidence threshold. Empty state shows instructions to upload documents first."
+      },
+      {
+        "name": "DashboardPage",
+        "type": "dashboard",
+        "route": "/",
+        "entity": null,
+        "actions": [],
+        "widgets": [
+          {
+            "type": "stat",
+            "title": "Total Documents",
+            "entity": "Document",
+            "metric": {
+              "fn": "count"
+            }
+          },
+          {
+            "type": "stat",
+            "title": "Completed",
+            "entity": "Document",
+            "metric": {
+              "fn": "count"
+            }
+          },
+          {
+            "type": "stat",
+            "title": "Failed",
+            "entity": "Document",
+            "metric": {
+              "fn": "count"
+            }
+          },
+          {
+            "type": "stat",
+            "title": "Avg Confidence %",
+            "entity": "Document",
+            "metric": {
+              "fn": "avg",
+              "field": "confidence"
+            }
+          },
+          {
+            "type": "chart",
+            "title": "Documents by Status",
+            "entity": "Document",
+            "groupBy": "status"
+          },
+          {
+            "type": "chart",
+            "title": "Uploads per Day",
+            "bucket": "day",
+            "entity": "Document",
+            "groupBy": "createdAt"
+          },
+          {
+            "type": "table",
+            "limit": 10,
+            "title": "Recent Documents",
+            "entity": "Document",
+            "columns": [
+              "originalFilename",
+              "status",
+              "confidence",
+              "createdAt"
+            ]
+          }
+        ],
+        "features": [],
+        "archetype": "dashboard",
+        "description": "Overview KPIs: total documents, complete count, failed count, average confidence. Recent documents table. Quick upload button.",
+        "entity_summary": [
+          "User",
+          "Document",
+          "ProcessDocumentJob"
+        ]
+      },
+      {
+        "name": "Login",
+        "type": "auth",
+        "route": "/login",
+        "entity": null,
+        "actions": [],
+        "features": [],
+        "archetype": "list"
+      },
+      {
+        "id": "admins-list",
+        "name": "admins",
+        "type": "list",
+        "route": "/admins",
+        "entity": "User",
+        "filter": {
+          "role": "admin"
+        },
+        "source": "actor_onboarding",
+        "visibleTo": [
+          "admin"
+        ],
+        "description": "Directory of admins in the app."
+      }
+    ],
+    "actors": [
+      {
+        "name": "admin",
+        "role": "admin",
+        "access": "authenticated",
+        "onboarding": {
+          "source": "seeded"
+        }
+      }
+    ],
+    "domain": "general",
+    "entities": {
+      "User": {
+        "table": "users",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "email",
+            "type": "varchar"
+          },
+          {
+            "name": "name",
+            "type": "varchar"
+          },
+          {
+            "name": "role",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "admin"
+              ]
+            },
+            "enum_values": [
+              "admin"
+            ]
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "schema": "src/db/schema/users.ts"
+      },
+      "Document": {
+        "table": "documents",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "originalFilename",
+            "type": "varchar"
+          },
+          {
+            "name": "fileUrl",
+            "type": "varchar"
+          },
+          {
+            "name": "mimeType",
+            "type": "varchar"
+          },
+          {
+            "name": "fileSizeBytes",
+            "type": "integer"
+          },
+          {
+            "name": "status",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "queued",
+                "processing",
+                "complete",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "ocrText",
+            "type": "text"
+          },
+          {
+            "name": "extractedFields",
+            "type": "jsonb"
+          },
+          {
+            "name": "confidence",
+            "type": "integer"
+          },
+          {
+            "name": "pageCount",
+            "type": "integer"
+          },
+          {
+            "name": "uploadedBy",
+            "type": "uuid"
+          },
+          {
+            "name": "processedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "errorMessage",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "schema": "src/db/schema/documents.ts",
+        "used_by": [
+          "ProcessDocumentJob"
+        ],
+        "depends_on": [
+          "User"
+        ]
+      },
+      "ProcessDocumentJob": {
+        "table": "process_document_jobs",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "documentId",
+            "type": "uuid"
+          },
+          {
+            "name": "step",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "ocr",
+                "ai_extract",
+                "done"
+              ]
+            }
+          },
+          {
+            "name": "startedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "completedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "error",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "schema": "src/db/schema/process_document_jobs.ts",
+        "internal": true,
+        "depends_on": [
+          "Document"
+        ]
+      }
+    },
+    "register": "linear",
+    "authGated": true,
+    "relations": [
+      {
+        "to": "User",
+        "from": "Document",
+        "foreignKey": "uploadedBy"
+      },
+      {
+        "to": "Document",
+        "from": "ProcessDocumentJob",
+        "foreignKey": "documentId"
+      }
+    ],
+    "seed_data": {
+      "documents": [
+        {
+          "status": "complete",
+          "pageCount": 2,
+          "confidence": 92,
+          "originalFilename": "invoice_2024_001.pdf"
+        },
+        {
+          "status": "failed",
+          "pageCount": 1,
+          "confidence": null,
+          "errorMessage": "Sidecar timeout",
+          "originalFilename": "contract_draft.pdf"
+        },
+        {
+          "status": "processing",
+          "pageCount": 1,
+          "confidence": null,
+          "originalFilename": "medical_record_scan.jpg"
+        },
+        {
+          "status": "queued",
+          "pageCount": null,
+          "confidence": null,
+          "originalFilename": "tax_form_2023.pdf"
+        },
+        {
+          "status": "complete",
+          "pageCount": 3,
+          "confidence": 87,
+          "originalFilename": "bank_statement_oct.pdf"
+        }
+      ]
+    },
+    "workflows": [
+      {
+        "name": "UploadDocumentsWorkflow",
+        "steps": [
+          {
+            "id": "trigger",
+            "next": "insert_document",
+            "type": "trigger",
+            "config": {
+              "entity": "Document",
+              "triggerType": "user_input"
+            }
+          },
+          {
+            "id": "insert_document",
+            "next": "insert_job",
+            "type": "action",
+            "config": {
+              "table": "documents",
+              "fields": [
+                "originalFilename",
+                "fileUrl",
+                "mimeType",
+                "fileSizeBytes",
+                "status",
+                "uploadedBy"
+              ],
+              "values": {
+                "status": "queued",
+                "uploadedBy": "{{uploadedBy}}"
+              },
+              "actionType": "db_insert"
+            }
+          },
+          {
+            "id": "insert_job",
+            "next": "notify_queued",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "fields": [
+                "documentId",
+                "step"
+              ],
+              "values": {
+                "step": "ocr",
+                "documentId": "{{insert_document.id}}"
+              },
+              "actionType": "db_insert"
+            }
+          },
+          {
+            "id": "notify_queued",
+            "next": "end",
+            "type": "action",
+            "config": {
+              "message": "Document {{originalFilename}} queued for processing.",
+              "actionType": "send_notification",
+              "recipientRole": "admin"
+            }
+          },
+          {
+            "id": "end",
+            "type": "end"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "files",
+            "type": "jsonb",
+            "source": {
+              "kind": "form_field",
+              "field": "files"
+            },
+            "required": true
+          },
+          {
+            "name": "uploadedBy",
+            "type": "uuid",
+            "source": {
+              "kind": "auth",
+              "claim": "user.id"
+            },
+            "required": true
+          }
+        ],
+        "source": {
+          "kind": "form",
+          "page": "DocumentUploadPage"
+        },
+        "trigger": "form_submit on DocumentUploadPage",
+        "description": "Accepts multipart file upload, writes a Document row per file at status=queued, dispatches ProcessDocumentWorkflow per document."
+      },
+      {
+        "name": "ProcessDocumentWorkflow",
+        "steps": [
+          {
+            "id": "trigger",
+            "next": "set_processing",
+            "type": "trigger",
+            "config": {
+              "entity": "ProcessDocumentJob",
+              "triggerType": "db_change"
+            }
+          },
+          {
+            "id": "set_processing",
+            "next": "update_job_started",
+            "type": "action",
+            "config": {
+              "table": "documents",
+              "where": {
+                "id": "{{documentId}}"
+              },
+              "fields": [
+                "status"
+              ],
+              "values": {
+                "status": "processing"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "update_job_started",
+            "next": "call_paddleocr",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "where": {
+                "id": "{{jobId}}"
+              },
+              "fields": [
+                "startedAt",
+                "step"
+              ],
+              "values": {
+                "step": "ocr",
+                "startedAt": "{{now}}"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "call_paddleocr",
+            "next": "ocr_success_gate",
+            "type": "action",
+            "config": {
+              "url": "{{env.PADDLEOCR_SIDECAR_URL}}/ocr",
+              "body": {
+                "fileUrl": "{{fileUrl}}"
+              },
+              "method": "POST",
+              "outputVar": "ocrResult",
+              "actionType": "http_call"
+            }
+          },
+          {
+            "id": "ocr_success_gate",
+            "type": "exclusive_gateway",
+            "config": {
+              "condition": "ocrResult.success == true"
+            },
+            "branches": {
+              "true": "update_job_step_ai",
+              "false": "set_failed"
+            }
+          },
+          {
+            "id": "update_job_step_ai",
+            "next": "ai_extract_fields",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "where": {
+                "id": "{{jobId}}"
+              },
+              "fields": [
+                "step"
+              ],
+              "values": {
+                "step": "ai_extract"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "ai_extract_fields",
+            "next": "persist_results",
+            "type": "action",
+            "config": {
+              "fields": [
+                "extractedFields"
+              ],
+              "prompt": "Extract all structured key-value fields from the following OCR text. Return a JSON object of field names to values.",
+              "inputVar": "ocrResult.text",
+              "outputVar": "aiResult",
+              "actionType": "ai_extract"
+            }
+          },
+          {
+            "id": "persist_results",
+            "next": "update_job_done",
+            "type": "action",
+            "config": {
+              "table": "documents",
+              "where": {
+                "id": "{{documentId}}"
+              },
+              "fields": [
+                "ocrText",
+                "extractedFields",
+                "confidence",
+                "status",
+                "processedAt"
+              ],
+              "values": {
+                "status": "complete",
+                "ocrText": "{{ocrResult.text}}",
+                "confidence": "{{ocrResult.confidence}}",
+                "processedAt": "{{now}}",
+                "extractedFields": "{{aiResult.extractedFields}}"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "update_job_done",
+            "next": "notify_complete",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "where": {
+                "id": "{{jobId}}"
+              },
+              "fields": [
+                "completedAt",
+                "step"
+              ],
+              "values": {
+                "step": "done",
+                "completedAt": "{{now}}"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "notify_complete",
+            "next": "end",
+            "type": "action",
+            "config": {
+              "message": "Document processing complete with {{ocrResult.confidence}}% confidence.",
+              "actionType": "send_notification",
+              "recipientRole": "admin"
+            }
+          },
+          {
+            "id": "set_failed",
+            "next": "update_job_failed",
+            "type": "action",
+            "config": {
+              "table": "documents",
+              "where": {
+                "id": "{{documentId}}"
+              },
+              "fields": [
+                "status",
+                "errorMessage"
+              ],
+              "values": {
+                "status": "failed",
+                "errorMessage": "{{ocrResult.error}}"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "update_job_failed",
+            "next": "notify_failed",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "where": {
+                "id": "{{jobId}}"
+              },
+              "fields": [
+                "completedAt",
+                "error"
+              ],
+              "values": {
+                "error": "{{ocrResult.error}}",
+                "completedAt": "{{now}}"
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "notify_failed",
+            "next": "end",
+            "type": "action",
+            "config": {
+              "message": "Document processing failed: {{ocrResult.error}}",
+              "actionType": "send_notification",
+              "recipientRole": "admin"
+            }
+          },
+          {
+            "id": "end",
+            "type": "end"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "documentId",
+            "type": "uuid",
+            "source": {
+              "kind": "form_field",
+              "field": "documentId"
+            },
+            "required": true
+          },
+          {
+            "name": "jobId",
+            "type": "uuid",
+            "source": {
+              "kind": "form_field",
+              "field": "jobId"
+            },
+            "required": true
+          }
+        ],
+        "source": {
+          "kind": "event",
+          "event": "ProcessDocumentJob.created"
+        },
+        "trigger": "db_change on ProcessDocumentJob",
+        "description": "Core async pipeline: marks document processing, calls PaddleOCR sidecar, runs AI extraction, persists results. Sets status=failed on any error."
+      },
+      {
+        "name": "ReprocessDocumentWorkflow",
+        "steps": [
+          {
+            "id": "trigger",
+            "next": "reset_document",
+            "type": "trigger",
+            "config": {
+              "entity": "Document",
+              "triggerType": "manual"
+            }
+          },
+          {
+            "id": "reset_document",
+            "next": "insert_reprocess_job",
+            "type": "action",
+            "config": {
+              "table": "documents",
+              "where": {
+                "id": "{{documentId}}"
+              },
+              "fields": [
+                "status",
+                "ocrText",
+                "extractedFields",
+                "confidence",
+                "errorMessage",
+                "processedAt"
+              ],
+              "values": {
+                "status": "queued",
+                "ocrText": null,
+                "confidence": null,
+                "processedAt": null,
+                "errorMessage": null,
+                "extractedFields": null
+              },
+              "actionType": "db_update"
+            }
+          },
+          {
+            "id": "insert_reprocess_job",
+            "next": "notify_requeued",
+            "type": "action",
+            "config": {
+              "table": "process_document_jobs",
+              "fields": [
+                "documentId",
+                "step"
+              ],
+              "values": {
+                "step": "ocr",
+                "documentId": "{{documentId}}"
+              },
+              "actionType": "db_insert"
+            }
+          },
+          {
+            "id": "notify_requeued",
+            "next": "end",
+            "type": "action",
+            "config": {
+              "message": "Document {{documentId}} re-queued for processing.",
+              "actionType": "send_notification",
+              "recipientRole": "admin"
+            }
+          },
+          {
+            "id": "end",
+            "type": "end"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "documentId",
+            "type": "uuid",
+            "source": {
+              "kind": "route",
+              "param": "id"
+            },
+            "required": true
+          }
+        ],
+        "source": {
+          "kind": "button",
+          "page": "DocumentDetailPage"
+        },
+        "trigger": "button on DocumentDetailPage",
+        "description": "Resets a failed or complete document back to queued status and dispatches a new ProcessDocumentJob."
+      }
+    ],
+    "api_routes": [
+      {
+        "auth": true,
+        "path": "/api/documents/upload",
+        "method": "POST",
+        "description": "Accepts multipart/form-data with one or more files. Writes Document rows at status=queued, dispatches ProcessDocumentWorkflow per file. Returns 202 with array of document IDs."
+      },
+      {
+        "auth": true,
+        "path": "/api/documents",
+        "method": "GET",
+        "description": "Returns paginated document list. Top-level hasProcessing boolean flag signals client to continue polling. Supports filters: status, dateFrom, dateTo, confidenceMin."
+      },
+      {
+        "auth": true,
+        "path": "/api/documents/:id",
+        "method": "GET",
+        "description": "Returns single document with extractedFields and ocrText."
+      },
+      {
+        "auth": true,
+        "path": "/api/documents/search",
+        "method": "GET",
+        "description": "Full-text search over tsvector index (ocr_text + extracted_fields JSONB string values). Accepts q (query string), status, dateFrom, dateTo, confidenceMin. Returns matching documents with snippet."
+      },
+      {
+        "auth": true,
+        "path": "/api/documents/:id/reprocess",
+        "method": "POST",
+        "description": "Resets document status to queued and inserts a new ProcessDocumentJob."
+      }
+    ],
+    "assumptions": [
+      "PaddleOCR sidecar communicates via HTTP REST at PADDLEOCR_SIDECAR_URL env var \u2014 resolved: HTTP is simpler to integrate with the workflow engine than subprocess stdout.",
+      "PDF preview uses a browser-native iframe \u2014 resolved: avoids pdf.js bundle overhead for an internal tool.",
+      "File storage is S3-compatible object storage \u2014 resolved: fileUrl stored as a pre-signed or internal URL; local disk is an acceptable alternative with env var toggle.",
+      "Job queue is a simple DB polling pattern on process_document_jobs \u2014 resolved: lowest ops overhead for an internal tool; BullMQ can be swapped in later.",
+      "Confidence is a single document-level integer (0-100) \u2014 resolved: stored on Document.confidence as the mean of per-character scores from PaddleOCR; per-field confidence is embedded inside extractedFields JSONB.",
+      "Full-text search uses Postgres tsvector with GIN index concatenating ocr_text and all JSONB string values \u2014 resolved: standard Postgres pattern, no external search engine needed.",
+      "Search supports keyword OR matching (default tsvector) \u2014 resolved: phrase search deferred to a future iteration.",
+      "Single role (admin) with seeded credentials \u2014 resolved: no self-signup needed for an internal tool.",
+      "Multi-page PDFs are split into pages by the PaddleOCR sidecar before OCR dispatch \u2014 resolved: sidecar is responsible for page splitting; pageCount is returned in ocrResult."
+    ],
+    "audit_trail": [
+      {
+        "on": [
+          "create",
+          "update"
+        ],
+        "entity": "Document",
+        "reason_required": false
+      }
+    ],
+    "data_models": [
+      {
+        "name": "User",
+        "table": "users",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "email",
+            "type": "varchar"
+          },
+          {
+            "name": "name",
+            "type": "varchar"
+          },
+          {
+            "name": "role",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "admin"
+              ]
+            },
+            "enum_values": [
+              "admin"
+            ]
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "indexes": []
+      },
+      {
+        "name": "Document",
+        "table": "documents",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "originalFilename",
+            "type": "varchar"
+          },
+          {
+            "name": "fileUrl",
+            "type": "varchar"
+          },
+          {
+            "name": "mimeType",
+            "type": "varchar"
+          },
+          {
+            "name": "fileSizeBytes",
+            "type": "integer"
+          },
+          {
+            "name": "status",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "queued",
+                "processing",
+                "complete",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "ocrText",
+            "type": "text"
+          },
+          {
+            "name": "extractedFields",
+            "type": "jsonb"
+          },
+          {
+            "name": "confidence",
+            "type": "integer"
+          },
+          {
+            "name": "pageCount",
+            "type": "integer"
+          },
+          {
+            "name": "uploadedBy",
+            "type": "uuid"
+          },
+          {
+            "name": "processedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "errorMessage",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "indexes": []
+      },
+      {
+        "name": "ProcessDocumentJob",
+        "table": "process_document_jobs",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "documentId",
+            "type": "uuid"
+          },
+          {
+            "name": "step",
+            "type": "varchar",
+            "semantic": {
+              "control": "Select",
+              "enum_values": [
+                "ocr",
+                "ai_extract",
+                "done"
+              ]
+            }
+          },
+          {
+            "name": "startedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "completedAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "error",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          },
+          {
+            "name": "updatedAt",
+            "type": "timestamp"
+          }
+        ],
+        "indexes": []
+      }
+    ],
+    "description": "Internal admin tool for uploading paper/PDF records, running OCR via PaddleOCR sidecar and AI field extraction, and searching the resulting structured and full-text content.",
+    "module_name": "document-intelligence"
+  },
+  "generatedAt": null
+}

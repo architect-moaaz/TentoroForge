@@ -1,0 +1,12 @@
+{
+  "archetype": "banking-platform",
+  "source_app": "igi1eqs7",
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "stresses": [
+    "Money/Ledger primitives",
+    "TRUST_NAVY visual lock",
+    "masked sensitive columns",
+    "user-named constraints"
+  ]
+}

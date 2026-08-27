@@ -1,0 +1,230 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "Task Manager"
+  },
+  "tokens": {},
+  "dataSources": {
+    "settings": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/settings",
+      "shape": { "appName": "string", "description": "string", "timezone": "string", "emailNotifications": "boolean", "weeklyDigest": "boolean", "theme": "string" }
+    },
+    "updateSettings": {
+      "type": "rest",
+      "method": "PUT",
+      "path": "/api/settings",
+      "body": { "from": "state:form" },
+      "onSuccess": { "invalidate": ["settings"] }
+    },
+    "deleteProject": {
+      "type": "rest",
+      "method": "DELETE",
+      "path": "/api/projects/{id}"
+    }
+  },
+  "pages": [
+    {
+      "$id": "settings",
+      "route": "/settings",
+      "title": "Settings",
+      "auth": { "required": true, "roles": ["admin"] },
+      "state": {
+        "activeSection": "general",
+        "form": {
+          "appName": "",
+          "description": "",
+          "timezone": "UTC",
+          "emailNotifications": true,
+          "weeklyDigest": true,
+          "theme": "light"
+        }
+      },
+      "root": {
+        "node": "Row",
+        "height": "screen",
+        "children": [
+          {
+            "node": "Stack",
+            "width": "240px",
+            "padding": "md",
+            "gap": "xs",
+            "children": [
+              {
+                "node": "Text",
+                "content": "Settings",
+                "typography": "heading-2",
+                "margin": { "bottom": "md" }
+              },
+              {
+                "node": "Repeater",
+                "data": "source:settingsNavItems",
+                "itemKey": "id",
+                "template": {
+                  "node": "Card",
+                  "padding": "sm",
+                  "hoverable": true,
+                  "selected": "{{item.id}} === state:activeSection",
+                  "action": { "type": "setState", "path": "activeSection", "value": "{{item.id}}" },
+                  "children": [
+                    {
+                      "node": "Row",
+                      "gap": "sm",
+                      "align": "center",
+                      "children": [
+                        { "node": "Icon", "name": "{{item.icon}}", "size": "sm", "color": "muted" },
+                        { "node": "Text", "content": "{{item.label}}" }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "node": "Divider",
+            "direction": "vertical"
+          },
+          {
+            "node": "Stack",
+            "flex": 1,
+            "padding": "lg",
+            "scroll": true,
+            "children": [
+              {
+                "node": "Slot",
+                "switch": "state:activeSection",
+                "cases": {
+                  "general": {
+                    "node": "Stack",
+                    "gap": "lg",
+                    "children": [
+                      { "node": "Text", "content": "General Settings", "typography": "heading-2" },
+                      {
+                        "node": "Form",
+                        "bind": "state:form",
+                        "onSubmit": {
+                          "type": "sequence",
+                          "steps": [
+                            { "type": "mutate", "source": "updateSettings" },
+                            { "type": "toast", "variant": "success", "message": "Settings saved" }
+                          ]
+                        },
+                        "layout": "single-column",
+                        "fields": [
+                          {
+                            "field": "appName",
+                            "label": "App Name",
+                            "required": true,
+                            "node": "TextInput",
+                            "placeholder": "My Application"
+                          },
+                          {
+                            "field": "description",
+                            "label": "Description",
+                            "node": "TextArea",
+                            "placeholder": "A brief description of your app",
+                            "rows": 3
+                          },
+                          {
+                            "field": "timezone",
+                            "label": "Timezone",
+                            "node": "Select",
+                            "options": [
+                              { "value": "UTC", "label": "UTC" },
+                              { "value": "America/New_York", "label": "Eastern Time" },
+                              { "value": "America/Chicago", "label": "Central Time" },
+                              { "value": "America/Denver", "label": "Mountain Time" },
+                              { "value": "America/Los_Angeles", "label": "Pacific Time" }
+                            ],
+                            "searchable": true
+                          }
+                        ],
+                        "actions": [
+                          {
+                            "node": "Row",
+                            "justify": "end",
+                            "children": [
+                              { "node": "Button", "label": "Save Changes", "variant": "primary" }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "notifications": {
+                    "node": "Stack",
+                    "gap": "lg",
+                    "children": [
+                      { "node": "Text", "content": "Notification Preferences", "typography": "heading-2" },
+                      {
+                        "node": "Card",
+                        "padding": "md",
+                        "children": [
+                          {
+                            "node": "Stack",
+                            "gap": "md",
+                            "children": [
+                              {
+                                "node": "Toggle",
+                                "bind": "state:form.emailNotifications",
+                                "label": "Email Notifications",
+                                "description": "Receive email notifications for task assignments and updates"
+                              },
+                              { "node": "Divider" },
+                              {
+                                "node": "Toggle",
+                                "bind": "state:form.weeklyDigest",
+                                "label": "Weekly Digest",
+                                "description": "Receive a weekly summary of project activity"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "danger": {
+                    "node": "Stack",
+                    "gap": "lg",
+                    "children": [
+                      { "node": "Text", "content": "Danger Zone", "typography": "heading-2", "color": "danger" },
+                      {
+                        "node": "Card",
+                        "padding": "md",
+                        "children": [
+                          {
+                            "node": "Row",
+                            "justify": "between",
+                            "align": "center",
+                            "children": [
+                              {
+                                "node": "Stack",
+                                "gap": "xs",
+                                "children": [
+                                  { "node": "Text", "content": "Delete Project", "weight": "semibold" },
+                                  { "node": "Text", "content": "Permanently delete this project and all its data", "typography": "body-sm" }
+                                ]
+                              },
+                              {
+                                "node": "Button",
+                                "label": "Delete Project",
+                                "variant": "danger",
+                                "action": { "type": "mutate", "source": "deleteProject", "confirm": "Are you sure? This action cannot be undone." }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

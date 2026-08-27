@@ -1,0 +1,11 @@
+{
+  "name": "inline-editable-grid",
+  "description": "Table where every cell is directly editable. Enter/blur commits; Esc reverts.",
+  "when_to_use": {"page_type_any_of": ["list", "grid"], "interactions_contains": "inline-edit"},
+  "invariants": ["commit-on-blur", "revert-on-escape", "cell-level-error-state", "optimistic-update"],
+  "shape": {
+    "type": "Card", "children": [
+      {"type": "Table", "props": {"editableCells": true, "bind": "{{rows}}"}}
+    ]
+  }
+}

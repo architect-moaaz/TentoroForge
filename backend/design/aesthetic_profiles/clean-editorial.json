@@ -1,0 +1,54 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "clean-editorial",
+  "description": "Editorial magazine feel — generous type, warm neutrals, hairline rules, serif display. Content-forward.",
+  "when_to_use": {
+    "layout.hero_any_of": ["media-hero", "feed-header"],
+    "layout.primaryInteraction_any_of": ["feed", "chart"]
+  },
+  "tokens": {
+    "color": {
+      "background": "hsl(35 30% 97%)",
+      "surface": "hsl(0 0% 100%)",
+      "surfaceHover": "hsl(35 30% 94%)",
+      "border": "hsl(30 15% 85%)",
+      "primary": "hsl(15 65% 42%)",
+      "foreground": "hsl(30 25% 12%)",
+      "muted": "hsl(30 10% 42%)"
+    },
+    "radius": {
+      "sm": "2px",
+      "md": "4px",
+      "lg": "6px",
+      "xl": "10px"
+    },
+    "shadow": {
+      "sm": "none",
+      "card": "0 1px 0 hsl(30 15% 85%)",
+      "elevated": "0 4px 20px hsl(30 25% 12% / 0.08)"
+    },
+    "spacing": "spacious",
+    "typography": {
+      "display": "'Fraunces', 'Playfair Display', 'DM Serif Display', serif",
+      "body": "'Source Serif Pro', 'Charter', Georgia, serif"
+    }
+  },
+  "css_variables": {
+    "--background": "35 30% 97%",
+    "--foreground": "30 25% 12%",
+    "--card": "0 0% 100%",
+    "--card-foreground": "30 25% 12%",
+    "--border": "30 15% 85%",
+    "--primary": "15 65% 42%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "35 30% 94%",
+    "--muted-foreground": "30 10% 42%",
+    "--ring": "15 65% 42%"
+  },
+  "surface_treatment": {
+    "root": {"background": "hsl(35 30% 97%)"},
+    "card": {"boxShadow": "0 1px 0 hsl(30 15% 85%)", "borderRadius": "2px"},
+    "button.primary": {"borderRadius": "2px"},
+    "heading.h1": {"fontFamily": "'Fraunces', 'Playfair Display', serif", "letterSpacing": "-0.02em"}
+  }
+}

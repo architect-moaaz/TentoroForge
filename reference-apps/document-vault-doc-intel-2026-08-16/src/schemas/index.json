@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "2",
+  "id": "upload-landing-page",
+  "route": "/",
+  "layout": "main",
+  "dataSources": [],
+  "root": {
+    "type": "Stack",
+    "props": {
+      "gap": "tokens.spacing.6",
+      "className": "px-6 py-6 md:px-8 md:py-8"
+    },
+    "children": [
+      {
+        "type": "Stack",
+        "props": { "gap": "tokens.spacing.1" },
+        "children": [
+          { "type": "Heading", "props": { "content": "Upload documents", "level": 1 } },
+          { "type": "Text",    "props": { "content": "Drop a PDF or image to run OCR + AI field extraction. You can also paste a public URL.", "variant": "caption" } }
+        ]
+      },
+      {
+        "type": "Card",
+        "props": {
+          "padding": "tokens.spacing.6",
+          "style": { "boxShadow": "0 0 0 1px hsl(220 8% 82%)" }
+        },
+        "children": [
+          {
+            "type": "Form",
+            "props": {
+              "workflow": "ProcessDocument",
+              "onSuccess": { "toast": "Queued for processing", "navigate": "/documents" },
+              "onError": { "toast": "Upload failed — see console" }
+            },
+            "children": [
+              {
+                "type": "Stack",
+                "props": { "gap": "tokens.spacing.4" },
+                "children": [
+                  {
+                    "type": "FileUpload",
+                    "props": {
+                      "name": "fileId",
+                      "label": "Drop a file",
+                      "accept": "application/pdf,image/*",
+                      "maxSizeMb": 10,
+                      "hint": "PDF or image · up to 10 MB"
+                    }
+                  },
+                  {
+                    "type": "Input",
+                    "props": {
+                      "name": "fileUrl",
+                      "label": "or paste a File URL",
+                      "placeholder": "https://example.com/scan.pdf"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "props": {
+                      "submit": true,
+                      "label": "Queue for processing",
+                      "variant": "primary"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {}
+}

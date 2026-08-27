@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-load",
+    "surface": "route"
+  },
+  "data": {
+    "denormalization": "moderate",
+    "readShape": "dashboard"
+  },
+  "identity": {
+    "usageMode": "returning-personal"
+  },
+  "label": "hr-back-office",
+  "layout": {
+    "density": "comfortable",
+    "hero": "kpi-strip",
+    "primaryInteraction": "dashboard",
+    "shell": "sidebar"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "sidebar-links"
+  },
+  "workflows": {
+    "executionMode": "await-with-progress"
+  }
+}

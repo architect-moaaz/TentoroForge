@@ -1,0 +1,43 @@
+{
+  "app_slug": "9y8de8i7",
+  "mode": "warn",
+  "summary": "Journey gate: 0/2 passed in 23s",
+  "journeys": [
+    {
+      "slug": "crud-write-document",
+      "name": "Create a Document through the UI",
+      "status": "failed",
+      "failing_step": "login_as",
+      "failure": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n\n  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator([\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7"
+    },
+    {
+      "slug": "crud-write-document",
+      "name": "Create a Document through the UI",
+      "status": "failed",
+      "failing_step": "login_as",
+      "failure": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[type=\"email\"], input[name=\"email\"], input[autocomplete=\"email\"], input[placeholder*=\"mail\" i]').first() to be visible\u001b[22m\n\n\n  189 |           'input[autocomplete~=\"password\"]',\n  190 |         ].join(\", \")).first();\n> 191 |         await emailInput.waitFor({ state: \"visible\", timeout: 10_000 });\n      |                          ^\n  192 |         await emailInput.fill(step.email);\n  193 |         await passwordInput.fill(step.password);\n  194 |         const submitButton = page.locator([\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:191:26\n    at runStep (/Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:166:3)\n    at /Users/m/Work/code/poc/design2ui-forge-v3/output/9y8de8i7/journeys/driver.spec.ts:319:7"
+    }
+  ],
+  "hints": [
+    {
+      "journey_slug": "crud-write-document",
+      "failing_step": "login_as",
+      "likely_cause": "Uncategorized journey failure.",
+      "target_seam": "unknown",
+      "hint": "The failure didn't match any of the known heuristic buckets. Inspect the Playwright trace + failure text manually.",
+      "tags": [
+        "unclassified"
+      ]
+    },
+    {
+      "journey_slug": "crud-write-document",
+      "failing_step": "login_as",
+      "likely_cause": "Uncategorized journey failure.",
+      "target_seam": "unknown",
+      "hint": "The failure didn't match any of the known heuristic buckets. Inspect the Playwright trace + failure text manually.",
+      "tags": [
+        "unclassified"
+      ]
+    }
+  ]
+}

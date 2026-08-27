@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-load",
+    "surface": "route"
+  },
+  "data": {
+    "denormalization": "aggressive",
+    "readShape": "map-pins"
+  },
+  "identity": {
+    "usageMode": "returning-personal"
+  },
+  "label": "map-canvas-booking",
+  "layout": {
+    "density": "spacious",
+    "hero": "map-canvas",
+    "primaryInteraction": "map",
+    "shell": "map-canvas"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "drawer"
+  },
+  "workflows": {
+    "executionMode": "streaming"
+  }
+}

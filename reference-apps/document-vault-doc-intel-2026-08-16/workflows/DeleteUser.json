@@ -1,0 +1,75 @@
+{
+  "id": "delete-user",
+  "name": "DeleteUser",
+  "description": "Delete a User record.",
+  "processVariables": [
+    {
+      "name": "id",
+      "type": "string",
+      "required": true
+    }
+  ],
+  "definition": {
+    "trigger": {
+      "type": "manual"
+    },
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "type": "manual"
+          },
+          "label": "Start"
+        }
+      },
+      {
+        "id": "db_delete",
+        "type": "action",
+        "position": {
+          "x": 200,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "actionType": "db_delete",
+            "table": "users",
+            "where": {
+              "id": "id"
+            }
+          },
+          "label": "Delete User"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "position": {
+          "x": 400,
+          "y": 0
+        },
+        "data": {
+          "config": {},
+          "label": "End"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_trigger_action",
+        "source": "trigger",
+        "target": "db_delete"
+      },
+      {
+        "id": "e_action_end",
+        "source": "db_delete",
+        "target": "end"
+      }
+    ]
+  }
+}

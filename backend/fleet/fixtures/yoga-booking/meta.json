@@ -1,0 +1,12 @@
+{
+  "archetype": "booking-platform",
+  "source_app": "2seyiw4q",
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "stresses": [
+    "personas + persona-pills shell",
+    "visual lock (wellness-warm)",
+    "schedule/booking flows",
+    "archetype vocabulary"
+  ]
+}

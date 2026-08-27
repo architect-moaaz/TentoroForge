@@ -1,0 +1,157 @@
+{
+  "schemaVersion": "1",
+  "id": "products/detail",
+  "route": "/products/[id]",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Product Detail" },
+  "dataSources": [
+    {
+      "name": "currentProduct",
+      "entity": "Product",
+      "op": "get",
+      "filter": { "id": { "$param": "id" } }
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "spacing.6" },
+    "children": [
+      {
+        "id": "breadcrumb",
+        "type": "Breadcrumb",
+        "props": {
+          "items": [
+            { "label": "Products", "href": "/products" },
+            { "label": "Detail" }
+          ]
+        }
+      },
+      {
+        "id": "product-heading",
+        "type": "Heading",
+        "bind": { "source": "currentProduct", "path": "name" },
+        "props": { "level": 1, "content": "Product" }
+      },
+      {
+        "id": "detail-card",
+        "type": "Card",
+        "props": {},
+        "children": [
+          {
+            "id": "detail-stack",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "spacing.4" },
+            "children": [
+              {
+                "id": "name-row",
+                "type": "Row",
+                "props": { "gap": "spacing.2", "align": "center" },
+                "children": [
+                  {
+                    "id": "name-label",
+                    "type": "Text",
+                    "props": { "content": "Name:", "as": "strong" }
+                  },
+                  {
+                    "id": "name-value",
+                    "type": "Text",
+                    "bind": { "source": "currentProduct", "path": "name" },
+                    "props": { "as": "span" }
+                  }
+                ]
+              },
+              {
+                "id": "description-row",
+                "type": "Row",
+                "props": { "gap": "spacing.2", "align": "center" },
+                "children": [
+                  {
+                    "id": "description-label",
+                    "type": "Text",
+                    "props": { "content": "Description:", "as": "strong" }
+                  },
+                  {
+                    "id": "description-value",
+                    "type": "Text",
+                    "bind": { "source": "currentProduct", "path": "description" },
+                    "props": { "as": "span" }
+                  }
+                ]
+              },
+              {
+                "id": "price-row",
+                "type": "Row",
+                "props": { "gap": "spacing.2", "align": "center" },
+                "children": [
+                  {
+                    "id": "price-label",
+                    "type": "Text",
+                    "props": { "content": "Price:", "as": "strong" }
+                  },
+                  {
+                    "id": "price-value",
+                    "type": "Text",
+                    "bind": { "source": "currentProduct", "path": "price" },
+                    "props": { "as": "span" }
+                  }
+                ]
+              },
+              {
+                "id": "stock-row",
+                "type": "Row",
+                "props": { "gap": "spacing.2", "align": "center" },
+                "children": [
+                  {
+                    "id": "stock-label",
+                    "type": "Text",
+                    "props": { "content": "In Stock:", "as": "strong" }
+                  },
+                  {
+                    "id": "stock-value",
+                    "type": "Text",
+                    "bind": { "source": "currentProduct", "path": "in_stock" },
+                    "props": { "as": "span" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "admin-actions",
+        "type": "Conditional",
+        "props": { "when": "user.role == 'admin'" },
+        "children": [
+          {
+            "id": "actions-row",
+            "type": "Row",
+            "props": { "gap": "spacing.3" },
+            "children": [
+              {
+                "id": "edit-btn",
+                "type": "Button",
+                "props": {
+                  "label": "Edit",
+                  "variant": "secondary",
+                  "navigate": "/products/[id]/edit"
+                }
+              },
+              {
+                "id": "delete-btn",
+                "type": "Button",
+                "props": {
+                  "label": "Delete",
+                  "variant": "danger",
+                  "workflow": "deleteProduct",
+                  "args": { "id": "currentProduct.id" }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

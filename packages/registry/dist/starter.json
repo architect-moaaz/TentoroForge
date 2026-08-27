@@ -1,0 +1,1007 @@
+{
+  "Container": {
+    "props": {
+      "direction": {},
+      "gap": {},
+      "padding": {},
+      "align": {},
+      "justify": {},
+      "wrap": {},
+      "maxWidth": {}
+    }
+  },
+  "Grid": {
+    "props": {
+      "columns": {},
+      "rowGap": {},
+      "columnGap": {},
+      "padding": {},
+      "align": {},
+      "gap": {}
+    }
+  },
+  "Card": {
+    "props": {
+      "title": {},
+      "footer": {},
+      "elevation": {},
+      "density": {}
+    }
+  },
+  "Divider": {
+    "props": {
+      "orientation": {},
+      "thickness": {}
+    }
+  },
+  "Spacer": {
+    "props": {
+      "size": {}
+    }
+  },
+  "Hero": {
+    "props": {
+      "headline": {},
+      "subhead": {},
+      "eyebrow": {},
+      "layout": {},
+      "role": {},
+      "ctas": {},
+      "backgroundImage": {},
+      "media": {}
+    }
+  },
+  "Stack": {
+    "props": {
+      "direction": {},
+      "gap": {},
+      "align": {},
+      "justify": {},
+      "wrap": {}
+    }
+  },
+  "Row": {
+    "props": {
+      "gap": {},
+      "align": {},
+      "justify": {},
+      "wrap": {}
+    }
+  },
+  "Input": {
+    "props": {
+      "label": {},
+      "placeholder": {},
+      "type": {},
+      "binding": {},
+      "validation": {}
+    }
+  },
+  "Textarea": {
+    "props": {
+      "label": {},
+      "placeholder": {},
+      "rows": {},
+      "binding": {}
+    }
+  },
+  "Select": {
+    "props": {
+      "label": {},
+      "options": {},
+      "binding": {},
+      "multiple": {}
+    }
+  },
+  "Checkbox": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "Switch": {
+    "props": {
+      "label": {},
+      "checked": {},
+      "binding": {}
+    }
+  },
+  "NumberInput": {
+    "props": {
+      "label": {},
+      "min": {},
+      "max": {},
+      "step": {},
+      "binding": {}
+    }
+  },
+  "MoneyInput": {
+    "props": {
+      "label": {},
+      "currency": {},
+      "currencyEditable": {},
+      "min": {},
+      "step": {},
+      "placeholder": {},
+      "binding": {}
+    }
+  },
+  "MoneyDisplay": {
+    "props": {
+      "currency": {},
+      "locale": {},
+      "compact": {},
+      "showSymbol": {},
+      "align": {},
+      "binding": {}
+    }
+  },
+  "RadioGroup": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "Slider": {
+    "props": {
+      "label": {},
+      "min": {},
+      "max": {},
+      "range": {},
+      "binding": {}
+    }
+  },
+  "FileUpload": {
+    "props": {
+      "label": {},
+      "accept": {},
+      "multiple": {},
+      "binding": {}
+    }
+  },
+  "Combobox": {
+    "props": {
+      "label": {},
+      "placeholder": {},
+      "binding": {}
+    }
+  },
+  "Button": {
+    "props": {
+      "label": {},
+      "variant": {},
+      "size": {},
+      "disabled": {},
+      "onClick": {},
+      "clearsFilters": {},
+      "opensDialog": {}
+    }
+  },
+  "Heading": {
+    "props": {
+      "content": {},
+      "level": {},
+      "weight": {}
+    }
+  },
+  "MetricTile": {
+    "props": {
+      "label": {},
+      "value": {},
+      "format": {},
+      "importance": {},
+      "icon": {},
+      "delta": {},
+      "trend": {}
+    }
+  },
+  "Avatar": {
+    "props": {
+      "name": {},
+      "photoUrl": {},
+      "src": {},
+      "size": {},
+      "status": {}
+    }
+  },
+  "NavLink": {
+    "props": {
+      "label": {},
+      "target": {},
+      "icon": {}
+    }
+  },
+  "Breadcrumb": {
+    "props": {
+      "items": {},
+      "separator": {}
+    }
+  },
+  "Section": {
+    "props": {
+      "variant": {},
+      "title": {},
+      "subtitle": {},
+      "anchor": {},
+      "role": {}
+    }
+  },
+  "Tabs": {
+    "props": {
+      "tabs": {},
+      "value": {}
+    }
+  },
+  "TabPanel": {
+    "props": {
+      "label": {},
+      "value": {}
+    }
+  },
+  "Table": {
+    "props": {
+      "columns": {},
+      "caption": {}
+    }
+  },
+  "Badge": {
+    "props": {
+      "content": {},
+      "variant": {}
+    }
+  },
+  "Alert": {
+    "props": {
+      "message": {},
+      "variant": {},
+      "title": {}
+    }
+  },
+  "EmptyState": {
+    "props": {
+      "message": {},
+      "icon": {},
+      "action": {}
+    }
+  },
+  "Form": {
+    "props": {
+      "workflow": {},
+      "fields": {},
+      "submitLabel": {},
+      "defaultValues": {}
+    }
+  },
+  "IconButton": {
+    "props": {
+      "icon": {},
+      "aria-label": {},
+      "variant": {},
+      "size": {},
+      "disabled": {},
+      "workflow": {}
+    }
+  },
+  "Sidebar": {
+    "props": {
+      "width": {}
+    }
+  },
+  "Cluster": {
+    "props": {
+      "gap": {},
+      "justify": {},
+      "align": {},
+      "equalCols": {},
+      "equalRows": {}
+    }
+  },
+  "Split": {
+    "props": {
+      "ratio": {},
+      "breakpoint": {}
+    }
+  },
+  "AppShell": {
+    "props": {
+      "sidebar": {},
+      "topbar": {},
+      "actions": {},
+      "rightRail": {}
+    }
+  },
+  "InspectorPanel": {
+    "props": {
+      "paramKey": {},
+      "title": {},
+      "width": {}
+    }
+  },
+  "TabPanelWithDeepLink": {
+    "props": {
+      "paramKey": {},
+      "tabs": {},
+      "defaultTab": {}
+    }
+  },
+  "Chart": {
+    "props": {
+      "chartType": {},
+      "data": {},
+      "xKey": {},
+      "series": {},
+      "height": {},
+      "showGrid": {},
+      "showLegend": {},
+      "showTooltip": {}
+    }
+  },
+  "Sparkline": {
+    "props": {
+      "data": {},
+      "width": {},
+      "height": {},
+      "color": {},
+      "showDots": {}
+    }
+  },
+  "DataGrid": {
+    "props": {
+      "columns": {},
+      "rows": {},
+      "rowKey": {},
+      "virtualise": {},
+      "selectable": {},
+      "expandable": {},
+      "rowActions": {}
+    }
+  },
+  "EditableLineGrid": {
+    "props": {
+      "columns": {},
+      "rows": {},
+      "rowKey": {},
+      "showLookup": {},
+      "lookupPlaceholder": {},
+      "removable": {},
+      "totals": {},
+      "emptyMessage": {}
+    }
+  },
+  "Timeline": {
+    "props": {
+      "entries": {},
+      "orientation": {}
+    }
+  },
+  "TableSortable": {
+    "props": {
+      "columns": {},
+      "caption": {},
+      "onSort": {}
+    }
+  },
+  "ApprovalStepper": {
+    "props": {
+      "steps": {},
+      "orientation": {},
+      "onStepClick": {}
+    }
+  },
+  "PersonCard": {
+    "props": {
+      "name": {},
+      "role": {},
+      "department": {},
+      "avatarUrl": {},
+      "avatarInitials": {},
+      "email": {},
+      "status": {},
+      "layout": {}
+    }
+  },
+  "FilterBar": {
+    "props": {
+      "chips": {},
+      "savedViews": {},
+      "showSearch": {}
+    }
+  },
+  "CommandPalette": {
+    "props": {
+      "items": {},
+      "placeholder": {},
+      "triggerKey": {}
+    }
+  },
+  "ActivityFeed": {
+    "props": {
+      "entries": {},
+      "title": {},
+      "showFilter": {},
+      "maxHeight": {}
+    }
+  },
+  "EmptyStateRich": {
+    "props": {
+      "heading": {},
+      "body": {},
+      "icon": {},
+      "illustration": {},
+      "primaryCta": {},
+      "sampleDataLink": {}
+    }
+  },
+  "DateRangePicker": {
+    "props": {
+      "name": {},
+      "label": {},
+      "startDate": {},
+      "endDate": {},
+      "presets": {},
+      "minDate": {},
+      "maxDate": {}
+    }
+  },
+  "MultiSelect": {
+    "props": {
+      "name": {},
+      "label": {},
+      "placeholder": {},
+      "options": {},
+      "selected": {},
+      "showSearch": {}
+    }
+  },
+  "FeatureCard": {
+    "props": {
+      "title": {},
+      "description": {},
+      "icon": {},
+      "cta": {},
+      "layout": {}
+    }
+  },
+  "Skeleton": {
+    "props": {
+      "variant": {},
+      "lines": {}
+    }
+  },
+  "LoadingState": {
+    "props": {
+      "label": {}
+    }
+  },
+  "KeyValueList": {
+    "props": {
+      "items": {}
+    }
+  },
+  "Link": {
+    "props": {
+      "label": {},
+      "navigate": {},
+      "workflow": {}
+    }
+  },
+  "DatePicker": {
+    "props": {
+      "name": {},
+      "label": {},
+      "bind": {},
+      "min": {},
+      "max": {}
+    }
+  },
+  "TimePicker": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "ColorPicker": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "InputOTP": {
+    "props": {
+      "label": {},
+      "length": {},
+      "binding": {}
+    }
+  },
+  "Rating": {
+    "props": {
+      "label": {},
+      "max": {},
+      "binding": {}
+    }
+  },
+  "MaskedInput": {
+    "props": {
+      "label": {},
+      "mask": {},
+      "binding": {}
+    }
+  },
+  "KeyValueInput": {
+    "props": {
+      "label": {},
+      "description": {},
+      "valueType": {},
+      "binding": {}
+    }
+  },
+  "Gauge": {
+    "props": {
+      "value": {},
+      "min": {},
+      "max": {},
+      "label": {},
+      "unit": {},
+      "binding": {}
+    }
+  },
+  "SplitArc": {
+    "props": {
+      "segments": {},
+      "total": {},
+      "title": {},
+      "size": {},
+      "showLegend": {},
+      "showEndLabels": {},
+      "binding": {}
+    }
+  },
+  "Heatmap": {
+    "props": {
+      "color": {},
+      "showValues": {},
+      "binding": {}
+    }
+  },
+  "Schematic": {
+    "props": {
+      "width": {},
+      "height": {},
+      "showLabels": {},
+      "binding": {}
+    }
+  },
+  "Stepper": {
+    "props": {
+      "orientation": {},
+      "activeStep": {},
+      "binding": {}
+    }
+  },
+  "Tag": {
+    "props": {
+      "label": {},
+      "variant": {},
+      "removable": {}
+    }
+  },
+  "Stat": {
+    "props": {
+      "label": {},
+      "value": {},
+      "delta": {},
+      "trend": {},
+      "caption": {}
+    }
+  },
+  "DescriptionList": {
+    "props": {
+      "orientation": {},
+      "binding": {}
+    }
+  },
+  "List": {
+    "props": {
+      "divided": {},
+      "binding": {}
+    }
+  },
+  "SegmentedControl": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "Tree": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "Transfer": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "Cascader": {
+    "props": {
+      "placeholder": {},
+      "binding": {}
+    }
+  },
+  "Calendar": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "Kanban": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "ResourceTimeline": {
+    "props": {
+      "resources": {},
+      "items": {},
+      "itemResourceField": {},
+      "startField": {},
+      "endField": {},
+      "titleField": {},
+      "statusField": {},
+      "resourceGroupField": {},
+      "days": {},
+      "itemHref": {}
+    }
+  },
+  "RichTextEditor": {
+    "props": {
+      "label": {},
+      "binding": {}
+    }
+  },
+  "Carousel": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "Lightbox": {
+    "props": {
+      "binding": {}
+    }
+  },
+  "CodeBlock": {
+    "props": {
+      "code": {},
+      "language": {},
+      "showCopy": {}
+    }
+  },
+  "QRCode": {
+    "props": {
+      "value": {},
+      "size": {},
+      "binding": {}
+    }
+  },
+  "CameraCapture": {
+    "props": {
+      "label": {},
+      "captureLabel": {},
+      "binding": {}
+    }
+  },
+  "BarcodeScanner": {
+    "props": {
+      "name": {},
+      "label": {},
+      "hint": {},
+      "binding": {}
+    }
+  },
+  "Scanner": {
+    "props": {
+      "label": {},
+      "deviceType": {},
+      "status": {},
+      "binding": {}
+    }
+  },
+  "ValidationChecklist": {
+    "props": {
+      "orientation": {},
+      "binding": {}
+    }
+  },
+  "FadeIn": {
+    "props": {
+      "delay": {},
+      "duration": {}
+    }
+  },
+  "Stagger": {
+    "props": {
+      "delay": {},
+      "interval": {}
+    }
+  },
+  "Repeat": {
+    "props": {
+      "source": {},
+      "bind": {},
+      "path": {},
+      "as": {},
+      "keyPath": {}
+    }
+  },
+  "Conditional": {
+    "props": {
+      "when": {}
+    }
+  },
+  "DataBoundary": {
+    "props": {
+      "fallback": {}
+    }
+  },
+  "Slot": {
+    "props": {
+      "name": {}
+    }
+  },
+  "Progress": {
+    "props": {
+      "label": {},
+      "value": {},
+      "variant": {}
+    }
+  },
+  "Spinner": {
+    "props": {
+      "label": {},
+      "size": {}
+    }
+  },
+  "Banner": {
+    "props": {
+      "variant": {},
+      "title": {},
+      "message": {}
+    }
+  },
+  "Redirect": {
+    "props": {
+      "to": {},
+      "label": {}
+    }
+  },
+  "Dialog": {
+    "props": {
+      "id": {},
+      "title": {},
+      "description": {},
+      "size": {}
+    }
+  },
+  "DropdownMenu": {
+    "props": {
+      "trigger": {}
+    }
+  },
+  "Popover": {
+    "props": {
+      "trigger": {},
+      "title": {},
+      "content": {}
+    }
+  },
+  "Tooltip": {
+    "props": {
+      "label": {},
+      "content": {}
+    }
+  },
+  "Drawer": {
+    "props": {
+      "trigger": {},
+      "title": {},
+      "side": {},
+      "content": {}
+    }
+  },
+  "ContextMenu": {
+    "props": {
+      "label": {}
+    }
+  },
+  "HoverCard": {
+    "props": {
+      "label": {},
+      "title": {},
+      "content": {}
+    }
+  },
+  "Menubar": {
+    "props": {}
+  },
+  "AddToCart": {
+    "props": {
+      "entity": {},
+      "itemId": {},
+      "quantity": {},
+      "price": {},
+      "label": {},
+      "text": {},
+      "variant": {},
+      "size": {},
+      "fullWidth": {}
+    }
+  },
+  "CartBadge": {
+    "props": {
+      "href": {},
+      "label": {},
+      "hideZero": {}
+    }
+  },
+  "CartPanel": {
+    "props": {
+      "title": {},
+      "emptyState": {},
+      "currency": {},
+      "checkoutLabel": {},
+      "onCheckoutNavigate": {}
+    }
+  },
+  "CartPage": {
+    "props": {
+      "title": {},
+      "currency": {},
+      "checkoutLabel": {},
+      "onCheckoutNavigate": {}
+    }
+  },
+  "BulkActionBar": {
+    "props": {
+      "selectedCount": {},
+      "actions": {},
+      "onClear": {}
+    }
+  },
+  "SavedViewsPicker": {
+    "props": {
+      "views": {},
+      "activeViewId": {},
+      "onSelectWorkflow": {}
+    }
+  },
+  "GlobalSearch": {
+    "props": {
+      "placeholder": {},
+      "workflow": {},
+      "debounceMs": {}
+    }
+  },
+  "SearchInput": {
+    "props": {
+      "placeholder": {},
+      "endpoint": {},
+      "debounceMs": {},
+      "minChars": {}
+    }
+  },
+  "SearchResults": {
+    "props": {
+      "hrefPattern": {},
+      "skeletonRows": {},
+      "pristineText": {},
+      "emptyText": {}
+    }
+  },
+  "KeyboardShortcuts": {
+    "props": {
+      "shortcuts": {},
+      "triggerKey": {}
+    }
+  },
+  "ThemeToggle": {
+    "props": {
+      "lightLabel": {},
+      "darkLabel": {},
+      "storageKey": {}
+    }
+  },
+  "IllustratedEmpty": {
+    "props": {
+      "kind": {},
+      "title": {},
+      "message": {},
+      "action": {}
+    }
+  },
+  "FocusTrap": {
+    "props": {
+      "active": {},
+      "autoFocus": {},
+      "restoreFocus": {}
+    }
+  },
+  "SkipLink": {
+    "props": {
+      "target": {},
+      "label": {}
+    }
+  },
+  "FocusRing": {
+    "props": {
+      "color": {},
+      "width": {},
+      "offset": {}
+    }
+  },
+  "AutoFocus": {
+    "props": {
+      "enabled": {},
+      "selector": {},
+      "delayed": {}
+    }
+  },
+  "UndoManager": {
+    "props": {
+      "position": {},
+      "timeoutMs": {},
+      "labelPrefix": {},
+      "maxStack": {}
+    }
+  },
+  "PresenceIndicator": {
+    "props": {
+      "route": {},
+      "max": {},
+      "size": {},
+      "showTooltips": {}
+    }
+  },
+  "OptimisticProvider": {
+    "props": {
+      "resource": {},
+      "toastOnRollback": {},
+      "timeoutMs": {}
+    }
+  },
+  "Wizard": {
+    "props": {
+      "steps": {},
+      "onComplete": {},
+      "successRoute": {},
+      "title": {},
+      "skipReview": {},
+      "submitLabel": {}
+    }
+  },
+  "SplitView": {
+    "props": {
+      "syncKey": {},
+      "masterWidth": {},
+      "emptyText": {},
+      "responsive": {}
+    }
+  },
+  "FilterBuilder": {
+    "props": {
+      "fields": {},
+      "paramKey": {},
+      "combinator": {},
+      "emptyLabel": {},
+      "onApplyWorkflow": {}
+    }
+  },
+  "TourOverlay": {
+    "props": {
+      "steps": {},
+      "storageKey": {},
+      "autoStart": {},
+      "nextLabel": {},
+      "doneLabel": {},
+      "skipLabel": {}
+    }
+  }
+}

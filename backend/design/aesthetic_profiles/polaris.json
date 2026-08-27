@@ -1,0 +1,53 @@
+{
+  "$schema_version": "1.0.0",
+  "name": "polaris",
+  "description": "Shopify Polaris — clean, warm, generous whitespace, green accent. E-commerce workspace signature.",
+  "when_to_use": {
+    "industry_any_of": ["ecommerce", "retail", "hospitality", "healthcare"],
+    "layout.density_any_of": ["comfortable"]
+  },
+  "tokens": {
+    "color": {
+      "background": "hsl(45 20% 98%)",
+      "surface": "hsl(0 0% 100%)",
+      "surfaceHover": "hsl(45 20% 96%)",
+      "border": "hsl(38 15% 88%)",
+      "primary": "hsl(150 55% 32%)",
+      "foreground": "hsl(220 15% 20%)",
+      "muted": "hsl(220 8% 45%)"
+    },
+    "radius": {
+      "sm": "6px",
+      "md": "8px",
+      "lg": "12px",
+      "xl": "16px"
+    },
+    "shadow": {
+      "sm": "0 1px 2px hsl(38 15% 30% / 0.06)",
+      "card": "0 1px 3px hsl(38 15% 30% / 0.08), 0 1px 2px hsl(38 15% 30% / 0.05)",
+      "elevated": "0 4px 12px hsl(38 15% 30% / 0.10)"
+    },
+    "spacing": "comfortable",
+    "typography": {
+      "display": "'Inter', -apple-system, system-ui, sans-serif",
+      "body": "'Inter', -apple-system, system-ui, sans-serif"
+    }
+  },
+  "css_variables": {
+    "--background": "45 20% 98%",
+    "--foreground": "220 15% 20%",
+    "--card": "0 0% 100%",
+    "--card-foreground": "220 15% 20%",
+    "--border": "38 15% 88%",
+    "--primary": "150 55% 32%",
+    "--primary-foreground": "0 0% 100%",
+    "--muted": "45 20% 96%",
+    "--muted-foreground": "220 8% 45%",
+    "--ring": "150 55% 32%"
+  },
+  "surface_treatment": {
+    "root": {"background": "hsl(45 20% 98%)"},
+    "card": {"boxShadow": "0 1px 3px hsl(38 15% 30% / 0.08), 0 1px 2px hsl(38 15% 30% / 0.05)"},
+    "button.primary": {}
+  }
+}

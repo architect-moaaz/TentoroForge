@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1",
+  "id": "accounts/list",
+  "route": "/accounts",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Accounts" },
+  "dataSources": [
+    { "id": "accounts-ds", "type": "rest", "url": "/api/accounts" }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "background": "tokens.color.surface.0"
+    },
+    "children": [
+      {
+        "id": "page-hero",
+        "type": "Hero",
+        "props": { "title": "Customer Accounts" },
+        "style": {
+          "background": "tokens.color.primary.600",
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg"
+        }
+      },
+      {
+        "id": "accounts-table",
+        "type": "Table",
+        "props": {
+          "dataSource": "accounts-ds",
+          "columns": [
+            { "key": "id",      "label": "ID" },
+            { "key": "owner",   "label": "Owner" },
+            { "key": "balance", "label": "Balance" }
+          ]
+        },
+        "style": {
+          "shadow": "tokens.shadow.sm",
+          "radius": "tokens.radius.md"
+        }
+      }
+    ]
+  }
+}

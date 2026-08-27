@@ -1,0 +1,402 @@
+{
+  "entities": {
+    "User": {
+      "fields": {
+        "id": {
+          "type": "uuid",
+          "nullable": false,
+          "primaryKey": true,
+          "hasDefault": true
+        },
+        "email": {
+          "type": "text",
+          "nullable": false,
+          "primaryKey": false,
+          "unique": true
+        },
+        "name": {
+          "type": "text",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "role": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false,
+          "enum_values": [
+            "admin"
+          ]
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false,
+          "hasDefault": true
+        },
+        "updatedAt": {
+          "type": "timestamp",
+          "nullable": false,
+          "primaryKey": false
+        },
+        "password": {
+          "type": "text",
+          "primaryKey": false,
+          "nullable": false
+        },
+        "isActive": {
+          "type": "boolean",
+          "primaryKey": false,
+          "nullable": true,
+          "hasDefault": true
+        }
+      },
+      "indexes": [],
+      "names": {
+        "entity": "User",
+        "tableSnake": "users",
+        "routeSlug": "users",
+        "sourceName": "users",
+        "binding": "users",
+        "label": "Users",
+        "labelSingular": "User",
+        "pluralSlug": "users",
+        "entityKey": "user"
+      }
+    },
+    "Document": {
+      "fields": {
+        "id": {
+          "type": "uuid",
+          "nullable": false,
+          "primaryKey": true,
+          "hasDefault": true
+        },
+        "originalFilename": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "fileUrl": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "mimeType": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "fileSizeBytes": {
+          "type": "integer",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "status": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "ocrText": {
+          "type": "text",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "extractedFields": {
+          "type": "jsonb",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "confidence": {
+          "type": "integer",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "pageCount": {
+          "type": "integer",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "uploadedBy": {
+          "type": "uuid",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "processedAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "errorMessage": {
+          "type": "text",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "updatedAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "uploadedByName": {
+          "type": "varchar",
+          "primaryKey": false,
+          "nullable": true
+        }
+      },
+      "indexes": [],
+      "names": {
+        "entity": "Document",
+        "tableSnake": "documents",
+        "routeSlug": "documents",
+        "sourceName": "documents",
+        "binding": "documents",
+        "label": "Documents",
+        "labelSingular": "Document",
+        "pluralSlug": "documents",
+        "entityKey": "document"
+      }
+    },
+    "ProcessDocumentJob": {
+      "fields": {
+        "id": {
+          "type": "uuid",
+          "nullable": false,
+          "primaryKey": true,
+          "hasDefault": true
+        },
+        "documentId": {
+          "type": "uuid",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "step": {
+          "type": "varchar",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "startedAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "completedAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        },
+        "updatedAt": {
+          "type": "timestamp",
+          "nullable": true,
+          "primaryKey": false
+        }
+      },
+      "indexes": [],
+      "names": {
+        "entity": "ProcessDocumentJob",
+        "tableSnake": "process_document_jobs",
+        "routeSlug": "process-document-jobs",
+        "sourceName": "processDocumentJobs",
+        "binding": "processDocumentJobs",
+        "label": "Process Document Jobs",
+        "labelSingular": "Process Document Job",
+        "pluralSlug": "processdocumentjobs",
+        "entityKey": "processdocumentjob"
+      }
+    }
+  },
+  "relations": [
+    {
+      "from_entity": "Document",
+      "to_entity": "User",
+      "type": "",
+      "foreignKey": "uploadedBy"
+    },
+    {
+      "from_entity": "ProcessDocumentJob",
+      "to_entity": "Document",
+      "type": "",
+      "foreignKey": "documentId"
+    }
+  ],
+  "api_routes": {
+    "POST /api/documents/upload": {
+      "entity": "",
+      "request_fields": [],
+      "response_entity": ""
+    },
+    "GET /api/documents": {
+      "entity": "",
+      "request_fields": [],
+      "response_entity": ""
+    },
+    "GET /api/documents/:id": {
+      "entity": "",
+      "request_fields": [],
+      "response_entity": ""
+    },
+    "GET /api/documents/search": {
+      "entity": "",
+      "request_fields": [],
+      "response_entity": ""
+    },
+    "POST /api/documents/:id/reprocess": {
+      "entity": "",
+      "request_fields": [],
+      "response_entity": ""
+    },
+    "POST /api/auth/signup": {
+      "entity": "auth",
+      "request_fields": [],
+      "response_entity": "auth"
+    },
+    "POST /api/form-rules": {
+      "entity": "form-rules",
+      "request_fields": [],
+      "response_entity": "form-rules"
+    },
+    "GET /api/_debug/seed-status": {
+      "entity": "_debug",
+      "request_fields": [],
+      "response_entity": "_debug"
+    },
+    "DELETE /api/data/[...path]": {
+      "entity": "data",
+      "request_fields": [],
+      "response_entity": "data"
+    },
+    "GET /api/data/[...path]": {
+      "entity": "data",
+      "request_fields": [],
+      "response_entity": "data"
+    },
+    "POST /api/data/[...path]": {
+      "entity": "data",
+      "request_fields": [],
+      "response_entity": "data"
+    },
+    "PUT /api/data/[...path]": {
+      "entity": "data",
+      "request_fields": [],
+      "response_entity": "data"
+    },
+    "POST /api/documents/pdf": {
+      "entity": "documents",
+      "request_fields": [],
+      "response_entity": "documents"
+    },
+    "GET /api/export/[entity]": {
+      "entity": "export",
+      "request_fields": [],
+      "response_entity": "export"
+    },
+    "GET /api/files/[id]": {
+      "entity": "files",
+      "request_fields": [],
+      "response_entity": "files"
+    },
+    "POST /api/files/upload": {
+      "entity": "files",
+      "request_fields": [],
+      "response_entity": "files"
+    },
+    "GET /api/health/db": {
+      "entity": "health",
+      "request_fields": [],
+      "response_entity": "health"
+    },
+    "GET /api/notifications": {
+      "entity": "notifications",
+      "request_fields": [],
+      "response_entity": "notifications"
+    },
+    "PATCH /api/notifications": {
+      "entity": "notifications",
+      "request_fields": [],
+      "response_entity": "notifications"
+    },
+    "GET /api/tasks/[id]": {
+      "entity": "tasks",
+      "request_fields": [],
+      "response_entity": "tasks"
+    },
+    "GET /api/tasks": {
+      "entity": "tasks",
+      "request_fields": [],
+      "response_entity": "tasks"
+    },
+    "POST /api/workflows/[id]/execute": {
+      "entity": "workflows",
+      "request_fields": [],
+      "response_entity": "workflows"
+    },
+    "GET /api/workflows/[id]": {
+      "entity": "workflows",
+      "request_fields": [],
+      "response_entity": "workflows"
+    },
+    "POST /api/workflows/event/[event]": {
+      "entity": "workflows",
+      "request_fields": [],
+      "response_entity": "workflows"
+    },
+    "GET /api/workflows": {
+      "entity": "workflows",
+      "request_fields": [],
+      "response_entity": "workflows"
+    }
+  },
+  "components": {},
+  "pages": {
+    "/documents": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/documents/upload": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/documents/[id]": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/documents/search": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/login": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    },
+    "/admins": {
+      "file": "",
+      "components": [],
+      "api_calls": []
+    }
+  },
+  "workflow_bindings": {},
+  "rules": {}
+}

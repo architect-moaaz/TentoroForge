@@ -1,0 +1,29 @@
+{
+  "scores": {
+    "visualPolish": 7, "domainFeel": 6, "informationDensity": 5,
+    "componentCoherence": 7, "brandReflection": 6
+  },
+  "compositeScore": 6.4,
+  "pass": false,
+  "topIssues": [
+    {
+      "severity": "medium",
+      "axis": "informationDensity",
+      "nodeIdHint": "stats-grid",
+      "issue": "Only 2 MetricTiles — page feels sparse for a list/dashboard hybrid.",
+      "suggestion": "Add 'Avg Duration' and 'Approval Rate' tiles; switch grid to columns=4."
+    },
+    {
+      "severity": "medium",
+      "axis": "domainFeel",
+      "nodeIdHint": "requests-table",
+      "issue": "Status column is plain text — a leave-management app expects color-coded badges.",
+      "suggestion": "Replace status text cell with Badge bound to {{item.status}}."
+    }
+  ],
+  "strengths": [
+    "Hero structure is solid — eyebrow, headline, CTA all present",
+    "Components feel from one design system"
+  ],
+  "designerApprovalRecommended": false
+}

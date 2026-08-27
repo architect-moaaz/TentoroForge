@@ -1,0 +1,31 @@
+{
+  "brand": {
+    "name": "",
+    "tagline": "",
+    "glyph": ""
+  },
+  "personas": [
+    {
+      "id": "admin",
+      "name": "Admin",
+      "role": "admin",
+      "one_liner": "",
+      "sample_name": null,
+      "jobs": []
+    }
+  ],
+  "archetype": "document-intelligence-platform",
+  "moments": [],
+  "voice_notes": {
+    "adjectives": [
+      "precise",
+      "authoritative",
+      "methodical",
+      "formal",
+      "technical",
+      "quietly"
+    ],
+    "sample_ctas": [],
+    "avoid": []
+  }
+}

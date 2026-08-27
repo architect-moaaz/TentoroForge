@@ -1,0 +1,22 @@
+{
+  "capability": "pip_video",
+  "permissions": {
+    "ios": {
+      "UIBackgroundModes": ["audio"]
+    },
+    "android": [
+      "android.permission.FOREGROUND_SERVICE"
+    ],
+    "expo_plugins": ["expo-av"]
+  },
+  "native_imports": {
+    "expo": ["expo-av"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/PipVideoProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["usePictureInPicture"]
+  },
+  "integration_keys": []
+}

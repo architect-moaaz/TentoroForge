@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "2",
+  "id": "leads/new",
+  "route": "/leads/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "Create Lead" },
+  "dataSources": [],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "children": [
+      {
+        "id": "lead-form",
+        "type": "Form",
+        "props": {},
+        "children": [
+          {
+            "id": "lead-accordion",
+            "type": "Accordion",
+            "props": { "mode": "single", "defaultOpen": ["basics"] },
+            "children": [
+              {
+                "id": "panel-basics",
+                "type": "AccordionPanel",
+                "props": { "value": "basics", "label": "Basics" },
+                "children": [
+                  { "type": "Input",    "props": { "name": "name",  "label": "Full Name", "type": "text" } },
+                  { "type": "Input",    "props": { "name": "email", "label": "Email",     "type": "email" } },
+                  { "type": "Input",    "props": { "name": "phone", "label": "Phone",     "type": "tel" } }
+                ]
+              },
+              {
+                "id": "panel-address",
+                "type": "AccordionPanel",
+                "props": { "value": "address", "label": "Address" },
+                "children": [
+                  { "type": "Input", "props": { "name": "street", "label": "Street", "type": "text" } },
+                  { "type": "Input", "props": { "name": "city",   "label": "City",   "type": "text" } },
+                  { "type": "Input", "props": { "name": "zip",    "label": "Zip",    "type": "text" } }
+                ]
+              },
+              {
+                "id": "panel-prefs",
+                "type": "AccordionPanel",
+                "props": { "value": "preferences", "label": "Preferences" },
+                "children": [
+                  {
+                    "type": "Select",
+                    "props": {
+                      "name": "timezone",
+                      "label": "Timezone",
+                      "options": [
+                        { "value": "utc",  "label": "UTC" },
+                        { "value": "pst",  "label": "Pacific" },
+                        { "value": "est",  "label": "Eastern" }
+                      ]
+                    }
+                  },
+                  { "type": "Checkbox", "props": { "name": "notifications", "label": "Email Notifications" } },
+                  { "type": "Checkbox", "props": { "name": "newsletter",    "label": "Subscribe to Newsletter" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "btn-submit",
+            "type": "Button",
+            "props": { "label": "Create Lead", "variant": "primary", "workflow": "createLead" }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "archetype": "ats",
+  "source_app": "v3azan7i",
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "stresses": [
+    "kanban pipeline",
+    "actors/journeys",
+    "role-scoped actions",
+    "candidate detail anatomy"
+  ]
+}

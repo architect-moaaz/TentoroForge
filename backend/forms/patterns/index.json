@@ -1,0 +1,16 @@
+{
+  "$schema_version": "1.0.0",
+  "$description": "Catalog of the 10 form patterns. Each entry names a JSON file in this directory whose 'shape' describes the layout scaffold and 'when_to_use' hints when the builder should pick it. Consumed by services/form_pattern_picker.py (M6 follow-up).",
+  "patterns": [
+    {"name": "single-column-progressive", "file": "single-column-progressive.json"},
+    {"name": "wizard-3-step", "file": "wizard-3-step.json"},
+    {"name": "checkout-express", "file": "checkout-express.json"},
+    {"name": "settings-tabbed", "file": "settings-tabbed.json"},
+    {"name": "filter-drawer", "file": "filter-drawer.json"},
+    {"name": "onboarding-carousel", "file": "onboarding-carousel.json"},
+    {"name": "inline-editable-grid", "file": "inline-editable-grid.json"},
+    {"name": "modal-quick-add", "file": "modal-quick-add.json"},
+    {"name": "master-detail-edit", "file": "master-detail-edit.json"},
+    {"name": "multi-step-approval", "file": "multi-step-approval.json"}
+  ]
+}

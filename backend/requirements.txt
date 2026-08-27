@@ -1,0 +1,80 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+httpx>=0.28.0
+sse-starlette>=2.2.0
+python-dotenv>=1.0.0
+pydantic[email]>=2.0.0
+
+# Database
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# Auth
+passlib[bcrypt]>=1.7.4
+# Pin bcrypt to 4.x — 5.x dropped `__about__.__version__` which
+# passlib uses for version detection. Without it, passlib falls
+# through to a canary password >72 bytes that bcrypt then rejects,
+# 500-ing every signup with "password cannot be longer than 72 bytes".
+bcrypt>=4.0,<5.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.9
+
+# Agents
+# claude-agent-sdk removed (LG-4) — agent loop runs on langgraph/langchain-anthropic
+
+# MCP client (platform-side tools/list + test-connection for
+# Agent Builder mcp tool nodes). Pinned <3.0 as a conservative guard
+# against future breaking releases; verified working with 2.x.
+mcp>=1.0,<3.0
+
+# Redis (optional — caching and job queues)
+redis>=5.0.0
+
+# S3 (optional — file storage)
+boto3>=1.34.0
+
+# Monitoring (optional — error tracking)
+sentry-sdk[fastapi]>=2.0.0
+
+# Fixtures / test data
+Faker==30.6.0
+
+# Browser automation (render-service)
+playwright==1.49.0
+
+# JSON patch (RFC 6902) — used by the fidelity loop patch applier
+jsonpatch==1.33
+
+# Brand color extraction (brand_extractor.py)
+Pillow>=10.0.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+
+# Testing
+# ENV-5: tests/conftest.py sets DATABASE_URL="sqlite+aiosqlite://" at import
+# time, so without this the whole suite fails at COLLECTION — 28 collection
+# errors that masked the 8 real failures underneath them. It was documented in
+# a conftest comment ("Run: pip install aiosqlite") rather than declared, which
+# means a clean install has never been able to run the tests.
+aiosqlite>=0.20.0
+# Same class: tests/deploy/* import respx to stub the Neon/Vercel HTTP clients.
+respx>=0.21.0
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+ruff>=0.5.0
+psycopg2-binary>=2.9
+anthropic>=0.40.0
+# OpenAI-compatible transport for non-Anthropic agents (Kimi/Moonshot,
+# DeepSeek, vLLM). See services/blueprint/executors.OpenAICompatibleModel.
+openai>=1.35.0
+# Native Gemini transport (response_schema is enforced server-side,
+# unlike the OpenAI compatibility shim). services/blueprint/executors.GeminiModel.
+google-genai>=1.0.0
+
+# LangGraph migration (Phase 1 — agent-loop runner behind FORGE_LANGGRAPH=1).
+langgraph>=0.2.60
+langchain-anthropic>=0.3.0
+langchain-core>=0.3.30

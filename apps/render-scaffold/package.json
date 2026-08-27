@@ -1,0 +1,29 @@
+{
+  "name": "@tentoroforge/render-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 6503",
+    "build": "next build",
+    "start": "next start -p 6503"
+  },
+  "dependencies": {
+    "@tentoroforge/engine": "*",
+    "@tentoroforge/library": "*",
+    "@tentoroforge/renderer": "*",
+    "@tentoroforge/schema": "*",
+    "next": "^15.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  }
+}

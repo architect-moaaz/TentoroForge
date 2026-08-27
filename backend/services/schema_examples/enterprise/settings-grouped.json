@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "2",
+  "id": "account/settings",
+  "route": "/settings",
+  "meta": { "title": "Account Settings", "archetype": "settings" },
+  "dataSources": [
+    { "kind": "detail", "name": "profile",       "table": "users",
+      "filter": { "id": "{{auth.userId}}" } },
+    { "kind": "detail", "name": "notifications",  "table": "notificationPreferences",
+      "filter": { "userId": "{{auth.userId}}" } },
+    { "kind": "detail", "name": "security",       "table": "securitySettings",
+      "filter": { "userId": "{{auth.userId}}" } },
+    { "kind": "detail", "name": "billing",        "table": "billingInfo",
+      "filter": { "userId": "{{auth.userId}}" } }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": { "topbar": { "$ref": "node:breadcrumb" } },
+    "children": [
+      {
+        "id": "settings-tabs", "type": "TabPanelWithDeepLink",
+        "props": {
+          "paramKey": "section",
+          "defaultTab": "profile",
+          "tabs": [
+            { "id": "profile",       "label": "Profile" },
+            { "id": "notifications", "label": "Notifications" },
+            { "id": "security",      "label": "Security" },
+            { "id": "billing",       "label": "Billing" }
+          ]
+        },
+        "children": [
+          {
+            "id": "profile-section", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              {
+                "id": "profile-form", "type": "Form",
+                "props": { "action": { "type": "workflow", "name": "updateProfile" } },
+                "children": [
+                  { "id": "display-name", "type": "Input",
+                    "props": { "name": "displayName", "label": "Display Name", "type": "text",
+                               "validators": { "required": true } } },
+                  { "id": "email", "type": "Input",
+                    "props": { "name": "email", "label": "Email", "type": "email",
+                               "validators": { "required": true } } },
+                  { "id": "bio", "type": "Textarea",
+                    "props": { "name": "bio", "label": "Bio", "rows": 3 } },
+                  { "id": "save-profile", "type": "Button",
+                    "props": { "label": "Save Profile", "variant": "primary" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "notifications-section", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              {
+                "id": "notif-form", "type": "Form",
+                "props": { "action": { "type": "workflow", "name": "updateNotifications" } },
+                "children": [
+                  { "id": "email-notifs", "type": "Checkbox",
+                    "props": { "name": "emailEnabled", "label": "Email Notifications" } },
+                  { "id": "push-notifs", "type": "Checkbox",
+                    "props": { "name": "pushEnabled", "label": "Push Notifications" } },
+                  { "id": "digest-freq", "type": "Select",
+                    "props": { "name": "digestFrequency", "label": "Digest Frequency",
+                               "options": [
+                                 { "value": "instant", "label": "Instant" },
+                                 { "value": "daily",   "label": "Daily" },
+                                 { "value": "weekly",  "label": "Weekly" }
+                               ] } },
+                  { "id": "save-notifs", "type": "Button",
+                    "props": { "label": "Save Preferences", "variant": "primary" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "security-section", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              {
+                "id": "security-form", "type": "Form",
+                "props": { "action": { "type": "workflow", "name": "updateSecurity" } },
+                "children": [
+                  { "id": "current-password", "type": "Input",
+                    "props": { "name": "currentPassword", "label": "Current Password", "type": "password",
+                               "validators": { "required": true } } },
+                  { "id": "new-password", "type": "Input",
+                    "props": { "name": "newPassword", "label": "New Password", "type": "password",
+                               "validators": { "required": true, "min": 8 } } },
+                  { "id": "mfa-enabled", "type": "Checkbox",
+                    "props": { "name": "mfaEnabled", "label": "Enable Two-Factor Authentication" } },
+                  { "id": "save-security", "type": "Button",
+                    "props": { "label": "Update Security", "variant": "primary" } }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "billing-section", "type": "Card",
+            "props": { "density": "loose" },
+            "children": [
+              { "id": "billing-kv", "type": "KeyValueList",
+                "props": {
+                  "items": [
+                    { "label": "Plan",         "value": "{{billing.plan}}" },
+                    { "label": "Billing Cycle","value": "{{billing.cycle}}" },
+                    { "label": "Next Invoice", "value": "{{billing.nextInvoiceDate}}" },
+                    { "label": "Amount",       "value": "{{billing.nextInvoiceAmount}}" }
+                  ]
+                }
+              },
+              { "id": "manage-billing-btn", "type": "Button",
+                "props": { "label": "Manage Billing", "variant": "secondary",
+                           "workflow": "openBillingPortal" } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,5356 @@
+{
+  "0ppltqf4": {
+    "app": "0ppltqf4",
+    "coverage": 1.0,
+    "reach": 0.4482758620689655,
+    "wired": 1.0,
+    "resolves": 0.7619047619047619,
+    "bound": 0.9523809523809523,
+    "forms": 1.0,
+    "composite": 0.8604269293924466,
+    "counts": {
+      "coverage": {
+        "ok": 36,
+        "total": 36
+      },
+      "reach": {
+        "ok": 26,
+        "total": 58
+      },
+      "wired": {
+        "ok": 82,
+        "total": 82
+      },
+      "resolves": {
+        "ok": 64,
+        "total": 84
+      },
+      "bound": {
+        "ok": 20,
+        "total": 21
+      },
+      "forms": {
+        "ok": 31,
+        "total": 31
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/members/*/bookings is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/reviews is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/settings is an orphan (no menu entry, no parent page)",
+        "/admin/templates is an orphan (no menu entry, no parent page)",
+        "/admin/templates/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/templates/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/reviews is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/: 'Book a Class' \u2192 /class-sessions (no such route)",
+        "/Booking/new: 'Cancel' \u2192 /Booking (no such route)",
+        "/ClassSession/new: 'Cancel' \u2192 /ClassSession (no such route)",
+        "/admin/members/[id]: 'Back' \u2192 /admin (no such route)",
+        "/admin/members/[id]: 'Edit' \u2192 /members/{{user.id}}/edit (no such route)",
+        "/admin/new: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/plans/:id/edit: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/plans/new: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/rooms/:id/edit: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/rooms/new: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/sessions/[id]/edit: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/sessions/new: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/settings: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/templates/:id/edit: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/templates/new: 'Cancel' \u2192 /admin (no such route)",
+        "/instructor/reviews: 'Add Class Review' \u2192 /instructor/new (no such route)",
+        "/instructor/sessions: 'Add Class Session' \u2192 /instructor/new (no such route)",
+        "/instructor/sessions/[id]/attendance: 'Add Booking' \u2192 /instructor/new (no such route)",
+        "/profile: 'Edit' \u2192 /home/{{user.id}}/edit (no such route)",
+        "/profile/membership: 'Edit' \u2192 /home/{{memberMembership.id}}/edit (no such route)"
+      ],
+      "bound": [
+        "/my-bookings: dataSource 'my' resolves to no entity"
+      ],
+      "forms": []
+    }
+  },
+  "1dug1730": {
+    "app": "1dug1730",
+    "coverage": 1.0,
+    "reach": 0.5,
+    "wired": 1.0,
+    "resolves": 0.9534883720930233,
+    "bound": 1.0,
+    "forms": 0.8888888888888888,
+    "composite": 0.8903962101636521,
+    "counts": {
+      "coverage": {
+        "ok": 18,
+        "total": 18
+      },
+      "reach": {
+        "ok": 15,
+        "total": 30
+      },
+      "wired": {
+        "ok": 42,
+        "total": 42
+      },
+      "resolves": {
+        "ok": 41,
+        "total": 43
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 16,
+        "total": 18
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/price-results is an orphan (no menu entry, no parent page)",
+        "/admin/products is an orphan (no menu entry, no parent page)",
+        "/admin/products/* is an orphan (no menu entry, no parent page)",
+        "/admin/retailers is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/new is an orphan (no menu entry, no parent page)",
+        "/admin/scans is an orphan (no menu entry, no parent page)",
+        "/admin/users is an orphan (no menu entry, no parent page)",
+        "/scans/* is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/products/[id]: 'Edit' \u2192 /scan/{{product.id}}/edit (no such route)",
+        "/scans/[id]: 'Edit' \u2192 /history/{{scanRecord.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "1j4mefbe": {
+    "app": "1j4mefbe",
+    "coverage": 1.0,
+    "reach": 0.46153846153846156,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.72,
+    "composite": 0.8635897435897436,
+    "counts": {
+      "coverage": {
+        "ok": 32,
+        "total": 32
+      },
+      "reach": {
+        "ok": 24,
+        "total": 52
+      },
+      "wired": {
+        "ok": 48,
+        "total": 48
+      },
+      "resolves": {
+        "ok": 48,
+        "total": 48
+      },
+      "bound": {
+        "ok": 15,
+        "total": 15
+      },
+      "forms": {
+        "ok": 18,
+        "total": 25
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/instructors is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/* is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/reviews is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/waitlist is an orphan (no menu entry, no parent page)",
+        "/instructor/availability is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/reviews is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/admin/plans/new: form has no submit target",
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/instructor/availability: form has no submit target",
+        "/login: form has no submit target",
+        "/my-bookings/[id]/review: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "2nm694lt": {
+    "app": "2nm694lt",
+    "coverage": 1.0,
+    "reach": 0.2698412698412698,
+    "wired": 1.0,
+    "resolves": 0.9857142857142858,
+    "bound": 1.0,
+    "forms": 0.7777777777777778,
+    "composite": 0.8388888888888889,
+    "counts": {
+      "coverage": {
+        "ok": 33,
+        "total": 33
+      },
+      "reach": {
+        "ok": 17,
+        "total": 63
+      },
+      "wired": {
+        "ok": 70,
+        "total": 70
+      },
+      "resolves": {
+        "ok": 69,
+        "total": 70
+      },
+      "bound": {
+        "ok": 15,
+        "total": 15
+      },
+      "forms": {
+        "ok": 28,
+        "total": 36
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/instructors is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/subscriptions is an orphan (no menu entry, no parent page)",
+        "/admin/templates is an orphan (no menu entry, no parent page)",
+        "/admin/templates/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/templates/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability is an orphan (no menu entry, no parent page)",
+        "/instructor/availability/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability/new is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/roster is an orphan (no menu entry, no parent page)",
+        "/instructors is an orphan (no menu entry, no parent page)",
+        "/instructors/* is an orphan (no menu entry, no parent page)",
+        "/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructors/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/admin/templates/new: form has no submit target",
+        "/classes/[id]/book: form has no submit target",
+        "/classes/[id]/review: form has no submit target",
+        "/instructor/availability/new: form has no submit target",
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "2seyiw4q": {
+    "app": "2seyiw4q",
+    "coverage": 1.0,
+    "reach": 0.49122807017543857,
+    "wired": 1.0,
+    "resolves": 0.9464285714285714,
+    "bound": 1.0,
+    "forms": 0.7037037037037037,
+    "composite": 0.8568933908846189,
+    "counts": {
+      "coverage": {
+        "ok": 33,
+        "total": 33
+      },
+      "reach": {
+        "ok": 28,
+        "total": 57
+      },
+      "wired": {
+        "ok": 55,
+        "total": 55
+      },
+      "resolves": {
+        "ok": 53,
+        "total": 56
+      },
+      "bound": {
+        "ok": 11,
+        "total": 11
+      },
+      "forms": {
+        "ok": 19,
+        "total": 27
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/settings is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/reviews is an orphan (no menu entry, no parent page)",
+        "/instructor/schedule is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/instructors is an orphan (no menu entry, no parent page)",
+        "/instructors/* is an orphan (no menu entry, no parent page)",
+        "/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructors/new is an orphan (no menu entry, no parent page)",
+        "/member/dashboard is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/* is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/instructors/[id]: 'Edit' \u2192 /admin/{{instructor.id}}/edit (no such route)",
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)",
+        "/sessions/[id]: 'Back' \u2192 /sessions (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/plans/new: form has no submit target",
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/instructor/availability: form has no submit target",
+        "/login: form has no submit target",
+        "/member/reviews/new: form has no submit target",
+        "/sessions/[id]/book: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "2vp5ac5i": {
+    "app": "2vp5ac5i",
+    "coverage": 1.0,
+    "reach": 0.5094339622641509,
+    "wired": 1.0,
+    "resolves": 0.9367088607594937,
+    "bound": 1.0,
+    "forms": 0.9615384615384616,
+    "composite": 0.9012802140936844,
+    "counts": {
+      "coverage": {
+        "ok": 31,
+        "total": 31
+      },
+      "reach": {
+        "ok": 27,
+        "total": 53
+      },
+      "wired": {
+        "ok": 79,
+        "total": 79
+      },
+      "resolves": {
+        "ok": 74,
+        "total": 79
+      },
+      "bound": {
+        "ok": 6,
+        "total": 6
+      },
+      "forms": {
+        "ok": 25,
+        "total": 26
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/audit-log is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/billing/*/edit is an orphan (no menu entry, no parent page)",
+        "/billing/claims is an orphan (no menu entry, no parent page)",
+        "/billing/claims/* is an orphan (no menu entry, no parent page)",
+        "/billing/invoices is an orphan (no menu entry, no parent page)",
+        "/billing/invoices/* is an orphan (no menu entry, no parent page)",
+        "/billing/new is an orphan (no menu entry, no parent page)",
+        "/dashboard is an orphan (no menu entry, no parent page)",
+        "/dashboard/admin is an orphan (no menu entry, no parent page)",
+        "/dashboard/doctor is an orphan (no menu entry, no parent page)",
+        "/dashboard/receptionist is an orphan (no menu entry, no parent page)",
+        "/labs/* is an orphan (no menu entry, no parent page)",
+        "/settings/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/insurance-providers is an orphan (no menu entry, no parent page)",
+        "/settings/insurance-providers/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/insurance-providers/new is an orphan (no menu entry, no parent page)",
+        "/settings/new is an orphan (no menu entry, no parent page)",
+        "/settings/practitioners is an orphan (no menu entry, no parent page)",
+        "/settings/practitioners/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/practitioners/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/appointments/[id]: 'Edit' \u2192 /settings/{{appointment.id}}/edit (no such route)",
+        "/billing/claims/[id]: 'Edit' \u2192 /settings/{{insuranceClaim.id}}/edit (no such route)",
+        "/billing/invoices/[id]: 'Edit' \u2192 /billing/{{invoice.id}}/edit (no such route)",
+        "/labs/[id]: 'Edit' \u2192 /settings/{{labResult.id}}/edit (no such route)",
+        "/patients/[id]: 'Edit' \u2192 /settings/{{patient.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "3ncq1pky": {
+    "app": "3ncq1pky",
+    "coverage": 1.0,
+    "reach": 0.7435897435897436,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.95,
+    "composite": 0.948931623931624,
+    "counts": {
+      "coverage": {
+        "ok": 19,
+        "total": 19
+      },
+      "reach": {
+        "ok": 29,
+        "total": 39
+      },
+      "wired": {
+        "ok": 49,
+        "total": 49
+      },
+      "resolves": {
+        "ok": 52,
+        "total": 52
+      },
+      "bound": {
+        "ok": 7,
+        "total": 7
+      },
+      "forms": {
+        "ok": 19,
+        "total": 20
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "45gmcnlc": {
+    "app": "45gmcnlc",
+    "coverage": 1.0,
+    "reach": 0.7457627118644068,
+    "wired": 1.0,
+    "resolves": 0.9634146341463414,
+    "bound": 1.0,
+    "forms": 0.9411764705882353,
+    "composite": 0.9417256360998305,
+    "counts": {
+      "coverage": {
+        "ok": 30,
+        "total": 30
+      },
+      "reach": {
+        "ok": 44,
+        "total": 59
+      },
+      "wired": {
+        "ok": 81,
+        "total": 81
+      },
+      "resolves": {
+        "ok": 79,
+        "total": 82
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 32,
+        "total": 34
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/schedule is an orphan (no menu entry, no parent page)",
+        "/my-membership is an orphan (no menu entry, no parent page)",
+        "/my-membership/*/edit is an orphan (no menu entry, no parent page)",
+        "/my-membership/new is an orphan (no menu entry, no parent page)",
+        "/profile is an orphan (no menu entry, no parent page)",
+        "/reviews/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /my-membership/{{member.id}}/edit (no such route)",
+        "/instructors/[id]: 'Edit' \u2192 /admin/instructors/{{instructor.id}}/edit (no such route)",
+        "/my-membership: 'Edit Member Membership' \u2192 /my-membership/{{memberMembership.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "49w6y3nd": {
+    "app": "49w6y3nd",
+    "coverage": 1.0,
+    "reach": 0.8923076923076924,
+    "wired": 0.7391304347826086,
+    "resolves": 0.9150943396226415,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9244220777854905,
+    "counts": {
+      "coverage": {
+        "ok": 41,
+        "total": 41
+      },
+      "reach": {
+        "ok": 58,
+        "total": 65
+      },
+      "wired": {
+        "ok": 102,
+        "total": 138
+      },
+      "resolves": {
+        "ok": 97,
+        "total": 106
+      },
+      "bound": {
+        "ok": 27,
+        "total": 27
+      },
+      "forms": {
+        "ok": 33,
+        "total": 33
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Session/*/edit is an orphan (no menu entry, no parent page)",
+        "/vote-sessions/* is an orphan (no menu entry, no parent page)",
+        "/vote-sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/vote-sessions/*/records is an orphan (no menu entry, no parent page)",
+        "/vote-sessions/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        ": 'Cancel' has no action",
+        ": 'Cancel' has no action",
+        ": 'Cancel' has no action",
+        ": 'Cancel' has no action",
+        ": 'Cancel' has no action",
+        ": 'Cancel' has no action",
+        "/admins: 'Add User' has no action",
+        "/audit: 'Add Audit Log' has no action",
+        "/bills: '\u0645\u0634\u0631\u0648\u0639 \u0642\u0627\u0646\u0648\u0646 \u062c\u062f\u064a\u062f' has no action",
+        "/bills/[id]/amendments: 'Back' has no action",
+        "/bills/[id]/amendments: 'Add Amendment' has no action",
+        "/blocs: 'Add Political Bloc' has no action",
+        "/committee-chairs: 'Add Member' has no action",
+        "/committees: 'New Committee' has no action",
+        "/committees: 'Add Committee' has no action",
+        "/documents: 'Add Document' has no action",
+        "/members: '\u0625\u0636\u0627\u0641\u0629 \u0639\u0636\u0648' has no action",
+        "/members: 'Add Member' has no action",
+        "/members/:id/edit: '\u0625\u0644\u063a\u0627\u0621' has no action",
+        "/members/:id/edit: '\u062d\u0641\u0638 \u0627\u0644\u0639\u0636\u0648' has no action",
+        "/members/[id]: 'Back' has no action",
+        "/members/new: '\u0625\u0644\u063a\u0627\u0621' has no action",
+        "/members/new: '\u062d\u0641\u0638 \u0627\u0644\u0639\u0636\u0648' has no action",
+        "/public/bills: 'Add Bill' has no action",
+        "/public/sessions: 'Add Session' has no action",
+        "/publics: 'Add User' has no action",
+        "/secretary-generals: 'Add User' has no action",
+        "/sessions: 'New Session' has no action",
+        "/sessions: 'Add Session' has no action",
+        "/sessions/[id]/agenda: 'Back' has no action",
+        "/sessions/[id]/attendance: 'Back' has no action",
+        "/sessions/[id]/votes: 'Back' has no action",
+        "/vote-sessions/[id]: 'Back' has no action",
+        "/vote-sessions/[id]: '\u062a\u0646\u0632\u064a\u0644 \u0627\u0644\u0648\u062b\u064a\u0642\u0629 \u0627\u0644\u0645\u0639\u062a\u0645\u062f\u0629' has no action",
+        "/vote-sessions/[id]/records: 'Back' has no action",
+        "/vote-sessions/[id]/records: 'Add Vote Record' has no action"
+      ],
+      "resolves": [
+        ": form \u2192 workflow form.submit (not defined)",
+        ": form \u2192 workflow form.submit (not defined)",
+        ": form \u2192 workflow form.submit (not defined)",
+        ": 'Save changes' \u2192 workflow form.submit (not defined)",
+        ": 'Save' \u2192 workflow form.submit (not defined)",
+        ": 'Save' \u2192 workflow form.submit (not defined)",
+        "/committees/[id]: 'Edit' \u2192 /publics/{{committee.id}}/edit (no such route)",
+        "/public/sessions/[id]: 'Edit' \u2192 /Session/{{session.id}}/edit (no such route)",
+        "/sessions/[id]: 'Edit' \u2192 /Session/{{session.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "4b2n2acp": {
+    "app": "4b2n2acp",
+    "coverage": 1.0,
+    "reach": 0.7878787878787878,
+    "wired": 1.0,
+    "resolves": 0.9795918367346939,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9612451041022471,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 26,
+        "total": 33
+      },
+      "wired": {
+        "ok": 47,
+        "total": 47
+      },
+      "resolves": {
+        "ok": 48,
+        "total": 49
+      },
+      "bound": {
+        "ok": 9,
+        "total": 9
+      },
+      "forms": {
+        "ok": 19,
+        "total": 19
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/scan/[id]/results: 'Edit' \u2192 /history/{{scanSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "4ct3h8z2": {
+    "app": "4ct3h8z2",
+    "coverage": 1.0,
+    "reach": 0.8,
+    "wired": 0.9864864864864865,
+    "resolves": 0.9866666666666667,
+    "bound": 1.0,
+    "forms": 0.9642857142857143,
+    "composite": 0.9562398112398113,
+    "counts": {
+      "coverage": {
+        "ok": 23,
+        "total": 23
+      },
+      "reach": {
+        "ok": 40,
+        "total": 50
+      },
+      "wired": {
+        "ok": 73,
+        "total": 74
+      },
+      "resolves": {
+        "ok": 74,
+        "total": 75
+      },
+      "bound": {
+        "ok": 11,
+        "total": 11
+      },
+      "forms": {
+        "ok": 27,
+        "total": 28
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/assessments/* is an orphan (no menu entry, no parent page)",
+        "/assessments/*/edit is an orphan (no menu entry, no parent page)",
+        "/assessments/new is an orphan (no menu entry, no parent page)",
+        "/interview-slots/*/edit is an orphan (no menu entry, no parent page)",
+        "/interview-slots/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/drives/[id]/schedule: 'Export' has no action"
+      ],
+      "resolves": [
+        "/drives/[id]: 'Edit' \u2192 /analytics/{{recruitmentDrive.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "4noe2jyh": {
+    "app": "4noe2jyh",
+    "coverage": 1.0,
+    "reach": 0.25806451612903225,
+    "wired": 1.0,
+    "resolves": 0.9868421052631579,
+    "bound": 1.0,
+    "forms": 0.9411764705882353,
+    "composite": 0.8643471819967375,
+    "counts": {
+      "coverage": {
+        "ok": 34,
+        "total": 34
+      },
+      "reach": {
+        "ok": 16,
+        "total": 62
+      },
+      "wired": {
+        "ok": 71,
+        "total": 71
+      },
+      "resolves": {
+        "ok": 75,
+        "total": 76
+      },
+      "bound": {
+        "ok": 19,
+        "total": 19
+      },
+      "forms": {
+        "ok": 32,
+        "total": 34
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/instructors is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/* is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/new is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/templates is an orphan (no menu entry, no parent page)",
+        "/admin/templates/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/templates/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability is an orphan (no menu entry, no parent page)",
+        "/instructor/availability/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability/new is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/roster is an orphan (no menu entry, no parent page)",
+        "/member/bookings is an orphan (no menu entry, no parent page)",
+        "/member/dashboard is an orphan (no menu entry, no parent page)",
+        "/member/membership is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "4swvyns0": {
+    "app": "4swvyns0",
+    "coverage": 1.0,
+    "reach": 0.8064516129032258,
+    "wired": 1.0,
+    "resolves": 0.9772727272727273,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9639540566959922,
+    "counts": {
+      "coverage": {
+        "ok": 13,
+        "total": 13
+      },
+      "reach": {
+        "ok": 25,
+        "total": 31
+      },
+      "wired": {
+        "ok": 43,
+        "total": 43
+      },
+      "resolves": {
+        "ok": 43,
+        "total": 44
+      },
+      "bound": {
+        "ok": 6,
+        "total": 6
+      },
+      "forms": {
+        "ok": 19,
+        "total": 19
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/retailers/*/edit is an orphan (no menu entry, no parent page)",
+        "/retailers/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/scan-session: 'Edit Scan Session' \u2192 /history/{{scanSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "4v35xahc": {
+    "app": "4v35xahc",
+    "coverage": 0.08,
+    "reach": 0.125,
+    "wired": null,
+    "resolves": null,
+    "bound": null,
+    "forms": null,
+    "composite": 0.10250000000000001,
+    "counts": {
+      "coverage": {
+        "ok": 2,
+        "total": 25
+      },
+      "reach": {
+        "ok": 1,
+        "total": 8
+      },
+      "wired": {
+        "ok": 0,
+        "total": 0
+      },
+      "resolves": {
+        "ok": 0,
+        "total": 0
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 0,
+        "total": 0
+      }
+    },
+    "failures": {
+      "coverage": [
+        "planned /candidate/dashboard never shipped",
+        "planned /candidate/apply never shipped",
+        "planned /candidate/application/[id] never shipped",
+        "planned /recruiter/applications never shipped",
+        "planned /recruiter/applications/[id] never shipped",
+        "planned /recruiter/applications/[id]/schedule never shipped",
+        "planned /recruiter/drives never shipped",
+        "planned /recruiter/drives/[id] never shipped",
+        "planned /recruiter/drives/new never shipped",
+        "planned /recruiter/drives/calendar never shipped",
+        "planned /interviewer/inbox never shipped",
+        "planned /feedback never shipped",
+        "planned /interviewer/feedback/[id]/view never shipped",
+        "planned /admin/analytics never shipped",
+        "planned /admin/users never shipped",
+        "planned /candidates never shipped",
+        "planned /candidates/new never shipped",
+        "planned /recruiters never shipped",
+        "planned /recruiters/new never shipped",
+        "planned /interviewers never shipped",
+        "planned /interviewers/new never shipped",
+        "planned /admins never shipped",
+        "planned /admins/link never shipped"
+      ],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "5h0d3wlg": {
+    "app": "5h0d3wlg",
+    "coverage": 1.0,
+    "reach": 0.3157894736842105,
+    "wired": 1.0,
+    "resolves": 0.9830508474576272,
+    "bound": 1.0,
+    "forms": 0.7878787878787878,
+    "composite": 0.8477865181701043,
+    "counts": {
+      "coverage": {
+        "ok": 28,
+        "total": 28
+      },
+      "reach": {
+        "ok": 18,
+        "total": 57
+      },
+      "wired": {
+        "ok": 57,
+        "total": 57
+      },
+      "resolves": {
+        "ok": 58,
+        "total": 59
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 26,
+        "total": 33
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/reviews is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/bookings/*/review is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/instructors is an orphan (no menu entry, no parent page)",
+        "/instructors/* is an orphan (no menu entry, no parent page)",
+        "/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructors/new is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/plans/new: form has no submit target",
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/bookings/[id]/review: form has no submit target",
+        "/instructor/availability: form has no submit target",
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "5r9ahdfk": {
+    "app": "5r9ahdfk",
+    "coverage": 1.0,
+    "reach": 0.7592592592592593,
+    "wired": 0.8144329896907216,
+    "resolves": 0.9873417721518988,
+    "bound": 1.0,
+    "forms": 0.9629629629629629,
+    "composite": 0.920666164010807,
+    "counts": {
+      "coverage": {
+        "ok": 41,
+        "total": 41
+      },
+      "reach": {
+        "ok": 41,
+        "total": 54
+      },
+      "wired": {
+        "ok": 79,
+        "total": 97
+      },
+      "resolves": {
+        "ok": 78,
+        "total": 79
+      },
+      "bound": {
+        "ok": 16,
+        "total": 16
+      },
+      "forms": {
+        "ok": 26,
+        "total": 27
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/PurchaseOrder/*/edit is an orphan (no menu entry, no parent page)",
+        "/PurchaseOrder/new is an orphan (no menu entry, no parent page)",
+        "/StockMovement/*/edit is an orphan (no menu entry, no parent page)",
+        "/StockMovement/new is an orphan (no menu entry, no parent page)",
+        "/cart is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/locations/* is an orphan (no menu entry, no parent page)",
+        "/locations/*/edit is an orphan (no menu entry, no parent page)",
+        "/locations/new is an orphan (no menu entry, no parent page)",
+        "/stock-adjustments/new is an orphan (no menu entry, no parent page)",
+        "/stock-transfers/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/categories: 'Create Category' has no action",
+        "/inventory-counts: 'New Count' has no action",
+        "/products: 'Add Product' has no action",
+        "/products: 'Create Product' has no action",
+        "/purchase-orders: 'New Purchaseorder' has no action",
+        "/purchase-orders: 'Create Purchase Order' has no action",
+        "/skus: 'New Sku' has no action",
+        "/skus: 'Add SKU' has no action",
+        "/skus: 'Create SKU' has no action",
+        "/skus/[id]: 'Back' has no action",
+        "/skus/[id]: 'Adjust Stock' has no action",
+        "/skus/[id]: 'Transfer' has no action",
+        "/skus/[id]/edit: 'Cancel' has no action",
+        "/skus/[id]/edit: 'Save Changes' has no action",
+        "/stock-levels: 'New Stocklevel' has no action",
+        "/suppliers: 'Add Supplier' has no action",
+        "/suppliers: 'Create Supplier' has no action",
+        "/warehouses/[id]/locations: 'Back' has no action"
+      ],
+      "resolves": [
+        "/purchase-orders/[id]: 'Edit' \u2192 /PurchaseOrder/{{purchaseOrder.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "5rm2w83t": {
+    "app": "5rm2w83t",
+    "coverage": 1.0,
+    "reach": 0.8333333333333334,
+    "wired": 1.0,
+    "resolves": 0.9516129032258065,
+    "bound": 1.0,
+    "forms": 0.9166666666666666,
+    "composite": 0.9502688172043011,
+    "counts": {
+      "coverage": {
+        "ok": 28,
+        "total": 28
+      },
+      "reach": {
+        "ok": 40,
+        "total": 48
+      },
+      "wired": {
+        "ok": 62,
+        "total": 62
+      },
+      "resolves": {
+        "ok": 59,
+        "total": 62
+      },
+      "bound": {
+        "ok": 4,
+        "total": 4
+      },
+      "forms": {
+        "ok": 22,
+        "total": 24
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/bookings/* is an orphan (no menu entry, no parent page)",
+        "/instructor/schedule is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendees is an orphan (no menu entry, no parent page)",
+        "/reviews/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/bookings/[id]: 'Edit' \u2192 /my-bookings/{{booking.id}}/edit (no such route)",
+        "/membership: 'Edit Member Membership' \u2192 /membership/{{memberMembership.id}}/edit (no such route)",
+        "/schedule/[id]: 'Edit' \u2192 /admin/sessions/{{classSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "5u9du8jt": {
+    "app": "5u9du8jt",
+    "coverage": 1.0,
+    "reach": 0.9024390243902439,
+    "wired": 0.578125,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9375,
+    "composite": 0.9030106707317073,
+    "counts": {
+      "coverage": {
+        "ok": 29,
+        "total": 29
+      },
+      "reach": {
+        "ok": 37,
+        "total": 41
+      },
+      "wired": {
+        "ok": 37,
+        "total": 64
+      },
+      "resolves": {
+        "ok": 38,
+        "total": 38
+      },
+      "bound": {
+        "ok": 17,
+        "total": 17
+      },
+      "forms": {
+        "ok": 15,
+        "total": 16
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/cart is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admins: 'New User' has no action",
+        "/admins/[id]: 'Back' has no action",
+        "/categories: 'New Categorie' has no action",
+        "/categories: 'Add Category' has no action",
+        "/categories: 'Create Category' has no action",
+        "/products: 'New Product' has no action",
+        "/products: 'Add Product' has no action",
+        "/products/[id]: 'Back' has no action",
+        "/products/[id]/edit: 'Cancel' has no action",
+        "/products/[id]/edit: 'Save Changes' has no action",
+        "/products/new: 'Cancel' has no action",
+        "/purchase-orders: 'New Purchaseorder' has no action",
+        "/purchase-orders/[id]: 'Back' has no action",
+        "/purchase-orders/[id]: 'Receive' has no action",
+        "/purchase-orders/[id]: 'Mark as Received' has no action",
+        "/purchase-orders/[id]: 'Cancel Order' has no action",
+        "/purchase-orders/[id]: 'Print' has no action",
+        "/purchase-orders/[id]: 'Export PDF' has no action",
+        "/purchase-orders/[id]/items: 'Back' has no action",
+        "/purchase-orders/[id]/items: 'Create Purchase Order Item' has no action",
+        "/purchase-orders/[id]/items/new: 'Cancel' has no action",
+        "/purchase-orders/new: 'Cancel' has no action",
+        "/staffs/[id]: 'Back' has no action",
+        "/stock-movements: 'New Stockmovement' has no action",
+        "/suppliers: 'Add Supplier' has no action",
+        "/suppliers: 'Create Supplier' has no action",
+        "/suppliers/[id]: 'Back' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "6fbql9rs": {
+    "app": "6fbql9rs",
+    "coverage": 1.0,
+    "reach": 0.5918367346938775,
+    "wired": 1.0,
+    "resolves": 0.9605263157894737,
+    "bound": 1.0,
+    "forms": 0.967741935483871,
+    "composite": 0.9200174976612038,
+    "counts": {
+      "coverage": {
+        "ok": 19,
+        "total": 19
+      },
+      "reach": {
+        "ok": 29,
+        "total": 49
+      },
+      "wired": {
+        "ok": 70,
+        "total": 70
+      },
+      "resolves": {
+        "ok": 73,
+        "total": 76
+      },
+      "bound": {
+        "ok": 13,
+        "total": 13
+      },
+      "forms": {
+        "ok": 30,
+        "total": 31
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/drive-assignments/*/edit is an orphan (no menu entry, no parent page)",
+        "/drive-assignments/new is an orphan (no menu entry, no parent page)",
+        "/feedback/* is an orphan (no menu entry, no parent page)",
+        "/feedback/*/edit is an orphan (no menu entry, no parent page)",
+        "/feedback/new is an orphan (no menu entry, no parent page)",
+        "/inviteinterviewer-user is an orphan (no menu entry, no parent page)",
+        "/inviteinterviewer-user/*/edit is an orphan (no menu entry, no parent page)",
+        "/inviteinterviewer-user/new is an orphan (no menu entry, no parent page)",
+        "/inviterecruiter-user is an orphan (no menu entry, no parent page)",
+        "/inviterecruiter-user/*/edit is an orphan (no menu entry, no parent page)",
+        "/inviterecruiter-user/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/reports/pipeline is an orphan (no menu entry, no parent page)",
+        "/schedule-driveassignment is an orphan (no menu entry, no parent page)",
+        "/schedule-driveassignment/*/edit is an orphan (no menu entry, no parent page)",
+        "/schedule-driveassignment/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/inviteinterviewer-user: 'Cancel' \u2192 /users (no such route)",
+        "/inviterecruiter-user: 'Cancel' \u2192 /users (no such route)",
+        "/schedule-driveassignment: 'Cancel' \u2192 /drive_assignments (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "6q7oqejv": {
+    "app": "6q7oqejv",
+    "coverage": 1.0,
+    "reach": 0.8769230769230769,
+    "wired": 0.8070175438596491,
+    "resolves": 0.9782608695652174,
+    "bound": 1.0,
+    "forms": 0.9705882352941176,
+    "composite": 0.9387982876070101,
+    "counts": {
+      "coverage": {
+        "ok": 37,
+        "total": 37
+      },
+      "reach": {
+        "ok": 57,
+        "total": 65
+      },
+      "wired": {
+        "ok": 92,
+        "total": 114
+      },
+      "resolves": {
+        "ok": 90,
+        "total": 92
+      },
+      "bound": {
+        "ok": 20,
+        "total": 20
+      },
+      "forms": {
+        "ok": 33,
+        "total": 34
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ReorderAlert/*/edit is an orphan (no menu entry, no parent page)",
+        "/ReorderAlert/new is an orphan (no menu entry, no parent page)",
+        "/StockLevel/*/edit is an orphan (no menu entry, no parent page)",
+        "/StockLevel/new is an orphan (no menu entry, no parent page)",
+        "/cart is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/categories: 'Create Category' has no action",
+        "/products: 'New Product' has no action",
+        "/products: 'Add Product' has no action",
+        "/products: 'Create Product' has no action",
+        "/products/[id]: 'Back' has no action",
+        "/products/[id]/edit: 'Cancel' has no action",
+        "/products/[id]/edit: 'Cancel' has no action",
+        "/products/[id]/edit: 'Save Changes' has no action",
+        "/purchase-orders: 'New Purchaseorder' has no action",
+        "/reorder-alerts: 'New Reorderalert' has no action",
+        "/skus: 'New Sku' has no action",
+        "/skus: 'Add SKU' has no action",
+        "/skus: 'Create SKU' has no action",
+        "/skus/[id]: 'Back' has no action",
+        "/stock: 'New Stocklevel' has no action",
+        "/stock-adjustments: 'New Stockadjustment' has no action",
+        "/stock-adjustments: 'New Adjustment' has no action",
+        "/stock-adjustments: 'Create Stock Adjustment' has no action",
+        "/stock-adjustments/[id]: 'Back' has no action",
+        "/suppliers: 'New Supplier' has no action",
+        "/suppliers: 'Add Supplier' has no action",
+        "/suppliers: 'Create Supplier' has no action"
+      ],
+      "resolves": [
+        "/stock-adjustments/[id]: 'Reject' \u2192 workflow rejectAdjustment (not defined)",
+        "/stock-adjustments/[id]: 'Approve' \u2192 workflow approveAdjustment (not defined)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "90cx1h1u": {
+    "app": "90cx1h1u",
+    "coverage": 1.0,
+    "reach": 0.4107142857142857,
+    "wired": 1.0,
+    "resolves": 0.9827586206896551,
+    "bound": 1.0,
+    "forms": 0.7666666666666667,
+    "composite": 0.8600232621784346,
+    "counts": {
+      "coverage": {
+        "ok": 35,
+        "total": 35
+      },
+      "reach": {
+        "ok": 23,
+        "total": 56
+      },
+      "wired": {
+        "ok": 58,
+        "total": 58
+      },
+      "resolves": {
+        "ok": 57,
+        "total": 58
+      },
+      "bound": {
+        "ok": 12,
+        "total": 12
+      },
+      "forms": {
+        "ok": 23,
+        "total": 30
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/cancellation-policies is an orphan (no menu entry, no parent page)",
+        "/admin/cancellation-policies/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/cancellation-policies/new is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/profile is an orphan (no menu entry, no parent page)",
+        "/member/*/edit is an orphan (no menu entry, no parent page)",
+        "/member/dashboard is an orphan (no menu entry, no parent page)",
+        "/member/new is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/* is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{member.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/sessions/[id]/edit: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/instructor/availability: form has no submit target",
+        "/instructor/profile: form has no submit target",
+        "/login: form has no submit target",
+        "/member/bookings/[id]/review: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "9y8de8i7": {
+    "app": "9y8de8i7",
+    "coverage": 0.8571428571428571,
+    "reach": 0.5,
+    "wired": 0.3333333333333333,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.5,
+    "composite": 0.6984126984126985,
+    "counts": {
+      "coverage": {
+        "ok": 6,
+        "total": 7
+      },
+      "reach": {
+        "ok": 4,
+        "total": 8
+      },
+      "wired": {
+        "ok": 1,
+        "total": 3
+      },
+      "resolves": {
+        "ok": 1,
+        "total": 1
+      },
+      "bound": {
+        "ok": 1,
+        "total": 1
+      },
+      "forms": {
+        "ok": 1,
+        "total": 2
+      }
+    },
+    "failures": {
+      "coverage": [
+        "planned /admins never shipped"
+      ],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/documents: 'Upload' has no action",
+        "/documents/[id]: 'Back' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "_s5_verify": {
+    "app": "_s5_verify",
+    "coverage": null,
+    "reach": null,
+    "wired": null,
+    "resolves": null,
+    "bound": null,
+    "forms": null,
+    "composite": null,
+    "counts": {
+      "coverage": {
+        "ok": 0,
+        "total": 0
+      },
+      "reach": {
+        "ok": 0,
+        "total": 0
+      },
+      "wired": {
+        "ok": 0,
+        "total": 0
+      },
+      "resolves": {
+        "ok": 0,
+        "total": 0
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 0,
+        "total": 0
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "atb0m97x": {
+    "app": "atb0m97x",
+    "coverage": 1.0,
+    "reach": 0.631578947368421,
+    "wired": 0.6818181818181818,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9,
+    "composite": 0.8688995215311005,
+    "counts": {
+      "coverage": {
+        "ok": 7,
+        "total": 7
+      },
+      "reach": {
+        "ok": 12,
+        "total": 19
+      },
+      "wired": {
+        "ok": 15,
+        "total": 22
+      },
+      "resolves": {
+        "ok": 17,
+        "total": 17
+      },
+      "bound": {
+        "ok": 5,
+        "total": 5
+      },
+      "forms": {
+        "ok": 9,
+        "total": 10
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/: 'Upload Documents' has no action",
+        "/: 'Search' has no action",
+        "/admins: 'New User' has no action",
+        "/documents: 'New Document' has no action",
+        "/documents: 'Upload Documents' has no action",
+        "/documents/[id]: 'Back' has no action",
+        "/search: 'New Document' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "blazpx6a": {
+    "app": "blazpx6a",
+    "coverage": 1.0,
+    "reach": 0.5909090909090909,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.92,
+    "composite": 0.9184848484848485,
+    "counts": {
+      "coverage": {
+        "ok": 23,
+        "total": 23
+      },
+      "reach": {
+        "ok": 26,
+        "total": 44
+      },
+      "wired": {
+        "ok": 69,
+        "total": 69
+      },
+      "resolves": {
+        "ok": 69,
+        "total": 69
+      },
+      "bound": {
+        "ok": 2,
+        "total": 2
+      },
+      "forms": {
+        "ok": 23,
+        "total": 25
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Review/*/edit is an orphan (no menu entry, no parent page)",
+        "/Review/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/analytics is an orphan (no menu entry, no parent page)",
+        "/admin/bookings is an orphan (no menu entry, no parent page)",
+        "/admin/classes is an orphan (no menu entry, no parent page)",
+        "/admin/classes/new is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/waitlist is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "cl196wu7": {
+    "app": "cl196wu7",
+    "coverage": 1.0,
+    "reach": 0.18867924528301888,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.7857142857142857,
+    "composite": 0.8290655884995508,
+    "counts": {
+      "coverage": {
+        "ok": 31,
+        "total": 31
+      },
+      "reach": {
+        "ok": 10,
+        "total": 53
+      },
+      "wired": {
+        "ok": 61,
+        "total": 61
+      },
+      "resolves": {
+        "ok": 61,
+        "total": 61
+      },
+      "bound": {
+        "ok": 17,
+        "total": 17
+      },
+      "forms": {
+        "ok": 22,
+        "total": 28
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/MembershipSubscription/*/edit is an orphan (no menu entry, no parent page)",
+        "/MembershipSubscription/new is an orphan (no menu entry, no parent page)",
+        "/admin is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/analytics is an orphan (no menu entry, no parent page)",
+        "/admin/instructors is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/* is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/waitlists is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/availability is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/* is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/membership/signup is an orphan (no menu entry, no parent page)",
+        "/my/*/edit is an orphan (no menu entry, no parent page)",
+        "/my/bookings is an orphan (no menu entry, no parent page)",
+        "/my/bookings/*/review is an orphan (no menu entry, no parent page)",
+        "/my/class-packs is an orphan (no menu entry, no parent page)",
+        "/my/membership is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/login: form has no submit target",
+        "/membership/signup: form has no submit target",
+        "/my/bookings/[id]/review: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "cn14gp4w": {
+    "app": "cn14gp4w",
+    "coverage": 1.0,
+    "reach": 0.40540540540540543,
+    "wired": 0.9743589743589743,
+    "resolves": 1.0,
+    "bound": null,
+    "forms": 0.9090909090909091,
+    "composite": 0.8577710577710578,
+    "counts": {
+      "coverage": {
+        "ok": 14,
+        "total": 14
+      },
+      "reach": {
+        "ok": 15,
+        "total": 37
+      },
+      "wired": {
+        "ok": 38,
+        "total": 39
+      },
+      "resolves": {
+        "ok": 39,
+        "total": 39
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 20,
+        "total": 22
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Batch/*/edit is an orphan (no menu entry, no parent page)",
+        "/Batch/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/auditors is an orphan (no menu entry, no parent page)",
+        "/auditors/*/edit is an orphan (no menu entry, no parent page)",
+        "/auditors/new is an orphan (no menu entry, no parent page)",
+        "/batches is an orphan (no menu entry, no parent page)",
+        "/documents/* is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/reviewers is an orphan (no menu entry, no parent page)",
+        "/reviewers/*/edit is an orphan (no menu entry, no parent page)",
+        "/reviewers/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/search: 'View Document' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/admin/users/new: form has no submit target",
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "cwx1stzz": {
+    "app": "cwx1stzz",
+    "coverage": 1.0,
+    "reach": 0.9696969696969697,
+    "wired": 0.7659574468085106,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.96,
+    "composite": 0.9492757360842466,
+    "counts": {
+      "coverage": {
+        "ok": 31,
+        "total": 31
+      },
+      "reach": {
+        "ok": 64,
+        "total": 66
+      },
+      "wired": {
+        "ok": 72,
+        "total": 94
+      },
+      "resolves": {
+        "ok": 72,
+        "total": 72
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 24,
+        "total": 25
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/attendee: 'New Attendee' has no action",
+        "/attendees: 'New Attendee' has no action",
+        "/dashboard: 'Reset filters' has no action",
+        "/events: 'New Event' has no action",
+        "/events: 'Create Event' has no action",
+        "/events/[id]: 'Back' has no action",
+        "/events/[id]/agenda: 'Back' has no action",
+        "/events/[id]/analytics: 'Back' has no action",
+        "/events/[id]/speakers: 'Back' has no action",
+        "/events/[id]/speakers: 'Create Speaker' has no action",
+        "/events/[id]/tasks: 'Back' has no action",
+        "/events/[id]/tickets: 'Back' has no action",
+        "/events/[id]/tickets: 'Create Ticket Type' has no action",
+        "/my-sessions: 'New Session' has no action",
+        "/my-sessions: 'Create Session' has no action",
+        "/my-sessions/new: 'Cancel' has no action",
+        "/my-tickets: 'New Ticket' has no action",
+        "/my-tickets: 'Create Ticket' has no action",
+        "/task: 'New Task' has no action",
+        "/venues: 'New Venue' has no action",
+        "/venues: 'New Venue' has no action",
+        "/venues: 'Create Venue' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "dxlc5m31": {
+    "app": "dxlc5m31",
+    "coverage": 1.0,
+    "reach": 0.43902439024390244,
+    "wired": 0.9298245614035088,
+    "resolves": 0.8596491228070176,
+    "bound": 1.0,
+    "forms": 0.9166666666666666,
+    "composite": 0.857527456853516,
+    "counts": {
+      "coverage": {
+        "ok": 18,
+        "total": 18
+      },
+      "reach": {
+        "ok": 18,
+        "total": 41
+      },
+      "wired": {
+        "ok": 53,
+        "total": 57
+      },
+      "resolves": {
+        "ok": 49,
+        "total": 57
+      },
+      "bound": {
+        "ok": 4,
+        "total": 4
+      },
+      "forms": {
+        "ok": 22,
+        "total": 24
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/analytics is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/retailers is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/new is an orphan (no menu entry, no parent page)",
+        "/admin/users is an orphan (no menu entry, no parent page)",
+        "/dashboard is an orphan (no menu entry, no parent page)",
+        "/dashboard/*/edit is an orphan (no menu entry, no parent page)",
+        "/dashboard/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession/*/edit is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession/new is an orphan (no menu entry, no parent page)",
+        "/scans/*/disambiguate is an orphan (no menu entry, no parent page)",
+        "/scans/*/results is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admin/retailers: 'New Retailer' has no action",
+        "/history/new: 'Cancel' has no action",
+        "/users: 'New User' has no action",
+        "/wishlist/new: 'Cancel' has no action"
+      ],
+      "resolves": [
+        "/about: 'Edit' \u2192 /dashboard/{{product.id}}/edit (no such route)",
+        "/admin/retailers/[id]/edit: 'Cancel' \u2192 /admin (no such route)",
+        "/admin/retailers/new: 'Cancel' \u2192 /admin (no such route)",
+        "/dashboard: 'View results  \u2192' \u2192 /scans/{{item.id}}/results (no such route)",
+        "/history: 'View results  \u2192' \u2192 /scans/{{item.id}}/results (no such route)",
+        "/products/[id]: 'Back' \u2192 /products (no such route)",
+        "/products/[id]: 'Edit' \u2192 /dashboard/{{product.id}}/edit (no such route)",
+        "/scans/[id]/results: 'Back' \u2192 /scans (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "dz6jba0x": {
+    "app": "dz6jba0x",
+    "coverage": 1.0,
+    "reach": 0.65,
+    "wired": 1.0,
+    "resolves": 0.9411764705882353,
+    "bound": null,
+    "forms": 0.8888888888888888,
+    "composite": 0.8960130718954247,
+    "counts": {
+      "coverage": {
+        "ok": 8,
+        "total": 8
+      },
+      "reach": {
+        "ok": 13,
+        "total": 20
+      },
+      "wired": {
+        "ok": 17,
+        "total": 17
+      },
+      "resolves": {
+        "ok": 16,
+        "total": 17
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 8,
+        "total": 9
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/MonthlyMrrSnapshot/*/edit is an orphan (no menu entry, no parent page)",
+        "/MonthlyMrrSnapshot/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        ": '+ New' \u2192 workflow item.create (not defined)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "facp2lcu": {
+    "app": "facp2lcu",
+    "coverage": 1.0,
+    "reach": 0.7962962962962963,
+    "wired": 1.0,
+    "resolves": 0.9875,
+    "bound": 1.0,
+    "forms": 0.9565217391304348,
+    "composite": 0.9567196725711219,
+    "counts": {
+      "coverage": {
+        "ok": 40,
+        "total": 40
+      },
+      "reach": {
+        "ok": 43,
+        "total": 54
+      },
+      "wired": {
+        "ok": 81,
+        "total": 81
+      },
+      "resolves": {
+        "ok": 79,
+        "total": 80
+      },
+      "bound": {
+        "ok": 10,
+        "total": 10
+      },
+      "forms": {
+        "ok": 22,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/owner/dashboard is an orphan (no menu entry, no parent page)",
+        "/reports/financials is an orphan (no menu entry, no parent page)",
+        "/reports/vacancies is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)",
+        "/tenant/maintenance/new is an orphan (no menu entry, no parent page)",
+        "/tenant/pay-rent is an orphan (no menu entry, no parent page)",
+        "/tenant/portal is an orphan (no menu entry, no parent page)",
+        "/units/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/payments/[id]: 'Edit' \u2192 /dashboard/{{rentPayment.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "fleet-banking": {
+    "app": "fleet-banking",
+    "coverage": 1.0,
+    "reach": 0.28205128205128205,
+    "wired": 0.8627450980392157,
+    "resolves": 0.9777777777777777,
+    "bound": 1.0,
+    "forms": 0.9545454545454546,
+    "composite": 0.846186602068955,
+    "counts": {
+      "coverage": {
+        "ok": 15,
+        "total": 15
+      },
+      "reach": {
+        "ok": 11,
+        "total": 39
+      },
+      "wired": {
+        "ok": 44,
+        "total": 51
+      },
+      "resolves": {
+        "ok": 44,
+        "total": 45
+      },
+      "bound": {
+        "ok": 6,
+        "total": 6
+      },
+      "forms": {
+        "ok": 21,
+        "total": 22
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Batch/*/edit is an orphan (no menu entry, no parent page)",
+        "/Batch/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/analytics is an orphan (no menu entry, no parent page)",
+        "/archivists is an orphan (no menu entry, no parent page)",
+        "/archivists/*/edit is an orphan (no menu entry, no parent page)",
+        "/archivists/new is an orphan (no menu entry, no parent page)",
+        "/batches is an orphan (no menu entry, no parent page)",
+        "/compliances is an orphan (no menu entry, no parent page)",
+        "/compliances/*/edit is an orphan (no menu entry, no parent page)",
+        "/compliances/new is an orphan (no menu entry, no parent page)",
+        "/documents/* is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/settings/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/new is an orphan (no menu entry, no parent page)",
+        "/settings/retention is an orphan (no menu entry, no parent page)",
+        "/settings/retention/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/retention/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admins: 'New User' has no action",
+        "/audit: 'New Document' has no action",
+        "/batches: 'New Batche' has no action",
+        "/batches: 'Upload New Batch' has no action",
+        "/batches: 'Create Batch' has no action",
+        "/batches/[id]: 'Back' has no action",
+        "/settings/retention: 'New Retentionpolicie' has no action"
+      ],
+      "resolves": [
+        "/documents/[id]: 'Back' \u2192 /documents (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "fleet-commerce-cart": {
+    "app": "fleet-commerce-cart",
+    "coverage": 1.0,
+    "reach": 0.4528301886792453,
+    "wired": 0.6931818181818182,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9259259259259259,
+    "composite": 0.8453229887978315,
+    "counts": {
+      "coverage": {
+        "ok": 32,
+        "total": 32
+      },
+      "reach": {
+        "ok": 24,
+        "total": 53
+      },
+      "wired": {
+        "ok": 61,
+        "total": 88
+      },
+      "resolves": {
+        "ok": 62,
+        "total": 62
+      },
+      "bound": {
+        "ok": 4,
+        "total": 4
+      },
+      "forms": {
+        "ok": 25,
+        "total": 27
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/account is an orphan (no menu entry, no parent page)",
+        "/admin is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/orders is an orphan (no menu entry, no parent page)",
+        "/admin/orders/* is an orphan (no menu entry, no parent page)",
+        "/admin/plants is an orphan (no menu entry, no parent page)",
+        "/admin/plants/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plants/*/variants is an orphan (no menu entry, no parent page)",
+        "/admin/plants/*/variants/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plants/*/variants/new is an orphan (no menu entry, no parent page)",
+        "/admin/plants/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/customers is an orphan (no menu entry, no parent page)",
+        "/customers/* is an orphan (no menu entry, no parent page)",
+        "/customers/*/edit is an orphan (no menu entry, no parent page)",
+        "/customers/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/subscription is an orphan (no menu entry, no parent page)",
+        "/subscription/*/edit is an orphan (no menu entry, no parent page)",
+        "/subscription/edit is an orphan (no menu entry, no parent page)",
+        "/subscription/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admin: '\u21ba Reset all filters' has no action",
+        "/admin/orders: 'Create Order' has no action",
+        "/admin/orders/[id]: 'Back' has no action",
+        "/admin/plants: 'Create Plant' has no action",
+        "/admin/plants/[id]/variants: 'Create Plant Size Variant' has no action",
+        "/admin/plants/[id]/variants/new: 'Cancel' has no action",
+        "/admins: 'Create User' has no action",
+        "/collections: 'New Collection' has no action",
+        "/collections: 'Create Collection' has no action",
+        "/collections/[id]: 'Back' has no action",
+        "/collections/new: 'Cancel' has no action",
+        "/customers: 'Create Customer' has no action",
+        "/orders: 'New Order' has no action",
+        "/orders: 'Create Order' has no action",
+        "/orders/[id]: 'Back' has no action",
+        "/planters: 'New Planter' has no action",
+        "/planters: 'Create Planter' has no action",
+        "/planters/[id]: 'Back' has no action",
+        "/plants: 'New Plant' has no action",
+        "/plants: 'Create Plant' has no action",
+        "/plants/[id]: 'Back' has no action",
+        "/plants/[id]: 'Edit' has no action",
+        "/plants/[id]/review: 'Cancel' has no action",
+        "/plants/[id]/reviews: 'Back' has no action",
+        "/plants/[id]/reviews: 'Create Review' has no action",
+        "/subscription/edit: 'Cancel' has no action",
+        "/subscription/new: 'Cancel' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "fleet-doc-intel": {
+    "app": "fleet-doc-intel",
+    "coverage": 1.0,
+    "reach": 0.631578947368421,
+    "wired": 0.7307692307692307,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9090909090909091,
+    "composite": 0.87857318120476,
+    "counts": {
+      "coverage": {
+        "ok": 7,
+        "total": 7
+      },
+      "reach": {
+        "ok": 12,
+        "total": 19
+      },
+      "wired": {
+        "ok": 19,
+        "total": 26
+      },
+      "resolves": {
+        "ok": 20,
+        "total": 20
+      },
+      "bound": {
+        "ok": 4,
+        "total": 4
+      },
+      "forms": {
+        "ok": 10,
+        "total": 11
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admins: 'New User' has no action",
+        "/admins: 'Add User' has no action",
+        "/documents: 'New Document' has no action",
+        "/documents: 'Add Document' has no action",
+        "/documents/[id]: 'Back' has no action",
+        "/documents/new: 'Cancel' has no action",
+        "/search: 'Add Document' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "fleet-leave-management": {
+    "app": "fleet-leave-management",
+    "coverage": 1.0,
+    "reach": 0.55,
+    "wired": 0.8,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.875,
+    "composite": 0.8708333333333332,
+    "counts": {
+      "coverage": {
+        "ok": 7,
+        "total": 7
+      },
+      "reach": {
+        "ok": 11,
+        "total": 20
+      },
+      "wired": {
+        "ok": 16,
+        "total": 20
+      },
+      "resolves": {
+        "ok": 17,
+        "total": 17
+      },
+      "bound": {
+        "ok": 1,
+        "total": 1
+      },
+      "forms": {
+        "ok": 7,
+        "total": 8
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/LeaveRequest/*/edit is an orphan (no menu entry, no parent page)",
+        "/LeaveRequest/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/: '\u21ba Reset all filters' has no action",
+        "/leave-requests: 'New Leaverequest' has no action",
+        "/leave-requests/[id]: 'Back' has no action",
+        "/managers: 'New User' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "fleet-recruitment": {
+    "app": "fleet-recruitment",
+    "coverage": 1.0,
+    "reach": 0.6818181818181818,
+    "wired": 0.9183673469387755,
+    "resolves": 0.9787234042553191,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9298181555020459,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 30,
+        "total": 44
+      },
+      "wired": {
+        "ok": 45,
+        "total": 49
+      },
+      "resolves": {
+        "ok": 46,
+        "total": 47
+      },
+      "bound": {
+        "ok": 2,
+        "total": 2
+      },
+      "forms": {
+        "ok": 20,
+        "total": 20
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/DriveApplication/*/edit is an orphan (no menu entry, no parent page)",
+        "/DriveApplication/new is an orphan (no menu entry, no parent page)",
+        "/drive is an orphan (no menu entry, no parent page)",
+        "/drive/*/edit is an orphan (no menu entry, no parent page)",
+        "/drive/new is an orphan (no menu entry, no parent page)",
+        "/feedback-scorecard is an orphan (no menu entry, no parent page)",
+        "/feedback-scorecard/*/edit is an orphan (no menu entry, no parent page)",
+        "/feedback-scorecard/new is an orphan (no menu entry, no parent page)",
+        "/interviews/calendar is an orphan (no menu entry, no parent page)",
+        "/recruiter/dashboard is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/candidates: 'New Candidateprofile' has no action",
+        "/dashboard: '\u21ba Reset all filters' has no action",
+        "/drive-application: 'New Driveapplication' has no action",
+        "/drives: 'New Drive' has no action"
+      ],
+      "resolves": [
+        "/interviews/calendar: 'New Interview' \u2192 /interviews/new (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "fleet-yoga-booking": {
+    "app": "fleet-yoga-booking",
+    "coverage": 1.0,
+    "reach": 0.49122807017543857,
+    "wired": 0.7142857142857143,
+    "resolves": 0.9615384615384616,
+    "bound": 1.0,
+    "forms": 0.9,
+    "composite": 0.8445087076666025,
+    "counts": {
+      "coverage": {
+        "ok": 33,
+        "total": 33
+      },
+      "reach": {
+        "ok": 28,
+        "total": 57
+      },
+      "wired": {
+        "ok": 50,
+        "total": 70
+      },
+      "resolves": {
+        "ok": 50,
+        "total": 52
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 18,
+        "total": 20
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/settings is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/reviews is an orphan (no menu entry, no parent page)",
+        "/instructor/schedule is an orphan (no menu entry, no parent page)",
+        "/instructor/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/instructors is an orphan (no menu entry, no parent page)",
+        "/instructors/* is an orphan (no menu entry, no parent page)",
+        "/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructors/new is an orphan (no menu entry, no parent page)",
+        "/member/dashboard is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/* is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admin/plans/new: 'Cancel' has no action",
+        "/admin/plans/new: 'Create Plan' has no action",
+        "/admin/rooms: 'New Room' has no action",
+        "/admin/sessions/[id]: 'Back' has no action",
+        "/admin/sessions/[id]: 'Reassign Instructor' has no action",
+        "/admin/sessions/[id]: 'Cancel Session' has no action",
+        "/admin/sessions/[id]: 'Edit' has no action",
+        "/instructor/availability: 'Cancel' has no action",
+        "/member/bookings: 'New Booking' has no action",
+        "/member/dashboard: 'Browse Schedule' has no action",
+        "/member/dashboard: 'Manage Membership' has no action",
+        "/member/dashboard: 'My Bookings' has no action",
+        "/member/membership: 'Back' has no action",
+        "/member/membership: 'Select Plan' has no action",
+        "/member/reviews: 'New Review' has no action",
+        "/members: 'New User' has no action",
+        "/plans: 'New Membershipplan' has no action",
+        "/plans: 'Subscribe' has no action",
+        "/schedule: 'New Classsession' has no action",
+        "/sessions/[id]/book: 'Cancel' has no action"
+      ],
+      "resolves": [
+        "/admin/instructors/[id]: 'Edit' \u2192 /admin/{{instructor.id}}/edit (no such route)",
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "ft2g6a87": {
+    "app": "ft2g6a87",
+    "coverage": 1.0,
+    "reach": 0.8461538461538461,
+    "wired": 1.0,
+    "resolves": 0.98,
+    "bound": 1.0,
+    "forms": 0.7407407407407407,
+    "composite": 0.9278157644824311,
+    "counts": {
+      "coverage": {
+        "ok": 28,
+        "total": 28
+      },
+      "reach": {
+        "ok": 44,
+        "total": 52
+      },
+      "wired": {
+        "ok": 49,
+        "total": 49
+      },
+      "resolves": {
+        "ok": 49,
+        "total": 50
+      },
+      "bound": {
+        "ok": 15,
+        "total": 15
+      },
+      "forms": {
+        "ok": 20,
+        "total": 27
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSchedule/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSchedule/new is an orphan (no menu entry, no parent page)",
+        "/bookings/confirm is an orphan (no menu entry, no parent page)",
+        "/reviews/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/classes/new: form has no submit target",
+        "/admin/schedule/new: form has no submit target",
+        "/bookings/confirm: form has no submit target",
+        "/login: form has no submit target",
+        "/profile/edit: form has no submit target",
+        "/reviews/new: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "g5g6wxf4": {
+    "app": "g5g6wxf4",
+    "coverage": 1.0,
+    "reach": 0.9036144578313253,
+    "wired": 0.9448818897637795,
+    "resolves": 0.975,
+    "bound": 0.72,
+    "forms": 0.9767441860465116,
+    "composite": 0.9200400889402695,
+    "counts": {
+      "coverage": {
+        "ok": 46,
+        "total": 46
+      },
+      "reach": {
+        "ok": 75,
+        "total": 83
+      },
+      "wired": {
+        "ok": 120,
+        "total": 127
+      },
+      "resolves": {
+        "ok": 117,
+        "total": 120
+      },
+      "bound": {
+        "ok": 18,
+        "total": 25
+      },
+      "forms": {
+        "ok": 42,
+        "total": 43
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Bill/*/edit is an orphan (no menu entry, no parent page)",
+        "/VotingRecord/*/edit is an orphan (no menu entry, no parent page)",
+        "/VotingRecord/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/bills: '\u0645\u0634\u0631\u0648\u0639 \u0642\u0627\u0646\u0648\u0646 \u062c\u062f\u064a\u062f' has no action",
+        "/minutes: '\u0625\u0646\u0634\u0627\u0621 \u0645\u062d\u0636\u0631 \u062c\u062f\u064a\u062f' has no action",
+        "/minutes/[id]: '\u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u062d\u0636\u0631 (PDF)' has no action",
+        "/minutes/[id]: '\u0627\u0644\u0639\u0648\u062f\u0629 \u0625\u0644\u0649 \u0627\u0644\u0642\u0627\u0626\u0645\u0629' has no action",
+        "/sessions/[id]/voting: '\u0645\u0648\u0627\u0641\u0642' has no action",
+        "/sessions/[id]/voting: '\u0645\u0639\u0627\u0631\u0636' has no action",
+        "/sessions/[id]/voting: '\u0645\u0645\u062a\u0646\u0639' has no action"
+      ],
+      "resolves": [
+        "/bills/[id]: 'Edit' \u2192 /Minute/{{bill.id}}/edit (no such route)",
+        "/calendar: 'New Session' \u2192 /calendar/new (no such route)",
+        "/public/bills/[id]: 'Edit' \u2192 /Minute/{{bill.id}}/edit (no such route)"
+      ],
+      "bound": [
+        "/committee-chairs: dataSource 'committee' resolves to no entity",
+        "/it-admins: dataSource 'it' resolves to no entity",
+        "/legal-advisors: dataSource 'legal' resolves to no entity",
+        "/political-blocs: dataSource 'political' resolves to no entity",
+        "/public-visitors: dataSource 'public' resolves to no entity",
+        "/secretary-generals: dataSource 'secretary' resolves to no entity",
+        "/session-clerks: dataSource 'session' resolves to no entity"
+      ],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "gds867dc": {
+    "app": "gds867dc",
+    "coverage": 1.0,
+    "reach": 0.625,
+    "wired": 1.0,
+    "resolves": 0.9782608695652174,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9338768115942028,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 20,
+        "total": 32
+      },
+      "wired": {
+        "ok": 45,
+        "total": 45
+      },
+      "resolves": {
+        "ok": 45,
+        "total": 46
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 18,
+        "total": 18
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/scrape-jobs is an orphan (no menu entry, no parent page)",
+        "/admin/sources is an orphan (no menu entry, no parent page)",
+        "/admin/sources/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sources/new is an orphan (no menu entry, no parent page)",
+        "/register is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/scan/[id]: 'Edit' \u2192 /history/{{scanRecord.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "geu60wr9": {
+    "app": "geu60wr9",
+    "coverage": 1.0,
+    "reach": 0.46938775510204084,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.7586206896551724,
+    "composite": 0.8713347407928689,
+    "counts": {
+      "coverage": {
+        "ok": 27,
+        "total": 27
+      },
+      "reach": {
+        "ok": 23,
+        "total": 49
+      },
+      "wired": {
+        "ok": 49,
+        "total": 49
+      },
+      "resolves": {
+        "ok": 49,
+        "total": 49
+      },
+      "bound": {
+        "ok": 9,
+        "total": 9
+      },
+      "forms": {
+        "ok": 22,
+        "total": 29
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/analytics is an orphan (no menu entry, no parent page)",
+        "/admin/classes is an orphan (no menu entry, no parent page)",
+        "/admin/classes/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/classes/new is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/plans is an orphan (no menu entry, no parent page)",
+        "/admin/plans/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/rooms is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/rooms/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/attendance is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/reviews/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/admin/classes/new: form has no submit target",
+        "/admin/plans/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/login: form has no submit target",
+        "/profile: form has no submit target",
+        "/reviews/new: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "gklk8txo": {
+    "app": "gklk8txo",
+    "coverage": 1.0,
+    "reach": 0.4594594594594595,
+    "wired": 0.9607843137254902,
+    "resolves": 0.9423076923076923,
+    "bound": 1.0,
+    "forms": 0.9090909090909091,
+    "composite": 0.8786070624305918,
+    "counts": {
+      "coverage": {
+        "ok": 18,
+        "total": 18
+      },
+      "reach": {
+        "ok": 17,
+        "total": 37
+      },
+      "wired": {
+        "ok": 49,
+        "total": 51
+      },
+      "resolves": {
+        "ok": 49,
+        "total": 52
+      },
+      "bound": {
+        "ok": 9,
+        "total": 9
+      },
+      "forms": {
+        "ok": 20,
+        "total": 22
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/analytics is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/retailers is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/retailers/new is an orphan (no menu entry, no parent page)",
+        "/admin/users is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession/*/edit is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession/new is an orphan (no menu entry, no parent page)",
+        "/scans/*/disambiguate is an orphan (no menu entry, no parent page)",
+        "/scans/*/results is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/: 'View Scrape Logs' has no action",
+        "/: 'Price Alerts Log' has no action"
+      ],
+      "resolves": [
+        "/products/[id]: 'Edit' \u2192 /home/{{product.id}}/edit (no such route)",
+        "/scanproductworkflow-scansession: 'Cancel' \u2192 /scan_sessions (no such route)",
+        "/scans/[id]/disambiguate: 'Edit' \u2192 /history/{{scanSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "grr9mehp": {
+    "app": "grr9mehp",
+    "coverage": 1.0,
+    "reach": 0.6338028169014085,
+    "wired": 1.0,
+    "resolves": 0.956140350877193,
+    "bound": 1.0,
+    "forms": 0.9473684210526315,
+    "composite": 0.9228852648052056,
+    "counts": {
+      "coverage": {
+        "ok": 37,
+        "total": 37
+      },
+      "reach": {
+        "ok": 45,
+        "total": 71
+      },
+      "wired": {
+        "ok": 113,
+        "total": 113
+      },
+      "resolves": {
+        "ok": 109,
+        "total": 114
+      },
+      "bound": {
+        "ok": 16,
+        "total": 16
+      },
+      "forms": {
+        "ok": 36,
+        "total": 38
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/classes is an orphan (no menu entry, no parent page)",
+        "/admin/classes/* is an orphan (no menu entry, no parent page)",
+        "/admin/classes/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/classes/new is an orphan (no menu entry, no parent page)",
+        "/admin/dashboard is an orphan (no menu entry, no parent page)",
+        "/admin/instructors is an orphan (no menu entry, no parent page)",
+        "/admin/instructors/* is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans is an orphan (no menu entry, no parent page)",
+        "/admin/membership-plans/new is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/schedules is an orphan (no menu entry, no parent page)",
+        "/admin/schedules/* is an orphan (no menu entry, no parent page)",
+        "/admin/schedules/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/schedules/new is an orphan (no menu entry, no parent page)",
+        "/instructor/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructor/dashboard is an orphan (no menu entry, no parent page)",
+        "/instructor/new is an orphan (no menu entry, no parent page)",
+        "/instructor/schedules is an orphan (no menu entry, no parent page)",
+        "/instructor/schedules/* is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/instructors/[id]: 'Edit' \u2192 /instructor/{{instructor.id}}/edit (no such route)",
+        "/admin/members/[id]: 'Edit' \u2192 /my-membership/{{member.id}}/edit (no such route)",
+        "/membership-plans/[id]: 'Edit' \u2192 /admin/{{membershipPlan.id}}/edit (no such route)",
+        "/my-membership: 'Edit Member Membership' \u2192 /my-membership/{{memberMembership.id}}/edit (no such route)",
+        "/profile: 'Edit Member' \u2192 /my-membership/{{member.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "hn7kysai": {
+    "app": "hn7kysai",
+    "coverage": 1.0,
+    "reach": 0.8292682926829268,
+    "wired": 0.9811320754716981,
+    "resolves": 0.9811320754716981,
+    "bound": 1.0,
+    "forms": 0.9523809523809523,
+    "composite": 0.9573188993345458,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 34,
+        "total": 41
+      },
+      "wired": {
+        "ok": 52,
+        "total": 53
+      },
+      "resolves": {
+        "ok": 52,
+        "total": 53
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 20,
+        "total": 21
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/applications/[id]/feedback: 'Cancel' has no action"
+      ],
+      "resolves": [
+        "/drives/[id]: 'Edit' \u2192 /analytics/{{recruitmentDrive.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "i6zsvtov": {
+    "app": "i6zsvtov",
+    "coverage": 1.0,
+    "reach": 0.7647058823529411,
+    "wired": 0.9583333333333334,
+    "resolves": 0.9583333333333334,
+    "bound": 1.0,
+    "forms": 0.9545454545454546,
+    "composite": 0.9393196672608438,
+    "counts": {
+      "coverage": {
+        "ok": 13,
+        "total": 13
+      },
+      "reach": {
+        "ok": 26,
+        "total": 34
+      },
+      "wired": {
+        "ok": 46,
+        "total": 48
+      },
+      "resolves": {
+        "ok": 46,
+        "total": 48
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 21,
+        "total": 22
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/product-match-2 is an orphan (no menu entry, no parent page)",
+        "/product-match-2/*/edit is an orphan (no menu entry, no parent page)",
+        "/product-match-2/new is an orphan (no menu entry, no parent page)",
+        "/scanproductworkflow-scansession is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/product-match-2: 'Back to Matches' has no action",
+        "/product-match-2: 'Cancel' has no action"
+      ],
+      "resolves": [
+        "/product-match: 'Edit Product Match' \u2192 /product-match/{{productMatch.id}}/edit (no such route)",
+        "/scanproductworkflow-scansession: 'Cancel' \u2192 /scan_sessions (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "igi1eqs7": {
+    "app": "igi1eqs7",
+    "coverage": 1.0,
+    "reach": 0.28205128205128205,
+    "wired": 0.9047619047619048,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.8695652173913043,
+    "composite": 0.8427297340340818,
+    "counts": {
+      "coverage": {
+        "ok": 15,
+        "total": 15
+      },
+      "reach": {
+        "ok": 11,
+        "total": 39
+      },
+      "wired": {
+        "ok": 38,
+        "total": 42
+      },
+      "resolves": {
+        "ok": 39,
+        "total": 39
+      },
+      "bound": {
+        "ok": 2,
+        "total": 2
+      },
+      "forms": {
+        "ok": 20,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Batch/*/edit is an orphan (no menu entry, no parent page)",
+        "/Batch/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/analytics is an orphan (no menu entry, no parent page)",
+        "/archivists is an orphan (no menu entry, no parent page)",
+        "/archivists/*/edit is an orphan (no menu entry, no parent page)",
+        "/archivists/new is an orphan (no menu entry, no parent page)",
+        "/batches is an orphan (no menu entry, no parent page)",
+        "/compliances is an orphan (no menu entry, no parent page)",
+        "/compliances/*/edit is an orphan (no menu entry, no parent page)",
+        "/compliances/new is an orphan (no menu entry, no parent page)",
+        "/documents/* is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/settings/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/new is an orphan (no menu entry, no parent page)",
+        "/settings/retention is an orphan (no menu entry, no parent page)",
+        "/settings/retention/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/retention/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admin/users: 'Invite New User' has no action",
+        "/audit: 'Export to CSV' has no action",
+        "/documents/[id]: 'Download' has no action",
+        "/documents/[id]: 'Edit Fields' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/batches/new: form has no submit target",
+        "/login: form has no submit target",
+        "/settings/retention/new: form has no submit target"
+      ]
+    }
+  },
+  "k2d0nnwi": {
+    "app": "k2d0nnwi",
+    "coverage": 1.0,
+    "reach": 0.7681159420289855,
+    "wired": 0.9902912621359223,
+    "resolves": 0.9724770642201835,
+    "bound": 1.0,
+    "forms": 0.76,
+    "composite": 0.9151473780641819,
+    "counts": {
+      "coverage": {
+        "ok": 28,
+        "total": 28
+      },
+      "reach": {
+        "ok": 53,
+        "total": 69
+      },
+      "wired": {
+        "ok": 102,
+        "total": 103
+      },
+      "resolves": {
+        "ok": 106,
+        "total": 109
+      },
+      "bound": {
+        "ok": 11,
+        "total": 11
+      },
+      "forms": {
+        "ok": 38,
+        "total": 50
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/forgot-password is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/register is an orphan (no menu entry, no parent page)",
+        "/reset-password is an orphan (no menu entry, no parent page)",
+        "/settings/competencies is an orphan (no menu entry, no parent page)",
+        "/settings/competencies/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/competencies/new is an orphan (no menu entry, no parent page)",
+        "/settings/drive-templates is an orphan (no menu entry, no parent page)",
+        "/settings/drive-templates/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/drive-templates/new is an orphan (no menu entry, no parent page)",
+        "/settings/eligibility is an orphan (no menu entry, no parent page)",
+        "/settings/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/reports: 'Export' has no action"
+      ],
+      "resolves": [
+        "/application: 'Edit' \u2192 /application-2/{{application.id}}/edit (no such route)",
+        "/eligibility-profile: 'Edit' \u2192 /eligibility-profile/{{eligibilityProfile.id}}/edit (no such route)",
+        "/interview-slot-2: 'Edit' \u2192 /interview-slot-2/{{interviewSlot.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/application-2/new: form has no submit target",
+        "/application/new: form has no submit target",
+        "/dashboard/new: form has no submit target",
+        "/drive/new: form has no submit target",
+        "/feedback/new: form has no submit target",
+        "/forgot-password: form has no submit target",
+        "/login: form has no submit target",
+        "/my-application/new: form has no submit target",
+        "/offer/new: form has no submit target",
+        "/reset-password: form has no submit target",
+        "/settings/new: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "kkd1zh6a": {
+    "app": "kkd1zh6a",
+    "coverage": 1.0,
+    "reach": 0.8225806451612904,
+    "wired": 0.8021978021978022,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9696969696969697,
+    "composite": 0.9324125695093438,
+    "counts": {
+      "coverage": {
+        "ok": 32,
+        "total": 32
+      },
+      "reach": {
+        "ok": 51,
+        "total": 62
+      },
+      "wired": {
+        "ok": 73,
+        "total": 91
+      },
+      "resolves": {
+        "ok": 91,
+        "total": 91
+      },
+      "bound": {
+        "ok": 3,
+        "total": 3
+      },
+      "forms": {
+        "ok": 32,
+        "total": 33
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/cart is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admins/link: 'Cancel' has no action",
+        "/admins/link: 'Cancel' has no action",
+        "/drivers/:id/edit: 'Cancel' has no action",
+        "/inventory/:id/edit: 'Cancel' has no action",
+        "/inventory/[id]/move: 'Cancel' has no action",
+        "/inventory/[id]/move: 'Cancel' has no action",
+        "/inventory/new: 'Cancel' has no action",
+        "/managers/:id/edit: 'Cancel' has no action",
+        "/managers/:id/edit: 'Cancel' has no action",
+        "/nursery-staffs/:id/edit: 'Cancel' has no action",
+        "/nursery-staffs/:id/edit: 'Cancel' has no action",
+        "/nursery-staffs/new: 'Cancel' has no action",
+        "/nursery-staffs/new: 'Cancel' has no action",
+        "/sales/:id/edit: 'Cancel' has no action",
+        "/sales/:id/edit: 'Cancel' has no action",
+        "/sales/new: 'Cancel' has no action",
+        "/sales/new: 'Cancel' has no action",
+        "/settings: 'Add Plant Batch' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "lgmp7oat": {
+    "app": "lgmp7oat",
+    "coverage": 1.0,
+    "reach": 0.8611111111111112,
+    "wired": 0.8,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.7894736842105263,
+    "composite": 0.908430799220273,
+    "counts": {
+      "coverage": {
+        "ok": 16,
+        "total": 16
+      },
+      "reach": {
+        "ok": 31,
+        "total": 36
+      },
+      "wired": {
+        "ok": 32,
+        "total": 40
+      },
+      "resolves": {
+        "ok": 32,
+        "total": 32
+      },
+      "bound": {
+        "ok": 3,
+        "total": 3
+      },
+      "forms": {
+        "ok": 15,
+        "total": 19
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/mrr-events: 'Export CSV' has no action",
+        "/plans: 'Create Plan' has no action",
+        "/plans: 'View Details' has no action",
+        "/plans: 'View Details' has no action",
+        "/plans: 'View Details' has no action",
+        "/subscriptions/[id]: 'Pause' has no action",
+        "/subscriptions/[id]: 'Cancel Subscription' has no action",
+        "/users: 'Invite new user' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/customers/new: form has no submit target",
+        "/login: form has no submit target",
+        "/plans/new: form has no submit target",
+        "/settings/quarterly-targets/new: form has no submit target"
+      ]
+    }
+  },
+  "n5uacbrt": {
+    "app": "n5uacbrt",
+    "coverage": 1.0,
+    "reach": 0.5714285714285714,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.7142857142857143,
+    "composite": 0.8809523809523809,
+    "counts": {
+      "coverage": {
+        "ok": 7,
+        "total": 7
+      },
+      "reach": {
+        "ok": 8,
+        "total": 14
+      },
+      "wired": {
+        "ok": 13,
+        "total": 13
+      },
+      "resolves": {
+        "ok": 13,
+        "total": 13
+      },
+      "bound": {
+        "ok": 1,
+        "total": 1
+      },
+      "forms": {
+        "ok": 5,
+        "total": 7
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/members/* is an orphan (no menu entry, no parent page)",
+        "/members/*/edit is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "nn75qh5m": {
+    "app": "nn75qh5m",
+    "coverage": 1.0,
+    "reach": 0.8571428571428571,
+    "wired": 1.0,
+    "resolves": 0.9655172413793104,
+    "bound": 1.0,
+    "forms": 0.9629629629629629,
+    "composite": 0.9642705102475216,
+    "counts": {
+      "coverage": {
+        "ok": 36,
+        "total": 36
+      },
+      "reach": {
+        "ok": 48,
+        "total": 56
+      },
+      "wired": {
+        "ok": 87,
+        "total": 87
+      },
+      "resolves": {
+        "ok": 84,
+        "total": 87
+      },
+      "bound": {
+        "ok": 5,
+        "total": 5
+      },
+      "forms": {
+        "ok": 26,
+        "total": 27
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/portal/owner is an orphan (no menu entry, no parent page)",
+        "/portal/tenant is an orphan (no menu entry, no parent page)",
+        "/portal/tenant/pay is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)",
+        "/units/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/inspections/[id]: 'Edit' \u2192 /accounting/{{inspection.id}}/edit (no such route)",
+        "/maintenance/[id]: 'Edit' \u2192 /accounting/{{maintenanceRequest.id}}/edit (no such route)",
+        "/payments/[id]: 'Edit' \u2192 /dashboard/{{payment.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "nni3wjf6": {
+    "app": "nni3wjf6",
+    "coverage": 1.0,
+    "reach": 0.6590909090909091,
+    "wired": 1.0,
+    "resolves": 0.9402985074626866,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9332315694255993,
+    "counts": {
+      "coverage": {
+        "ok": 20,
+        "total": 20
+      },
+      "reach": {
+        "ok": 29,
+        "total": 44
+      },
+      "wired": {
+        "ok": 65,
+        "total": 65
+      },
+      "resolves": {
+        "ok": 63,
+        "total": 67
+      },
+      "bound": {
+        "ok": 1,
+        "total": 1
+      },
+      "forms": {
+        "ok": 25,
+        "total": 25
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/register is an orphan (no menu entry, no parent page)",
+        "/scan-3 is an orphan (no menu entry, no parent page)",
+        "/scan-3/*/edit is an orphan (no menu entry, no parent page)",
+        "/scan-3/new is an orphan (no menu entry, no parent page)",
+        "/scan-4 is an orphan (no menu entry, no parent page)",
+        "/scan-4/*/edit is an orphan (no menu entry, no parent page)",
+        "/scan-4/new is an orphan (no menu entry, no parent page)",
+        "/scan-4/prices is an orphan (no menu entry, no parent page)",
+        "/scan-4/product is an orphan (no menu entry, no parent page)",
+        "/scans/* is an orphan (no menu entry, no parent page)",
+        "/scans/*/prices is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/scan-2: 'Edit Scan' \u2192 /history/{{scan.id}}/edit (no such route)",
+        "/scan-4: 'Edit Scan' \u2192 /history/{{scan.id}}/edit (no such route)",
+        "/scan-4: 'Edit Scan' \u2192 /history/{{scan.id}}/edit (no such route)",
+        "/scan-4/product: 'Edit' \u2192 /scan-4/{{matchedProduct.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "pgekhw4o": {
+    "app": "pgekhw4o",
+    "coverage": 1.0,
+    "reach": 0.19230769230769232,
+    "wired": 1.0,
+    "resolves": 0.963855421686747,
+    "bound": 1.0,
+    "forms": 0.9696969696969697,
+    "composite": 0.8543100139485683,
+    "counts": {
+      "coverage": {
+        "ok": 24,
+        "total": 24
+      },
+      "reach": {
+        "ok": 10,
+        "total": 52
+      },
+      "wired": {
+        "ok": 77,
+        "total": 77
+      },
+      "resolves": {
+        "ok": 80,
+        "total": 83
+      },
+      "bound": {
+        "ok": 7,
+        "total": 7
+      },
+      "forms": {
+        "ok": 32,
+        "total": 33
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/link is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/candidates is an orphan (no menu entry, no parent page)",
+        "/candidates/* is an orphan (no menu entry, no parent page)",
+        "/candidates/*/edit is an orphan (no menu entry, no parent page)",
+        "/candidates/new is an orphan (no menu entry, no parent page)",
+        "/inviteteammember-user is an orphan (no menu entry, no parent page)",
+        "/inviteteammember-user/*/edit is an orphan (no menu entry, no parent page)",
+        "/inviteteammember-user/new is an orphan (no menu entry, no parent page)",
+        "/managers is an orphan (no menu entry, no parent page)",
+        "/managers/*/edit is an orphan (no menu entry, no parent page)",
+        "/managers/link is an orphan (no menu entry, no parent page)",
+        "/managers/new is an orphan (no menu entry, no parent page)",
+        "/members is an orphan (no menu entry, no parent page)",
+        "/members/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/recruiters is an orphan (no menu entry, no parent page)",
+        "/recruiters/*/edit is an orphan (no menu entry, no parent page)",
+        "/recruiters/new is an orphan (no menu entry, no parent page)",
+        "/task is an orphan (no menu entry, no parent page)",
+        "/task-2 is an orphan (no menu entry, no parent page)",
+        "/task-2/*/edit is an orphan (no menu entry, no parent page)",
+        "/task-2/new is an orphan (no menu entry, no parent page)",
+        "/task-3 is an orphan (no menu entry, no parent page)",
+        "/task-3/*/edit is an orphan (no menu entry, no parent page)",
+        "/task-3/new is an orphan (no menu entry, no parent page)",
+        "/task-4 is an orphan (no menu entry, no parent page)",
+        "/task-4/*/edit is an orphan (no menu entry, no parent page)",
+        "/task-4/new is an orphan (no menu entry, no parent page)",
+        "/task-5 is an orphan (no menu entry, no parent page)",
+        "/task-5/*/edit is an orphan (no menu entry, no parent page)",
+        "/task-5/new is an orphan (no menu entry, no parent page)",
+        "/task/*/edit is an orphan (no menu entry, no parent page)",
+        "/task/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/inviteteammember-user: 'Cancel' \u2192 /users (no such route)",
+        "/projects/[id]: 'Edit' \u2192 /task-3/{{project.id}}/edit (no such route)",
+        "/task-2: 'Edit Task' \u2192 /task/{{task.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "pkiuqdrq": {
+    "app": "pkiuqdrq",
+    "coverage": 1.0,
+    "reach": 0.8163265306122449,
+    "wired": 0.7945205479452054,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.9565217391304348,
+    "composite": 0.9278948029479808,
+    "counts": {
+      "coverage": {
+        "ok": 30,
+        "total": 30
+      },
+      "reach": {
+        "ok": 40,
+        "total": 49
+      },
+      "wired": {
+        "ok": 58,
+        "total": 73
+      },
+      "resolves": {
+        "ok": 58,
+        "total": 58
+      },
+      "bound": {
+        "ok": 14,
+        "total": 14
+      },
+      "forms": {
+        "ok": 22,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/StockAlert/*/edit is an orphan (no menu entry, no parent page)",
+        "/StockAlert/new is an orphan (no menu entry, no parent page)",
+        "/StockLevel/*/edit is an orphan (no menu entry, no parent page)",
+        "/StockLevel/new is an orphan (no menu entry, no parent page)",
+        "/cart is an orphan (no menu entry, no parent page)",
+        "/dashboard is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/alerts: 'New Stockalert' has no action",
+        "/products: 'New Product' has no action",
+        "/products: 'Add Product' has no action",
+        "/purchase-orders: 'New Purchaseorder' has no action",
+        "/purchase-orders: 'Create Purchase Order' has no action",
+        "/purchase-orders/[id]: 'Back' has no action",
+        "/purchase-orders/[id]: 'Submit' has no action",
+        "/purchase-orders/[id]: 'Acknowledge' has no action",
+        "/purchase-orders/[id]: 'Receive Stock' has no action",
+        "/purchase-orders/[id]: 'Cancel' has no action",
+        "/settings/users: 'Invite User' has no action",
+        "/suppliers: 'Add Supplier' has no action",
+        "/suppliers: 'New Supplier' has no action",
+        "/warehouses: 'New Warehouse' has no action",
+        "/warehouses: 'Add Warehouse' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "qd4ckwvg": {
+    "app": "qd4ckwvg",
+    "coverage": 1.0,
+    "reach": 0.6190476190476191,
+    "wired": 0.9696969696969697,
+    "resolves": 0.9846153846153847,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.928893328893329,
+    "counts": {
+      "coverage": {
+        "ok": 19,
+        "total": 19
+      },
+      "reach": {
+        "ok": 26,
+        "total": 42
+      },
+      "wired": {
+        "ok": 64,
+        "total": 66
+      },
+      "resolves": {
+        "ok": 64,
+        "total": 65
+      },
+      "bound": {
+        "ok": 13,
+        "total": 13
+      },
+      "forms": {
+        "ok": 26,
+        "total": 26
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/product is an orphan (no menu entry, no parent page)",
+        "/product/*/edit is an orphan (no menu entry, no parent page)",
+        "/product/new is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/products/search is an orphan (no menu entry, no parent page)",
+        "/register is an orphan (no menu entry, no parent page)",
+        "/retailers/*/edit is an orphan (no menu entry, no parent page)",
+        "/retailers/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/: 'New Scan' has no action",
+        "/: 'View All' has no action"
+      ],
+      "resolves": [
+        "/product: 'Edit Product' \u2192 /product/{{product.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "qm97y23x": {
+    "app": "qm97y23x",
+    "coverage": 0.043478260869565216,
+    "reach": 0.16666666666666666,
+    "wired": null,
+    "resolves": null,
+    "bound": null,
+    "forms": null,
+    "composite": 0.10507246376811594,
+    "counts": {
+      "coverage": {
+        "ok": 1,
+        "total": 23
+      },
+      "reach": {
+        "ok": 1,
+        "total": 6
+      },
+      "wired": {
+        "ok": 0,
+        "total": 0
+      },
+      "resolves": {
+        "ok": 0,
+        "total": 0
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 0,
+        "total": 0
+      }
+    },
+    "failures": {
+      "coverage": [
+        "planned /portal never shipped",
+        "planned /portal/apply never shipped",
+        "planned /recruiter/dashboard never shipped",
+        "planned /recruiter/pipeline never shipped",
+        "planned /recruiter/applications/[id] never shipped",
+        "planned /recruiter/candidates/[id] never shipped",
+        "planned /recruiter/candidates never shipped",
+        "planned /recruiter/drives never shipped",
+        "planned /recruiter/drives/[id] never shipped",
+        "planned /recruiter/drives/new never shipped",
+        "planned /recruiter/drives/[id]/slots never shipped",
+        "planned /recruiter/drives/[id]/slots/new never shipped",
+        "planned /interview-feedback never shipped",
+        "planned /recruiter/applications/[id]/feedback never shipped",
+        "planned /hiring-manager/dashboard never shipped",
+        "planned /hiring-manager/offers never shipped",
+        "planned /recruiter/analytics never shipped",
+        "planned /admin/audit never shipped",
+        "planned /candidates never shipped",
+        "planned /recruiters never shipped",
+        "planned /recruiters/new never shipped",
+        "planned /hiring-managers never shipped"
+      ],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "qzdvdmje": {
+    "app": "qzdvdmje",
+    "coverage": 1.0,
+    "reach": 0.7796610169491526,
+    "wired": 1.0,
+    "resolves": 0.9789473684210527,
+    "bound": 1.0,
+    "forms": 0.96875,
+    "composite": 0.9545597308950343,
+    "counts": {
+      "coverage": {
+        "ok": 35,
+        "total": 35
+      },
+      "reach": {
+        "ok": 46,
+        "total": 59
+      },
+      "wired": {
+        "ok": 92,
+        "total": 92
+      },
+      "resolves": {
+        "ok": 93,
+        "total": 95
+      },
+      "bound": {
+        "ok": 7,
+        "total": 7
+      },
+      "forms": {
+        "ok": 31,
+        "total": 32
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/owner/dashboard is an orphan (no menu entry, no parent page)",
+        "/owner/disbursements is an orphan (no menu entry, no parent page)",
+        "/owner/disbursements/* is an orphan (no menu entry, no parent page)",
+        "/owner/new is an orphan (no menu entry, no parent page)",
+        "/rent-payments/* is an orphan (no menu entry, no parent page)",
+        "/rent-payments/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)",
+        "/tenant/pay-rent is an orphan (no menu entry, no parent page)",
+        "/tenant/portal is an orphan (no menu entry, no parent page)",
+        "/units/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/owner/disbursements/[id]: 'Edit' \u2192 /analytics/{{ownerDisbursement.id}}/edit (no such route)",
+        "/rent-payments/[id]: 'Edit' \u2192 /dashboard/{{rentPayment.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "tr7rfk34": {
+    "app": "tr7rfk34",
+    "coverage": 1.0,
+    "reach": 0.9,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9833333333333334,
+    "counts": {
+      "coverage": {
+        "ok": 28,
+        "total": 28
+      },
+      "reach": {
+        "ok": 45,
+        "total": 50
+      },
+      "wired": {
+        "ok": 52,
+        "total": 52
+      },
+      "resolves": {
+        "ok": 54,
+        "total": 54
+      },
+      "bound": {
+        "ok": 10,
+        "total": 10
+      },
+      "forms": {
+        "ok": 23,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/class-packs/purchase is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "ugsy63ed": {
+    "app": "ugsy63ed",
+    "coverage": 1.0,
+    "reach": 0.5283018867924528,
+    "wired": 0.8064516129032258,
+    "resolves": 0.9411764705882353,
+    "bound": 1.0,
+    "forms": 0.7307692307692307,
+    "composite": 0.8344498668421908,
+    "counts": {
+      "coverage": {
+        "ok": 30,
+        "total": 30
+      },
+      "reach": {
+        "ok": 28,
+        "total": 53
+      },
+      "wired": {
+        "ok": 50,
+        "total": 62
+      },
+      "resolves": {
+        "ok": 48,
+        "total": 51
+      },
+      "bound": {
+        "ok": 9,
+        "total": 9
+      },
+      "forms": {
+        "ok": 19,
+        "total": 26
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/ClassSession/*/edit is an orphan (no menu entry, no parent page)",
+        "/ClassSession/new is an orphan (no menu entry, no parent page)",
+        "/admin is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/sessions is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/* is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/admin/waitlist is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/instructor is an orphan (no menu entry, no parent page)",
+        "/instructors is an orphan (no menu entry, no parent page)",
+        "/instructors/* is an orphan (no menu entry, no parent page)",
+        "/instructors/*/edit is an orphan (no menu entry, no parent page)",
+        "/instructors/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/admin/membership-plans/new: 'Cancel' has no action",
+        "/admin/membership-plans/new: 'Create Plan' has no action",
+        "/admin/rooms/new: 'Cancel' has no action",
+        "/admin/rooms/new: 'Create Room' has no action",
+        "/admin/sessions: 'Add Session' has no action",
+        "/admin/sessions: 'View Details' has no action",
+        "/admin/sessions: 'View Details' has no action",
+        "/admin/sessions: 'View Details' has no action",
+        "/admin/sessions/[id]: 'Substitute Instructor' has no action",
+        "/reviews/new: 'Cancel' has no action",
+        "/reviews/new: 'Submit Review' has no action",
+        "/schedule: 'View Details' has no action"
+      ],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{user.id}}/edit (no such route)",
+        "/instructor/sessions/[id]/attendance: 'Mark All Attended' \u2192 workflow markAllAttended (not defined)",
+        "/instructor/sessions/[id]/attendance: 'Export Roster' \u2192 workflow exportRoster (not defined)"
+      ],
+      "bound": [],
+      "forms": [
+        "/admin/membership-plans/new: form has no submit target",
+        "/admin/rooms/new: form has no submit target",
+        "/admin/sessions/new: form has no submit target",
+        "/instructor/availability: form has no submit target",
+        "/login: form has no submit target",
+        "/reviews/new: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "upsvs9w9": {
+    "app": "upsvs9w9",
+    "coverage": 1.0,
+    "reach": 0.8431372549019608,
+    "wired": 1.0,
+    "resolves": 0.9875,
+    "bound": 1.0,
+    "forms": 0.9583333333333334,
+    "composite": 0.964828431372549,
+    "counts": {
+      "coverage": {
+        "ok": 35,
+        "total": 35
+      },
+      "reach": {
+        "ok": 43,
+        "total": 51
+      },
+      "wired": {
+        "ok": 82,
+        "total": 82
+      },
+      "resolves": {
+        "ok": 79,
+        "total": 80
+      },
+      "bound": {
+        "ok": 5,
+        "total": 5
+      },
+      "forms": {
+        "ok": 23,
+        "total": 24
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/reports/owner is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)",
+        "/units/* is an orphan (no menu entry, no parent page)",
+        "/units/*/edit is an orphan (no menu entry, no parent page)",
+        "/units/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/payments/[id]: 'Edit' \u2192 /dashboard/{{rentPayment.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "uuegg9u9": {
+    "app": "uuegg9u9",
+    "coverage": 1.0,
+    "reach": 0.84375,
+    "wired": 1.0,
+    "resolves": 0.9782608695652174,
+    "bound": 1.0,
+    "forms": 0.95,
+    "composite": 0.9620018115942028,
+    "counts": {
+      "coverage": {
+        "ok": 13,
+        "total": 13
+      },
+      "reach": {
+        "ok": 27,
+        "total": 32
+      },
+      "wired": {
+        "ok": 45,
+        "total": 45
+      },
+      "resolves": {
+        "ok": 45,
+        "total": 46
+      },
+      "bound": {
+        "ok": 8,
+        "total": 8
+      },
+      "forms": {
+        "ok": 19,
+        "total": 20
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/products/[id]: 'Edit' \u2192 /admin/{{product.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "v3azan7i": {
+    "app": "v3azan7i",
+    "coverage": 1.0,
+    "reach": 0.8333333333333334,
+    "wired": 1.0,
+    "resolves": 0.95,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9638888888888889,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 35,
+        "total": 42
+      },
+      "wired": {
+        "ok": 59,
+        "total": 59
+      },
+      "resolves": {
+        "ok": 57,
+        "total": 60
+      },
+      "bound": {
+        "ok": 6,
+        "total": 6
+      },
+      "forms": {
+        "ok": 25,
+        "total": 25
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/interviews/calendar is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/recruiter/dashboard is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/candidate-profile: 'Edit' \u2192 /candidate-profile/{{candidateProfile.id}}/edit (no such route)",
+        "/drive: 'Edit' \u2192 /drive/{{drive.id}}/edit (no such route)",
+        "/interview-2: 'Edit' \u2192 /interview-2/{{interview.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "vg3fam37": {
+    "app": "vg3fam37",
+    "coverage": 1.0,
+    "reach": 0.6904761904761905,
+    "wired": 0.9830508474576272,
+    "resolves": 0.95,
+    "bound": 1.0,
+    "forms": 0.9565217391304348,
+    "composite": 0.9300081295107088,
+    "counts": {
+      "coverage": {
+        "ok": 17,
+        "total": 17
+      },
+      "reach": {
+        "ok": 29,
+        "total": 42
+      },
+      "wired": {
+        "ok": 58,
+        "total": 59
+      },
+      "resolves": {
+        "ok": 57,
+        "total": 60
+      },
+      "bound": {
+        "ok": 15,
+        "total": 15
+      },
+      "forms": {
+        "ok": 22,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/prices is an orphan (no menu entry, no parent page)",
+        "/retailers/* is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/scan: 'Correct Product' has no action"
+      ],
+      "resolves": [
+        "/products/[id]: 'Back' \u2192 /products (no such route)",
+        "/products/[id]/prices: 'Edit' \u2192 /search/{{product.id}}/edit (no such route)",
+        "/retailers/[id]: 'Back' \u2192 /retailers (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "viss71iv": {
+    "app": "viss71iv",
+    "coverage": 1.0,
+    "reach": 0.8545454545454545,
+    "wired": 1.0,
+    "resolves": 0.978021978021978,
+    "bound": 1.0,
+    "forms": 0.9696969696969697,
+    "composite": 0.9670440670440671,
+    "counts": {
+      "coverage": {
+        "ok": 37,
+        "total": 37
+      },
+      "reach": {
+        "ok": 47,
+        "total": 55
+      },
+      "wired": {
+        "ok": 90,
+        "total": 90
+      },
+      "resolves": {
+        "ok": 89,
+        "total": 91
+      },
+      "bound": {
+        "ok": 3,
+        "total": 3
+      },
+      "forms": {
+        "ok": 32,
+        "total": 33
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/reports/financials is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/inspections/[id]: 'Edit' \u2192 /home/{{inspection.id}}/edit (no such route)",
+        "/payments/[id]: 'Edit' \u2192 /home/{{rentPayment.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "vpvu0m2y": {
+    "app": "vpvu0m2y",
+    "coverage": 1.0,
+    "reach": 0.3333333333333333,
+    "wired": 0.9210526315789473,
+    "resolves": 0.972972972972973,
+    "bound": 1.0,
+    "forms": 0.9047619047619048,
+    "composite": 0.8553534737745264,
+    "counts": {
+      "coverage": {
+        "ok": 14,
+        "total": 14
+      },
+      "reach": {
+        "ok": 12,
+        "total": 36
+      },
+      "wired": {
+        "ok": 35,
+        "total": 38
+      },
+      "resolves": {
+        "ok": 36,
+        "total": 37
+      },
+      "bound": {
+        "ok": 2,
+        "total": 2
+      },
+      "forms": {
+        "ok": 19,
+        "total": 21
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Batch/*/edit is an orphan (no menu entry, no parent page)",
+        "/Batch/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/archivists is an orphan (no menu entry, no parent page)",
+        "/archivists/*/edit is an orphan (no menu entry, no parent page)",
+        "/archivists/new is an orphan (no menu entry, no parent page)",
+        "/documents/* is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/reviewers is an orphan (no menu entry, no parent page)",
+        "/reviewers/*/edit is an orphan (no menu entry, no parent page)",
+        "/reviewers/new is an orphan (no menu entry, no parent page)",
+        "/settings/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/new is an orphan (no menu entry, no parent page)",
+        "/settings/retention is an orphan (no menu entry, no parent page)",
+        "/settings/retention/*/edit is an orphan (no menu entry, no parent page)",
+        "/settings/retention/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/: 'Quick Upload' has no action",
+        "/batches: 'Upload batch' has no action",
+        "/settings/users: 'Invite User' has no action"
+      ],
+      "resolves": [
+        "/audit: 'Export CSV' \u2192 workflow exportAuditLog (not defined)"
+      ],
+      "bound": [],
+      "forms": [
+        "/batches/new: form has no submit target",
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "vulbzsi0": {
+    "app": "vulbzsi0",
+    "coverage": 1.0,
+    "reach": 0.8679245283018868,
+    "wired": 1.0,
+    "resolves": 0.9759036144578314,
+    "bound": 1.0,
+    "forms": 0.9285714285714286,
+    "composite": 0.962066595221858,
+    "counts": {
+      "coverage": {
+        "ok": 32,
+        "total": 32
+      },
+      "reach": {
+        "ok": 46,
+        "total": 53
+      },
+      "wired": {
+        "ok": 80,
+        "total": 80
+      },
+      "resolves": {
+        "ok": 81,
+        "total": 83
+      },
+      "bound": {
+        "ok": 12,
+        "total": 12
+      },
+      "forms": {
+        "ok": 26,
+        "total": 28
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/cart: 'Edit Cart' \u2192 /cart/{{cart.id}}/edit (no such route)",
+        "/subscription: 'Edit Subscription' \u2192 /subscription/{{subscription.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "wse48rj9": {
+    "app": "wse48rj9",
+    "coverage": 1.0,
+    "reach": 0.775,
+    "wired": 1.0,
+    "resolves": 0.9661016949152542,
+    "bound": null,
+    "forms": 0.9130434782608695,
+    "composite": 0.9308290346352248,
+    "counts": {
+      "coverage": {
+        "ok": 21,
+        "total": 21
+      },
+      "reach": {
+        "ok": 31,
+        "total": 40
+      },
+      "wired": {
+        "ok": 58,
+        "total": 58
+      },
+      "resolves": {
+        "ok": 57,
+        "total": 59
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 21,
+        "total": 23
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/link is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/identifyproductworkflow-scansession is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/products/[id]/prices: 'Edit' \u2192 /scan/{{product.id}}/edit (no such route)",
+        "/scan-session: 'Edit Scan Session' \u2192 /history/{{scanSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "x4fcmdyi": {
+    "app": "x4fcmdyi",
+    "coverage": 1.0,
+    "reach": 0.9107142857142857,
+    "wired": 0.78125,
+    "resolves": 0.9466666666666667,
+    "bound": 1.0,
+    "forms": 0.9615384615384616,
+    "composite": 0.933361568986569,
+    "counts": {
+      "coverage": {
+        "ok": 35,
+        "total": 35
+      },
+      "reach": {
+        "ok": 51,
+        "total": 56
+      },
+      "wired": {
+        "ok": 75,
+        "total": 96
+      },
+      "resolves": {
+        "ok": 71,
+        "total": 75
+      },
+      "bound": {
+        "ok": 18,
+        "total": 18
+      },
+      "forms": {
+        "ok": 25,
+        "total": 26
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Bill/*/edit is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/votes/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/audit: 'New Auditlog' has no action",
+        "/audit: 'New Audit Log' has no action",
+        "/bills: '\u0645\u0634\u0631\u0648\u0639 \u0642\u0627\u0646\u0648\u0646 \u062c\u062f\u064a\u062f' has no action",
+        "/committees: '\u0644\u062c\u0646\u0629 \u062c\u062f\u064a\u062f\u0629' has no action",
+        "/committees: 'New Committee' has no action",
+        "/documents: 'New Document' has no action",
+        "/members: 'New Member' has no action",
+        "/sessions: 'New Session' has no action",
+        "/sessions/[id]/attendance: 'Back' has no action",
+        "/sessions/[id]/attendance: 'New Attendance Record' has no action",
+        "/sessions/[id]/minutes: 'Back' has no action",
+        "/sessions/[id]/minutes: '\u062a\u0642\u062f\u064a\u0645 \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u0629' has no action",
+        "/sessions/[id]/minutes: '\u0627\u0639\u062a\u0645\u0627\u062f' has no action",
+        "/sessions/[id]/minutes: '\u0642\u0641\u0644 \u0627\u0644\u0645\u062d\u0636\u0631' has no action",
+        "/sessions/[id]/votes: 'Back' has no action",
+        "/sessions/[id]/votes: 'New Vote' has no action",
+        "/votes/[id]: '\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u062a\u0635\u0648\u064a\u062a' has no action",
+        "/votes/[id]: '\u062a\u0635\u062f\u064a\u0631 PDF' has no action",
+        "/votes/[id]: '\u0646\u0639\u0645' has no action",
+        "/votes/[id]: '\u0644\u0627' has no action",
+        "/votes/[id]: '\u0627\u0645\u062a\u0646\u0627\u0639' has no action"
+      ],
+      "resolves": [
+        "/bills/[id]: 'Edit' \u2192 /Bill/{{bill.id}}/edit (no such route)",
+        "/public/bills/[id]: 'Edit' \u2192 /Bill/{{bill.id}}/edit (no such route)",
+        "/public/sessions/[id]: 'Edit' \u2192 /Session/{{session.id}}/edit (no such route)",
+        "/sessions/[id]: 'Edit' \u2192 /Session/{{session.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "x5sqxslf": {
+    "app": "x5sqxslf",
+    "coverage": 1.0,
+    "reach": 0.5925925925925926,
+    "wired": 0.8695652173913043,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 0.7692307692307693,
+    "composite": 0.8718980965357775,
+    "counts": {
+      "coverage": {
+        "ok": 13,
+        "total": 13
+      },
+      "reach": {
+        "ok": 16,
+        "total": 27
+      },
+      "wired": {
+        "ok": 20,
+        "total": 23
+      },
+      "resolves": {
+        "ok": 20,
+        "total": 20
+      },
+      "bound": {
+        "ok": 5,
+        "total": 5
+      },
+      "forms": {
+        "ok": 10,
+        "total": 13
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/admins is an orphan (no menu entry, no parent page)",
+        "/admins/*/edit is an orphan (no menu entry, no parent page)",
+        "/admins/new is an orphan (no menu entry, no parent page)",
+        "/head-of-growths is an orphan (no menu entry, no parent page)",
+        "/head-of-growths/*/edit is an orphan (no menu entry, no parent page)",
+        "/head-of-growths/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/settings/users: 'Invite User' has no action",
+        "/subscriptions/[id]: 'Cancel Subscription' has no action",
+        "/subscriptions/[id]: 'Reactivate' has no action"
+      ],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/customers/new: form has no submit target",
+        "/login: form has no submit target",
+        "/subscriptions/new: form has no submit target"
+      ]
+    }
+  },
+  "xnoo9mrj": {
+    "app": "xnoo9mrj",
+    "coverage": 1.0,
+    "reach": 0.6774193548387096,
+    "wired": 1.0,
+    "resolves": 0.9210526315789473,
+    "bound": 1.0,
+    "forms": 0.875,
+    "composite": 0.9122453310696095,
+    "counts": {
+      "coverage": {
+        "ok": 16,
+        "total": 16
+      },
+      "reach": {
+        "ok": 21,
+        "total": 31
+      },
+      "wired": {
+        "ok": 38,
+        "total": 38
+      },
+      "resolves": {
+        "ok": 35,
+        "total": 38
+      },
+      "bound": {
+        "ok": 5,
+        "total": 5
+      },
+      "forms": {
+        "ok": 14,
+        "total": 16
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/applications/* is an orphan (no menu entry, no parent page)",
+        "/candidate/applications/* is an orphan (no menu entry, no parent page)",
+        "/candidate/dashboard is an orphan (no menu entry, no parent page)",
+        "/drive/*/feedback is an orphan (no menu entry, no parent page)",
+        "/drive/*/schedule is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/applications/[id]: 'Edit' \u2192 /dashboard/{{application.id}}/edit (no such route)",
+        "/candidate/applications/[id]: 'Edit' \u2192 /dashboard/{{application.id}}/edit (no such route)",
+        "/pipeline/[id]: 'Edit' \u2192 /dashboard/{{application.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "xoiz4i97": {
+    "app": "xoiz4i97",
+    "coverage": 1.0,
+    "reach": 0.82,
+    "wired": 1.0,
+    "resolves": 0.9868421052631579,
+    "bound": 1.0,
+    "forms": 0.9642857142857143,
+    "composite": 0.9618546365914787,
+    "counts": {
+      "coverage": {
+        "ok": 24,
+        "total": 24
+      },
+      "reach": {
+        "ok": 41,
+        "total": 50
+      },
+      "wired": {
+        "ok": 70,
+        "total": 70
+      },
+      "resolves": {
+        "ok": 75,
+        "total": 76
+      },
+      "bound": {
+        "ok": 13,
+        "total": 13
+      },
+      "forms": {
+        "ok": 27,
+        "total": 28
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/feedback/* is an orphan (no menu entry, no parent page)",
+        "/feedback/*/edit is an orphan (no menu entry, no parent page)",
+        "/feedback/new is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/recruiter/dashboard is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/candidates/[id]: 'Edit' \u2192 /application/{{candidateProfile.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "ybbc855k": {
+    "app": "ybbc855k",
+    "coverage": 1.0,
+    "reach": 0.7631578947368421,
+    "wired": 1.0,
+    "resolves": 1.0,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9605263157894738,
+    "counts": {
+      "coverage": {
+        "ok": 18,
+        "total": 18
+      },
+      "reach": {
+        "ok": 29,
+        "total": 38
+      },
+      "wired": {
+        "ok": 50,
+        "total": 50
+      },
+      "resolves": {
+        "ok": 52,
+        "total": 52
+      },
+      "bound": {
+        "ok": 11,
+        "total": 11
+      },
+      "forms": {
+        "ok": 22,
+        "total": 22
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/home is an orphan (no menu entry, no parent page)",
+        "/home/*/edit is an orphan (no menu entry, no parent page)",
+        "/home/new is an orphan (no menu entry, no parent page)",
+        "/scan-sessions/*/edit is an orphan (no menu entry, no parent page)",
+        "/scan-sessions/new is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": []
+    }
+  },
+  "z99vp407": {
+    "app": "z99vp407",
+    "coverage": 1.0,
+    "reach": 0.9545454545454546,
+    "wired": 0.8513513513513513,
+    "resolves": 0.9846153846153847,
+    "bound": 1.0,
+    "forms": 0.9583333333333334,
+    "composite": 0.9581409206409206,
+    "counts": {
+      "coverage": {
+        "ok": 22,
+        "total": 22
+      },
+      "reach": {
+        "ok": 42,
+        "total": 44
+      },
+      "wired": {
+        "ok": 63,
+        "total": 74
+      },
+      "resolves": {
+        "ok": 64,
+        "total": 65
+      },
+      "bound": {
+        "ok": 4,
+        "total": 4
+      },
+      "forms": {
+        "ok": 23,
+        "total": 24
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [
+        "/attendees: 'New Attendee' has no action",
+        "/conferences: 'New Conference' has no action",
+        "/conferences/[id]/registrations: 'Back' has no action",
+        "/conferences/[id]/schedule: 'Back' has no action",
+        "/conferences/[id]/sessions: 'Back' has no action",
+        "/conferences/[id]/sponsors: 'Back' has no action",
+        "/organisers: 'New User' has no action",
+        "/session: 'New Session' has no action",
+        "/session-2: 'New Item' has no action",
+        "/speaker: 'New Speaker' has no action",
+        "/speaker-2: 'New Item' has no action"
+      ],
+      "resolves": [
+        "/conferences/[id]: 'Edit' \u2192 /Conference/{{conference.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target"
+      ]
+    }
+  },
+  "zg2d7vag": {
+    "app": "zg2d7vag",
+    "coverage": 1.0,
+    "reach": 0.6363636363636364,
+    "wired": 1.0,
+    "resolves": 0.9558823529411765,
+    "bound": 1.0,
+    "forms": 0.9230769230769231,
+    "composite": 0.919220485396956,
+    "counts": {
+      "coverage": {
+        "ok": 20,
+        "total": 20
+      },
+      "reach": {
+        "ok": 28,
+        "total": 44
+      },
+      "wired": {
+        "ok": 67,
+        "total": 67
+      },
+      "resolves": {
+        "ok": 65,
+        "total": 68
+      },
+      "bound": {
+        "ok": 2,
+        "total": 2
+      },
+      "forms": {
+        "ok": 24,
+        "total": 26
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/Booking/*/edit is an orphan (no menu entry, no parent page)",
+        "/Booking/new is an orphan (no menu entry, no parent page)",
+        "/MembershipPass/*/edit is an orphan (no menu entry, no parent page)",
+        "/MembershipPass/new is an orphan (no menu entry, no parent page)",
+        "/admin/*/edit is an orphan (no menu entry, no parent page)",
+        "/admin/members is an orphan (no menu entry, no parent page)",
+        "/admin/members/* is an orphan (no menu entry, no parent page)",
+        "/admin/new is an orphan (no menu entry, no parent page)",
+        "/admin/schedule is an orphan (no menu entry, no parent page)",
+        "/admin/sessions/new is an orphan (no menu entry, no parent page)",
+        "/reviews/new is an orphan (no menu entry, no parent page)",
+        "/sessions/* is an orphan (no menu entry, no parent page)",
+        "/tasks is an orphan (no menu entry, no parent page)",
+        "/tasks/* is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/admin/members/[id]: 'Edit' \u2192 /admin/{{member.id}}/edit (no such route)",
+        "/profile: 'Edit Member' \u2192 /admin/{{member.id}}/edit (no such route)",
+        "/sessions/[id]: 'Edit' \u2192 /classes/{{classSession.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "zhebvtqk": {
+    "app": "zhebvtqk",
+    "coverage": 0.8,
+    "reach": 0.625,
+    "wired": null,
+    "resolves": null,
+    "bound": null,
+    "forms": 0.0,
+    "composite": 0.47500000000000003,
+    "counts": {
+      "coverage": {
+        "ok": 4,
+        "total": 5
+      },
+      "reach": {
+        "ok": 5,
+        "total": 8
+      },
+      "wired": {
+        "ok": 0,
+        "total": 0
+      },
+      "resolves": {
+        "ok": 0,
+        "total": 0
+      },
+      "bound": {
+        "ok": 0,
+        "total": 0
+      },
+      "forms": {
+        "ok": 0,
+        "total": 2
+      }
+    },
+    "failures": {
+      "coverage": [
+        "planned /members never shipped"
+      ],
+      "reach": [
+        "/*/*/edit is an orphan (no menu entry, no parent page)",
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/dashboard is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [],
+      "bound": [],
+      "forms": [
+        "/login: form has no submit target",
+        "/signup: form has no submit target"
+      ]
+    }
+  },
+  "zxnb9rh2": {
+    "app": "zxnb9rh2",
+    "coverage": 1.0,
+    "reach": 0.8873239436619719,
+    "wired": 1.0,
+    "resolves": 0.9534883720930233,
+    "bound": 1.0,
+    "forms": 1.0,
+    "composite": 0.9734687192924992,
+    "counts": {
+      "coverage": {
+        "ok": 34,
+        "total": 34
+      },
+      "reach": {
+        "ok": 63,
+        "total": 71
+      },
+      "wired": {
+        "ok": 122,
+        "total": 122
+      },
+      "resolves": {
+        "ok": 123,
+        "total": 129
+      },
+      "bound": {
+        "ok": 13,
+        "total": 13
+      },
+      "forms": {
+        "ok": 45,
+        "total": 45
+      }
+    },
+    "failures": {
+      "coverage": [],
+      "reach": [
+        "/*/new is an orphan (no menu entry, no parent page)",
+        "/account/settings is an orphan (no menu entry, no parent page)",
+        "/products is an orphan (no menu entry, no parent page)",
+        "/products/* is an orphan (no menu entry, no parent page)",
+        "/products/*/edit is an orphan (no menu entry, no parent page)",
+        "/products/new is an orphan (no menu entry, no parent page)",
+        "/recruiter/dashboard is an orphan (no menu entry, no parent page)",
+        "/recruiter/login is an orphan (no menu entry, no parent page)"
+      ],
+      "wired": [],
+      "resolves": [
+        "/assessment-day: 'Edit' \u2192 /assessment-day/{{assessmentDay.id}}/edit (no such route)",
+        "/candidates/[id]: 'Edit' \u2192 /profile/{{candidateProfile.id}}/edit (no such route)",
+        "/drives/[id]: 'Edit' \u2192 /reports/{{recruitmentDrive.id}}/edit (no such route)",
+        "/interview: 'Edit' \u2192 /interview/{{interview.id}}/edit (no such route)",
+        "/profile: 'Edit' \u2192 /profile/{{candidateProfile.id}}/edit (no such route)",
+        "/profile/cv: 'Edit' \u2192 /profile/{{candidateProfile.id}}/edit (no such route)"
+      ],
+      "bound": [],
+      "forms": []
+    }
+  }
+}

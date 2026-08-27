@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "2",
+  "id": "leave-requests/new",
+  "route": "/leave-requests/new",
+  "layout": "DashboardLayout",
+  "meta": { "title": "New Leave Request" },
+  "dataSources": [
+    { "name": "leaveTypes", "entity": "LeaveType",    "op": "list" },
+    { "name": "currentUser","entity": "Employee",     "op": "get",
+      "filter": { "id": ":currentUserId" } }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.6" },
+    "style": {
+      "padding": "tokens.spacing.semantic.page",
+      "motion": "fade-in"
+    },
+    "children": [
+      {
+        "id": "form-hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "TIME OFF",
+          "headline": "Request Leave",
+          "subhead": "Submit a new leave request. Your manager will be notified automatically.",
+          "layout": "stacked",
+          "ctas": []
+        },
+        "style": {
+          "background": {
+            "type": "gradient",
+            "from": "tokens.color.primary.50",
+            "to": "tokens.color.surface.0"
+          },
+          "padding": "tokens.spacing.semantic.section",
+          "radius": "tokens.radius.xl",
+          "motion": "fade-up"
+        }
+      },
+      {
+        "id": "form-section",
+        "type": "Section",
+        "props": { "variant": "plain", "title": "Leave Details" },
+        "style": {
+          "background": { "type": "solid", "value": "tokens.color.surface.0" },
+          "padding": "tokens.spacing.8",
+          "radius": "tokens.radius.lg",
+          "shadow": "tokens.shadow.md",
+          "motion": "fade-up"
+        },
+        "children": [
+          {
+            "id": "leave-form",
+            "type": "Stack",
+            "props": { "direction": "vertical", "gap": "tokens.spacing.5" },
+            "children": [
+              {
+                "id": "field-type",
+                "type": "Select",
+                "props": {
+                  "name": "leaveType",
+                  "label": "Leave Type",
+                  "options": [
+                    { "value": "annual",    "label": "Annual Leave" },
+                    { "value": "sick",      "label": "Sick Leave" },
+                    { "value": "parental",  "label": "Parental Leave" },
+                    { "value": "compassionate", "label": "Compassionate Leave" },
+                    { "value": "study",     "label": "Study Leave" },
+                    { "value": "unpaid",    "label": "Unpaid Leave" }
+                  ],
+                  "validators": { "required": true }
+                }
+              },
+              {
+                "id": "field-dates-row",
+                "type": "Row",
+                "props": { "align": "start" },
+                "children": [
+                  {
+                    "id": "field-start-date",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "startDate",
+                      "label": "Start Date",
+                      "validators": { "required": true }
+                    }
+                  },
+                  {
+                    "id": "field-end-date",
+                    "type": "DatePicker",
+                    "props": {
+                      "name": "endDate",
+                      "label": "End Date",
+                      "validators": { "required": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "field-reason",
+                "type": "Textarea",
+                "props": {
+                  "name": "reason",
+                  "label": "Reason",
+                  "placeholder": "Briefly describe why you're taking leave. This is shared with your manager.",
+                  "rows": 4,
+                  "validators": { "required": true, "min": 10, "max": 500 }
+                }
+              },
+              {
+                "id": "field-coverage",
+                "type": "Input",
+                "props": {
+                  "name": "coverageArrangement",
+                  "label": "Coverage Arrangement",
+                  "type": "text",
+                  "placeholder": "Who will cover your responsibilities? Optional.",
+                  "validators": { "required": false }
+                }
+              },
+              {
+                "id": "field-half-day",
+                "type": "Checkbox",
+                "props": {
+                  "name": "halfDayStart",
+                  "label": "Start on afternoon of first day (half-day)"
+                }
+              },
+              {
+                "id": "field-notify-team",
+                "type": "Checkbox",
+                "props": {
+                  "name": "notifyTeam",
+                  "label": "Notify my team channel when approved"
+                }
+              },
+              {
+                "id": "form-actions",
+                "type": "Row",
+                "props": { "justify": "end", "align": "center" },
+                "children": [
+                  {
+                    "id": "cancel-link",
+                    "type": "Text",
+                    "props": { "content": "Cancel", "as": "span" }
+                  },
+                  {
+                    "id": "submit-spacer",
+                    "type": "Spacer",
+                    "props": { "size": "tokens.spacing.3" }
+                  },
+                  {
+                    "id": "submit-btn",
+                    "type": "Text",
+                    "props": { "content": "Submit Request", "as": "span" }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

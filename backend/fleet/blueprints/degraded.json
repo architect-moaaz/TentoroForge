@@ -1,0 +1,152 @@
+{
+  "apis": [
+    {
+      "entity": "ENTITY-001",
+      "id": "API-001",
+      "method": "GET",
+      "path": "/api/candidates",
+      "requirements": [
+        "REQ-001"
+      ],
+      "status": "VERIFIED"
+    },
+    {
+      "entity": "ENTITY-001",
+      "id": "API-002",
+      "method": "POST",
+      "path": "/api/candidates",
+      "requirements": [
+        "REQ-001"
+      ],
+      "status": "VERIFIED"
+    }
+  ],
+  "application": {
+    "domain": "ATS",
+    "id": "degraded",
+    "name": "degraded"
+  },
+  "codeMap": [],
+  "data": {
+    "entities": [
+      {
+        "fields": [
+          {
+            "name": "fullName",
+            "required": true,
+            "type": "text"
+          },
+          {
+            "enumValues": [
+              "applied",
+              "offer"
+            ],
+            "name": "stage",
+            "type": "text"
+          },
+          {
+            "name": "score",
+            "type": "integer"
+          }
+        ],
+        "id": "ENTITY-001",
+        "labelField": "fullName",
+        "name": "Candidate",
+        "status": "VERIFIED",
+        "table": "candidates"
+      }
+    ]
+  },
+  "navigation": {
+    "style": "sidebar",
+    "tree": []
+  },
+  "pages": [
+    {
+      "actions": [
+        "create"
+      ],
+      "data": {
+        "primaryEntity": "ENTITY-001"
+      },
+      "id": "PAGE-001",
+      "name": "Candidates",
+      "pattern": "entity_list",
+      "purpose": "Manage candidates progressing through recruitment.",
+      "requirements": [
+        "REQ-001"
+      ],
+      "route": "/candidates",
+      "status": "VERIFIED",
+      "users": [
+        "ROLE-001"
+      ]
+    }
+  ],
+  "permissions": [
+    {
+      "action": "create",
+      "id": "PERM-001",
+      "name": "manage candidates",
+      "status": "VERIFIED"
+    }
+  ],
+  "requirements": [
+    {
+      "description": "Recruiter can add and advance candidates.",
+      "evidence": [
+        {
+          "message": "MSG-001",
+          "type": "conversation"
+        }
+      ],
+      "id": "REQ-001",
+      "status": "APPROVED"
+    }
+  ],
+  "roles": [
+    {
+      "id": "ROLE-001",
+      "name": "recruiter",
+      "status": "VERIFIED"
+    }
+  ],
+  "schemaVersion": "1",
+  "state": "IMPLEMENTATION",
+  "tests": [],
+  "version": 1,
+  "widgets": [
+    {
+      "dataSource": {
+        "aggregation": "count",
+        "entity": "ENTITY-001",
+        "op": "aggregate"
+      },
+      "id": "WIDGET-001",
+      "kind": "metric",
+      "label": "Open candidates",
+      "page": "PAGE-001",
+      "status": "VERIFIED",
+      "unit": "percent"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "FLOW-001",
+      "launchedFrom": [],
+      "name": "Advance candidate",
+      "status": "VERIFIED",
+      "steps": [
+        {
+          "entity": "ENTITY-001",
+          "key": "s1",
+          "name": "save",
+          "type": "action"
+        }
+      ],
+      "trigger": {
+        "kind": "manual"
+      }
+    }
+  ]
+}

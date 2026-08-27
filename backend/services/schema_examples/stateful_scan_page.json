@@ -1,0 +1,119 @@
+{
+  "_comment": "STATEFUL SINGLE-PAGE PATTERN — canonical example for planner + Smith.\n\nOne route, three states (initial / scanning / results), no navigation between them. The `poll` block at the top level tells the runtime's AutoRefresh wrapper to re-run the RSC path every 2500ms; each tick re-resolves the `scan` dataSource, so when the workflow flips scan.status from 'pending' → 'processing' → 'completed', the Conditional root re-evaluates and swaps the visible branch. `stopWhen` halts polling once the workflow has terminated.\n\nUse this shape when the workflow is short-running (seconds) and the user expects to stay on the page. For long-running workflows (minutes+) prefer page-per-state so the user can navigate away.\n\nSee docs/superpowers/patterns/stateful-single-page.md for the full contract.",
+  "schemaVersion": "2",
+  "id": "scan",
+  "route": "/scan",
+  "layout": "main",
+
+  "poll": {
+    "interval": 2500,
+    "stopWhen": "scan.status IN ('completed','failed')"
+  },
+
+  "dataSources": [
+    {
+      "name": "scan",
+      "entity": "Scan",
+      "op": "latestForUser",
+      "note": "Returns the caller's most recent scan row (or null). Runtime resolver reads the auth'd user id and orders by createdAt DESC LIMIT 1."
+    },
+    {
+      "name": "prices",
+      "entity": "PriceResult",
+      "op": "list",
+      "where": {"scanId": "{{scan.id}}"},
+      "orderBy": [{"field": "price", "direction": "asc"}]
+    }
+  ],
+
+  "root": {
+    "type": "Conditional",
+    "branches": [
+      {
+        "if": "!scan",
+        "node": {
+          "type": "Stack",
+          "props": {"gap": "tokens.spacing.6"},
+          "children": [
+            {"type": "Heading", "props": {"content": "Scan a product", "level": 1}},
+            {"type": "Text", "props": {"content": "Take a photo or upload an image. We'll identify the product and find prices across retailers.", "variant": "muted"}},
+            {
+              "type": "Form",
+              "props": {"workflow": "ScanProductWorkflow"},
+              "children": [
+                {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [
+                  {"type": "Camera", "props": {"name": "imageUrl", "label": "Take photo"}},
+                  {"type": "FileUpload", "props": {"name": "imageUrl", "label": "Or upload image", "accept": "image/*"}},
+                  {"type": "Button", "props": {"label": "Scan", "variant": "primary", "submit": true}}
+                ]}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "if": "scan.status === 'pending' || scan.status === 'processing'",
+        "node": {
+          "type": "Stack",
+          "props": {"gap": "tokens.spacing.6", "align": "center"},
+          "children": [
+            {"type": "Heading", "props": {"content": "Scanning...", "level": 2}},
+            {"type": "Progress", "props": {"indeterminate": true}},
+            {"type": "Text", "props": {"content": "Identifying the product and checking prices across retailers. This usually takes 10–20 seconds.", "variant": "muted"}}
+          ]
+        }
+      },
+      {
+        "if": "scan.status === 'failed'",
+        "node": {
+          "type": "Stack",
+          "props": {"gap": "tokens.spacing.4"},
+          "children": [
+            {"type": "Banner", "props": {"variant": "error", "content": "Scan failed. Try again with a clearer image."}},
+            {"type": "Button", "props": {"label": "Try again", "variant": "primary", "navigate": "/scan?reset=1"}}
+          ]
+        }
+      },
+      {
+        "if": "scan.status === 'completed'",
+        "node": {
+          "type": "Stack",
+          "props": {"gap": "tokens.spacing.6"},
+          "children": [
+            {
+              "type": "Card",
+              "children": [
+                {"type": "Row", "props": {"gap": "tokens.spacing.4", "align": "center"}, "children": [
+                  {"type": "Image", "props": {"src": "{{scan.imageUrl}}", "width": 96, "alt": "scanned image"}},
+                  {"type": "Stack", "props": {"gap": "tokens.spacing.1"}, "children": [
+                    {"type": "Heading", "props": {"content": "Scan result", "level": 3}},
+                    {"type": "Text", "props": {"content": "Compare prices below", "variant": "muted"}}
+                  ]}
+                ]}
+              ]
+            },
+            {
+              "type": "Repeat",
+              "bind": "prices",
+              "children": [
+                {
+                  "type": "Card",
+                  "children": [
+                    {"type": "Row", "props": {"justify": "between", "align": "center"}, "children": [
+                      {"type": "Stack", "props": {"gap": "tokens.spacing.1"}, "children": [
+                        {"type": "Text", "props": {"content": "{{item.retailerId}}", "weight": "medium"}},
+                        {"type": "Text", "props": {"content": "{{item.currency}} {{item.price}}", "variant": "muted"}}
+                      ]},
+                      {"type": "Link", "props": {"label": "Open →", "navigate": "{{item.productUrl}}", "external": true}}
+                    ]}
+                  ]
+                }
+              ]
+            },
+            {"type": "Button", "props": {"label": "Scan another", "variant": "ghost", "navigate": "/scan?reset=1"}}
+          ]
+        }
+      }
+    ]
+  }
+}

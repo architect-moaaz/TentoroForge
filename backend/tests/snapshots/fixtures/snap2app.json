@@ -1,0 +1,16 @@
+{
+  "app_shape": {
+    "layout": {"shell": "none", "hero": "full-bleed-gradient", "primaryInteraction": "capture", "density": "spacious"},
+    "auth": {"surface": "modal", "gating": "on-action"},
+    "nav": {"menu": "none", "back": "history"},
+    "workflows": {"executionMode": "fire-and-forget"},
+    "data": {"readShape": "list", "denormalization": "aggressive"},
+    "identity": {"usageMode": "single-session"},
+    "label": "hero-cta-capture-utility"
+  },
+  "archetypes": [
+    {"name": "scan", "recipe": "visual_product_search", "entities": ["scan_session", "price_result"], "routes": ["/", "/scan", "/history"]}
+  ],
+  "industry": "consumer-retail",
+  "runtime_context": ["camera"]
+}

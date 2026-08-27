@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "2",
+  "id": "employees/list",
+  "route": "/employees",
+  "meta": { "title": "Employees", "archetype": "list" },
+  "dataSources": [
+    { "kind": "list", "name": "employees", "table": "employees" },
+    { "kind": "detail", "name": "selectedEmployee", "table": "employees",
+      "filter": { "id": "{{url.inspector}}" } }
+  ],
+  "root": {
+    "id": "root", "type": "AppShell",
+    "props": {
+      "topbar": { "$ref": "node:breadcrumb" },
+      "actions": { "$ref": "node:add-employee-cta" }
+    },
+    "children": [
+      {
+        "id": "filter-bar", "type": "FilterBar",
+        "props": {
+          "showSearch": true,
+          "chips": [
+            { "key": "dept", "label": "Department",
+              "options": [
+                { "value": "eng", "label": "Engineering" },
+                { "value": "design", "label": "Design" },
+                { "value": "sales", "label": "Sales" }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "employees-grid", "type": "DataGrid",
+        "props": {
+          "columns": [
+            { "key": "name", "label": "Name", "sortable": true, "frozen": true, "width": 200 },
+            { "key": "department", "label": "Department", "sortable": true },
+            { "key": "role", "label": "Role" },
+            { "key": "status", "label": "Status", "align": "right" }
+          ],
+          "rows": "{{employees}}",
+          "rowKey": "id",
+          "selectable": true,
+          "rowActions": [
+            { "label": "View",
+              "action": { "type": "navigate", "to": "?inspector={{row.id}}" }}
+          ]
+        }
+      },
+      {
+        "id": "employee-inspector", "type": "InspectorPanel",
+        "props": { "paramKey": "inspector", "title": "{{selectedEmployee.name}}", "width": "default" },
+        "children": [
+          { "id": "person-card", "type": "PersonCard",
+            "props": {
+              "name": "{{selectedEmployee.name}}",
+              "role": "{{selectedEmployee.role}}",
+              "department": "{{selectedEmployee.department}}",
+              "email": "{{selectedEmployee.email}}",
+              "status": "{{selectedEmployee.status}}",
+              "manager": {
+                "name": "{{selectedEmployee.manager.name}}",
+                "role": "{{selectedEmployee.manager.role}}"
+              },
+              "layout": "expanded"
+            }},
+          { "id": "kv-list", "type": "KeyValueList",
+            "props": {
+              "items": [
+                { "label": "Hire date", "value": "{{selectedEmployee.hireDate}}" },
+                { "label": "Tenure", "value": "{{selectedEmployee.tenure}}" },
+                { "label": "Last review", "value": "{{selectedEmployee.lastReview}}" }
+              ]
+            }}
+        ]
+      }
+    ]
+  }
+}

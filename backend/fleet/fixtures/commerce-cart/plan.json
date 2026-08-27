@@ -1,0 +1,3451 @@
+{
+  "nav": {
+    "sidebar": [
+      {
+        "icon": "home",
+        "label": "Home",
+        "route": "/"
+      },
+      {
+        "icon": "leaf",
+        "label": "Plants",
+        "route": "/plants"
+      },
+      {
+        "icon": "grid",
+        "label": "Collections",
+        "route": "/collections"
+      },
+      {
+        "icon": "box",
+        "label": "Planters",
+        "route": "/planters"
+      },
+      {
+        "icon": "refresh",
+        "label": "Subscription",
+        "route": "/subscription"
+      },
+      {
+        "icon": "package",
+        "label": "My Orders",
+        "route": "/orders"
+      },
+      {
+        "icon": "shopping-cart",
+        "label": "Cart",
+        "route": "/cart"
+      },
+      {
+        "icon": "user",
+        "label": "Account",
+        "route": "/account"
+      },
+      {
+        "icon": "settings",
+        "label": "Admin",
+        "roles": [
+          "admin"
+        ],
+        "route": "/admin"
+      }
+    ]
+  },
+  "name": "Plant Storefront",
+  "pages": [
+    {
+      "name": "HomPage",
+      "type": "dashboard",
+      "route": "/",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "Plant",
+          "title": "Plants Available",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "Collection",
+          "title": "Featured Collections",
+          "limit": 6,
+          "columns": [
+            "title",
+            "featured"
+          ]
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "dataSource": {
+        "op": "list",
+        "entity": null
+      },
+      "description": "Botanical hero banner with seasonal CTA, featured collections grid, and bestseller plant cards.",
+      "entity_summary": [
+        "User",
+        "Customer",
+        "Plant",
+        "Variant",
+        "PlantSizeVariant",
+        "Planter",
+        "CareGuide",
+        "Review",
+        "Order",
+        "OrderItem",
+        "Cart",
+        "Subscription",
+        "Collection"
+      ]
+    },
+    {
+      "name": "PlantListPage",
+      "type": "list",
+      "route": "/plants",
+      "entity": "Plant",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Plant"
+      },
+      "description": "Faceted filter sidebar (category, light, difficulty, pet-safe, price) with botanical plant cards showing badges and quick-add."
+    },
+    {
+      "name": "PlantDetailPage",
+      "type": "detail",
+      "route": "/plants/[id]",
+      "entity": "Plant",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Full plant PDP with image gallery, pot-size bundle selector, care guide tabs, and review section."
+    },
+    {
+      "name": "PlantReviewFormPage",
+      "type": "form",
+      "route": "/plants/[id]/review",
+      "entity": "Review",
+      "fields": [
+        {
+          "name": "rating",
+          "label": "Rating",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "body",
+          "semanticType": "multiline",
+          "label": "Review",
+          "required": false,
+          "order": 2
+        },
+        {
+          "name": "imageUrl",
+          "semanticType": "url",
+          "label": "Photo URL",
+          "required": false,
+          "order": 3
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "SubmitReviewWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "CollectionListPage",
+      "type": "list",
+      "route": "/collections",
+      "entity": "Collection",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Collection"
+      },
+      "description": "Browse all curated plant collections with cover images."
+    },
+    {
+      "name": "CollectionDetailPage",
+      "type": "detail",
+      "route": "/collections/[id]",
+      "entity": "Collection",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Collection detail showing filtered plant grid for this collection."
+    },
+    {
+      "name": "PlanterListPage",
+      "type": "list",
+      "route": "/planters",
+      "entity": "Planter",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Planter"
+      },
+      "description": "Browse decorative planters filterable by material, color, and diameter."
+    },
+    {
+      "name": "PlanterDetailPage",
+      "type": "detail",
+      "route": "/planters/[id]",
+      "entity": "Planter",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Planter detail with images, materials, compatible plant sizes."
+    },
+    {
+      "name": "CheckoutPage",
+      "type": "form",
+      "route": "/checkout",
+      "entity": "Order",
+      "fields": [
+        {
+          "name": "shippingAddress",
+          "label": "Shipping Address",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "notes",
+          "semanticType": "multiline",
+          "label": "Order Notes",
+          "required": false,
+          "order": 2
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "PlaceOrderWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "CartPage",
+      "type": "detail",
+      "route": "/cart",
+      "entity": "Cart",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Cart summary with line items, quantities, subtotal, and proceed to checkout."
+    },
+    {
+      "name": "OrderListPage",
+      "type": "list",
+      "route": "/orders",
+      "entity": "Order",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Order"
+      },
+      "description": "Customer's order history with status badges."
+    },
+    {
+      "name": "OrderDetailPage",
+      "type": "detail",
+      "route": "/orders/[id]",
+      "entity": "Order",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Full order detail with line items, shipping info, and status timeline."
+    },
+    {
+      "name": "SubscriptionPage",
+      "type": "detail",
+      "route": "/subscription",
+      "entity": "Subscription",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "detail",
+      "description": "Customer subscription dashboard: frequency, preferences, next charge, skip/cancel actions."
+    },
+    {
+      "name": "SubscriptionEditPage",
+      "type": "form",
+      "route": "/subscription/edit",
+      "entity": "Subscription",
+      "fields": [
+        {
+          "name": "frequency",
+          "label": "Delivery Frequency",
+          "required": true,
+          "enum": [
+            "monthly",
+            "quarterly"
+          ],
+          "order": 1
+        },
+        {
+          "name": "difficultyPref",
+          "label": "Plant Difficulty",
+          "required": false,
+          "enum": [
+            "easy",
+            "medium",
+            "expert"
+          ],
+          "order": 2
+        },
+        {
+          "name": "sizePref",
+          "label": "Pot Size Preference",
+          "required": false,
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "order": 3
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "UpdateSubscriptionWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "SubscriptionSignupPage",
+      "type": "form",
+      "route": "/subscription/new",
+      "entity": "Subscription",
+      "fields": [
+        {
+          "name": "frequency",
+          "label": "Delivery Frequency",
+          "required": true,
+          "enum": [
+            "monthly",
+            "quarterly"
+          ],
+          "order": 1
+        },
+        {
+          "name": "difficultyPref",
+          "label": "Plant Difficulty",
+          "required": false,
+          "enum": [
+            "easy",
+            "medium",
+            "expert"
+          ],
+          "order": 2
+        },
+        {
+          "name": "sizePref",
+          "label": "Pot Size Preference",
+          "required": false,
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "order": 3
+        }
+      ],
+      "submit": {
+        "kind": "workflow",
+        "target": "CreateSubscriptionWorkflow"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AccountProfilePage",
+      "type": "form",
+      "route": "/account",
+      "entity": "User",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Full Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "email",
+          "semanticType": "email",
+          "label": "Email",
+          "required": true,
+          "order": 2
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "User"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminDashboardPage",
+      "type": "dashboard",
+      "route": "/admin",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "Order",
+          "title": "Total Orders",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "Plant",
+          "title": "Active Plants",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "Order",
+          "title": "Recent Orders",
+          "limit": 10,
+          "columns": [
+            "customerId",
+            "status",
+            "total",
+            "placedAt"
+          ]
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "dataSource": {
+        "op": "list",
+        "entity": null
+      },
+      "description": "Admin overview: total orders, revenue, low-stock alerts, recent orders table.",
+      "entity_summary": [
+        "User",
+        "Customer",
+        "Plant",
+        "Variant",
+        "PlantSizeVariant",
+        "Planter",
+        "CareGuide",
+        "Review",
+        "Order",
+        "OrderItem",
+        "Cart",
+        "Subscription",
+        "Collection"
+      ]
+    },
+    {
+      "name": "AdminPlantListPage",
+      "type": "list",
+      "route": "/admin/plants",
+      "entity": "Plant",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Plant"
+      },
+      "description": "Admin plant catalogue management with inline stock status."
+    },
+    {
+      "name": "AdminPlantFormPage",
+      "type": "form",
+      "route": "/admin/plants/new",
+      "entity": "Plant",
+      "fields": [
+        {
+          "name": "commonName",
+          "label": "Common Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "scientificName",
+          "label": "Scientific Name",
+          "required": false,
+          "order": 2
+        },
+        {
+          "name": "category",
+          "label": "Category",
+          "required": true,
+          "enum": [
+            "indoor",
+            "outdoor",
+            "succulent",
+            "tropical",
+            "fern"
+          ],
+          "order": 3
+        },
+        {
+          "name": "lightRequirement",
+          "label": "Light",
+          "required": true,
+          "enum": [
+            "low",
+            "medium",
+            "bright"
+          ],
+          "order": 4
+        },
+        {
+          "name": "wateringFrequency",
+          "label": "Watering",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "difficulty",
+          "label": "Difficulty",
+          "required": true,
+          "enum": [
+            "easy",
+            "medium",
+            "expert"
+          ],
+          "order": 6
+        },
+        {
+          "name": "petSafe",
+          "label": "Pet Safe",
+          "required": true,
+          "order": 7
+        },
+        {
+          "name": "description",
+          "semanticType": "multiline",
+          "label": "Description",
+          "required": false,
+          "order": 8
+        },
+        {
+          "name": "isActive",
+          "label": "Active",
+          "required": true,
+          "order": 9
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "Plant"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminPlantEditPage",
+      "type": "form",
+      "route": "/admin/plants/[id]/edit",
+      "entity": "Plant",
+      "fields": [
+        {
+          "name": "commonName",
+          "label": "Common Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "scientificName",
+          "label": "Scientific Name",
+          "required": false,
+          "order": 2
+        },
+        {
+          "name": "category",
+          "label": "Category",
+          "required": true,
+          "enum": [
+            "indoor",
+            "outdoor",
+            "succulent",
+            "tropical",
+            "fern"
+          ],
+          "order": 3
+        },
+        {
+          "name": "lightRequirement",
+          "label": "Light",
+          "required": true,
+          "enum": [
+            "low",
+            "medium",
+            "bright"
+          ],
+          "order": 4
+        },
+        {
+          "name": "difficulty",
+          "label": "Difficulty",
+          "required": true,
+          "enum": [
+            "easy",
+            "medium",
+            "expert"
+          ],
+          "order": 5
+        },
+        {
+          "name": "petSafe",
+          "label": "Pet Safe",
+          "required": true,
+          "order": 6
+        },
+        {
+          "name": "isActive",
+          "label": "Active",
+          "required": true,
+          "order": 7
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "Plant"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "AdminOrdersPage",
+      "type": "list",
+      "route": "/admin/orders",
+      "entity": "Order",
+      "actions": [],
+      "features": [
+        "status-pipeline",
+        "approval"
+      ],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Order"
+      },
+      "description": "Admin order management with status update controls."
+    },
+    {
+      "name": "AdminOrderDetailPage",
+      "type": "detail",
+      "route": "/admin/orders/[id]",
+      "entity": "Order",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Admin order detail with status update action."
+    },
+    {
+      "name": "PlantSizeVariantListPage",
+      "type": "list",
+      "route": "/admin/plants/[id]/variants",
+      "entity": "PlantSizeVariant",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "PlantSizeVariant"
+      },
+      "description": "Manage size variants and stock for a given plant."
+    },
+    {
+      "name": "PlantSizeVariantFormPage",
+      "type": "form",
+      "route": "/admin/plants/[id]/variants/new",
+      "entity": "PlantSizeVariant",
+      "fields": [
+        {
+          "name": "sku",
+          "label": "SKU",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "label",
+          "label": "Label",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "potDiameterCm",
+          "label": "Pot Diameter (cm)",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "priceModifier",
+          "label": "Price Modifier (cents)",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "stockQty",
+          "label": "Stock Qty",
+          "required": true,
+          "order": 5
+        }
+      ],
+      "submit": {
+        "kind": "data_api",
+        "target": "PlantSizeVariant"
+      },
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "CareGuideDetailPage",
+      "type": "detail",
+      "route": "/plants/[id]/care",
+      "entity": "CareGuide",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Tabbed care guide for a plant: Watering, Light, Fertilizing, Repotting, Common Issues."
+    },
+    {
+      "name": "ReviewListPage",
+      "type": "list",
+      "route": "/plants/[id]/reviews",
+      "entity": "Review",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "dataSource": {
+        "op": "list",
+        "entity": "Review"
+      },
+      "description": "Customer reviews for a plant with ratings and verified purchase badges."
+    },
+    {
+      "name": "Login",
+      "type": "auth",
+      "route": "/login",
+      "entity": null,
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "name": "Sign Up",
+      "type": "auth",
+      "route": "/signup",
+      "entity": null,
+      "actions": [],
+      "features": [],
+      "archetype": "form"
+    },
+    {
+      "id": "customers-list",
+      "name": "customers",
+      "type": "list",
+      "route": "/customers",
+      "entity": "Customer",
+      "filter": {
+        "role": "customer"
+      },
+      "source": "actor_onboarding",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "visibleTo": [
+        "admin",
+        "customer"
+      ],
+      "dataSource": {
+        "op": "list",
+        "entity": "Customer"
+      },
+      "description": "Directory of customers in the app."
+    },
+    {
+      "id": "customers-new",
+      "name": "Add customer",
+      "type": "form",
+      "route": "/customers/new",
+      "entity": "User",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Full Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "email",
+          "semanticType": "email",
+          "label": "Email",
+          "required": true,
+          "order": 2
+        }
+      ],
+      "source": "actor_onboarding",
+      "submit": {
+        "kind": "data_api",
+        "target": "User"
+      },
+      "actions": [],
+      "prefill": {
+        "role": "customer"
+      },
+      "features": [],
+      "archetype": "form",
+      "visibleTo": [
+        "admin"
+      ],
+      "description": "Internal creation form for customer."
+    },
+    {
+      "id": "admins-list",
+      "name": "admins",
+      "type": "list",
+      "route": "/admins",
+      "entity": "User",
+      "filter": {
+        "role": "admin"
+      },
+      "source": "actor_onboarding",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "visibleTo": [
+        "admin"
+      ],
+      "dataSource": {
+        "op": "list",
+        "entity": "User"
+      },
+      "description": "Directory of admins in the app."
+    },
+    {
+      "id": "admins-new",
+      "name": "Invite admin",
+      "type": "form",
+      "route": "/admins/new",
+      "entity": "User",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Full Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "email",
+          "semanticType": "email",
+          "label": "Email",
+          "required": true,
+          "order": 2
+        }
+      ],
+      "source": "actor_onboarding",
+      "submit": {
+        "kind": "workflow",
+        "target": "InviteAdmin"
+      },
+      "actions": [],
+      "prefill": {
+        "role": "admin"
+      },
+      "features": [],
+      "archetype": "form",
+      "visibleTo": [
+        "admin"
+      ],
+      "description": "Form for admin to invite a new admin."
+    }
+  ],
+  "actors": [
+    {
+      "name": "customer",
+      "role": "customer",
+      "access": "auth",
+      "onboarding": {
+        "source": "self_signup"
+      }
+    },
+    {
+      "name": "admin",
+      "role": "admin",
+      "access": "auth",
+      "onboarding": {
+        "source": "invited_by",
+        "invited_by": "admin"
+      }
+    }
+  ],
+  "domain": "general",
+  "entities": {
+    "Cart": {
+      "table": "carts",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "items",
+          "type": "jsonb",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/carts.ts",
+      "internal": true,
+      "depends_on": [
+        "User"
+      ]
+    },
+    "User": {
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "customer",
+            "admin"
+          ]
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/users.ts"
+    },
+    "Order": {
+      "table": "orders",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "shippingAddress",
+          "type": "jsonb",
+          "not_null": true
+        },
+        {
+          "name": "total",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "placedAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/orders.ts",
+      "depends_on": [
+        "User"
+      ]
+    },
+    "Plant": {
+      "table": "plants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "commonName",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "scientificName",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "category",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lightRequirement",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "wateringFrequency",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "difficulty",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "petSafe",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "images",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "schema": "src/db/schema/plants.ts"
+    },
+    "Review": {
+      "table": "reviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "rating",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "imageUrl",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "verifiedPurchase",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/reviews.ts",
+      "depends_on": [
+        "Plant",
+        "User"
+      ]
+    },
+    "Planter": {
+      "table": "planters",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "material",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "color",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "diameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "price",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "images",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/planters.ts"
+    },
+    "Variant": {
+      "table": "variants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "sku",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "potDiameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "price",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "stockQty",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/variants.ts",
+      "internal": true,
+      "depends_on": [
+        "Plant"
+      ]
+    },
+    "Customer": {
+      "table": "customers",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "userId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "phone",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "growZone",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "defaultShippingAddress",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "schema": "src/db/schema/customers.ts",
+      "commerce": true,
+      "depends_on": [
+        "User"
+      ]
+    },
+    "CareGuide": {
+      "table": "care_guides",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "wateringInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lightInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "fertilizingInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "repottingInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "commonIssues",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/care_guides.ts",
+      "depends_on": [
+        "Plant"
+      ]
+    },
+    "OrderItem": {
+      "table": "order_items",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "orders",
+            "column": "id"
+          },
+          "name": "orderId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "plant_size_variants",
+            "column": "id"
+          },
+          "name": "variantId",
+          "type": "uuid",
+          "nullable": true
+        },
+        {
+          "fk": {
+            "table": "planters",
+            "column": "id"
+          },
+          "name": "planterId",
+          "type": "uuid",
+          "nullable": true
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "unitPrice",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/order_items.ts",
+      "internal": true,
+      "depends_on": [
+        "Order",
+        "Plant",
+        "PlantSizeVariant",
+        "Planter"
+      ]
+    },
+    "Collection": {
+      "table": "collections",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "title",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "image",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "featured",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/collections.ts"
+    },
+    "Subscription": {
+      "table": "subscriptions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "frequency",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "difficultyPref",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "sizePref",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "nextChargeAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "nextDeliveryAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/subscriptions.ts",
+      "depends_on": [
+        "User"
+      ]
+    },
+    "PlantSizeVariant": {
+      "table": "plant_size_variants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "sku",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "potDiameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "priceModifier",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "stockQty",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "schema": "src/db/schema/plant_size_variants.ts",
+      "depends_on": [
+        "Plant"
+      ]
+    }
+  },
+  "register": "figma",
+  "authGated": true,
+  "relations": [
+    {
+      "to": "User",
+      "from": "Customer",
+      "foreignKey": "userId"
+    },
+    {
+      "to": "Plant",
+      "from": "PlantSizeVariant",
+      "foreignKey": "plantId"
+    },
+    {
+      "to": "Plant",
+      "from": "Variant",
+      "foreignKey": "plantId"
+    },
+    {
+      "to": "Plant",
+      "from": "CareGuide",
+      "foreignKey": "plantId"
+    },
+    {
+      "to": "Plant",
+      "from": "Review",
+      "foreignKey": "plantId"
+    },
+    {
+      "to": "User",
+      "from": "Review",
+      "foreignKey": "customerId"
+    },
+    {
+      "to": "User",
+      "from": "Order",
+      "foreignKey": "customerId"
+    },
+    {
+      "to": "Order",
+      "from": "OrderItem",
+      "foreignKey": "orderId"
+    },
+    {
+      "to": "Plant",
+      "from": "OrderItem",
+      "foreignKey": "plantId"
+    },
+    {
+      "to": "PlantSizeVariant",
+      "from": "OrderItem",
+      "foreignKey": "variantId"
+    },
+    {
+      "to": "Planter",
+      "from": "OrderItem",
+      "foreignKey": "planterId"
+    },
+    {
+      "to": "User",
+      "from": "Cart",
+      "foreignKey": "customerId"
+    },
+    {
+      "to": "User",
+      "from": "Subscription",
+      "foreignKey": "customerId"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "AddToCartWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_cart",
+          "type": "trigger",
+          "config": {
+            "entity": "Cart",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_cart",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "carts",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "items"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "plantId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "variantId",
+          "type": "uuid",
+          "source": {
+            "kind": "form_field",
+            "field": "variantId"
+          },
+          "required": false
+        },
+        {
+          "name": "planterId",
+          "type": "uuid",
+          "source": {
+            "kind": "form_field",
+            "field": "planterId"
+          },
+          "required": false
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "source": {
+            "kind": "static",
+            "value": "1"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "PlantDetailPage"
+      },
+      "trigger": "button on PlantDetailPage"
+    },
+    {
+      "name": "RemoveFromCartWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "remove_item",
+          "type": "trigger",
+          "config": {
+            "entity": "Cart",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "remove_item",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "carts",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "items"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "itemIndex",
+          "type": "integer",
+          "source": {
+            "kind": "static",
+            "value": "0"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "CartPage"
+      },
+      "trigger": "button on CartPage"
+    },
+    {
+      "name": "PlaceOrderWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "create_order",
+          "type": "trigger",
+          "config": {
+            "entity": "Order",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "create_order",
+          "next": "clear_cart",
+          "type": "action",
+          "config": {
+            "table": "orders",
+            "fields": [
+              "customerId",
+              "shippingAddress",
+              "notes",
+              "status",
+              "total",
+              "placedAt"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "clear_cart",
+          "next": "notify_customer",
+          "type": "action",
+          "config": {
+            "table": "carts",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "items"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_customer",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your order has been placed successfully.",
+            "actionType": "send_email",
+            "recipientRole": "customer"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "shippingAddress",
+          "type": "jsonb",
+          "source": {
+            "kind": "form_field",
+            "field": "shippingAddress"
+          },
+          "required": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "source": {
+            "kind": "form_field",
+            "field": "notes"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "CheckoutPage"
+      },
+      "trigger": "form submit on CheckoutPage"
+    },
+    {
+      "name": "UpdateOrderStatusWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_status",
+          "type": "trigger",
+          "config": {
+            "entity": "Order",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_status",
+          "next": "notify_customer",
+          "type": "action",
+          "config": {
+            "table": "orders",
+            "where": {
+              "id": "{{orderId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_customer",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your order status has been updated to {{status}}.",
+            "actionType": "send_email",
+            "recipientRole": "customer"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "orderId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "status"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminOrderDetailPage"
+      },
+      "trigger": "button on AdminOrderDetailPage"
+    },
+    {
+      "name": "CancelOrderWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "cancel_order",
+          "type": "trigger",
+          "config": {
+            "entity": "Order",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "cancel_order",
+          "next": "notify_cancel",
+          "type": "action",
+          "config": {
+            "table": "orders",
+            "where": {
+              "id": "{{orderId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_cancel",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your order has been cancelled.",
+            "actionType": "send_email",
+            "recipientRole": "customer"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "orderId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "OrderDetailPage"
+      },
+      "trigger": "button on OrderDetailPage"
+    },
+    {
+      "name": "ReorderWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "fetch_order",
+          "type": "trigger",
+          "config": {
+            "entity": "Order",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "fetch_order",
+          "next": "copy_items_to_cart",
+          "type": "action",
+          "config": {
+            "table": "orders",
+            "where": {
+              "id": "{{orderId}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "copy_items_to_cart",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "carts",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "items"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "orderId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "OrderDetailPage"
+      },
+      "trigger": "button on OrderDetailPage"
+    },
+    {
+      "name": "SubmitReviewWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "check_verified",
+          "type": "trigger",
+          "config": {
+            "entity": "Review",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "check_verified",
+          "next": "insert_review",
+          "type": "action",
+          "config": {
+            "table": "order_items",
+            "where": {
+              "plantId": "{{plantId}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "insert_review",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "reviews",
+            "fields": [
+              "plantId",
+              "customerId",
+              "rating",
+              "body",
+              "imageUrl",
+              "verifiedPurchase"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "plantId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        },
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "rating",
+          "type": "integer",
+          "source": {
+            "kind": "form_field",
+            "field": "rating"
+          },
+          "required": true
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "source": {
+            "kind": "form_field",
+            "field": "body"
+          },
+          "required": false
+        },
+        {
+          "name": "imageUrl",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "imageUrl"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "PlantReviewFormPage"
+      },
+      "trigger": "form submit on PlantReviewFormPage"
+    },
+    {
+      "name": "CreateSubscriptionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "create_subscription",
+          "type": "trigger",
+          "config": {
+            "entity": "Subscription",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "create_subscription",
+          "next": "notify_created",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "fields": [
+              "customerId",
+              "frequency",
+              "difficultyPref",
+              "sizePref",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_created",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your plant subscription has been created.",
+            "actionType": "send_email",
+            "recipientRole": "customer"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "frequency",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "frequency"
+          },
+          "required": true
+        },
+        {
+          "name": "difficultyPref",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "difficultyPref"
+          },
+          "required": false
+        },
+        {
+          "name": "sizePref",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "sizePref"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "SubscriptionSignupPage"
+      },
+      "trigger": "form submit on SubscriptionSignupPage"
+    },
+    {
+      "name": "UpdateSubscriptionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_subscription",
+          "type": "trigger",
+          "config": {
+            "entity": "Subscription",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_subscription",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "frequency",
+              "difficultyPref",
+              "sizePref"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        },
+        {
+          "name": "frequency",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "frequency"
+          },
+          "required": true
+        },
+        {
+          "name": "difficultyPref",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "difficultyPref"
+          },
+          "required": false
+        },
+        {
+          "name": "sizePref",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "sizePref"
+          },
+          "required": false
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "SubscriptionEditPage"
+      },
+      "trigger": "form submit on SubscriptionEditPage"
+    },
+    {
+      "name": "CancelSubscriptionWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "cancel_subscription",
+          "type": "trigger",
+          "config": {
+            "entity": "Subscription",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "cancel_subscription",
+          "next": "notify_cancelled",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "customerId": "{{customerId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_cancelled",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Your subscription has been cancelled.",
+            "actionType": "send_email",
+            "recipientRole": "customer"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "source": {
+            "kind": "auth",
+            "claim": "user.id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "SubscriptionPage"
+      },
+      "trigger": "button on SubscriptionPage"
+    },
+    {
+      "name": "DeletePlantWorkflow",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "delete_plant",
+          "type": "trigger",
+          "config": {
+            "entity": "Plant",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "delete_plant",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "table": "plants",
+            "where": {
+              "id": "{{plantId}}"
+            },
+            "actionType": "db_delete"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "plantId",
+          "type": "uuid",
+          "source": {
+            "kind": "route",
+            "param": "id"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "button",
+        "page": "AdminPlantListPage"
+      },
+      "trigger": "button on AdminPlantListPage"
+    },
+    {
+      "name": "SubscriptionChargeScheduler",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "find_due",
+          "type": "trigger",
+          "config": {
+            "triggerType": "schedule"
+          }
+        },
+        {
+          "id": "find_due",
+          "next": "notify_admin",
+          "type": "action",
+          "config": {
+            "table": "subscriptions",
+            "where": {
+              "status": "active",
+              "nextChargeAt_lte": "{{now}}"
+            },
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "notify_admin",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Subscriptions due for charge today.",
+            "actionType": "send_notification",
+            "recipientRole": "admin"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "now",
+          "type": "timestamp",
+          "source": {
+            "kind": "static",
+            "value": "{{now}}"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "cron",
+        "schedule": "0 8 * * *"
+      },
+      "trigger": "schedule"
+    },
+    {
+      "name": "InviteAdmin",
+      "roles": {
+        "invoker": "admin"
+      },
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "create_user",
+          "type": "trigger",
+          "config": {
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "create_user",
+          "next": "send_invite",
+          "type": "action",
+          "config": {
+            "table": "users",
+            "fields": [
+              "email",
+              "name",
+              "role"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "send_invite",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Hi {{name}}, you've been invited to join as an admin. Click the link to set your password.",
+            "actionType": "send_email",
+            "recipientRole": "admin"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "email",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "email"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "source": {
+            "kind": "form_field",
+            "field": "name"
+          },
+          "required": true
+        }
+      ],
+      "source": {
+        "kind": "form",
+        "page": "admins-new"
+      },
+      "description": "Invite a new admin into the app (assigns role='admin')."
+    }
+  ],
+  "assumptions": [
+    "Storefront covers both indoor and outdoor plants \u2014 category field on Plant entity covers both.",
+    "Subscription feature is in scope as a customer-facing monthly/quarterly box.",
+    "Admin panel is in scope for plant, order, and inventory management.",
+    "Custom headless architecture assumed \u2014 no third-party e-commerce platform dependency.",
+    "Wholesale/B2B persona is out of scope for this plan.",
+    "Single currency (USD) and single language (English) for this version.",
+    "Cart is stored server-side per customer as a JSONB items array for simplicity.",
+    "Grow-zone validation on checkout is logged but not a hard blocker in v1.",
+    "Pet-safe flag is prominently surfaced as a filter and badge on plant cards.",
+    "OrderItem and Cart marked internal:true \u2014 they are system join/session tables not directly surfaced as standalone user-facing pages.",
+    "Variant marked internal:true \u2014 PlantSizeVariant is the canonical size-variant entity surfaced via /admin/plants/[id]/variants.",
+    "Customer entity surfaced via /customers list page for admin management; internal flag removed.",
+    "/login and /signup pages use archetype:form (auth pages) not archetype:list to avoid dataSource requirement.",
+    "InviteAdmin workflow inputs declared explicitly: email and name collected from the admins-new form page.",
+    "DeletePlantWorkflow plantId source corrected to route param 'id' rather than auth claim."
+  ],
+  "data_models": [
+    {
+      "name": "User",
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "not_null": true,
+          "enum_values": [
+            "customer",
+            "admin"
+          ]
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Customer",
+      "table": "customers",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "userId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "phone",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "growZone",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "defaultShippingAddress",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Plant",
+      "table": "plants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "commonName",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "scientificName",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "category",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lightRequirement",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "wateringFrequency",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "difficulty",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "petSafe",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "images",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "photoUrl",
+          "type": "varchar",
+          "not_null": false,
+          "semantic_type": "media"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Variant",
+      "table": "variants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "sku",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "potDiameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "price",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "stockQty",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "PlantSizeVariant",
+      "table": "plant_size_variants",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "sku",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "potDiameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "priceModifier",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "stockQty",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Planter",
+      "table": "planters",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "material",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "color",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "diameterCm",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "price",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "images",
+          "type": "jsonb",
+          "nullable": true
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CareGuide",
+      "table": "care_guides",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "wateringInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lightInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "fertilizingInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "repottingInstructions",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "commonIssues",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Review",
+      "table": "reviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "rating",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "imageUrl",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "verifiedPurchase",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Order",
+      "table": "orders",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "shippingAddress",
+          "type": "jsonb",
+          "not_null": true
+        },
+        {
+          "name": "total",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "placedAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "OrderItem",
+      "table": "order_items",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "orders",
+            "column": "id"
+          },
+          "name": "orderId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "plants",
+            "column": "id"
+          },
+          "name": "plantId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "fk": {
+            "table": "plant_size_variants",
+            "column": "id"
+          },
+          "name": "variantId",
+          "type": "uuid",
+          "nullable": true
+        },
+        {
+          "fk": {
+            "table": "planters",
+            "column": "id"
+          },
+          "name": "planterId",
+          "type": "uuid",
+          "nullable": true
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "unitPrice",
+          "type": "integer",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": [],
+      "internal": true
+    },
+    {
+      "name": "Cart",
+      "table": "carts",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "items",
+          "type": "jsonb",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": [],
+      "internal": true
+    },
+    {
+      "name": "Subscription",
+      "table": "subscriptions",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "fk": {
+            "table": "users",
+            "column": "id"
+          },
+          "name": "customerId",
+          "type": "uuid",
+          "not_null": true
+        },
+        {
+          "name": "frequency",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "difficultyPref",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "sizePref",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "nextChargeAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "nextDeliveryAt",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Collection",
+      "table": "collections",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "primaryKey": true
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "title",
+          "type": "varchar",
+          "not_null": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "image",
+          "type": "varchar",
+          "nullable": true
+        },
+        {
+          "name": "featured",
+          "type": "boolean",
+          "not_null": true
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "not_null": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "not_null": true
+        }
+      ],
+      "indexes": []
+    }
+  ],
+  "description": "An online plant storefront where customers browse, filter, and purchase indoor/outdoor plants with pot options, care guides, and optional subscription delivery.",
+  "module_name": "plant-storefront"
+}

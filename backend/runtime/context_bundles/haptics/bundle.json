@@ -1,0 +1,20 @@
+{
+  "capability": "haptics",
+  "permissions": {
+    "ios": {},
+    "android": [
+      "android.permission.VIBRATE"
+    ],
+    "expo_plugins": ["expo-haptics"]
+  },
+  "native_imports": {
+    "expo": ["expo-haptics"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/HapticsProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useHaptics"]
+  },
+  "integration_keys": []
+}

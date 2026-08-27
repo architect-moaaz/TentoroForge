@@ -1,0 +1,471 @@
+{
+  "schemaVersion": "2",
+  "id": "users/new",
+  "route": "/users/new",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Add User",
+    "description": "Create a new user account for the leave management system"
+  },
+  "dataSources": [
+    {
+      "name": "departments",
+      "entity": "Department",
+      "op": "list"
+    },
+    {
+      "name": "managers",
+      "entity": "User",
+      "op": "list",
+      "filter": {
+        "role": "manager"
+      }
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "form-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "USER MANAGEMENT",
+              "headline": "Add New User",
+              "subhead": "Create a new user account with appropriate permissions for the leave management system.",
+              "layout": "stacked",
+              "ctas": []
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.primary.50",
+                "to": "tokens.color.surface.0",
+                "angle": 160
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.xl",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "form-card",
+            "type": "Card",
+            "style": {
+              "background": "tokens.color.surface.0",
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm"
+            },
+            "children": [
+              {
+                "id": "form-content",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.8"
+                },
+                "children": [
+                  {
+                    "id": "section-personal",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Personal Information",
+                      "subtitle": "Basic user details and contact information"
+                    },
+                    "children": [
+                      {
+                        "id": "personal-fields",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.semantic.input"
+                        },
+                        "children": [
+                          {
+                            "id": "name-row",
+                            "type": "Row",
+                            "props": {
+                              "gap": "tokens.spacing.4"
+                            },
+                            "children": [
+                              {
+                                "id": "field-first-name",
+                                "type": "Input",
+                                "props": {
+                                  "name": "firstName",
+                                  "label": "First Name",
+                                  "type": "text",
+                                  "placeholder": "e.g. Sarah",
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              },
+                              {
+                                "id": "field-last-name",
+                                "type": "Input",
+                                "props": {
+                                  "name": "lastName",
+                                  "label": "Last Name",
+                                  "type": "text",
+                                  "placeholder": "e.g. Johnson",
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "field-email",
+                            "type": "Input",
+                            "props": {
+                              "name": "email",
+                              "label": "Email Address",
+                              "type": "email",
+                              "placeholder": "sarah.johnson@company.com",
+                              "validators": {
+                                "required": true,
+                                "pattern": "^[^@]+@[^@]+\\.[^@]+$",
+                                "message": "Please enter a valid email address"
+                              }
+                            }
+                          },
+                          {
+                            "id": "field-phone",
+                            "type": "Input",
+                            "props": {
+                              "name": "phone",
+                              "label": "Phone Number",
+                              "type": "tel",
+                              "placeholder": "+1 (555) 123-4567",
+                              "validators": {
+                                "required": false
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "section-employment",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "Employment Details",
+                      "subtitle": "Department, role, and organizational structure"
+                    },
+                    "children": [
+                      {
+                        "id": "employment-fields",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.semantic.input"
+                        },
+                        "children": [
+                          {
+                            "id": "field-employee-id",
+                            "type": "Input",
+                            "props": {
+                              "name": "employeeId",
+                              "label": "Employee ID",
+                              "type": "text",
+                              "placeholder": "e.g. EMP001234",
+                              "validators": {
+                                "required": true,
+                                "pattern": "^[A-Z]{3}\\d{6}$",
+                                "message": "Employee ID must be 3 letters followed by 6 digits"
+                              }
+                            }
+                          },
+                          {
+                            "id": "dept-title-row",
+                            "type": "Row",
+                            "props": {
+                              "gap": "tokens.spacing.4"
+                            },
+                            "children": [
+                              {
+                                "id": "field-department",
+                                "type": "Select",
+                                "props": {
+                                  "name": "departmentId",
+                                  "label": "Department",
+                                  "options": [
+                                    {
+                                      "value": "hr",
+                                      "label": "Human Resources"
+                                    },
+                                    {
+                                      "value": "engineering",
+                                      "label": "Engineering"
+                                    },
+                                    {
+                                      "value": "marketing",
+                                      "label": "Marketing"
+                                    },
+                                    {
+                                      "value": "finance",
+                                      "label": "Finance"
+                                    },
+                                    {
+                                      "value": "operations",
+                                      "label": "Operations"
+                                    },
+                                    {
+                                      "value": "sales",
+                                      "label": "Sales"
+                                    }
+                                  ],
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              },
+                              {
+                                "id": "field-job-title",
+                                "type": "Input",
+                                "props": {
+                                  "name": "jobTitle",
+                                  "label": "Job Title",
+                                  "type": "text",
+                                  "placeholder": "e.g. Senior HR Specialist",
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "field-manager",
+                            "type": "Select",
+                            "props": {
+                              "name": "managerId",
+                              "label": "Direct Manager",
+                              "options": [
+                                {
+                                  "value": "mgr001",
+                                  "label": "Jennifer Chen - HR Director"
+                                },
+                                {
+                                  "value": "mgr002",
+                                  "label": "Michael Rodriguez - Engineering Manager"
+                                },
+                                {
+                                  "value": "mgr003",
+                                  "label": "Lisa Park - Marketing Director"
+                                }
+                              ],
+                              "validators": {
+                                "required": false
+                              }
+                            }
+                          },
+                          {
+                            "id": "dates-row",
+                            "type": "Row",
+                            "props": {
+                              "gap": "tokens.spacing.4"
+                            },
+                            "children": [
+                              {
+                                "id": "field-start-date",
+                                "type": "DatePicker",
+                                "props": {
+                                  "name": "startDate",
+                                  "label": "Start Date",
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              },
+                              {
+                                "id": "field-employment-type",
+                                "type": "Select",
+                                "props": {
+                                  "name": "employmentType",
+                                  "label": "Employment Type",
+                                  "options": [
+                                    {
+                                      "value": "full-time",
+                                      "label": "Full-time"
+                                    },
+                                    {
+                                      "value": "part-time",
+                                      "label": "Part-time"
+                                    },
+                                    {
+                                      "value": "contract",
+                                      "label": "Contract"
+                                    },
+                                    {
+                                      "value": "intern",
+                                      "label": "Intern"
+                                    }
+                                  ],
+                                  "validators": {
+                                    "required": true
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "section-system-access",
+                    "type": "Section",
+                    "props": {
+                      "variant": "plain",
+                      "title": "System Access & Permissions",
+                      "subtitle": "Role-based access control for the leave management system"
+                    },
+                    "children": [
+                      {
+                        "id": "access-fields",
+                        "type": "Stack",
+                        "props": {
+                          "direction": "vertical",
+                          "gap": "tokens.spacing.semantic.input"
+                        },
+                        "children": [
+                          {
+                            "id": "field-system-role",
+                            "type": "Select",
+                            "props": {
+                              "name": "systemRole",
+                              "label": "System Role",
+                              "options": [
+                                {
+                                  "value": "employee",
+                                  "label": "Employee \u2014 can submit and view own leave requests"
+                                },
+                                {
+                                  "value": "manager",
+                                  "label": "Manager \u2014 can approve team leave requests and view department analytics"
+                                },
+                                {
+                                  "value": "hr_admin",
+                                  "label": "HR Admin \u2014 full access to employee records and leave policies"
+                                },
+                                {
+                                  "value": "system_admin",
+                                  "label": "System Admin \u2014 complete system administration access"
+                                }
+                              ],
+                              "validators": {
+                                "required": true
+                              }
+                            }
+                          },
+                          {
+                            "id": "permissions-checkboxes",
+                            "type": "Stack",
+                            "props": {
+                              "direction": "vertical",
+                              "gap": "tokens.spacing.3"
+                            },
+                            "children": [
+                              {
+                                "id": "field-active",
+                                "type": "Checkbox",
+                                "props": {
+                                  "name": "isActive",
+                                  "label": "Account is active and can log in"
+                                }
+                              },
+                              {
+                                "id": "field-send-welcome",
+                                "type": "Checkbox",
+                                "props": {
+                                  "name": "sendWelcomeEmail",
+                                  "label": "Send welcome email with login credentials"
+                                }
+                              },
+                              {
+                                "id": "field-password-reset",
+                                "type": "Checkbox",
+                                "props": {
+                                  "name": "requirePasswordReset",
+                                  "label": "Require password change on first login"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "form-actions",
+                    "type": "Row",
+                    "props": {
+                      "justify": "end",
+                      "gap": "tokens.spacing.3"
+                    },
+                    "style": {
+                      "padding": "tokens.spacing.6 0 0 0"
+                    },
+                    "children": [
+                      {
+                        "id": "btn-cancel",
+                        "type": "Button",
+                        "props": {
+                          "label": "Cancel",
+                          "variant": "ghost",
+                          "size": "md",
+                          "navigate": "/users"
+                        }
+                      },
+                      {
+                        "id": "btn-save-draft",
+                        "type": "Button",
+                        "props": {
+                          "label": "Save as Draft",
+                          "variant": "secondary",
+                          "size": "md",
+                          "workflow": "saveUserDraft"
+                        }
+                      },
+                      {
+                        "id": "btn-create",
+                        "type": "Button",
+                        "props": {
+                          "label": "Create User",
+                          "variant": "primary",
+                          "size": "md",
+                          "workflow": "createUser"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

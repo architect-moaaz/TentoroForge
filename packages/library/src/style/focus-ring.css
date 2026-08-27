@@ -1,0 +1,53 @@
+/**
+ * Spec E Wave 2 — focus-visible ring tokens + global :focus-visible
+ * rule. Emitted into every generated app's globals.css by
+ * backend/services/interactions_css_inject.inject_polish_stylesheets
+ * behind the FORGE_POLISH_A11Y flag.
+ *
+ * The tokens live in :root so any component (library or user-authored)
+ * can pick them up. FocusRing overrides them locally when needed.
+ *
+ * WCAG 2.1 SC 2.4.7 (Focus Visible): ≥2px outline with sufficient
+ * contrast. Colour defaults to the brand primary so it inherits the
+ * app's palette; falls back to Tailwind blue for early boot.
+ */
+:root {
+  --focus-ring-color: var(--color-primary, #2563eb);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+}
+
+/* Universal focus-visible rule — applies to real focusable elements
+   (buttons, inputs, links, [tabindex]). Uses outline (not box-shadow)
+   so the ring follows the element's shape without forcing position:
+   relative. */
+*:focus-visible,
+[data-forge-focus-ring]:focus-within > *:focus {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+  /* Ensure the ring is not clipped by overflow:hidden parents in
+     complex layouts. box-shadow companion adds a soft halo so the ring
+     stays visible on tight borders. */
+  box-shadow: 0 0 0 var(--focus-ring-offset)
+    color-mix(in srgb, var(--focus-ring-color) 15%, transparent);
+}
+
+/* Suppress the ring for mouse-only focus (WCAG 2.4.7 allows this — we
+   are still focus-visible for keyboard/AT). Modern browsers do this
+   automatically via :focus-visible; this rule just prevents the older
+   :focus fallback from double-drawing when :focus-visible IS
+   supported. */
+@supports selector(:focus-visible) {
+  *:focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+/* When user opts into high-contrast, thicken the ring for extra
+   distinctness — the high-contrast pass emits a matching
+   [data-theme="high-contrast"] block. */
+[data-theme="high-contrast"] {
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 3px;
+}

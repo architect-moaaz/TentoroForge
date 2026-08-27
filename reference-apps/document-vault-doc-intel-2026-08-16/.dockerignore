@@ -1,0 +1,14 @@
+# Dockerignore for JV-15 verify container builds.
+# Skip anything that would either bloat the context or clash with the
+# container's own install (host node_modules is arch-dependent).
+node_modules
+.next
+.env.local
+.env
+data
+tmp
+*.log
+.git
+.DS_Store
+journeys
+.journey-boot.log

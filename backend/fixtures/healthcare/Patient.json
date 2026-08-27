@@ -1,0 +1,12 @@
+[
+  { "id": "p-0001", "mrn": "MRN-484921", "name": "Eleanor Park", "dateOfBirth": "1958-03-12", "primaryConcern": "Hypertension follow-up", "status": "active", "lastVisit": "2025-11-04T09:30:00Z" },
+  { "id": "p-0002", "mrn": "MRN-302184", "name": "James Whitaker", "dateOfBirth": "1982-07-29", "primaryConcern": "Annual physical", "status": "scheduled", "lastVisit": "2025-09-15T13:00:00Z" },
+  { "id": "p-0003", "mrn": "MRN-918273", "name": "Aiko Tanaka", "dateOfBirth": "1995-12-04", "primaryConcern": "Pre-natal — second trimester", "status": "active", "lastVisit": "2025-10-22T10:45:00Z" },
+  { "id": "p-0004", "mrn": "MRN-556102", "name": "Rashid Khan", "dateOfBirth": "1971-05-18", "primaryConcern": "Type 2 diabetes management", "status": "active", "lastVisit": "2025-11-08T16:15:00Z" },
+  { "id": "p-0005", "mrn": "MRN-110928", "name": "Sofia Reyes", "dateOfBirth": "2014-08-25", "primaryConcern": "Pediatric immunization schedule", "status": "active", "lastVisit": "2025-10-30T11:00:00Z" },
+  { "id": "p-0006", "mrn": "MRN-223847", "name": "David Olsen", "dateOfBirth": "1948-01-09", "primaryConcern": "Cardiology consult — post-CABG", "status": "active", "lastVisit": "2025-11-12T08:30:00Z" },
+  { "id": "p-0007", "mrn": "MRN-998877", "name": "Maria Santos", "dateOfBirth": "1989-04-17", "primaryConcern": "Migraine workup", "status": "scheduled", "lastVisit": "2025-09-28T14:00:00Z" },
+  { "id": "p-0008", "mrn": "MRN-446629", "name": "Kwame Nkrumah", "dateOfBirth": "1965-11-30", "primaryConcern": "Annual oncology follow-up — remission", "status": "active", "lastVisit": "2025-08-19T15:30:00Z" },
+  { "id": "p-0009", "mrn": "MRN-771203", "name": "Helena Brennan", "dateOfBirth": "1992-02-14", "primaryConcern": "Anxiety / mental health screening", "status": "active", "lastVisit": "2025-11-01T17:00:00Z" },
+  { "id": "p-0010", "mrn": "MRN-330156", "name": "Yuki Watanabe", "dateOfBirth": "1976-09-08", "primaryConcern": "Orthopedic — knee replacement follow-up", "status": "active", "lastVisit": "2025-10-14T12:30:00Z" }
+]

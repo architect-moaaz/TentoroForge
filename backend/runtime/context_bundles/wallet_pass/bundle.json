@@ -1,0 +1,18 @@
+{
+  "capability": "wallet_pass",
+  "permissions": {
+    "ios": {},
+    "android": [],
+    "expo_plugins": ["expo-apple-wallet", "expo-google-wallet"]
+  },
+  "native_imports": {
+    "expo": ["expo-apple-wallet", "expo-google-wallet"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/WalletPassProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useAddPass", "usePasses"]
+  },
+  "integration_keys": ["APPLE_WALLET_PASS_TYPE_ID", "GOOGLE_WALLET_ISSUER_ID"]
+}

@@ -1,0 +1,195 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "Task Manager"
+  },
+  "tokens": {},
+  "dataSources": {
+    "dashboardStats": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/dashboard/stats",
+      "shape": { "totalTasks": "number", "openBugs": "number", "overdue": "number", "completionRate": "number" },
+      "refresh": "on-focus"
+    },
+    "recentTasks": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/tasks",
+      "params": {
+        "limit": { "type": "number", "default": 5 },
+        "sort": { "type": "string", "default": "-updatedAt" }
+      },
+      "shape": { "items": "Task[]" }
+    },
+    "overdueTasks": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/tasks",
+      "params": {
+        "overdue": { "type": "boolean", "default": true },
+        "limit": { "type": "number", "default": 5 }
+      },
+      "shape": { "items": "Task[]" }
+    }
+  },
+  "pages": [
+    {
+      "$id": "dashboard",
+      "route": "/dashboard",
+      "title": "Dashboard",
+      "auth": { "required": true },
+      "state": {},
+      "root": {
+        "node": "Stack",
+        "gap": "xl",
+        "padding": "lg",
+        "children": [
+          {
+            "node": "Text",
+            "content": "Dashboard",
+            "typography": "heading-1"
+          },
+          {
+            "node": "Grid",
+            "columns": { "default": 1, "sm": 2, "lg": 4 },
+            "gap": "md",
+            "children": [
+              {
+                "node": "StatCard",
+                "label": "Total Tasks",
+                "value": "source:dashboardStats.totalTasks",
+                "format": "number",
+                "icon": "check-square",
+                "action": { "type": "navigate", "to": "/tasks" }
+              },
+              {
+                "node": "StatCard",
+                "label": "Open Bugs",
+                "value": "source:dashboardStats.openBugs",
+                "format": "number",
+                "icon": "bug",
+                "trend": "source:dashboardStats.bugTrend",
+                "trendDirection": "down-good"
+              },
+              {
+                "node": "StatCard",
+                "label": "Overdue",
+                "value": "source:dashboardStats.overdue",
+                "format": "number",
+                "icon": "alert-triangle"
+              },
+              {
+                "node": "StatCard",
+                "label": "Completion Rate",
+                "value": "source:dashboardStats.completionRate",
+                "format": "percent",
+                "icon": "trending-up",
+                "trend": "source:dashboardStats.rateTrend",
+                "trendDirection": "up-good"
+              }
+            ]
+          },
+          {
+            "node": "Grid",
+            "columns": { "default": 1, "lg": 2 },
+            "gap": "lg",
+            "children": [
+              {
+                "node": "Card",
+                "padding": "md",
+                "children": [
+                  {
+                    "node": "Row",
+                    "justify": "between",
+                    "align": "center",
+                    "children": [
+                      { "node": "Text", "content": "Recent Tasks", "typography": "heading-3" },
+                      {
+                        "node": "Text",
+                        "content": "View all →",
+                        "typography": "body-sm",
+                        "color": "primary"
+                      }
+                    ]
+                  },
+                  { "node": "Spacer", "size": "sm" },
+                  {
+                    "node": "DataTable",
+                    "data": "source:recentTasks",
+                    "columns": [
+                      { "field": "title", "header": "Task", "width": "2fr" },
+                      { "field": "status", "header": "Status", "width": "100px", "render": "badge" },
+                      { "field": "updatedAt", "header": "Updated", "width": "100px", "render": "date:relative" }
+                    ],
+                    "onRowClick": { "type": "navigate", "to": "/tasks/{{row.id}}" },
+                    "emptyState": {
+                      "node": "EmptyState",
+                      "icon": "inbox",
+                      "message": "No recent tasks"
+                    }
+                  }
+                ]
+              },
+              {
+                "node": "Card",
+                "padding": "md",
+                "children": [
+                  {
+                    "node": "Row",
+                    "justify": "between",
+                    "align": "center",
+                    "children": [
+                      { "node": "Text", "content": "Overdue Items", "typography": "heading-3" },
+                      {
+                        "node": "Text",
+                        "content": "View all →",
+                        "typography": "body-sm",
+                        "color": "danger"
+                      }
+                    ]
+                  },
+                  { "node": "Spacer", "size": "sm" },
+                  {
+                    "node": "Repeater",
+                    "data": "source:overdueTasks.items",
+                    "itemKey": "id",
+                    "gap": "sm",
+                    "emptyState": {
+                      "node": "EmptyState",
+                      "icon": "check-circle",
+                      "message": "No overdue items!"
+                    },
+                    "template": {
+                      "node": "Row",
+                      "gap": "sm",
+                      "align": "center",
+                      "padding": { "y": "xs" },
+                      "children": [
+                        {
+                          "node": "Icon",
+                          "name": "alert-circle",
+                          "size": "sm",
+                          "color": "danger"
+                        },
+                        {
+                          "node": "Stack",
+                          "gap": "none",
+                          "flex": 1,
+                          "children": [
+                            { "node": "Text", "content": "{{item.title}}", "weight": "medium", "truncate": 1 },
+                            { "node": "Text", "content": "Due {{item.dueDate | relativeDate}}", "typography": "caption", "color": "danger" }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

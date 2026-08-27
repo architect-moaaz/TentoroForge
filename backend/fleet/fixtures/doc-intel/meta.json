@@ -1,0 +1,12 @@
+{
+  "archetype": "field-service",
+  "source_app": "atb0m97x",
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "stresses": [
+    "file upload -> OCR -> AI extract",
+    "workflow trigger forms",
+    "record status stepper",
+    "launcher record-input contract"
+  ]
+}

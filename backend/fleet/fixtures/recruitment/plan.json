@@ -1,0 +1,2422 @@
+{
+  "name": "Cabin Crew Recruitment ATS",
+  "pages": [
+    {
+      "name": "SignupPage",
+      "type": "form",
+      "route": "/signup",
+      "entity": "User",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Full Name",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "email",
+          "semanticType": "email",
+          "label": "Email Address",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "nationality",
+          "label": "Nationality",
+          "required": true,
+          "order": 3
+        }
+      ],
+      "actions": [],
+      "features": [],
+      "archetype": "form",
+      "description": "Public self-signup page for Candidates. Collects full name, email, password, and nationality. On submit creates a User record with role=candidate and an empty CandidateProfile."
+    },
+    {
+      "name": "ApplyPage",
+      "type": "form",
+      "route": "/apply",
+      "entity": "CandidateProfile",
+      "fields": [
+        {
+          "name": "dateOfBirth",
+          "label": "Date of Birth",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "passportNumber",
+          "label": "Passport Number",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "passportExpiry",
+          "label": "Passport Expiry Date",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "rightToWorkDeclaration",
+          "label": "I confirm I have the right to work in the target country",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "medicalFitnessDeclaration",
+          "label": "I declare I am medically fit to perform cabin crew duties (EASA Part-CC baseline)",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "swimmingProficiency",
+          "label": "I am a proficient swimmer",
+          "required": true,
+          "order": 6
+        },
+        {
+          "name": "heightCm",
+          "label": "Height (cm)",
+          "required": true,
+          "order": 7
+        },
+        {
+          "name": "primaryLanguage",
+          "label": "Primary Language",
+          "required": true,
+          "order": 8
+        },
+        {
+          "name": "secondaryLanguages",
+          "label": "Secondary Languages",
+          "order": 9
+        },
+        {
+          "name": "totalExperienceYears",
+          "label": "Total Work Experience (years)",
+          "required": true,
+          "order": 10
+        },
+        {
+          "name": "aviationExperienceYears",
+          "label": "Aviation Experience (years)",
+          "order": 11
+        },
+        {
+          "name": "previousAirlines",
+          "label": "Previous Airlines / Operators",
+          "order": 12
+        },
+        {
+          "name": "educationLevel",
+          "label": "Highest Education Level",
+          "required": true,
+          "order": 13
+        },
+        {
+          "name": "cvFileUrl",
+          "label": "Upload CV (PDF or DOCX)",
+          "required": true,
+          "order": 14
+        }
+      ],
+      "actions": [
+        {
+          "label": "Submit Application",
+          "workflow": "ParseAndAggregateCV",
+          "kind": "page_action"
+        }
+      ],
+      "features": [
+        "notify"
+      ],
+      "archetype": "wizard",
+      "description": "Multi-step wizard for Candidates to complete their aviation-compliant profile and upload their CV. Step 1: personal details (DOB, passport, right-to-work, medical and swimming declarations). Step 2: experience (total years, aviation years, previous airlines, education). Step 3: CV file upload. On completion the CV is queued for AI parsing via ParseAndAggregateCV workflow."
+    },
+    {
+      "name": "PipelinePage",
+      "type": "list",
+      "route": "/drive-application",
+      "entity": "DriveApplication",
+      "actions": [
+        {
+          "label": "Shortlist",
+          "workflow": "ShortlistCandidate",
+          "kind": "row_action",
+          "requires_record": true
+        },
+        {
+          "label": "Reject",
+          "workflow": "RejectCandidate",
+          "kind": "row_action",
+          "requires_record": true
+        }
+      ],
+      "features": [
+        "status-pipeline",
+        "approval"
+      ],
+      "archetype": "kanban",
+      "description": "Recruiter pipeline board for a specific Drive. Columns represent application statuses: Applied, Shortlisted, Interview Scheduled, Offered, Rejected. Each card shows candidate name, aggregation score, nationality, and aviation experience years. Recruiter can drag cards or use action buttons to shortlist or reject."
+    },
+    {
+      "name": "DriveSchedulePage",
+      "type": "form",
+      "route": "/interview",
+      "entity": "Interview",
+      "actions": [
+        {
+          "label": "Schedule Interview",
+          "workflow": "ScheduleInterview",
+          "kind": "page_action"
+        }
+      ],
+      "features": [
+        "notify",
+        "scheduled"
+      ],
+      "archetype": "resource-schedule",
+      "description": "Recruiter interview scheduling view for a Drive. Left panel lists shortlisted candidates for the Drive. Right panel is a resource-schedule grid with rows per shortlisted candidate and columns per day, showing interview slots. Recruiter clicks an empty cell to open a booking form (candidate pre-filled, date/time, stage, duration, location, interview type). On save, ScheduleInterview workflow fires."
+    },
+    {
+      "name": "InterviewPage",
+      "type": "detail",
+      "route": "/interview-2",
+      "entity": "Interview",
+      "actions": [
+        {
+          "label": "Submit Feedback Scorecard",
+          "workflow": "SubmitFeedbackScorecard",
+          "kind": "page_action"
+        }
+      ],
+      "features": [],
+      "archetype": "detail",
+      "description": "Recruiter interview conduction page. Shows candidate profile summary (photo, aggregation score, CV highlights, aviation experience, language skills, compliance declarations). Below is a structured interview guide with aviation competency question prompts grouped by competency area. Recruiter takes live notes. Bottom bar links to Submit Feedback Scorecard."
+    },
+    {
+      "name": "FeedbackScorecardPage",
+      "type": "form",
+      "route": "/feedback-scorecard",
+      "entity": "FeedbackScorecard",
+      "fields": [
+        {
+          "name": "groomingScore",
+          "label": "Grooming & Presentation (1-5)",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "languageProficiencyEnglish",
+          "label": "English Language Proficiency (1-5)",
+          "required": true,
+          "order": 2
+        },
+        {
+          "name": "languageProficiencySecondary",
+          "label": "Secondary Language Proficiency (1-5)",
+          "order": 3
+        },
+        {
+          "name": "safetyAwarenessScore",
+          "label": "Safety Awareness (1-5)",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "customerServiceScore",
+          "label": "Customer Service Orientation (1-5)",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "crmAptitudeScore",
+          "label": "Crew Resource Management Aptitude (1-5)",
+          "required": true,
+          "order": 6
+        },
+        {
+          "name": "culturalFitScore",
+          "label": "Cultural Fit (1-5)",
+          "required": true,
+          "order": 7
+        },
+        {
+          "name": "physicalFitnessDeclarationConfirmed",
+          "label": "Physical Fitness Declaration Confirmed by Recruiter",
+          "required": true,
+          "order": 8
+        },
+        {
+          "name": "overallRecommendation",
+          "label": "Overall Recommendation",
+          "required": true,
+          "enum": [
+            "Proceed",
+            "Hold",
+            "Reject"
+          ],
+          "order": 9
+        },
+        {
+          "name": "complianceNotes",
+          "semanticType": "multiline",
+          "label": "Compliance / Regulatory Notes (EASA/IATA)",
+          "order": 10
+        },
+        {
+          "name": "additionalComments",
+          "semanticType": "multiline",
+          "label": "Additional Comments",
+          "order": 11
+        }
+      ],
+      "actions": [
+        {
+          "label": "Submit Scorecard",
+          "workflow": "SubmitFeedbackScorecard",
+          "kind": "page_action"
+        }
+      ],
+      "features": [
+        "notify"
+      ],
+      "archetype": "form",
+      "description": "Aviation-aligned feedback scorecard form. Scores (1-5) for: Grooming & Presentation, English Language Proficiency, Secondary Language Proficiency, Safety Awareness, Customer Service Orientation, Crew Resource Management Aptitude, Cultural Fit. Boolean for Physical Fitness Declaration Confirmed. Overall Recommendation dropdown (Proceed / Hold / Reject). Compliance Notes textarea. Additional Comments textarea. On submit, SubmitFeedbackScorecard workflow persists the scorecard and notifies the candidate."
+    },
+    {
+      "name": "CandidateDashboardPage",
+      "type": "dashboard",
+      "route": "/dashboard",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "DriveApplication",
+          "title": "Applications Submitted",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "DriveApplication",
+          "title": "My Applications",
+          "limit": 5,
+          "columns": [
+            "driveId",
+            "status",
+            "aggregationScore",
+            "appliedAt"
+          ]
+        },
+        {
+          "type": "stat",
+          "entity": "Interview",
+          "title": "Upcoming Interviews",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "Notification",
+          "title": "Recent Notifications",
+          "limit": 5,
+          "columns": [
+            "title",
+            "body",
+            "createdAt"
+          ]
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "description": "Candidate home dashboard. Shows application status timeline per Drive applied to, CV parse status indicator, aggregation score badge, upcoming interview schedule widget, and notification inbox preview.",
+      "entity_summary": [
+        "User",
+        "CandidateProfile",
+        "Drive",
+        "DriveStage",
+        "DriveApplication",
+        "Interview",
+        "FeedbackScorecard",
+        "Notification"
+      ]
+    },
+    {
+      "name": "RecruiterDashboardPage",
+      "type": "dashboard",
+      "route": "/recruiter/dashboard",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "Drive",
+          "title": "Active Drives",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "DriveApplication",
+          "title": "Total Applications",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "DriveApplication",
+          "title": "Shortlisted Candidates",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "Interview",
+          "title": "Interviews Today",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "table",
+          "entity": "DriveApplication",
+          "title": "Recent Applications",
+          "limit": 10,
+          "columns": [
+            "candidateId",
+            "driveId",
+            "status",
+            "aggregationScore",
+            "appliedAt"
+          ]
+        },
+        {
+          "type": "chart",
+          "entity": "DriveApplication",
+          "title": "Applications by Status",
+          "groupBy": "status"
+        }
+      ],
+      "features": [],
+      "archetype": "dashboard",
+      "description": "Recruiter home dashboard. KPI tiles: total active Drives, total applications this month, shortlisted count, interviews scheduled today. Recent activity feed. Quick-access buttons to create a new Drive or view pipeline.",
+      "entity_summary": [
+        "User",
+        "CandidateProfile",
+        "Drive",
+        "DriveStage",
+        "DriveApplication",
+        "Interview",
+        "FeedbackScorecard",
+        "Notification"
+      ]
+    },
+    {
+      "name": "DrivesListPage",
+      "type": "list",
+      "route": "/drives",
+      "entity": "Drive",
+      "actions": [
+        {
+          "label": "Create Drive",
+          "workflow": "CreateDrive",
+          "kind": "page_action"
+        }
+      ],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "list",
+      "description": "Recruiter list of all Drives. Columns: title, location, status, start date, end date, headcount target, application count. Filters by status (Draft, Active, Closed). Actions: Create Drive, View Pipeline, Edit, Archive."
+    },
+    {
+      "name": "DriveFormPage",
+      "type": "form",
+      "route": "/drives/new",
+      "entity": "Drive",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Drive Title",
+          "required": true,
+          "order": 1
+        },
+        {
+          "name": "description",
+          "semanticType": "multiline",
+          "label": "Description",
+          "order": 2
+        },
+        {
+          "name": "location",
+          "label": "Location / Base",
+          "required": true,
+          "order": 3
+        },
+        {
+          "name": "targetHeadcount",
+          "label": "Target Headcount",
+          "required": true,
+          "order": 4
+        },
+        {
+          "name": "startDate",
+          "label": "Drive Start Date",
+          "required": true,
+          "order": 5
+        },
+        {
+          "name": "endDate",
+          "label": "Drive End Date",
+          "required": true,
+          "order": 6
+        }
+      ],
+      "actions": [
+        {
+          "label": "Create Drive",
+          "workflow": "CreateDrive",
+          "kind": "page_action"
+        }
+      ],
+      "features": [],
+      "archetype": "form",
+      "description": "Form to create a new recruitment Drive. Fields: title, description, location, target headcount, start date, end date. On save, three default DriveStages are seeded (Initial Screening, Group Exercise, Final Interview)."
+    },
+    {
+      "name": "DriveDetailPage",
+      "type": "detail",
+      "route": "/drive",
+      "entity": "Drive",
+      "actions": [],
+      "features": [
+        "status-pipeline"
+      ],
+      "archetype": "detail",
+      "description": "Drive detail page showing Drive metadata, stages list (Initial Screening, Group Exercise, Final Interview), application statistics per stage, and quick links to Pipeline and Schedule views."
+    },
+    {
+      "name": "CandidateProfilePage",
+      "type": "detail",
+      "route": "/candidate-profile",
+      "entity": "CandidateProfile",
+      "actions": [],
+      "features": [],
+      "archetype": "detail",
+      "description": "Full candidate profile view for Recruiters. Sections: personal details, compliance declarations (passport validity, right-to-work, medical fitness, swimming), aviation experience, language skills, education, CV parse summary with aggregation score, and application history across Drives with scorecards."
+    },
+    {
+      "name": "CandidatesListPage",
+      "type": "list",
+      "route": "/candidates",
+      "entity": "CandidateProfile",
+      "actions": [],
+      "features": [],
+      "archetype": "list",
+      "description": "Recruiter searchable list of all candidates in the system. Columns: name, nationality, aggregation score, aviation experience years, CV parse status, date applied. Filters: aggregation score range, experience years, language. Click row to open CandidateProfilePage."
+    },
+    {
+      "name": "InterviewCalendarPage",
+      "type": "dashboard",
+      "route": "/interviews/calendar",
+      "entity": "Interview",
+      "actions": [],
+      "features": [
+        "scheduled"
+      ],
+      "archetype": "calendar",
+      "description": "Recruiter calendar view of all scheduled interviews across all Drives. Month/week toggle. Events color-coded by Drive. Click event to open interview detail. Sidebar shows today's interviews list."
+    },
+    {
+      "name": "NotificationsPage",
+      "type": "list",
+      "route": "/notifications",
+      "entity": "Notification",
+      "actions": [],
+      "features": [
+        "notify"
+      ],
+      "archetype": "inbox",
+      "description": "Unified notification inbox for both Candidates and Recruiters. Left pane lists notifications (title, time, read/unread badge). Right reading pane shows body and a link to the related entity (Drive, Application, Interview)."
+    },
+    {
+      "name": "AnalyticsPage",
+      "type": "dashboard",
+      "route": "/analytics",
+      "entity": null,
+      "actions": [],
+      "widgets": [
+        {
+          "type": "stat",
+          "entity": "DriveApplication",
+          "title": "Total Applications",
+          "metric": {
+            "fn": "count"
+          }
+        },
+        {
+          "type": "stat",
+          "entity": "FeedbackScorecard",
+          "title": "Avg Scorecard Total",
+          "metric": {
+            "fn": "avg",
+            "field": "totalScore"
+          }
+        },
+        {
+          "type": "chart",
+          "entity": "DriveApplication",
+          "title": "Applications by Month",
+          "groupBy": "createdAt",
+          "bucket": "month"
+        },
+        {
+          "type": "chart",
+          "entity": "DriveApplication",
+          "title": "Pipeline Funnel",
+          "groupBy": "status"
+        },
+        {
+          "type": "chart",
+          "entity": "FeedbackScorecard",
+          "title": "Recommendation Breakdown",
+          "groupBy": "overallRecommendation"
+        },
+        {
+          "type": "chart",
+          "entity": "DriveApplication",
+          "title": "Applications per Drive",
+          "groupBy": "driveId"
+        }
+      ],
+      "features": [],
+      "archetype": "report",
+      "description": "Recruitment analytics for Recruiters. KPIs: total applications, shortlist rate, offer rate, average aggregation score. Charts: applications by month, applications by Drive, funnel by status stage, recommendation distribution (Proceed/Hold/Reject) from scorecards, average score by competency area.",
+      "entity_summary": [
+        "User",
+        "CandidateProfile",
+        "Drive",
+        "DriveStage",
+        "DriveApplication",
+        "Interview",
+        "FeedbackScorecard",
+        "Notification"
+      ]
+    },
+    {
+      "name": "SettingsPage",
+      "type": "form",
+      "route": "/settings",
+      "entity": "User",
+      "actions": [],
+      "features": [],
+      "archetype": "settings",
+      "description": "Account settings page. Sections: profile (name, email, avatar), password change, notification preferences (email and in-app toggles per event type)."
+    }
+  ],
+  "domain": "hr",
+  "entities": {
+    "User": {
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "enum_values": [
+            "candidate",
+            "recruiter"
+          ]
+        },
+        {
+          "name": "avatarUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/users.ts",
+      "used_by": [
+        "CandidateProfile",
+        "Drive",
+        "DriveApplication",
+        "Interview",
+        "FeedbackScorecard",
+        "Notification"
+      ],
+      "depends_on": []
+    },
+    "Drive": {
+      "table": "drives",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "location",
+          "type": "varchar"
+        },
+        {
+          "name": "targetHeadcount",
+          "type": "integer"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/drives.ts",
+      "used_by": [
+        "DriveStage",
+        "DriveApplication"
+      ],
+      "depends_on": [
+        "User"
+      ]
+    },
+    "Interview": {
+      "table": "interviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "driveApplicationId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveStageId",
+          "type": "uuid"
+        },
+        {
+          "name": "scheduledAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "durationMinutes",
+          "type": "integer"
+        },
+        {
+          "name": "location",
+          "type": "varchar"
+        },
+        {
+          "name": "interviewType",
+          "type": "varchar"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "notes",
+          "type": "text"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/interviews.ts",
+      "used_by": [
+        "FeedbackScorecard"
+      ],
+      "depends_on": [
+        "DriveApplication",
+        "Drive",
+        "User",
+        "DriveStage"
+      ]
+    },
+    "DriveStage": {
+      "table": "drive_stages",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "stageOrder",
+          "type": "integer"
+        },
+        {
+          "name": "stageType",
+          "type": "varchar"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/drive_stages.ts",
+      "used_by": [
+        "DriveApplication",
+        "Interview"
+      ],
+      "depends_on": [
+        "Drive"
+      ]
+    },
+    "Notification": {
+      "table": "notifications",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "body",
+          "type": "text"
+        },
+        {
+          "name": "type",
+          "type": "varchar"
+        },
+        {
+          "name": "isRead",
+          "type": "boolean"
+        },
+        {
+          "name": "relatedEntityType",
+          "type": "varchar"
+        },
+        {
+          "name": "relatedEntityId",
+          "type": "uuid"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/notifications.ts",
+      "used_by": [],
+      "depends_on": [
+        "User"
+      ]
+    },
+    "CandidateProfile": {
+      "table": "candidate_profiles",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "dateOfBirth",
+          "type": "timestamp"
+        },
+        {
+          "name": "nationality",
+          "type": "varchar"
+        },
+        {
+          "name": "passportNumber",
+          "type": "varchar"
+        },
+        {
+          "name": "passportExpiry",
+          "type": "timestamp"
+        },
+        {
+          "name": "rightToWorkDeclaration",
+          "type": "boolean"
+        },
+        {
+          "name": "medicalFitnessDeclaration",
+          "type": "boolean"
+        },
+        {
+          "name": "swimmingProficiency",
+          "type": "boolean"
+        },
+        {
+          "name": "heightCm",
+          "type": "integer"
+        },
+        {
+          "name": "primaryLanguage",
+          "type": "varchar"
+        },
+        {
+          "name": "secondaryLanguages",
+          "type": "jsonb"
+        },
+        {
+          "name": "totalExperienceYears",
+          "type": "integer"
+        },
+        {
+          "name": "aviationExperienceYears",
+          "type": "integer"
+        },
+        {
+          "name": "previousAirlines",
+          "type": "jsonb"
+        },
+        {
+          "name": "educationLevel",
+          "type": "varchar"
+        },
+        {
+          "name": "cvFileUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "cvParseStatus",
+          "type": "varchar"
+        },
+        {
+          "name": "aggregationScore",
+          "type": "integer"
+        },
+        {
+          "name": "parsedData",
+          "type": "jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/candidate_profiles.ts",
+      "used_by": [
+        "DriveApplication"
+      ],
+      "depends_on": [
+        "User"
+      ]
+    },
+    "DriveApplication": {
+      "table": "drive_applications",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "currentStageId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "aggregationScore",
+          "type": "integer"
+        },
+        {
+          "name": "appliedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "shortlistedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/drive_applications.ts",
+      "used_by": [
+        "Interview",
+        "FeedbackScorecard"
+      ],
+      "depends_on": [
+        "User",
+        "Drive",
+        "DriveStage"
+      ]
+    },
+    "FeedbackScorecard": {
+      "table": "feedback_scorecards",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "interviewId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveApplicationId",
+          "type": "uuid"
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "groomingScore",
+          "type": "integer"
+        },
+        {
+          "name": "languageProficiencyEnglish",
+          "type": "integer"
+        },
+        {
+          "name": "languageProficiencySecondary",
+          "type": "integer"
+        },
+        {
+          "name": "safetyAwarenessScore",
+          "type": "integer"
+        },
+        {
+          "name": "customerServiceScore",
+          "type": "integer"
+        },
+        {
+          "name": "crmAptitudeScore",
+          "type": "integer"
+        },
+        {
+          "name": "culturalFitScore",
+          "type": "integer"
+        },
+        {
+          "name": "physicalFitnessDeclarationConfirmed",
+          "type": "boolean"
+        },
+        {
+          "name": "overallRecommendation",
+          "type": "varchar"
+        },
+        {
+          "name": "complianceNotes",
+          "type": "text"
+        },
+        {
+          "name": "additionalComments",
+          "type": "text"
+        },
+        {
+          "name": "totalScore",
+          "type": "integer"
+        },
+        {
+          "name": "submittedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "schema": "src/db/schema/feedback_scorecards.ts",
+      "used_by": [],
+      "depends_on": [
+        "Interview",
+        "DriveApplication",
+        "User"
+      ]
+    }
+  },
+  "authGated": true,
+  "relations": [
+    {
+      "to": "User",
+      "from": "CandidateProfile",
+      "foreignKey": "userId"
+    },
+    {
+      "to": "User",
+      "from": "Drive",
+      "foreignKey": "recruiterId"
+    },
+    {
+      "to": "Drive",
+      "from": "DriveStage",
+      "foreignKey": "driveId"
+    },
+    {
+      "to": "User",
+      "from": "DriveApplication",
+      "foreignKey": "candidateId"
+    },
+    {
+      "to": "Drive",
+      "from": "DriveApplication",
+      "foreignKey": "driveId"
+    },
+    {
+      "to": "DriveStage",
+      "from": "DriveApplication",
+      "foreignKey": "currentStageId"
+    },
+    {
+      "to": "DriveApplication",
+      "from": "Interview",
+      "foreignKey": "driveApplicationId"
+    },
+    {
+      "to": "Drive",
+      "from": "Interview",
+      "foreignKey": "driveId"
+    },
+    {
+      "to": "User",
+      "from": "Interview",
+      "foreignKey": "candidateId"
+    },
+    {
+      "to": "User",
+      "from": "Interview",
+      "foreignKey": "recruiterId"
+    },
+    {
+      "to": "DriveStage",
+      "from": "Interview",
+      "foreignKey": "driveStageId"
+    },
+    {
+      "to": "Interview",
+      "from": "FeedbackScorecard",
+      "foreignKey": "interviewId"
+    },
+    {
+      "to": "DriveApplication",
+      "from": "FeedbackScorecard",
+      "foreignKey": "driveApplicationId"
+    },
+    {
+      "to": "User",
+      "from": "FeedbackScorecard",
+      "foreignKey": "recruiterId"
+    },
+    {
+      "to": "User",
+      "from": "FeedbackScorecard",
+      "foreignKey": "candidateId"
+    },
+    {
+      "to": "User",
+      "from": "Notification",
+      "foreignKey": "userId"
+    }
+  ],
+  "seed_data": {
+    "users": [
+      {
+        "id": "11111111-0000-0000-0000-000000000001",
+        "name": "Sarah Mitchell",
+        "role": "recruiter",
+        "email": "recruiter@cabincrew.io"
+      },
+      {
+        "id": "22222222-0000-0000-0000-000000000001",
+        "name": "Amira Hassan",
+        "role": "candidate",
+        "email": "candidate1@example.com"
+      },
+      {
+        "id": "22222222-0000-0000-0000-000000000002",
+        "name": "James Okafor",
+        "role": "candidate",
+        "email": "candidate2@example.com"
+      }
+    ],
+    "drives": [
+      {
+        "id": "33333333-0000-0000-0000-000000000001",
+        "title": "Summer 2025 Cabin Crew Intake \u2014 Dubai Base",
+        "status": "active",
+        "endDate": "2025-07-31",
+        "location": "Dubai, UAE",
+        "startDate": "2025-06-01",
+        "recruiterId": "11111111-0000-0000-0000-000000000001",
+        "targetHeadcount": 40
+      },
+      {
+        "id": "33333333-0000-0000-0000-000000000002",
+        "title": "Autumn 2025 Cabin Crew Intake \u2014 London Heathrow",
+        "status": "draft",
+        "endDate": "2025-10-31",
+        "location": "London, UK",
+        "startDate": "2025-09-01",
+        "recruiterId": "11111111-0000-0000-0000-000000000001",
+        "targetHeadcount": 25
+      }
+    ],
+    "drive_stages": [
+      {
+        "id": "44444444-0000-0000-0000-000000000001",
+        "name": "Initial Screening",
+        "driveId": "33333333-0000-0000-0000-000000000001",
+        "stageType": "screening",
+        "stageOrder": 1
+      },
+      {
+        "id": "44444444-0000-0000-0000-000000000002",
+        "name": "Group Exercise",
+        "driveId": "33333333-0000-0000-0000-000000000001",
+        "stageType": "group_exercise",
+        "stageOrder": 2
+      },
+      {
+        "id": "44444444-0000-0000-0000-000000000003",
+        "name": "Final Interview",
+        "driveId": "33333333-0000-0000-0000-000000000001",
+        "stageType": "final_interview",
+        "stageOrder": 3
+      }
+    ],
+    "candidate_profiles": [
+      {
+        "userId": "22222222-0000-0000-0000-000000000001",
+        "nationality": "Egyptian",
+        "cvParseStatus": "parsed",
+        "educationLevel": "Bachelor's Degree",
+        "primaryLanguage": "English",
+        "aggregationScore": 82,
+        "secondaryLanguages": [
+          "Arabic",
+          "French"
+        ],
+        "swimmingProficiency": true,
+        "totalExperienceYears": 5,
+        "rightToWorkDeclaration": true,
+        "aviationExperienceYears": 3,
+        "medicalFitnessDeclaration": true
+      },
+      {
+        "userId": "22222222-0000-0000-0000-000000000002",
+        "nationality": "Nigerian",
+        "cvParseStatus": "parsed",
+        "educationLevel": "Diploma",
+        "primaryLanguage": "English",
+        "aggregationScore": 61,
+        "secondaryLanguages": [
+          "Yoruba"
+        ],
+        "swimmingProficiency": false,
+        "totalExperienceYears": 2,
+        "rightToWorkDeclaration": true,
+        "aviationExperienceYears": 0,
+        "medicalFitnessDeclaration": true
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "name": "ParseAndAggregateCV",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "extract_cv",
+          "type": "trigger",
+          "config": {
+            "entity": "CandidateProfile",
+            "triggerType": "api_event"
+          }
+        },
+        {
+          "id": "extract_cv",
+          "next": "update_profile_parsed",
+          "type": "action",
+          "config": {
+            "fields": [
+              "totalExperienceYears",
+              "aviationExperienceYears",
+              "previousAirlines",
+              "primaryLanguage",
+              "secondaryLanguages",
+              "educationLevel"
+            ],
+            "prompt": "Extract the following fields from the uploaded CV document: totalExperienceYears, aviationExperienceYears, previousAirlines (list), primaryLanguage, secondaryLanguages (list), educationLevel, certifications (list). Return as structured JSON.",
+            "actionType": "ai_extract"
+          }
+        },
+        {
+          "id": "update_profile_parsed",
+          "next": "compute_score",
+          "type": "action",
+          "config": {
+            "table": "candidate_profiles",
+            "where": {
+              "userId": "{{userId}}"
+            },
+            "fields": [
+              "parsedData",
+              "totalExperienceYears",
+              "aviationExperienceYears",
+              "previousAirlines",
+              "primaryLanguage",
+              "secondaryLanguages",
+              "educationLevel",
+              "cvParseStatus"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "compute_score",
+          "next": "update_score",
+          "type": "action",
+          "config": {
+            "fields": [
+              "aggregationScore"
+            ],
+            "prompt": "Given the candidate profile fields (aviationExperienceYears, totalExperienceYears, educationLevel, primaryLanguage, secondaryLanguages count, swimmingProficiency, medicalFitnessDeclaration, rightToWorkDeclaration), compute a weighted aggregation score from 0 to 100 aligned with IATA cabin crew baseline requirements. Return a single integer.",
+            "actionType": "ai_decide"
+          }
+        },
+        {
+          "id": "update_score",
+          "next": "notify_candidate_parsed",
+          "type": "action",
+          "config": {
+            "table": "candidate_profiles",
+            "where": {
+              "userId": "{{userId}}"
+            },
+            "fields": [
+              "aggregationScore"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_candidate_parsed",
+          "next": "send_email_parsed",
+          "type": "action",
+          "config": {
+            "message": "Your CV has been parsed and your profile is now ready. Your aggregation score has been computed. You can now apply to open Drives.",
+            "actionType": "send_notification",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "send_email_parsed",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Welcome to the Cabin Crew ATS. Your CV aggregation is complete. Log in to view your profile and apply to open recruitment Drives.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "api_event on CandidateProfile",
+      "description": "Triggered when a Candidate submits their application with a CV file. Extracts structured aviation-relevant fields from the CV using AI, persists the parsed data to the CandidateProfile, computes an aggregation score, then notifies the candidate that their profile is ready."
+    },
+    {
+      "name": "ShortlistCandidate",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_status_shortlisted",
+          "type": "trigger",
+          "config": {
+            "entity": "DriveApplication",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_status_shortlisted",
+          "next": "notify_candidate_shortlisted",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status",
+              "shortlistedAt"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_candidate_shortlisted",
+          "next": "send_email_shortlisted",
+          "type": "action",
+          "config": {
+            "message": "Congratulations! You have been shortlisted for a recruitment Drive. Please await further scheduling information.",
+            "actionType": "send_notification",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "send_email_shortlisted",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "You have been shortlisted for a cabin crew recruitment Drive. The recruitment team will be in touch shortly to schedule your interview.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "manual on DriveApplication",
+      "description": "Recruiter manually shortlists a Candidate within a Drive. Updates the DriveApplication status to shortlisted, records the shortlistedAt timestamp, notifies the candidate, and notifies the recruiter team."
+    },
+    {
+      "name": "RejectCandidate",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "update_status_rejected",
+          "type": "trigger",
+          "config": {
+            "entity": "DriveApplication",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "update_status_rejected",
+          "next": "notify_candidate_rejected",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_candidate_rejected",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Thank you for your interest in joining our cabin crew. After careful consideration, we are unable to progress your application at this time. We encourage you to apply for future openings.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "manual on DriveApplication",
+      "description": "Recruiter rejects a Candidate application within a Drive. Updates DriveApplication status to rejected and notifies the candidate by email."
+    },
+    {
+      "name": "ScheduleInterview",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "insert_interview",
+          "type": "trigger",
+          "config": {
+            "entity": "Interview",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "insert_interview",
+          "next": "update_application_scheduled",
+          "type": "action",
+          "config": {
+            "table": "interviews",
+            "fields": [
+              "driveApplicationId",
+              "driveId",
+              "candidateId",
+              "recruiterId",
+              "driveStageId",
+              "scheduledAt",
+              "durationMinutes",
+              "location",
+              "interviewType",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "update_application_scheduled",
+          "next": "notify_candidate_scheduled",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_candidate_scheduled",
+          "next": "send_email_scheduled",
+          "type": "action",
+          "config": {
+            "message": "Your interview has been scheduled. Please check your email for full details including date, time, and location.",
+            "actionType": "send_notification",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "send_email_scheduled",
+          "next": "send_reminder_wait",
+          "type": "action",
+          "config": {
+            "message": "Your cabin crew recruitment interview has been scheduled. Please arrive 15 minutes early in full grooming standard. Location and time details are attached.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "send_reminder_wait",
+          "next": "send_reminder_email",
+          "type": "wait",
+          "config": {
+            "description": "Wait until 24 hours before interview scheduledAt",
+            "durationHours": -24
+          }
+        },
+        {
+          "id": "send_reminder_email",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Reminder: Your cabin crew interview is tomorrow. Please ensure you meet grooming standards and bring valid passport and any requested documents.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "manual on Interview",
+      "description": "Recruiter schedules an interview for a shortlisted Candidate within a Drive. Creates an Interview record, updates the DriveApplication status to interview_scheduled, and sends the Candidate a notification and email with interview details."
+    },
+    {
+      "name": "SubmitFeedbackScorecard",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "compute_total_score",
+          "type": "trigger",
+          "config": {
+            "entity": "FeedbackScorecard",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "compute_total_score",
+          "next": "insert_scorecard",
+          "type": "action",
+          "config": {
+            "variables": {
+              "totalScore": "{{groomingScore + languageProficiencyEnglish + languageProficiencySecondary + safetyAwarenessScore + customerServiceScore + crmAptitudeScore + culturalFitScore}}"
+            },
+            "actionType": "set_variable"
+          }
+        },
+        {
+          "id": "insert_scorecard",
+          "next": "recommendation_gate",
+          "type": "action",
+          "config": {
+            "table": "feedback_scorecards",
+            "fields": [
+              "interviewId",
+              "driveApplicationId",
+              "recruiterId",
+              "candidateId",
+              "groomingScore",
+              "languageProficiencyEnglish",
+              "languageProficiencySecondary",
+              "safetyAwarenessScore",
+              "customerServiceScore",
+              "crmAptitudeScore",
+              "culturalFitScore",
+              "physicalFitnessDeclarationConfirmed",
+              "overallRecommendation",
+              "complianceNotes",
+              "additionalComments",
+              "totalScore",
+              "submittedAt"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "recommendation_gate",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "overallRecommendation == 'Proceed'"
+          },
+          "branches": {
+            "true": "update_status_proceed",
+            "false": "recommendation_hold_gate"
+          }
+        },
+        {
+          "id": "recommendation_hold_gate",
+          "type": "exclusive_gateway",
+          "config": {
+            "condition": "overallRecommendation == 'Hold'"
+          },
+          "branches": {
+            "true": "update_status_hold",
+            "false": "update_status_reject"
+          }
+        },
+        {
+          "id": "update_status_proceed",
+          "next": "notify_candidate_outcome",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "update_status_hold",
+          "next": "notify_candidate_outcome",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "update_status_reject",
+          "next": "notify_candidate_outcome",
+          "type": "action",
+          "config": {
+            "table": "drive_applications",
+            "where": {
+              "id": "{{driveApplicationId}}"
+            },
+            "fields": [
+              "status"
+            ],
+            "actionType": "db_update"
+          }
+        },
+        {
+          "id": "notify_candidate_outcome",
+          "next": "send_email_outcome",
+          "type": "action",
+          "config": {
+            "message": "Your interview feedback has been recorded. The recruitment team will be in touch regarding next steps.",
+            "actionType": "send_notification",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "send_email_outcome",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "Thank you for attending your cabin crew recruitment interview. Your feedback scorecard has been reviewed by our team and we will contact you shortly regarding the outcome and any next steps.",
+            "actionType": "send_email",
+            "recipientRole": "candidate"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "manual on FeedbackScorecard",
+      "description": "Recruiter submits a completed aviation-aligned feedback scorecard for a Candidate after an interview. Computes total score, persists the scorecard, updates the DriveApplication status based on the overall recommendation, and notifies the candidate of the outcome."
+    },
+    {
+      "name": "CreateDrive",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "insert_drive",
+          "type": "trigger",
+          "config": {
+            "entity": "Drive",
+            "triggerType": "manual"
+          }
+        },
+        {
+          "id": "insert_drive",
+          "next": "insert_stage_screening",
+          "type": "action",
+          "config": {
+            "table": "drives",
+            "fields": [
+              "recruiterId",
+              "title",
+              "description",
+              "location",
+              "targetHeadcount",
+              "startDate",
+              "endDate",
+              "status"
+            ],
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "insert_stage_screening",
+          "next": "insert_stage_group",
+          "type": "action",
+          "config": {
+            "table": "drive_stages",
+            "fields": [
+              "driveId",
+              "name",
+              "stageOrder",
+              "stageType"
+            ],
+            "values": {
+              "name": "Initial Screening",
+              "stageType": "screening",
+              "stageOrder": 1
+            },
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "insert_stage_group",
+          "next": "insert_stage_final",
+          "type": "action",
+          "config": {
+            "table": "drive_stages",
+            "fields": [
+              "driveId",
+              "name",
+              "stageOrder",
+              "stageType"
+            ],
+            "values": {
+              "name": "Group Exercise",
+              "stageType": "group_exercise",
+              "stageOrder": 2
+            },
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "insert_stage_final",
+          "next": "notify_recruiter_drive_created",
+          "type": "action",
+          "config": {
+            "table": "drive_stages",
+            "fields": [
+              "driveId",
+              "name",
+              "stageOrder",
+              "stageType"
+            ],
+            "values": {
+              "name": "Final Interview",
+              "stageType": "final_interview",
+              "stageOrder": 3
+            },
+            "actionType": "db_insert"
+          }
+        },
+        {
+          "id": "notify_recruiter_drive_created",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "New recruitment Drive created successfully with 3 default stages: Initial Screening, Group Exercise, Final Interview.",
+            "actionType": "send_notification",
+            "recipientRole": "recruiter"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "manual on Drive",
+      "description": "Recruiter creates a new recruitment Drive. Inserts the Drive record and seeds three default DriveStages: Initial Screening (order 1), Group Exercise (order 2), Final Interview (order 3)."
+    },
+    {
+      "name": "NewApplicationNotifyRecruiter",
+      "steps": [
+        {
+          "id": "trigger",
+          "next": "query_drive_recruiter",
+          "type": "trigger",
+          "config": {
+            "entity": "DriveApplication",
+            "triggerType": "db_change"
+          }
+        },
+        {
+          "id": "query_drive_recruiter",
+          "next": "notify_recruiter_new_application",
+          "type": "action",
+          "config": {
+            "table": "drives",
+            "where": {
+              "id": "{{driveId}}"
+            },
+            "fields": [
+              "recruiterId"
+            ],
+            "actionType": "db_query"
+          }
+        },
+        {
+          "id": "notify_recruiter_new_application",
+          "next": "end",
+          "type": "action",
+          "config": {
+            "message": "A new candidate has applied to your Drive. Review their profile and aggregation score in the Pipeline view.",
+            "actionType": "send_notification",
+            "recipientRole": "recruiter"
+          }
+        },
+        {
+          "id": "end",
+          "type": "end"
+        }
+      ],
+      "trigger": "db_change on DriveApplication",
+      "description": "Triggered when a new DriveApplication is inserted. Notifies the owning Recruiter of the Drive that a new candidate has applied so they can review the pipeline."
+    }
+  ],
+  "assumptions": [
+    "What aviation-specific fields should appear on the feedback scorecard \u2014 resolved: Scorecard includes Grooming & Presentation, Language Proficiency (English + secondary), Safety Awareness, Customer Service Orientation, Crew Resource Management aptitude, Cultural Fit, Physical Fitness Declaration, and Overall Recommendation (Proceed / Hold / Reject). This aligns with IATA cabin crew competency standards.",
+    "Are there multiple stages within a Drive \u2014 resolved: A Drive contains three ordered stages: Initial Screening, Group Exercise, and Final Interview. Each stage is modelled as a DriveStage record; a Candidate's ApplicationStatus tracks progress per stage. This matches typical airline recruitment event structure.",
+    "Who creates and manages Drives \u2014 resolved: Recruiters create and manage Drives on the platform. There is no separate Admin role; the Recruiter actor owns Drive CRUD. This avoids adding an undeclared actor while keeping management capabilities practical.",
+    "Is there a CV scoring or ranking step after aggregation \u2014 resolved: After AI parsing, the system computes an automatic AggregationScore (0-100) based on weighted aviation-relevant fields (experience, language, education). The score is surfaced on the pipeline page as a ranking aid; Recruiters still make the final shortlist decision manually.",
+    "Can Candidates apply to multiple Drives simultaneously \u2014 resolved: Yes. A DriveApplication join entity tracks each Candidate-Drive combination independently with its own status, stage, and score. This is standard ATS behaviour and supports concurrent recruitment campaigns.",
+    "Is there a notification or communication workflow \u2014 resolved: Yes. Candidates receive an email + in-app notification upon (a) CV parse completion, (b) shortlisting, and (c) interview scheduling. Recruiters receive an in-app notification when a new application arrives for one of their Drives.",
+    "Are there compliance or regulatory data requirements specific to aviation \u2014 resolved: Candidate profiles capture passport validity, right-to-work declaration, medical fitness self-declaration, and swimming proficiency (EASA/IATA cabin crew baseline requirements). Feedback Scorecards include a regulatory compliance note field. No full EASA Part-CC medical form is generated, but the fields are captured for downstream HR use."
+  ],
+  "data_models": [
+    {
+      "name": "User",
+      "table": "users",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "email",
+          "type": "varchar"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "role",
+          "type": "varchar",
+          "enum_values": [
+            "candidate",
+            "recruiter"
+          ]
+        },
+        {
+          "name": "avatarUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "CandidateProfile",
+      "table": "candidate_profiles",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "dateOfBirth",
+          "type": "timestamp"
+        },
+        {
+          "name": "nationality",
+          "type": "varchar"
+        },
+        {
+          "name": "passportNumber",
+          "type": "varchar"
+        },
+        {
+          "name": "passportExpiry",
+          "type": "timestamp"
+        },
+        {
+          "name": "rightToWorkDeclaration",
+          "type": "boolean"
+        },
+        {
+          "name": "medicalFitnessDeclaration",
+          "type": "boolean"
+        },
+        {
+          "name": "swimmingProficiency",
+          "type": "boolean"
+        },
+        {
+          "name": "heightCm",
+          "type": "integer"
+        },
+        {
+          "name": "primaryLanguage",
+          "type": "varchar"
+        },
+        {
+          "name": "secondaryLanguages",
+          "type": "jsonb"
+        },
+        {
+          "name": "totalExperienceYears",
+          "type": "integer"
+        },
+        {
+          "name": "aviationExperienceYears",
+          "type": "integer"
+        },
+        {
+          "name": "previousAirlines",
+          "type": "jsonb"
+        },
+        {
+          "name": "educationLevel",
+          "type": "varchar"
+        },
+        {
+          "name": "cvFileUrl",
+          "type": "varchar"
+        },
+        {
+          "name": "cvParseStatus",
+          "type": "varchar"
+        },
+        {
+          "name": "aggregationScore",
+          "type": "integer"
+        },
+        {
+          "name": "parsedData",
+          "type": "jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Drive",
+      "table": "drives",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "description",
+          "type": "text"
+        },
+        {
+          "name": "location",
+          "type": "varchar"
+        },
+        {
+          "name": "targetHeadcount",
+          "type": "integer"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "startDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "endDate",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "DriveStage",
+      "table": "drive_stages",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "name",
+          "type": "varchar"
+        },
+        {
+          "name": "stageOrder",
+          "type": "integer"
+        },
+        {
+          "name": "stageType",
+          "type": "varchar"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "DriveApplication",
+      "table": "drive_applications",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "currentStageId",
+          "type": "uuid"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "aggregationScore",
+          "type": "integer"
+        },
+        {
+          "name": "appliedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "shortlistedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Interview",
+      "table": "interviews",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "driveApplicationId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveId",
+          "type": "uuid"
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveStageId",
+          "type": "uuid"
+        },
+        {
+          "name": "scheduledAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "durationMinutes",
+          "type": "integer"
+        },
+        {
+          "name": "location",
+          "type": "varchar"
+        },
+        {
+          "name": "interviewType",
+          "type": "varchar"
+        },
+        {
+          "name": "status",
+          "type": "varchar"
+        },
+        {
+          "name": "notes",
+          "type": "text"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "FeedbackScorecard",
+      "table": "feedback_scorecards",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "interviewId",
+          "type": "uuid"
+        },
+        {
+          "name": "driveApplicationId",
+          "type": "uuid"
+        },
+        {
+          "name": "recruiterId",
+          "type": "uuid"
+        },
+        {
+          "name": "candidateId",
+          "type": "uuid"
+        },
+        {
+          "name": "groomingScore",
+          "type": "integer"
+        },
+        {
+          "name": "languageProficiencyEnglish",
+          "type": "integer"
+        },
+        {
+          "name": "languageProficiencySecondary",
+          "type": "integer"
+        },
+        {
+          "name": "safetyAwarenessScore",
+          "type": "integer"
+        },
+        {
+          "name": "customerServiceScore",
+          "type": "integer"
+        },
+        {
+          "name": "crmAptitudeScore",
+          "type": "integer"
+        },
+        {
+          "name": "culturalFitScore",
+          "type": "integer"
+        },
+        {
+          "name": "physicalFitnessDeclarationConfirmed",
+          "type": "boolean"
+        },
+        {
+          "name": "overallRecommendation",
+          "type": "varchar"
+        },
+        {
+          "name": "complianceNotes",
+          "type": "text"
+        },
+        {
+          "name": "additionalComments",
+          "type": "text"
+        },
+        {
+          "name": "totalScore",
+          "type": "integer"
+        },
+        {
+          "name": "submittedAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "Notification",
+      "table": "notifications",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true
+        },
+        {
+          "name": "userId",
+          "type": "uuid"
+        },
+        {
+          "name": "title",
+          "type": "varchar"
+        },
+        {
+          "name": "body",
+          "type": "text"
+        },
+        {
+          "name": "type",
+          "type": "varchar"
+        },
+        {
+          "name": "isRead",
+          "type": "boolean"
+        },
+        {
+          "name": "relatedEntityType",
+          "type": "varchar"
+        },
+        {
+          "name": "relatedEntityId",
+          "type": "uuid"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp"
+        }
+      ],
+      "indexes": []
+    }
+  ],
+  "description": "An Applicant Tracking System purpose-built for aviation cabin crew recruitment. Candidates upload CVs that are parsed and aggregated; recruiters shortlist candidates, schedule interviews within recruitment Drives, and submit aviation-aligned feedback scorecards.",
+  "module_name": "cabin-crew-ats"
+}

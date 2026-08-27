@@ -1,0 +1,141 @@
+{
+  "$schema": "tentoroforge/ir/1.0",
+  "app": {
+    "name": "User Management"
+  },
+  "tokens": {},
+  "dataSources": {
+    "users": {
+      "type": "rest",
+      "method": "GET",
+      "path": "/api/users",
+      "params": {
+        "search": { "type": "string", "from": "state:search" },
+        "page": { "type": "number", "from": "state:page" },
+        "limit": { "type": "number", "default": 20 }
+      },
+      "shape": { "items": "User[]", "total": "number" },
+      "refresh": "on-focus"
+    },
+    "deleteUser": {
+      "type": "rest",
+      "method": "DELETE",
+      "path": "/api/users/{id}",
+      "onSuccess": { "invalidate": ["users"] }
+    }
+  },
+  "pages": [
+    {
+      "$id": "user-list",
+      "route": "/users",
+      "title": "Users",
+      "auth": { "required": true, "roles": ["admin"] },
+      "state": {
+        "search": "",
+        "page": 1
+      },
+      "root": {
+        "node": "Stack",
+        "gap": "lg",
+        "padding": "lg",
+        "children": [
+          {
+            "node": "Row",
+            "justify": "between",
+            "align": "center",
+            "children": [
+              {
+                "node": "Text",
+                "content": "Users",
+                "typography": "heading-2"
+              },
+              {
+                "node": "Row",
+                "gap": "sm",
+                "children": [
+                  {
+                    "node": "TextInput",
+                    "bind": "state:search",
+                    "placeholder": "Search users...",
+                    "icon": "search",
+                    "debounce": 300
+                  },
+                  {
+                    "node": "Button",
+                    "label": "Add User",
+                    "icon": "plus",
+                    "variant": "primary",
+                    "action": { "type": "openModal", "modal": "create-user" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "node": "DataTable",
+            "data": "source:users",
+            "columns": [
+              {
+                "field": "name",
+                "header": "Name",
+                "width": "2fr",
+                "sortable": true
+              },
+              {
+                "field": "email",
+                "header": "Email",
+                "width": "2fr",
+                "sortable": true
+              },
+              {
+                "field": "role",
+                "header": "Role",
+                "width": "120px",
+                "render": "badge"
+              },
+              {
+                "field": "createdAt",
+                "header": "Joined",
+                "width": "120px",
+                "render": "date:relative"
+              }
+            ],
+            "pagination": true,
+            "sorting": { "default": { "field": "name", "direction": "asc" } },
+            "onRowClick": { "type": "navigate", "to": "/users/{{row.id}}" },
+            "emptyState": {
+              "node": "EmptyState",
+              "icon": "users",
+              "title": "No users found",
+              "message": "Add your first team member to get started.",
+              "action": {
+                "label": "Add User",
+                "action": { "type": "openModal", "modal": "create-user" }
+              }
+            }
+          }
+        ]
+      },
+      "modals": {
+        "create-user": {
+          "title": "Add User",
+          "size": "md",
+          "body": {
+            "node": "Form",
+            "bind": "state:newUser",
+            "onSubmit": { "type": "mutate", "source": "createUser" },
+            "fields": [
+              { "field": "name", "label": "Name", "required": true },
+              { "field": "email", "label": "Email", "required": true, "node": "TextInput", "type": "email" },
+              { "field": "role", "label": "Role", "node": "Select", "options": [
+                { "value": "admin", "label": "Admin" },
+                { "value": "member", "label": "Member" },
+                { "value": "viewer", "label": "Viewer" }
+              ]}
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

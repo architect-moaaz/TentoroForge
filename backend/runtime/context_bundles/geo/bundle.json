@@ -1,0 +1,27 @@
+{
+  "capability": "geo",
+  "$description": "Wired by runtime_context_wire.py when plan.runtime_context contains 'geo'.",
+  "permissions": {
+    "ios": {
+      "NSLocationWhenInUseUsageDescription": "We use your location to show nearby results and improve estimates.",
+      "NSLocationAlwaysAndWhenInUseUsageDescription": "Background location lets us keep tracking updates fresh."
+    },
+    "android": [
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_COARSE_LOCATION"
+    ],
+    "expo_plugins": ["expo-location"]
+  },
+  "native_imports": {
+    "expo": ["expo-location"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/GeoProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useGeo", "useCurrentPosition", "useWatchPosition"]
+  },
+  "integration_keys": [
+    {"provider": "geocoding", "env_var": "GEOCODING_API_KEY", "optional": true, "docs": "Required only for reverse-geocoding server-side. Client-side use of device GPS needs no key."}
+  ]
+}

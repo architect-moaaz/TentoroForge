@@ -1,0 +1,153 @@
+{
+  "project_id": "e7964b5e-306a-469b-b0b5-dd4bd723ba29",
+  "domain": null,
+  "entities": [
+    {
+      "name": "User",
+      "table": "users",
+      "purpose": "authored during planning",
+      "key_fields": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ],
+      "why_shaped_this_way": "planner shaped from user requirement"
+    },
+    {
+      "name": "Document",
+      "table": "documents",
+      "purpose": "authored during planning",
+      "key_fields": [
+        "id",
+        "originalFilename",
+        "fileUrl",
+        "mimeType",
+        "fileSizeBytes",
+        "status",
+        "ocrText",
+        "extractedFields"
+      ],
+      "why_shaped_this_way": "planner shaped from user requirement"
+    },
+    {
+      "name": "ProcessDocumentJob",
+      "table": "process_document_jobs",
+      "purpose": "authored during planning",
+      "key_fields": [
+        "id",
+        "documentId",
+        "step",
+        "startedAt",
+        "completedAt",
+        "error",
+        "createdAt",
+        "updatedAt"
+      ],
+      "why_shaped_this_way": "planner shaped from user requirement"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "UploadDocumentsWorkflow",
+      "purpose": "Accepts multipart file upload, writes a Document row per file at status=queued, dispatches ProcessDocumentWorkflow per document.",
+      "trigger": "form_submit on DocumentUploadPage",
+      "why": "planner shaped from user requirement"
+    },
+    {
+      "name": "ProcessDocumentWorkflow",
+      "purpose": "Core async pipeline: marks document processing, calls PaddleOCR sidecar, runs AI extraction, persists results. Sets status=failed on any error.",
+      "trigger": "db_change on ProcessDocumentJob",
+      "why": "planner shaped from user requirement"
+    },
+    {
+      "name": "ReprocessDocumentWorkflow",
+      "purpose": "Resets a failed or complete document back to queued status and dispatches a new ProcessDocumentJob.",
+      "trigger": "button on DocumentDetailPage",
+      "why": "planner shaped from user requirement"
+    }
+  ],
+  "pages": [
+    {
+      "route": "/documents",
+      "schema_path": "",
+      "role": "list",
+      "notable_choices": []
+    },
+    {
+      "route": "/documents/upload",
+      "schema_path": "",
+      "role": "form",
+      "notable_choices": []
+    },
+    {
+      "route": "/documents/[id]",
+      "schema_path": "",
+      "role": "detail",
+      "notable_choices": []
+    },
+    {
+      "route": "/documents/search",
+      "schema_path": "",
+      "role": "list",
+      "notable_choices": []
+    },
+    {
+      "route": "/",
+      "schema_path": "",
+      "role": "dashboard",
+      "notable_choices": []
+    },
+    {
+      "route": "/login",
+      "schema_path": "",
+      "role": "auth",
+      "notable_choices": []
+    },
+    {
+      "route": "/admins",
+      "schema_path": "",
+      "role": "list",
+      "notable_choices": []
+    }
+  ],
+  "design_decisions": [],
+  "change_log": [
+    {
+      "at": "2026-08-15 16:48:42 UTC",
+      "user_ask": "",
+      "smith_move": "planner: +3 entities · +3 workflows · +7 pages",
+      "diff_summary": "entities=3, workflows=3, pages=7",
+      "verified_by": [
+        "planner artifact"
+      ],
+      "why": "plan finalized (may still change on revise)",
+      "source": "smith"
+    },
+    {
+      "at": "2026-08-15 16:54:40 UTC",
+      "user_ask": "[APPROVE_PLAN]",
+      "smith_move": "generation: full pipeline run",
+      "diff_summary": "0 file(s) generated",
+      "verified_by": [
+        "post_generate_fixes suite",
+        "atomic commit"
+      ],
+      "why": "app materialization for the current plan",
+      "source": "smith"
+    },
+    {
+      "at": "2026-08-15 16:54:40 UTC",
+      "user_ask": "",
+      "smith_move": "reconcile: Blueprint ↔ app-registry",
+      "diff_summary": "3 orphan entities; 3 orphan workflows; 7 orphan pages",
+      "verified_by": [
+        "contracts/resource-registry.json read"
+      ],
+      "why": "keep Smith's memory honest against what the pipeline actually produced (post-generate hook)",
+      "source": "external"
+    }
+  ]
+}

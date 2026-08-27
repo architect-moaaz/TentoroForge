@@ -1,0 +1,370 @@
+{
+  "$schema_version": "1.0.0",
+  "$description": "Named recipes — each is a shortcut that resolves to (capabilities + workflow_template + component_set + recipe_specific_signatures). Downstream stages read the RESOLVED capabilities, never the recipe name — so a novel LLM-composed module gets identical treatment to a recipe-picked one. Add a new recipe = JSON edit. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "recipes": {
+    "visual_product_search": {
+      "gloss": "Camera → AI extract → parallel MCP scrape → aggregate + rank.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "none"},
+        "write": {"pattern": "capture", "integrity": "direct"},
+        "interactions": ["live-follow"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": "visual_product_search_workflow",
+      "component_set": ["CameraCapture", "Scanner", "Container", "Image", "Heading", "Text", "Repeat"],
+      "recipe_signatures": ["pulsing-scan-orb", "viewfinder-frame", "gradient-scan-cta", "price-card-grid"],
+      "required_entities": ["scan_session", "price_result"]
+    },
+    "catalog": {
+      "gloss": "Browsable grid of items with categories, filters, promotional rails.",
+      "capabilities": {
+        "read": {"pattern": "grid", "grouping": "category"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["filter", "sort", "infinite-scroll"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Row", "Image", "Heading", "Text", "Button", "Repeat", "Carousel"],
+      "recipe_signatures": ["category-tiles", "promo-rail", "image-lead-card", "hover-lift"],
+      "required_entities": []
+    },
+    "crud": {
+      "gloss": "Baseline create/read/update/delete on a single entity.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "none"},
+        "write": {"pattern": "create-form", "integrity": "direct"},
+        "interactions": ["filter", "sort"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": "crud_workflow",
+      "component_set": ["Table", "Form", "Input", "Button", "Container"],
+      "recipe_signatures": [],
+      "required_entities": []
+    },
+    "directory": {
+      "gloss": "Searchable roster of people or organizations.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "category"},
+        "write": {"pattern": "create-form", "integrity": "direct"},
+        "interactions": ["filter", "sort", "keyboard-nav"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Table", "Container", "Image", "Text", "Input", "Button", "Repeat"],
+      "recipe_signatures": ["avatar-row", "alpha-index-rail"],
+      "required_entities": []
+    },
+    "dashboard": {
+      "gloss": "Metric row + charts + drill-in modals.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["filter"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": null,
+      "component_set": ["Stat", "Chart", "Container", "Row", "Heading", "Text", "Gauge", "SplitArc"],
+      "recipe_signatures": ["metric-row-with-sparklines", "range-picker", "drill-in-modal"],
+      "required_entities": []
+    },
+    "kanban": {
+      "gloss": "Board with drag-between-lanes cards; status columns.",
+      "capabilities": {
+        "read": {"pattern": "board", "grouping": "status"},
+        "write": {"pattern": "drag", "integrity": "direct"},
+        "interactions": ["drag-between-groups", "drag-reorder", "bulk-select", "filter"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": "status_transition_workflow",
+      "component_set": ["Kanban", "Container", "Heading", "Text", "Button"],
+      "recipe_signatures": ["lane-swap-animation", "drop-zone-glow", "card-lift-on-drag", "wip-limit-hint"],
+      "required_entities": []
+    },
+    "approval_queue": {
+      "gloss": "List of items awaiting approval; approve/reject actions per row.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "status"},
+        "write": {"pattern": "bulk-action", "integrity": "audit-logged"},
+        "interactions": ["bulk-select", "filter", "sort"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": "approval_workflow",
+      "component_set": ["Table", "Stepper", "Tag", "Button", "Container"],
+      "recipe_signatures": ["stepper-status-pills", "audit-trail", "action-button-row"],
+      "required_entities": []
+    },
+    "wizard": {
+      "gloss": "Multi-step form with progress indicator and per-step validation.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "wizard", "integrity": "direct"},
+        "interactions": [],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Stepper", "Form", "Input", "Button", "Container", "Heading"],
+      "recipe_signatures": ["step-progress-bar", "per-step-summary-card", "back-continue-rail"],
+      "required_entities": []
+    },
+    "checkout": {
+      "gloss": "Cart → address → payment → review → confirm.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "wizard", "integrity": "audit-logged"},
+        "interactions": [],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": "checkout_workflow",
+      "component_set": ["Stepper", "Form", "Input", "Button", "Container", "Heading", "DescriptionList"],
+      "recipe_signatures": ["order-summary-sticky-sidebar", "step-progress-bar", "trust-badges-row"],
+      "required_entities": ["order"]
+    },
+    "cart": {
+      "gloss": "Line items with quantity adjust + running total + coupon.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "none"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["inline-edit"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Table", "Input", "Button", "DescriptionList", "Container"],
+      "recipe_signatures": ["running-total-sticky", "quantity-stepper", "empty-state-illustration"],
+      "required_entities": ["cart_item"]
+    },
+    "chat": {
+      "gloss": "Threaded conversation with participant presence + typing indicator.",
+      "capabilities": {
+        "read": {"pattern": "feed", "grouping": "date"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["live-follow", "infinite-scroll"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Text", "Input", "Button", "Repeat", "Image"],
+      "recipe_signatures": ["typing-indicator", "presence-dots", "unread-pill", "delivered-tick"],
+      "required_entities": ["message"]
+    },
+    "feed": {
+      "gloss": "Reverse-chronological stream of posts/updates.",
+      "capabilities": {
+        "read": {"pattern": "feed", "grouping": "date"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["infinite-scroll", "filter"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Image", "Text", "Heading", "Button", "Repeat"],
+      "recipe_signatures": ["pull-to-refresh", "read-more-fade", "engagement-row"],
+      "required_entities": []
+    },
+    "player": {
+      "gloss": "Now-playing surface with transport controls + queue.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["live-follow"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Image", "Heading", "Text", "Button", "Slider", "Progress"],
+      "recipe_signatures": ["transport-controls", "waveform-scrub", "queue-drawer"],
+      "required_entities": ["track"]
+    },
+    "chart_analysis": {
+      "gloss": "Interactive chart with range/interval controls and crosshair.",
+      "capabilities": {
+        "read": {"pattern": "chart", "grouping": "date"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["pinch-zoom", "live-follow"],
+        "presentation": {"itemShape": "bar"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Chart", "SegmentedControl", "Container", "Stat"],
+      "recipe_signatures": ["axis-hover-crosshair", "zoom-brush", "range-picker", "endpoint-emphasis"],
+      "required_entities": []
+    },
+    "map_pins": {
+      "gloss": "Map with clustered pins + tap-to-detail overlay.",
+      "capabilities": {
+        "read": {"pattern": "map-pins", "grouping": "none"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["pinch-zoom", "live-follow"],
+        "presentation": {"itemShape": "pin"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Text", "Image", "Button"],
+      "recipe_signatures": ["pin-cluster-badge", "hover-tooltip", "cluster-zoom-in"],
+      "required_entities": []
+    },
+    "detail_view": {
+      "gloss": "Full-record read surface — hero header, description list, related-item panels.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "section"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": [],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Heading", "DescriptionList", "Text", "Image", "Button", "Tag"],
+      "recipe_signatures": ["hero-header-band", "definition-grid", "related-items-rail"],
+      "required_entities": []
+    },
+    "chat_with_agent": {
+      "gloss": "One-on-one conversation with an AI agent; streamed replies + tool-call chips.",
+      "capabilities": {
+        "read": {"pattern": "feed", "grouping": "date"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["live-follow", "infinite-scroll", "attach"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": "agent_chat_workflow",
+      "component_set": ["Container", "Text", "Input", "Button", "Repeat", "Image", "Spinner"],
+      "recipe_signatures": ["streaming-cursor", "tool-call-chip", "message-thinking-shimmer", "regenerate-button"],
+      "required_entities": ["thread", "message"]
+    },
+    "livestream": {
+      "gloss": "Real-time video broadcast with viewer count + rolling chat.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["live-follow"],
+        "presentation": {"itemShape": "player"},
+        "state": {"realtime": "stream"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Text", "Input", "Button", "Repeat", "Image"],
+      "recipe_signatures": ["live-badge-pulse", "viewer-count-ticker", "chat-overlay-fade", "reaction-flyup"],
+      "required_entities": ["stream", "chat_message"]
+    },
+    "booking_calendar": {
+      "gloss": "Calendar picker → time-slot select → confirm reservation.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "date"},
+        "write": {"pattern": "wizard", "integrity": "direct"},
+        "interactions": ["date-select", "time-slot-select"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": "booking_workflow",
+      "component_set": ["Calendar", "Container", "Button", "Form", "DescriptionList"],
+      "recipe_signatures": ["date-availability-heatmap", "time-slot-grid", "sticky-summary-rail"],
+      "required_entities": ["reservation", "slot"]
+    },
+    "subscription_plan": {
+      "gloss": "Pricing tiers → plan select → upgrade/downgrade flow.",
+      "capabilities": {
+        "read": {"pattern": "grid", "grouping": "tier"},
+        "write": {"pattern": "wizard", "integrity": "audit-logged"},
+        "interactions": ["compare"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": "subscription_workflow",
+      "component_set": ["Container", "Heading", "Text", "Button", "DescriptionList", "Tag"],
+      "recipe_signatures": ["tier-comparison-table", "featured-tier-badge", "annual-toggle-savings"],
+      "required_entities": ["plan", "subscription"]
+    },
+    "settings_tabbed": {
+      "gloss": "Multi-section settings surface — tabs or sidebar sections with form panes.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "section"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["inline-edit", "tab-switch"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Heading", "Form", "Input", "Switch", "Button"],
+      "recipe_signatures": ["autosave-hint", "section-sidebar-rail", "dirty-state-banner"],
+      "required_entities": []
+    },
+    "search_with_filters": {
+      "gloss": "Query bar + filter panel + result list with facet counts.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "none"},
+        "write": {"pattern": "none", "integrity": "direct"},
+        "interactions": ["search", "filter", "sort", "infinite-scroll"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Input", "Repeat", "Tag", "Button", "Heading"],
+      "recipe_signatures": ["facet-count-badges", "clear-all-chip-row", "empty-search-illustration"],
+      "required_entities": []
+    },
+    "notification_inbox": {
+      "gloss": "Grouped notification list with unread badge + mark-as-read.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "date"},
+        "write": {"pattern": "bulk-action", "integrity": "direct"},
+        "interactions": ["bulk-select", "filter"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Text", "Button", "Tag", "Repeat", "Heading"],
+      "recipe_signatures": ["unread-dot", "date-group-header", "mark-all-read-affordance"],
+      "required_entities": ["notification"]
+    },
+    "onboarding_tour": {
+      "gloss": "Multi-slide product intro with progress + dismiss + get-started CTA.",
+      "capabilities": {
+        "read": {"pattern": "single-record", "grouping": "none"},
+        "write": {"pattern": "wizard", "integrity": "direct"},
+        "interactions": ["swipe", "next-back"],
+        "presentation": {"itemShape": "card"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Heading", "Text", "Button", "Image", "Progress"],
+      "recipe_signatures": ["progress-dots", "big-illustration-per-slide", "skip-to-end-link"],
+      "required_entities": []
+    },
+    "document_viewer": {
+      "gloss": "PDF/document viewer with pagination + zoom + annotations.",
+      "capabilities": {
+        "read": {"pattern": "document", "grouping": "none"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["pinch-zoom", "page-nav", "annotate"],
+        "presentation": {"itemShape": "document"},
+        "state": {"realtime": "none"}
+      },
+      "workflow_template": null,
+      "component_set": ["Container", "Image", "Button", "Progress", "Input"],
+      "recipe_signatures": ["page-thumb-strip", "zoom-floating-controls", "highlight-annotation"],
+      "required_entities": ["document"]
+    },
+    "data_grid": {
+      "gloss": "High-density table with column filters, sort, pinning, inline edit.",
+      "capabilities": {
+        "read": {"pattern": "list", "grouping": "none"},
+        "write": {"pattern": "inline", "integrity": "direct"},
+        "interactions": ["filter", "sort", "column-pin", "inline-edit", "bulk-select"],
+        "presentation": {"itemShape": "row"},
+        "state": {"realtime": "poll"}
+      },
+      "workflow_template": null,
+      "component_set": ["Table", "Input", "Button", "Container", "Tag"],
+      "recipe_signatures": ["frozen-first-column", "column-header-menu", "inline-edit-cell-glow", "resize-column-handle"],
+      "required_entities": []
+    }
+  }
+}

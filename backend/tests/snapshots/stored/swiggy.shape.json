@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "on-action",
+    "surface": "modal"
+  },
+  "data": {
+    "denormalization": "aggressive",
+    "readShape": "row-rails"
+  },
+  "identity": {
+    "usageMode": "returning-personal"
+  },
+  "label": "browse-and-order",
+  "layout": {
+    "density": "spacious",
+    "hero": "search-hero",
+    "primaryInteraction": "browse",
+    "shell": "bottom-tabs"
+  },
+  "nav": {
+    "back": "history",
+    "menu": "bottom-tabs"
+  },
+  "workflows": {
+    "executionMode": "streaming"
+  }
+}

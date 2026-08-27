@@ -1,0 +1,189 @@
+{
+  "passed": false,
+  "error_count": 18,
+  "warning_count": 8,
+  "findings": [
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{id}}\" references \"id\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/UpdateDocument.json",
+      "locator": "values.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{id}}\" references \"id\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/UpdateUser.json",
+      "locator": "values.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{env.PADDLEOCR_SIDECAR_URL}}\" references \"env\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "url"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{fileUrl}}\" references \"fileUrl\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "body.fileUrl"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{ocrResult.confidence}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "message"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{ocrResult.error}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "values.errorMessage"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{jobId}}\" references \"jobId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{ocrResult.error}}\" references \"ocrResult\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/processdocumentworkflow.json",
+      "locator": "message"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/reprocessdocumentworkflow.json",
+      "locator": "where.id"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{documentId}}\" references \"documentId\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/reprocessdocumentworkflow.json",
+      "locator": "message"
+    },
+    {
+      "severity": "error",
+      "code": "undefined-ref",
+      "message": "\"{{originalFilename}}\" references \"originalFilename\" which is not declared as a node id, trigger, input, event, context, or process variable in this workflow.",
+      "file": "workflows/uploaddocumentsworkflow.json",
+      "locator": "message"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"admins\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "admins.json",
+      "locator": "dataSources[name=\"admins\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"documents\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "documents.json",
+      "locator": "dataSources[name=\"documents\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"Document_recent\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "index.json",
+      "locator": "dataSources[name=\"Document_recent\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"recentDocuments\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "index.json",
+      "locator": "dataSources[name=\"recentDocuments\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"documents\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "home.json",
+      "locator": "dataSources[name=\"documents\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"documents_search_extracted\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "documents/search.json",
+      "locator": "dataSources[name=\"documents_search_extracted\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"documents_search_extraction_failed\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "documents/search.json",
+      "locator": "dataSources[name=\"documents_search_extraction_failed\"]"
+    },
+    {
+      "severity": "warning",
+      "code": "list-without-repeat",
+      "message": "DataSource \"documents_search_needs_review\" (op:list) has no Repeat/List node iterating it. Fetched rows will not render.",
+      "file": "documents/search.json",
+      "locator": "dataSources[name=\"documents_search_needs_review\"]"
+    },
+    {
+      "severity": "error",
+      "code": "duplicate-route",
+      "message": "2 page schemas share route \"/\": ['index.json', 'home.json']. Only one will resolve at runtime.",
+      "file": "index.json",
+      "locator": "route"
+    }
+  ]
+}

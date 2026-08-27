@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1",
+  "id": "products/list",
+  "route": "/products",
+  "meta": { "title": "Products" },
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "spacing.6" },
+    "children": [
+      {
+        "id": "title",
+        "type": "Heading",
+        "props": { "level": 1, "content": "Products" }
+      }
+    ]
+  }
+}

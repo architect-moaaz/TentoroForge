@@ -1,0 +1,73 @@
+# Render-scaffold prod image, built from the MONOREPO ROOT context.
+#
+# Mirrors frontend/Dockerfile.prod — same npm workspace build pattern
+# so `@tentoroforge/*` symlinks resolve. next.config.ts doesn't opt
+# into standalone output, so we keep the workspace tree at runtime
+# and invoke `next start` via `npm run start`.
+#
+# Compose invokes this as:
+#   build:
+#     context: .
+#     dockerfile: apps/render-scaffold/Dockerfile.prod
+
+FROM node:20-alpine AS builder
+WORKDIR /repo
+
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY apps ./apps
+COPY frontend ./frontend
+
+RUN npm ci --include-workspace-root --legacy-peer-deps
+
+# NEXT_PUBLIC_* env vars are baked into the client bundle at build time.
+# The scaffold's SSR page reads NEXT_PUBLIC_API_URL to fetch the
+# generated app's contract/schema files from the backend. Empty means
+# "same origin" — caddy routes /api/* → backend.
+ARG NEXT_PUBLIC_API_URL=""
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+# On UAT the caddy edge only routes /p/* to this container. basePath
+# scopes every route AND asset URL under /p uniformly (assetPrefix in
+# Next 15 App Router misses some <head> tags — basePath doesn't). Empty
+# on local dev so `next dev` still serves from the root.
+ARG NEXT_BASE_PATH=""
+ENV NEXT_BASE_PATH=$NEXT_BASE_PATH
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+WORKDIR /repo/apps/render-scaffold
+RUN npm run build
+
+# --- runtime ---
+FROM node:20-alpine AS runner
+WORKDIR /repo
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=6503
+ENV HOSTNAME="0.0.0.0"
+
+# `next start` re-evaluates next.config.ts at runtime, so basePath
+# resolution depends on NEXT_BASE_PATH being present in the RUNTIME env,
+# not just the builder stage's env. Docker resets ARGs across FROM, so
+# we redeclare and set it here — otherwise the built binary has the
+# route table for the root, ignoring the baked required-server-files.
+ARG NEXT_BASE_PATH=""
+ENV NEXT_BASE_PATH=$NEXT_BASE_PATH
+
+# resolveProject.ts computes OUTPUT_ROOT = cwd/../../output. From
+# /repo/apps/render-scaffold that lands at /repo/output — but the
+# backend writes to /output (bind mount). Setting the env forces the
+# scaffold to read from the mounted volume directly.
+ENV OUTPUT_ROOT=/output
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser  --system --uid 1001 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /repo /repo
+
+USER nextjs
+WORKDIR /repo/apps/render-scaffold
+EXPOSE 6503
+CMD ["npm", "run", "start"]

@@ -1,0 +1,508 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700&family=Nunito:wght@400&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+  --background: 0 0% 100%;
+  --card: 210 40% 98%;
+  --primary: 23 82% 31%;
+  --accent: 32 95% 44%;
+  --muted: 0 0% 32%;
+  --destructive: 0 72% 51%;
+  --color-success: 142 76% 36%;
+  --color-warning: 38 92% 50%;
+  --color-info: 217 91% 60%;
+  --border: 225 5% 85%;
+  --foreground: 222 47% 11%;
+  --muted-foreground: 215 19% 35%;
+  --input: 225 5% 85%;
+  --card-foreground: 222 47% 11%;
+  --popover: 210 40% 98%;
+  --popover-foreground: 222 47% 11%;
+  --ring: 23 82% 62%;
+  --accent-foreground: 224 30% 8%;
+  --success: 145 55% 40%;
+  --success-foreground: 145 20% 98%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 38 40% 14%;
+  --destructive-foreground: 0 0% 100%;
+  --info: 210 82% 48%;
+  --info-foreground: 210 20% 98%;
+  --radius: 0.625rem;
+  --icon-stroke: 2.0px;
+}
+
+  .dark {
+    --background: 222 84% 5%;
+    --foreground: 210 20% 98%;
+    --card: 222 84% 8%;
+    --card-foreground: 210 20% 98%;
+    --popover: 222 84% 8%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 25% 20%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 215 25% 15%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 215 25% 15%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 25% 20%;
+    --input: 215 25% 20%;
+    --ring: 199 89% 48%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ===== GLOBAL INTERACTIONS ===== */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* ===== CARD HOVER ===== */
+.card-hover {
+  transition: box-shadow 200ms, transform 200ms;
+}
+
+.card-hover:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+/* ===== LOADING SKELETON ===== */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--muted) / 0.5) 50%, hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius);
+}
+
+/* ===== STATUS COLORS ===== */
+.status-success { color: hsl(142 76% 36%); background: hsl(142 76% 36% / 0.1); }
+.status-warning { color: hsl(38 92% 50%); background: hsl(38 92% 50% / 0.1); }
+.status-error { color: hsl(0 84% 60%); background: hsl(0 84% 60% / 0.1); }
+.status-info { color: hsl(221 83% 53%); background: hsl(221 83% 53% / 0.1); }
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+/* tentoro:typography */
+:root {
+  --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-body: 'Nunito', system-ui, sans-serif;
+  --font-heading-weight: 700;
+  --font-body-weight: 400;
+  --font-heading-tracking: -0.01em;
+}
+body {
+  font-family: var(--font-body);
+  line-height: 1.5;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  letter-spacing: var(--font-heading-tracking);
+}
+svg.lucide {
+  stroke-width: var(--icon-stroke, 2px);
+}
+/* /tentoro:typography */
+
+/* tentoro:personality */
+main h1::after { content: ""; display: block; width: 2.25rem; height: 3px; margin-top: 0.45rem; background: #F97316; }
+tbody tr td { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+[data-hero-content] h1 { border-bottom: none; padding-bottom: 0; }
+[data-hero-content] h1::after { content: none; }
+::selection { background: #0EA5E940; }
+:focus-visible { outline-color: #F97316; }
+/* /tentoro:personality */
+
+/* tentoro:skin */
+/* language: rail-blocks·hero-asymmetric·soft-shadow·rounded·geometric·grain */
+[data-skin="lang5f57104e"] { --sk-pos:#34D399; --sk-neg:#F87171; --sk-mut:#94A3B8; }
+[data-skin="lang5f57104e"] [data-delta-direction='up'] { color: var(--sk-pos); }
+[data-skin="lang5f57104e"] [data-delta-direction='down'] { color: var(--sk-neg); }
+[data-skin="lang5f57104e"] [data-delta-direction='flat'] { color: var(--sk-mut); }
+[data-skin="lang5f57104e"] { --sk-ink: #171717; --sk-line: rgba(255,255,255,0.12); --sk-primary: #0EA5E9; --sk-accent: #F97316; --sk-surface: #E5E5E5; --sk-nav-w: 252px; --sk-nav-inset: 0px; --sk-gutter: 72px; --sk-card-gap: 32px; --sk-radius: 14px; }
+[data-skin="lang5f57104e"] main > div { padding: 72px; }
+[data-skin="lang5f57104e"] main > div > * { margin-bottom: 56px; }
+[data-skin="lang5f57104e"] :where(h1, h2, [data-slot='header']) { font-family: 'Poppins', system-ui, sans-serif; }
+[data-skin="lang5f57104e"] :where(main h1) { font-size: 30px; font-weight: 600; text-transform: none; letter-spacing: -0.02em; }
+[data-skin="lang5f57104e"] .grid:has([data-metric-tile]), [data-skin="lang5f57104e"] .grid:has([data-importance]) { grid-template-columns: 2fr 1fr 1fr 1fr !important; gap: 24px !important; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) :where([data-metric-label]) { text-transform: none; letter-spacing: .02em; font-size: 11px; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) :where([data-metric-value]) { font-family: 'Chivo', system-ui, sans-serif !important; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) :where([data-metric-value]) { font-variant-numeric: tabular-nums; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) { border:0; border-radius:0; box-shadow:none; background:transparent; padding:8px 0; display:flex; flex-direction:column-reverse; justify-content:flex-end; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) :where([data-metric-label]) { border-top:1px solid rgba(255,255,255,0.07); padding-top:8px; margin-top:10px; opacity:.7; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]) :where([data-metric-value]) { font-size:56px; font-weight:300 !important; }
+[data-skin="lang5f57104e"] :where([data-metric-tile], [data-importance]):not(:first-child) :where(p:nth-of-type(2)) { font-size:30px; }
+[data-skin="lang5f57104e"] :where([data-card]), [data-skin="lang5f57104e"] :where([data-table], [data-activity-feed]) { border-width:0px; border-color:rgba(255,255,255,0.12); border-radius:14px; box-shadow:0 2px 8px rgba(20,20,30,.07); background:#E5E5E5; }
+[data-skin="lang5f57104e"] :where([data-card]) > :where([data-slot='header']) { background:transparent; border-bottom:none; text-transform:none; letter-spacing:0; font-size:15px; }
+[data-skin="lang5f57104e"] main { counter-reset: forge-section; }
+[data-skin="lang5f57104e"] main h2::before { counter-increment: forge-section; content: counter(forge-section, decimal-leading-zero); display:block; margin-bottom:6px; font-size:11px; font-weight:600; letter-spacing:.14em; opacity:.5; }
+[data-skin="lang5f57104e"] :where(button) { border-radius:14px; }
+[data-skin="lang5f57104e"] [data-table] :where(thead) { background:transparent; }
+[data-skin="lang5f57104e"] [data-table] :where(thead th) { text-transform:none; letter-spacing:.02em; font-size:12px; }
+[data-skin="lang5f57104e"] [data-table] :where(tbody tr) { border-bottom:1px solid rgba(255,255,255,0.07); }
+[data-skin="lang5f57104e"] [data-table] :where(tbody tr) { height:52px; }
+[data-skin="lang5f57104e"] [data-table] :where(td) { border-left:0; border-right:0; }
+[data-skin="lang5f57104e"] [data-shell-main], [data-skin="lang5f57104e"] main { background-color:#FAFAFA; position:relative; }
+/* PATCH: [data-shell-main] removed from selector — was dropping real <main> content to 5% opacity.
+   Only the ::before decorative pseudo-element should get the noise-veil. Platform fix pending in design_language.py. */
+[data-skin="lang5f57104e"] main::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:0; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size:182px; opacity:.055; }
+[data-skin="lang5f57104e"] :where(a,button,input,select,textarea,summary,[tabindex]):focus-visible { outline:2px solid #F97316; outline-offset:2px; border-radius:12px; }
+@media (forced-colors: active) { [data-skin="lang5f57104e"] :focus-visible { outline:2px solid CanvasText; outline-offset:2px; } }
+[data-skin="lang5f57104e"] ::selection { background:#F9731633; color:#171717; text-shadow:none; }
+[data-skin="lang5f57104e"] { scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.12) transparent; }
+@media (prefers-reduced-motion: reduce) { [data-skin="lang5f57104e"] *, [data-skin="lang5f57104e"] *::before, [data-skin="lang5f57104e"] *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+/* /tentoro:skin */
+
+/* tentoro:nav */
+/* nav: rail-blocks + invert */
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item] { height:48px; padding-left:18px; padding-right:18px; border-radius:0px; font-size:14px; font-weight:600; text-transform:none; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item] { margin:0; border-radius:0; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item]:nth-child(4n+1) { background:#0EA5E90f; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item]:nth-child(4n+2) { background:#F973160f; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item]:nth-child(4n+3) { background:#0EA5E91a; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item]:nth-child(4n+4) { background:#F973161a; }
+[data-skin="lang5f57104e"] [data-shell-nav] [data-nav-item][data-active='true'] { background:#171717; color:#E5E5E5; border-radius:0; font-weight:600; }
+/* /tentoro:nav */
+
+/* Library design tokens — the --color-* scale Chart/Badge/Alert read.
+   Mapped from the design-spec palette so components are themed, not black. */
+:root {
+  --color-primary-100: #28170e;
+  --color-primary-200: #40210e;
+  --color-primary-500: #92400E;
+  --color-primary-800: #c3967a;
+  --color-secondary-100: #1e232a;
+  --color-secondary-200: #2e3640;
+  --color-secondary-500: #64748B;
+  --color-secondary-800: #aab3bf;
+  --color-accent-100: #38240c;
+  --color-accent-200: #5d370b;
+  --color-accent-500: #D97706;
+  --color-accent-800: #eab476;
+  --color-error-100: #381213;
+  --color-error-200: #5e1618;
+  --color-error-500: #DC2626;
+  --color-error-800: #ec8888;
+  --color-warning-100: #3e2c0d;
+  --color-warning-200: #68460d;
+  --color-warning-500: #F59E0B;
+  --color-warning-800: #faca79;
+  --color-success-100: #0d2d1b;
+  --color-success-200: #0f4826;
+  --color-success-500: #16A34A;
+  --color-success-800: #7fcc9b;
+  --color-info-100: #152641;
+  --color-info-200: #1e3b6b;
+  --color-info-500: #3B82F6;
+  --color-info-800: #93bafa;
+  --color-text-tertiary: #94A3B8;
+  --color-border-default: #D7D8DB;
+  --color-surface-1: #F8FAFC;
+}
+
+/* Spec C4/C8 — motion + responsive tokens (auto-generated) */
+:root {
+  --motion-fast-ms: 120ms;
+  --motion-medium-ms: 240ms;
+  --motion-slow-ms: 480ms;
+  --ease-out: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --ease-in-out: cubic-bezier(0.4, 0.0, 0.2, 1.0);
+  --primary-form-factor: "desktop";
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast-ms: 0ms;
+    --motion-medium-ms: 0ms;
+    --motion-slow-ms: 0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .motion-tint { transition: background-color var(--motion-fast-ms) var(--ease-out), color var(--motion-fast-ms) var(--ease-out), border-color var(--motion-fast-ms) var(--ease-out); }
+  .motion-lift { transition: transform var(--motion-medium-ms) var(--ease-out), box-shadow var(--motion-medium-ms) var(--ease-out); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .motion-tint, .motion-lift { transition: none !important; }
+}
+/* /Spec C4/C8 */
+
+/* forge:interactions:start */
+/* Spec C Slice 4 — motion primitive refresh.
+ *
+ * Interactive-element transitions (hover, press, focus). Applies across
+ * the library via data-* attributes and generic tag selectors so
+ * individual component files don't have to opt in. All timings read
+ * from the same --token-motion-* CSS vars the enter-animations use.
+ *
+ * Convention:
+ *   - Buttons + role="button" get a subtle press (translateY + brightness).
+ *   - Cards get a rise on hover (translateY + soft shadow bump).
+ *   - Tables rows tint on hover.
+ *   - Modal/Toast overlays fade+scale in.
+ * All wrapped in prefers-reduced-motion: reduce → transitions disabled.
+ */
+
+/* ─── Buttons ─────────────────────────────────────────────── */
+button,
+[role="button"],
+[data-forge-btn] {
+  transition:
+    background-color var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    color            var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    transform        var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    box-shadow       var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    border-color     var(--token-motion-duration-fast, 120ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+button:hover:not(:disabled),
+[role="button"]:hover:not([aria-disabled="true"]) {
+  filter: brightness(0.96);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  transform: translateY(1px);
+  filter: brightness(0.92);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+[data-forge-focus-ring]:focus-visible {
+  outline: 2px solid var(--ring, var(--primary, hsl(210 60% 45%)));
+  outline-offset: 2px;
+}
+
+/* ─── Cards / surfaces ────────────────────────────────────── */
+[data-forge-card],
+[data-forge-hover-lift] {
+  transition:
+    transform  var(--token-motion-duration-normal, 240ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+    box-shadow var(--token-motion-duration-normal, 240ms) var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+[data-forge-card][data-hoverable="true"]:hover,
+[data-forge-hover-lift]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 12px -4px rgba(0, 0, 0, 0.12), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Table rows ──────────────────────────────────────────── */
+[data-forge-table] tbody tr {
+  transition: background-color var(--token-motion-duration-fast, 120ms)
+              var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+[data-forge-table] tbody tr:hover {
+  background-color: var(--muted, hsl(0 0% 96%));
+}
+
+/* ─── Modal / Dialog / Toast enter ────────────────────────── */
+@keyframes forge-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes forge-slide-in-bottom {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+[data-forge-modal],
+[data-forge-dialog],
+[role="dialog"][data-state="open"] {
+  animation: forge-scale-in var(--token-motion-duration-normal, 240ms)
+             var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)) both;
+}
+
+[data-forge-toast],
+[role="alert"][data-forge-live] {
+  animation: forge-slide-in-bottom var(--token-motion-duration-normal, 240ms)
+             var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1)) both;
+}
+
+/* ─── Global reduced-motion respect ───────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  [data-forge-btn],
+  [data-forge-card],
+  [data-forge-hover-lift],
+  [data-forge-table] tbody tr {
+    transition: none !important;
+  }
+  button:hover, button:active,
+  [role="button"]:hover, [role="button"]:active,
+  [data-forge-card][data-hoverable="true"]:hover,
+  [data-forge-hover-lift]:hover {
+    transform: none !important;
+    filter: none !important;
+  }
+  [data-forge-modal],
+  [data-forge-dialog],
+  [role="dialog"][data-state="open"],
+  [data-forge-toast],
+  [role="alert"][data-forge-live] {
+    animation: none !important;
+  }
+}
+/* forge:interactions:end */
+
+/* forge:theme-dark:start */
+/* Spec C Slice 8 — dark-mode token overrides.
+ *
+ * The library renders exclusively through CSS custom properties
+ * (--background, --foreground, --card, --border, --primary, etc.). This
+ * stylesheet flips those tokens under a `[data-theme="dark"]` root
+ * override so the entire component tree inverts without touching a
+ * single component file.
+ *
+ * ThemeToggle sets `document.documentElement.dataset.theme = "dark"`;
+ * this stylesheet is the target that makes that toggle observable.
+ *
+ * Also respects `prefers-color-scheme: dark` on first paint so users
+ * without a stored preference see the OS default immediately.
+ *
+ * Import once at the app root — same convention as motion.css.
+ */
+
+/* ─── OS-preferred dark (initial paint) ───────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background:          hsl(222 15% 10%);
+    --foreground:          hsl(210 10% 92%);
+    --card:                hsl(222 15% 13%);
+    --card-foreground:     hsl(210 10% 92%);
+    --popover:             hsl(222 15% 13%);
+    --popover-foreground:  hsl(210 10% 92%);
+    --muted:               hsl(222 12% 18%);
+    --muted-foreground:    hsl(210 8% 65%);
+    --border:              hsl(222 12% 22%);
+    --input:               hsl(222 12% 22%);
+    --ring:                var(--primary, hsl(210 60% 55%));
+    --secondary:           hsl(222 12% 18%);
+    --secondary-foreground:hsl(210 10% 92%);
+    --destructive:         hsl(0 62% 50%);
+    --destructive-foreground: hsl(210 10% 96%);
+    --primary-foreground:  hsl(210 10% 96%);
+    --accent:              var(--accent, hsl(30 80% 60%));
+    --accent-foreground:   hsl(30 20% 12%);
+  }
+}
+
+/* ─── Explicit user toggle (wins over OS + system) ────────── */
+:root[data-theme="dark"] {
+  --background:          hsl(222 15% 10%);
+  --foreground:          hsl(210 10% 92%);
+  --card:                hsl(222 15% 13%);
+  --card-foreground:     hsl(210 10% 92%);
+  --popover:             hsl(222 15% 13%);
+  --popover-foreground:  hsl(210 10% 92%);
+  --muted:               hsl(222 12% 18%);
+  --muted-foreground:    hsl(210 8% 65%);
+  --border:              hsl(222 12% 22%);
+  --input:               hsl(222 12% 22%);
+  --ring:                var(--primary, hsl(210 60% 55%));
+  --secondary:           hsl(222 12% 18%);
+  --secondary-foreground:hsl(210 10% 92%);
+  --destructive:         hsl(0 62% 50%);
+  --destructive-foreground: hsl(210 10% 96%);
+  --primary-foreground:  hsl(210 10% 96%);
+  --accent:              var(--accent, hsl(30 80% 60%));
+  --accent-foreground:   hsl(30 20% 12%);
+  /* Explicit toggle also flips native form controls + scrollbars. */
+  color-scheme: dark;
+}
+
+/* ─── Explicit light — wins over OS-preferred-dark ────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+  /* Light values are the library's compiled defaults, so no overrides
+   * needed here — this selector exists to WIN OVER the media-query
+   * dark rule above when the user explicitly chose light. */
+}
+/* forge:theme-dark:end */
+
+/* forge:high-contrast:start */
+[data-theme="high-contrast"] {
+  --color-brand: #1e4fbc;
+  --color-primary: #1e4fbc;
+  --color-accent: #6931c9;
+  --color-foreground: #111827;
+  --color-ink: #111827;
+  --color-background: #ffffff;
+  --color-canvas: #ffffff;
+  --focus-ring-color: #111827;
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 3px;
+}
+/* forge:high-contrast:end */
+
+/* IRF-M6-T4 aesthetic-scope injected */ name=carbon
+.aesthetic-carbon {
+  --background: 0 0% 100%;
+  --foreground: 220 20% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 20% 12%;
+  --border: 220 8% 82%;
+  --primary: 216 100% 40%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 220 10% 96%;
+  --muted-foreground: 220 10% 40%;
+  --ring: 216 100% 40%;
+}

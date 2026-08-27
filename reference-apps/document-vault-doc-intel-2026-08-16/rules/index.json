@@ -1,0 +1,255 @@
+[
+  {
+    "name": "document-status-state-machine",
+    "rule_type": "state_machine",
+    "model_name": "Document",
+    "field_name": "status",
+    "config": {
+      "states": [
+        "queued",
+        "processing",
+        "complete",
+        "failed"
+      ],
+      "transitions": [
+        {
+          "from": "queued",
+          "to": "processing"
+        },
+        {
+          "from": "processing",
+          "to": "complete"
+        },
+        {
+          "from": "processing",
+          "to": "failed"
+        },
+        {
+          "from": "failed",
+          "to": "queued",
+          "requires": "Admin"
+        }
+      ]
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-confidence-range",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "confidence",
+    "config": {
+      "min": 0,
+      "max": 1,
+      "errorMessage": "Confidence must be between 0 and 1 inclusive."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-original-filename-required",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "originalFilename",
+    "config": {
+      "required": true,
+      "errorMessage": "Original filename is required."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-file-url-required",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "fileUrl",
+    "config": {
+      "required": true,
+      "errorMessage": "File URL is required."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-mime-type-required",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "mimeType",
+    "config": {
+      "required": true,
+      "errorMessage": "MIME type is required."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-file-size-positive",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "fileSizeBytes",
+    "config": {
+      "min": 1,
+      "errorMessage": "File size must be at least 1 byte."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-page-count-positive",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "pageCount",
+    "config": {
+      "min": 1,
+      "errorMessage": "Page count must be at least 1."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-error-message-required-when-failed",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "errorMessage",
+    "config": {
+      "expression": "if status = \"failed\" then errorMessage != null else true",
+      "errorMessage": "An error message must be recorded when document status is failed."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-status-default-queued",
+    "rule_type": "business",
+    "model_name": "Document",
+    "field_name": "status",
+    "config": {
+      "expression": "if status = null then \"queued\" else status",
+      "trigger": "on_create"
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-processed-at-on-complete",
+    "rule_type": "business",
+    "model_name": "Document",
+    "field_name": "processedAt",
+    "config": {
+      "expression": "if status = \"complete\" and processedAt = null then now() else processedAt",
+      "trigger": "on_update"
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-uploaded-by-required",
+    "rule_type": "validation",
+    "model_name": "Document",
+    "field_name": "uploadedBy",
+    "config": {
+      "required": true,
+      "errorMessage": "Uploaded by (user reference) is required."
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-dispatch-process-on-create",
+    "rule_type": "trigger",
+    "model_name": "Document",
+    "field_name": null,
+    "config": {
+      "event": "on_create",
+      "action": "ProcessDocumentWorkflow"
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-reprocess-on-status-update",
+    "rule_type": "trigger",
+    "model_name": "Document",
+    "field_name": null,
+    "config": {
+      "event": "on_update",
+      "action": "ReprocessDocumentWorkflow"
+    },
+    "is_active": true
+  },
+  {
+    "name": "process-job-document-id-required",
+    "rule_type": "validation",
+    "model_name": "ProcessDocumentJob",
+    "field_name": "documentId",
+    "config": {
+      "required": true,
+      "errorMessage": "A ProcessDocumentJob must reference a valid Document ID."
+    },
+    "is_active": true
+  },
+  {
+    "name": "process-job-step-required",
+    "rule_type": "validation",
+    "model_name": "ProcessDocumentJob",
+    "field_name": "step",
+    "config": {
+      "required": true,
+      "errorMessage": "Processing step name is required."
+    },
+    "is_active": true
+  },
+  {
+    "name": "process-job-started-at-on-create",
+    "rule_type": "business",
+    "model_name": "ProcessDocumentJob",
+    "field_name": "startedAt",
+    "config": {
+      "expression": "if startedAt = null then now() else startedAt",
+      "trigger": "on_create"
+    },
+    "is_active": true
+  },
+  {
+    "name": "process-job-completed-at-on-terminal",
+    "rule_type": "business",
+    "model_name": "ProcessDocumentJob",
+    "field_name": "completedAt",
+    "config": {
+      "expression": "if completedAt = null and (error != null or step = \"done\") then now() else completedAt",
+      "trigger": "on_update"
+    },
+    "is_active": true
+  },
+  {
+    "name": "document-access-admin-only",
+    "rule_type": "access",
+    "model_name": "Document",
+    "field_name": null,
+    "config": {
+      "roles": [
+        "Admin"
+      ],
+      "can_view": true,
+      "can_edit": true
+    },
+    "is_active": true
+  },
+  {
+    "name": "process-job-access-admin-only",
+    "rule_type": "access",
+    "model_name": "ProcessDocumentJob",
+    "field_name": null,
+    "config": {
+      "roles": [
+        "Admin"
+      ],
+      "can_view": true,
+      "can_edit": true
+    },
+    "is_active": true
+  },
+  {
+    "name": "user-access-admin-only",
+    "rule_type": "access",
+    "model_name": "User",
+    "field_name": null,
+    "config": {
+      "roles": [
+        "Admin"
+      ],
+      "can_view": true,
+      "can_edit": true
+    },
+    "is_active": true
+  }
+]

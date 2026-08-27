@@ -1,0 +1,190 @@
+{
+  "flows": {
+    "entity_crud": {
+      "Document": {
+        "list": {
+          "route": "/documents",
+          "actions": {
+            "search": {
+              "type": "inline",
+              "trigger": "input:search",
+              "effect": "filter_table"
+            },
+            "create": {
+              "target": "/documents/new",
+              "trigger": "button:New Document"
+            },
+            "view_detail": {
+              "target": "/documents/{id}",
+              "trigger": "table_row_click"
+            },
+            "delete": {
+              "type": "confirm_dialog",
+              "api": "DELETE /api/data/documents/{id}",
+              "on_success": "refresh+toast:Deleted"
+            }
+          }
+        },
+        "create": {
+          "route": "/documents/new",
+          "form_fields": [
+            "originalFilename",
+            "fileUrl",
+            "mimeType",
+            "fileSizeBytes",
+            "status",
+            "ocrText",
+            "extractedFields",
+            "confidence",
+            "pageCount",
+            "uploadedBy"
+          ],
+          "submit": {
+            "api": "POST /api/data/documents",
+            "on_success": "redirect:/documents+toast:Created",
+            "on_error": "inline_validation"
+          },
+          "back": {
+            "target": "/documents",
+            "trigger": "button:Back"
+          }
+        },
+        "detail": {
+          "route": "/documents/{id}",
+          "actions": {
+            "edit": {
+              "type": "inline_form",
+              "api": "PUT /api/data/documents/{id}",
+              "on_success": "refresh+toast:Updated"
+            },
+            "delete": {
+              "type": "confirm_dialog",
+              "api": "DELETE /api/data/documents/{id}",
+              "on_success": "redirect:/documents+toast:Deleted"
+            },
+            "back": {
+              "target": "/documents",
+              "trigger": "button:Back"
+            }
+          }
+        }
+      },
+      "ProcessDocumentJob": {
+        "list": {
+          "route": "/process-document-jobs",
+          "actions": {
+            "search": {
+              "type": "inline",
+              "trigger": "input:search",
+              "effect": "filter_table"
+            },
+            "create": {
+              "target": "/process-document-jobs/new",
+              "trigger": "button:New ProcessDocumentJob"
+            },
+            "view_detail": {
+              "target": "/process-document-jobs/{id}",
+              "trigger": "table_row_click"
+            },
+            "delete": {
+              "type": "confirm_dialog",
+              "api": "DELETE /api/data/process_document_jobs/{id}",
+              "on_success": "refresh+toast:Deleted"
+            }
+          }
+        },
+        "create": {
+          "route": "/process-document-jobs/new",
+          "form_fields": [
+            "documentId",
+            "step",
+            "startedAt",
+            "completedAt",
+            "error"
+          ],
+          "submit": {
+            "api": "POST /api/data/process_document_jobs",
+            "on_success": "redirect:/process-document-jobs+toast:Created",
+            "on_error": "inline_validation"
+          },
+          "back": {
+            "target": "/process-document-jobs",
+            "trigger": "button:Back"
+          }
+        },
+        "detail": {
+          "route": "/process-document-jobs/{id}",
+          "actions": {
+            "edit": {
+              "type": "inline_form",
+              "api": "PUT /api/data/process_document_jobs/{id}",
+              "on_success": "refresh+toast:Updated"
+            },
+            "delete": {
+              "type": "confirm_dialog",
+              "api": "DELETE /api/data/process_document_jobs/{id}",
+              "on_success": "redirect:/process-document-jobs+toast:Deleted"
+            },
+            "back": {
+              "target": "/process-document-jobs",
+              "trigger": "button:Back"
+            }
+          }
+        }
+      }
+    },
+    "dashboard": {
+      "route": "/dashboard",
+      "widgets": {
+        "stat_cards": {
+          "entities": [
+            "Document",
+            "ProcessDocumentJob"
+          ],
+          "api": "/api/data/{entity}/stats",
+          "click": "navigate:/{entity}"
+        }
+      }
+    },
+    "auth": {
+      "login": {
+        "route": "/login",
+        "submit": {
+          "api": "signIn('credentials')",
+          "on_success": "redirect:/dashboard"
+        }
+      },
+      "signup": {
+        "route": "/signup",
+        "submit": {
+          "api": "POST /api/auth/signup",
+          "on_success": "redirect:/login+toast:Account created"
+        }
+      },
+      "logout": {
+        "trigger": "user_menu:Sign Out",
+        "action": "signOut()",
+        "on_success": "redirect:/login"
+      }
+    }
+  },
+  "navigation": {
+    "sidebar_items": [
+      {
+        "label": "Dashboard",
+        "href": "/dashboard"
+      },
+      {
+        "label": "Document",
+        "href": "/documents"
+      },
+      {
+        "label": "ProcessDocumentJob",
+        "href": "/process-document-jobs"
+      }
+    ],
+    "user_menu": [
+      "Sign Out"
+    ]
+  }
+}

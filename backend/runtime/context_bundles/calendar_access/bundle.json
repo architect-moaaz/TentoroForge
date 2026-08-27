@@ -1,0 +1,23 @@
+{
+  "capability": "calendar_access",
+  "permissions": {
+    "ios": {
+      "NSCalendarsUsageDescription": "We add events to your calendar for bookings and reminders."
+    },
+    "android": [
+      "android.permission.READ_CALENDAR",
+      "android.permission.WRITE_CALENDAR"
+    ],
+    "expo_plugins": ["expo-calendar"]
+  },
+  "native_imports": {
+    "expo": ["expo-calendar"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/CalendarAccessProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useCalendarEvents", "useAddEvent"]
+  },
+  "integration_keys": []
+}

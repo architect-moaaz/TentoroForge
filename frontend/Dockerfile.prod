@@ -1,0 +1,63 @@
+# Frontend prod image, built from the MONOREPO ROOT context.
+#
+# Simpler than a multi-stage split because pnpm's workspace symlinks
+# don't survive an aggressive `COPY --from=` overlay of the frontend
+# dir. Cost: one bigger builder layer. Runtime image stays tiny.
+#
+# Compose invokes this as:
+#   build:
+#     context: .
+#     dockerfile: frontend/Dockerfile.prod
+
+FROM node:20-alpine AS builder
+WORKDIR /repo
+
+# Repo declares workspaces via npm-style "workspaces" in root
+# package.json — no pnpm-workspace.yaml exists. Use npm so the
+# workspace resolver walks packages/, apps/, and frontend/ correctly
+# and hoists their symlinks into frontend/node_modules.
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY apps ./apps
+COPY frontend ./frontend
+
+# --include-workspace-root pulls the workspace root's own devDeps too
+# (typescript, next, etc. live in various workspaces here). --legacy-
+# peer-deps because React 19 is still catching up.
+RUN npm ci --include-workspace-root --legacy-peer-deps
+
+# Next.js inlines every NEXT_PUBLIC_* env var into the client bundle at
+# build time. Setting it in docker-compose's environment: block only
+# affects the runtime container — by then the JS already has the old
+# value burnt in. So we pipe it through as a build arg.
+ARG NEXT_PUBLIC_API_URL=""
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+WORKDIR /repo/frontend
+RUN npm run build
+
+# --- runtime ---
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser  --system --uid 1001 nextjs
+
+# Standalone in a monorepo puts the entrypoint at frontend/server.js
+# and expects assets *relative to that*, i.e. at frontend/.next/static
+# and frontend/public. Copy them under /app/frontend/, NOT under /app/,
+# or every static request 404s.
+COPY --from=builder --chown=nextjs:nodejs /repo/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /repo/frontend/.next/static     ./frontend/.next/static
+COPY --from=builder --chown=nextjs:nodejs /repo/frontend/public           ./frontend/public
+
+USER nextjs
+EXPOSE 3000
+CMD ["node", "frontend/server.js"]

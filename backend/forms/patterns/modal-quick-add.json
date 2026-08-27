@@ -1,0 +1,17 @@
+{
+  "name": "modal-quick-add",
+  "description": "1-3 field modal for fast entity creation from a list view. Preserves scroll of the underlying list.",
+  "when_to_use": {"modality": "modal", "field_count_range": [1, 4]},
+  "invariants": ["autofocus-first-input", "escape-closes", "return-to-list-preserves-scroll", "in-flight-disable"],
+  "shape": {
+    "type": "Dialog", "props": {"title": "Add", "size": "sm"}, "children": [
+      {"type": "Form", "children": [
+        {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [{"$slot": "fields"}]}
+      ]},
+      {"type": "Row", "props": {"justify": "end", "gap": "tokens.spacing.2"}, "children": [
+        {"type": "Button", "props": {"variant": "ghost", "label": "Cancel"}},
+        {"type": "Button", "props": {"variant": "primary", "label": "Add", "submit": true}}
+      ]}
+    ]
+  }
+}

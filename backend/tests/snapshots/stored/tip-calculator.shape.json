@@ -1,0 +1,27 @@
+{
+  "auth": {
+    "gating": "none",
+    "surface": "none"
+  },
+  "data": {
+    "denormalization": "none",
+    "readShape": "single-record"
+  },
+  "identity": {
+    "usageMode": "single-session"
+  },
+  "label": "single-purpose-utility",
+  "layout": {
+    "density": "spacious",
+    "hero": "none",
+    "primaryInteraction": "form",
+    "shell": "none"
+  },
+  "nav": {
+    "back": "none",
+    "menu": "none"
+  },
+  "workflows": {
+    "executionMode": "fire-and-forget"
+  }
+}

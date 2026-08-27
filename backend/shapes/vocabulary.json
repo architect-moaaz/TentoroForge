@@ -1,0 +1,81 @@
+{
+  "$schema_version": "1.0.0",
+  "$description": "Closed value set for each primitive of ShapeProfile. Single source of truth: planner prompt renders from this, validators read from this, code enums are generated from this. Adding a new value = JSON edit + one PR. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "primitives": {
+    "layout.shell": {
+      "description": "Persistent chrome wrapping every route.",
+      "values": ["none", "sidebar", "header", "three-pane", "bottom-tabs", "map-canvas"]
+    },
+    "layout.hero": {
+      "description": "What dominates the first view above the fold.",
+      "values": ["none", "full-bleed-gradient", "media-hero", "metric-row", "player-bar", "map-canvas", "feed-header", "now-playing"]
+    },
+    "layout.primaryInteraction": {
+      "description": "What the user is mostly doing on the primary surface.",
+      "values": ["cta-button", "capture", "search", "feed", "player", "map", "chat", "lesson", "data-grid", "card-grid", "form", "chart"]
+    },
+    "layout.density": {
+      "description": "Information density on typical surfaces.",
+      "values": ["spacious", "comfortable", "dense"]
+    },
+    "auth.surface": {
+      "description": "How the user is asked to authenticate.",
+      "values": ["none", "modal", "route", "sso-only"]
+    },
+    "auth.gating": {
+      "description": "When authentication is required.",
+      "values": ["none", "on-action", "on-load"]
+    },
+    "nav.menu": {
+      "description": "Global navigation surface.",
+      "values": ["none", "sidebar-links", "header-links", "bottom-tabs", "drawer", "command-palette"]
+    },
+    "nav.back": {
+      "description": "How the user retreats from a screen.",
+      "values": ["history", "crumb", "close-modal", "none"]
+    },
+    "workflows.executionMode": {
+      "description": "Default submission behaviour for workflows.",
+      "values": ["fire-and-forget", "await-with-progress", "streaming", "background-with-notification"]
+    },
+    "data.readShape": {
+      "description": "How primary data is presented to the user.",
+      "values": ["single-record", "list", "feed", "grid", "map-pins", "board", "timeline"]
+    },
+    "data.denormalization": {
+      "description": "How aggressively foreign keys are flattened for display.",
+      "values": ["none", "moderate", "aggressive"]
+    },
+    "identity.usageMode": {
+      "description": "Who uses this app and how often.",
+      "values": ["single-session", "returning-personal", "multi-user-team", "public-anonymous"]
+    }
+  },
+  "safe_defaults": {
+    "$comment": "Used by shape_profile_detector.py as the last-resort fallback when no LLM signal AND no keyword signal is available. Matches today's implicit default output shape so a missing-API-key fallback still generates a working (if unadventurous) app.",
+    "layout": {
+      "shell": "sidebar",
+      "hero": "none",
+      "primaryInteraction": "data-grid",
+      "density": "comfortable"
+    },
+    "auth": {
+      "surface": "route",
+      "gating": "on-load"
+    },
+    "nav": {
+      "menu": "sidebar-links",
+      "back": "crumb"
+    },
+    "workflows": {
+      "executionMode": "await-with-progress"
+    },
+    "data": {
+      "readShape": "list",
+      "denormalization": "moderate"
+    },
+    "identity": {
+      "usageMode": "multi-user-team"
+    }
+  }
+}

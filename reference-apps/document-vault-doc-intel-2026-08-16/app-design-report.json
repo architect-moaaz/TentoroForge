@@ -1,0 +1,56 @@
+{
+  "pages": [
+    {
+      "route": "/documents",
+      "archetype": "list",
+      "substituted": null,
+      "kept_features": [
+        "status-pipeline",
+        "notify"
+      ],
+      "dropped_features": []
+    },
+    {
+      "route": "/documents/upload",
+      "archetype": "form",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    },
+    {
+      "route": "/documents/[id]",
+      "archetype": "detail",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    },
+    {
+      "route": "/documents/search",
+      "archetype": "list",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    },
+    {
+      "route": "/",
+      "archetype": "dashboard",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    },
+    {
+      "route": "/login",
+      "archetype": "list",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    },
+    {
+      "route": "/admins",
+      "archetype": "list",
+      "substituted": null,
+      "kept_features": [],
+      "dropped_features": []
+    }
+  ]
+}

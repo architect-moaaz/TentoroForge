@@ -1,0 +1,182 @@
+{
+  "Document": {
+    "id": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "originalFilename": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "fileUrl": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "mimeType": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "fileSizeBytes": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "status": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "ocrText": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "extractedFields": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "confidence": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "pageCount": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "uploadedBy": {
+      "role": "actor",
+      "targetSlug": "users",
+      "targetTable": "users",
+      "required": false
+    },
+    "processedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "errorMessage": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "createdAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "updatedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    }
+  },
+  "ProcessDocumentJob": {
+    "id": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "documentId": {
+      "role": "domain",
+      "targetSlug": "documents",
+      "targetTable": "documents",
+      "required": false
+    },
+    "step": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "startedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "completedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "error": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "createdAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "updatedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    }
+  },
+  "User": {
+    "id": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "email": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "name": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "role": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "createdAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    },
+    "updatedAt": {
+      "role": "plain",
+      "targetSlug": null,
+      "targetTable": null,
+      "required": false
+    }
+  }
+}

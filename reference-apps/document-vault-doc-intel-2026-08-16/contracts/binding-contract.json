@@ -1,0 +1,39 @@
+{
+  "User": {
+    "labelField": "name",
+    "listSource": "users",
+    "fkBindings": [],
+    "createWorkflow": "CreateUser",
+    "updateWorkflow": "UpdateUser",
+    "statusWorkflow": null
+  },
+  "Document": {
+    "labelField": "id",
+    "listSource": "documents",
+    "fkBindings": [],
+    "createWorkflow": "CreateDocument",
+    "updateWorkflow": "UpdateDocument",
+    "statusWorkflow": {
+      "name": "UpdateDocument",
+      "statusVar": "status",
+      "idVar": "id",
+      "statuses": []
+    }
+  },
+  "ProcessDocumentJob": {
+    "labelField": "id",
+    "listSource": "processDocumentJobs",
+    "fkBindings": [
+      {
+        "field": "documentId",
+        "targetEntity": "Document",
+        "source": "documents",
+        "valueField": "id",
+        "labelField": "id"
+      }
+    ],
+    "createWorkflow": "CreateProcessDocumentJob",
+    "updateWorkflow": "UpdateProcessDocumentJob",
+    "statusWorkflow": null
+  }
+}

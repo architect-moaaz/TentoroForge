@@ -1,0 +1,112 @@
+{
+  "banking": {
+    "functional": 91.0,
+    "design": 100.0,
+    "composite": 91.0,
+    "tier": "static",
+    "wall_s": 609.7,
+    "breakdown": {
+      "proof": 2,
+      "delivery": 1.0,
+      "page_contract": 3.0,
+      "binding_smoke": 0.0,
+      "action_contract": 0,
+      "anatomy": 0.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  },
+  "commerce-cart": {
+    "functional": 95.0,
+    "design": 97.0,
+    "composite": 95.0,
+    "tier": "static",
+    "wall_s": 368.8,
+    "breakdown": {
+      "proof": 2,
+      "delivery": 3.0,
+      "page_contract": 0.0,
+      "binding_smoke": 0.0,
+      "workflow_validation": 0,
+      "action_contract": 0,
+      "anatomy": 3.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  },
+  "doc-intel": {
+    "functional": 89.0,
+    "design": 100.0,
+    "composite": 89.0,
+    "tier": "static",
+    "wall_s": 372.9,
+    "breakdown": {
+      "proof": 10,
+      "delivery": 1.0,
+      "page_contract": 0.0,
+      "binding_smoke": 0.0,
+      "action_contract": 0,
+      "anatomy": 0.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  },
+  "leave-management": {
+    "functional": 98.0,
+    "design": 100.0,
+    "composite": 98.0,
+    "tier": "static",
+    "wall_s": 216.9,
+    "breakdown": {
+      "proof": 2,
+      "delivery": 0.0,
+      "page_contract": 0.0,
+      "binding_smoke": 0.0,
+      "action_contract": 0,
+      "anatomy": 0.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  },
+  "recruitment": {
+    "functional": 94.0,
+    "design": 100.0,
+    "composite": 94.0,
+    "tier": "static",
+    "wall_s": 451.5,
+    "breakdown": {
+      "proof": 2,
+      "delivery": 1.0,
+      "page_contract": 3.0,
+      "binding_smoke": 0.0,
+      "action_contract": 0,
+      "anatomy": 0.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  },
+  "yoga-booking": {
+    "functional": 95.0,
+    "design": 97.0,
+    "composite": 95.0,
+    "tier": "static",
+    "wall_s": 4625.0,
+    "breakdown": {
+      "proof": 2,
+      "delivery": 3.0,
+      "page_contract": 0.0,
+      "binding_smoke": 0.0,
+      "workflow_validation": 0,
+      "action_contract": 0,
+      "anatomy": 3.0,
+      "requirement_fidelity": 0.0
+    },
+    "run_ts": "20260818T080945Z",
+    "blessed_at": "2026-08-18T08:12:30.346852+00:00"
+  }
+}

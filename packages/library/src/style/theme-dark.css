@@ -1,0 +1,72 @@
+/* Spec C Slice 8 — dark-mode token overrides.
+ *
+ * The library renders exclusively through CSS custom properties
+ * (--background, --foreground, --card, --border, --primary, etc.). This
+ * stylesheet flips those tokens under a `[data-theme="dark"]` root
+ * override so the entire component tree inverts without touching a
+ * single component file.
+ *
+ * ThemeToggle sets `document.documentElement.dataset.theme = "dark"`;
+ * this stylesheet is the target that makes that toggle observable.
+ *
+ * Also respects `prefers-color-scheme: dark` on first paint so users
+ * without a stored preference see the OS default immediately.
+ *
+ * Import once at the app root — same convention as motion.css.
+ */
+
+/* ─── OS-preferred dark (initial paint) ───────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background:          hsl(222 15% 10%);
+    --foreground:          hsl(210 10% 92%);
+    --card:                hsl(222 15% 13%);
+    --card-foreground:     hsl(210 10% 92%);
+    --popover:             hsl(222 15% 13%);
+    --popover-foreground:  hsl(210 10% 92%);
+    --muted:               hsl(222 12% 18%);
+    --muted-foreground:    hsl(210 8% 65%);
+    --border:              hsl(222 12% 22%);
+    --input:               hsl(222 12% 22%);
+    --ring:                var(--primary, hsl(210 60% 55%));
+    --secondary:           hsl(222 12% 18%);
+    --secondary-foreground:hsl(210 10% 92%);
+    --destructive:         hsl(0 62% 50%);
+    --destructive-foreground: hsl(210 10% 96%);
+    --primary-foreground:  hsl(210 10% 96%);
+    --accent:              var(--accent, hsl(30 80% 60%));
+    --accent-foreground:   hsl(30 20% 12%);
+  }
+}
+
+/* ─── Explicit user toggle (wins over OS + system) ────────── */
+:root[data-theme="dark"] {
+  --background:          hsl(222 15% 10%);
+  --foreground:          hsl(210 10% 92%);
+  --card:                hsl(222 15% 13%);
+  --card-foreground:     hsl(210 10% 92%);
+  --popover:             hsl(222 15% 13%);
+  --popover-foreground:  hsl(210 10% 92%);
+  --muted:               hsl(222 12% 18%);
+  --muted-foreground:    hsl(210 8% 65%);
+  --border:              hsl(222 12% 22%);
+  --input:               hsl(222 12% 22%);
+  --ring:                var(--primary, hsl(210 60% 55%));
+  --secondary:           hsl(222 12% 18%);
+  --secondary-foreground:hsl(210 10% 92%);
+  --destructive:         hsl(0 62% 50%);
+  --destructive-foreground: hsl(210 10% 96%);
+  --primary-foreground:  hsl(210 10% 96%);
+  --accent:              var(--accent, hsl(30 80% 60%));
+  --accent-foreground:   hsl(30 20% 12%);
+  /* Explicit toggle also flips native form controls + scrollbars. */
+  color-scheme: dark;
+}
+
+/* ─── Explicit light — wins over OS-preferred-dark ────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+  /* Light values are the library's compiled defaults, so no overrides
+   * needed here — this selector exists to WIN OVER the media-query
+   * dark rule above when the user explicitly chose light. */
+}

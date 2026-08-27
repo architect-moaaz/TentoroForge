@@ -1,0 +1,225 @@
+{
+  "schemaVersion": "2",
+  "id": "exemplar-dashboard-kpi-grid",
+  "route": "/example/dashboard",
+  "layout": "main",
+  "dataSources": [
+    {
+      "name": "signupsByWeek",
+      "entity": "User",
+      "op": "series",
+      "groupBy": "createdAt",
+      "bucket": "week",
+      "agg": { "fn": "count" }
+    },
+    {
+      "name": "usersBySource",
+      "entity": "User",
+      "op": "series",
+      "groupBy": "source",
+      "agg": { "fn": "count" },
+      "sort": "value",
+      "limit": 6
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Stack",
+    "props": { "direction": "vertical", "gap": "tokens.spacing.semantic.section" },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Hero",
+        "props": {
+          "eyebrow": "Reports snapshot",
+          "headline": "Last 28 days",
+          "subhead": "Oct 21 – Nov 17, 2025",
+          "layout": "stacked",
+          "ctas": []
+        }
+      },
+      {
+        "id": "kpi-row",
+        "type": "Grid",
+        "props": { "columns": 4, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "kpi-users",
+            "type": "MetricTile",
+            "props": {
+              "label": "Users",
+              "value": "83K",
+              "format": "number",
+              "delta": { "value": "+12%", "direction": "up" },
+              "icon": "users",
+              "importance": "primary"
+            }
+          },
+          {
+            "id": "kpi-new",
+            "type": "MetricTile",
+            "props": {
+              "label": "New users",
+              "value": "70K",
+              "format": "number",
+              "delta": { "value": "+8%", "direction": "up" },
+              "icon": "user-plus",
+              "importance": "primary"
+            }
+          },
+          {
+            "id": "kpi-engagement",
+            "type": "MetricTile",
+            "props": {
+              "label": "Avg engagement",
+              "value": "2m 00s",
+              "format": "duration",
+              "delta": { "value": "+5s", "direction": "up" },
+              "icon": "clock",
+              "importance": "secondary"
+            }
+          },
+          {
+            "id": "kpi-revenue",
+            "type": "MetricTile",
+            "props": {
+              "label": "Revenue",
+              "value": "$253K",
+              "format": "currency",
+              "delta": { "value": "+15%", "direction": "up" },
+              "icon": "dollar-sign",
+              "importance": "primary"
+            }
+          }
+        ]
+      },
+      {
+        "id": "main-chart-row",
+        "type": "Grid",
+        "props": { "columns": 3, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "trend-chart-wrapper",
+            "type": "Card",
+            "children": [
+              {
+                "id": "trend-chart",
+                "type": "Chart",
+                "props": {
+                  "chartType": "line",
+                  "data": "{{signupsByWeek}}",
+                  "xKey": "label",
+                  "series": [{ "name": "Users", "dataKey": "value" }]
+                }
+              }
+            ]
+          },
+          {
+            "id": "top-countries-card",
+            "type": "Card",
+            "children": [
+              {
+                "id": "top-countries",
+                "type": "ActivityFeed",
+                "props": {
+                  "title": "Top countries",
+                  "entries": [
+                    {
+                      "timestamp": "2025-11-17T00:00:00Z",
+                      "actor": { "name": "United States" },
+                      "action": "contributed",
+                      "target": "34% of sessions"
+                    },
+                    {
+                      "timestamp": "2025-11-17T00:00:00Z",
+                      "actor": { "name": "United Kingdom" },
+                      "action": "contributed",
+                      "target": "18% of sessions"
+                    },
+                    {
+                      "timestamp": "2025-11-17T00:00:00Z",
+                      "actor": { "name": "Germany" },
+                      "action": "contributed",
+                      "target": "11% of sessions"
+                    },
+                    {
+                      "timestamp": "2025-11-17T00:00:00Z",
+                      "actor": { "name": "France" },
+                      "action": "contributed",
+                      "target": "9% of sessions"
+                    },
+                    {
+                      "timestamp": "2025-11-17T00:00:00Z",
+                      "actor": { "name": "Canada" },
+                      "action": "contributed",
+                      "target": "7% of sessions"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "secondary-row",
+        "type": "Grid",
+        "props": { "columns": 2, "gap": "tokens.spacing.semantic.card" },
+        "children": [
+          {
+            "id": "sources-chart",
+            "type": "Card",
+            "children": [
+              {
+                "id": "sources-bar",
+                "type": "Chart",
+                "props": {
+                  "chartType": "bar",
+                  "data": "{{usersBySource}}",
+                  "xKey": "label",
+                  "series": [{ "name": "New users", "dataKey": "value" }]
+                }
+              }
+            ]
+          },
+          {
+            "id": "insights-card",
+            "type": "Card",
+            "children": [
+              {
+                "id": "insights-feed",
+                "type": "ActivityFeed",
+                "props": {
+                  "title": "Insights",
+                  "entries": [
+                    {
+                      "timestamp": "2025-11-17T09:00:00Z",
+                      "actor": { "name": "Analytics" },
+                      "action": "detected",
+                      "target": "Traffic spike on Nov 11",
+                      "detail": "28% above weekly average"
+                    },
+                    {
+                      "timestamp": "2025-11-15T14:30:00Z",
+                      "actor": { "name": "Analytics" },
+                      "action": "flagged",
+                      "target": "Mobile bounce rate",
+                      "detail": "Increased 4 pts vs. prior period"
+                    },
+                    {
+                      "timestamp": "2025-11-13T11:00:00Z",
+                      "actor": { "name": "Analytics" },
+                      "action": "noted",
+                      "target": "Revenue milestone",
+                      "detail": "$250K crossed on Nov 13"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

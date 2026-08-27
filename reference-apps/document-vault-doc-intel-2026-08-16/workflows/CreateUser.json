@@ -1,0 +1,93 @@
+{
+  "id": "create-user",
+  "name": "CreateUser",
+  "description": "Create a User record.",
+  "processVariables": [
+    {
+      "name": "email",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "required": false
+    }
+  ],
+  "definition": {
+    "trigger": {
+      "type": "manual"
+    },
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "type": "manual"
+          },
+          "label": "Start"
+        }
+      },
+      {
+        "id": "db_insert",
+        "type": "action",
+        "position": {
+          "x": 200,
+          "y": 0
+        },
+        "data": {
+          "config": {
+            "actionType": "db_insert",
+            "table": "users",
+            "values": {
+              "email": "email",
+              "password": "password",
+              "name": "name",
+              "role": "role"
+            }
+          },
+          "label": "Create User"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "position": {
+          "x": 400,
+          "y": 0
+        },
+        "data": {
+          "config": {},
+          "label": "End"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_trigger_action",
+        "source": "trigger",
+        "target": "db_insert"
+      },
+      {
+        "id": "e_action_end",
+        "source": "db_insert",
+        "target": "end"
+      }
+    ]
+  }
+}

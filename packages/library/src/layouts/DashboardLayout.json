@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1",
+  "id": "DashboardLayout",
+  "root": {
+    "id": "dash-shell",
+    "type": "Stack",
+    "props": {
+      "direction": "horizontal",
+      "gap": "spacing.0",
+      "align": "stretch"
+    },
+    "children": [
+      {
+        "id": "dash-sidebar",
+        "type": "Container",
+        "props": { "maxWidth": "sm" },
+        "children": [
+          {
+            "id": "dash-sidebar-stack",
+            "type": "Stack",
+            "props": {
+              "direction": "vertical",
+              "gap": "spacing.4",
+              "align": "stretch"
+            },
+            "children": [
+              {
+                "id": "dash-brand",
+                "type": "Heading",
+                "props": {
+                  "level": 1,
+                  "content": "App"
+                }
+              },
+              {
+                "id": "dash-nav-home",
+                "type": "NavLink",
+                "props": {
+                  "href": "/",
+                  "children": "Home"
+                }
+              },
+              {
+                "id": "dash-nav-settings",
+                "type": "NavLink",
+                "props": {
+                  "href": "/settings",
+                  "children": "Settings"
+                }
+              },
+              {
+                "id": "dash-sidebar-slot",
+                "type": "Slot",
+                "props": { "name": "sidebar" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "dash-main-area",
+        "type": "Container",
+        "props": { "maxWidth": "2xl" },
+        "children": [
+          {
+            "id": "dash-main-stack",
+            "type": "Stack",
+            "props": {
+              "direction": "vertical",
+              "gap": "spacing.6",
+              "align": "stretch"
+            },
+            "children": [
+              {
+                "id": "dash-header",
+                "type": "Stack",
+                "props": {
+                  "direction": "horizontal",
+                  "gap": "spacing.4",
+                  "align": "center",
+                  "justify": "between"
+                },
+                "children": [
+                  {
+                    "id": "dash-breadcrumb",
+                    "type": "Breadcrumb",
+                    "props": {
+                      "items": [
+                        { "label": "Home", "href": "/" }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "dash-main-slot",
+                "type": "Slot",
+                "props": { "name": "main" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

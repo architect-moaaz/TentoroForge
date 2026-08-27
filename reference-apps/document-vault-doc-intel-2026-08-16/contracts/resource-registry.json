@@ -1,0 +1,305 @@
+{
+  "accessModel": {
+    "ownership": "role-based",
+    "roles": [],
+    "rules": [],
+    "userEntityId": "user"
+  },
+  "entities": {
+    "Document": {
+      "camel": "document",
+      "columns": [
+        {
+          "enum": null,
+          "fk": null,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": true,
+          "type": "uuid"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "originalFilename",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "fileUrl",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "mimeType",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "fileSizeBytes",
+          "notNull": false,
+          "type": "integer"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "status",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "ocrText",
+          "notNull": false,
+          "type": "text"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "extractedFields",
+          "notNull": false,
+          "type": "jsonb"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "confidence",
+          "notNull": false,
+          "type": "integer"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "pageCount",
+          "notNull": false,
+          "type": "integer"
+        },
+        {
+          "enum": null,
+          "fk": "user",
+          "name": "uploadedBy",
+          "notNull": false,
+          "type": "uuid"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "processedAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "errorMessage",
+          "notNull": false,
+          "type": "text"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "createdAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "updatedAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "uploadedByName",
+          "notNull": false,
+          "type": "varchar"
+        }
+      ],
+      "fks": [
+        {
+          "column": "uploadedBy",
+          "targetEntityId": "user"
+        }
+      ],
+      "id": "document",
+      "name": "Document",
+      "schemaFile": "src/db/schema/documents.ts",
+      "singular": "document",
+      "slug": "documents",
+      "table": "documents",
+      "typeFile": "src/types/documents.ts"
+    },
+    "ProcessDocumentJob": {
+      "camel": "processDocumentJob",
+      "columns": [
+        {
+          "enum": null,
+          "fk": null,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": true,
+          "type": "uuid"
+        },
+        {
+          "enum": null,
+          "fk": "document",
+          "name": "documentId",
+          "notNull": false,
+          "type": "uuid"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "step",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "startedAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "completedAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "error",
+          "notNull": false,
+          "type": "text"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "createdAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "updatedAt",
+          "notNull": false,
+          "type": "timestamp"
+        }
+      ],
+      "fks": [
+        {
+          "column": "documentId",
+          "targetEntityId": "document"
+        }
+      ],
+      "id": "process-document-job",
+      "name": "ProcessDocumentJob",
+      "schemaFile": "src/db/schema/process-document-jobs.ts",
+      "singular": "processDocumentJob",
+      "slug": "process-document-jobs",
+      "table": "process_document_jobs",
+      "typeFile": "src/types/process-document-jobs.ts"
+    },
+    "User": {
+      "camel": "user",
+      "columns": [
+        {
+          "enum": null,
+          "fk": null,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": true,
+          "type": "uuid"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "email",
+          "notNull": true,
+          "type": "text"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "name",
+          "notNull": false,
+          "type": "text"
+        },
+        {
+          "enum": [
+            "admin"
+          ],
+          "fk": null,
+          "name": "role",
+          "notNull": false,
+          "type": "varchar"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "createdAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "updatedAt",
+          "notNull": false,
+          "type": "timestamp"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "password",
+          "notNull": true,
+          "type": "text"
+        },
+        {
+          "enum": null,
+          "fk": null,
+          "name": "isActive",
+          "notNull": false,
+          "type": "boolean"
+        }
+      ],
+      "fks": [],
+      "id": "user",
+      "name": "User",
+      "schemaFile": "src/db/schema/users.ts",
+      "singular": "user",
+      "slug": "users",
+      "table": "users",
+      "typeFile": "src/types/users.ts"
+    }
+  },
+  "interactions": [],
+  "relationships": [
+    {
+      "fkColumn": "uploadedBy",
+      "from": "document",
+      "to": "user",
+      "type": "many-to-one"
+    },
+    {
+      "fkColumn": "documentId",
+      "from": "process-document-job",
+      "to": "document",
+      "type": "many-to-one"
+    }
+  ],
+  "roles": [],
+  "version": 1
+}

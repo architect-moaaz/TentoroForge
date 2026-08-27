@@ -1,0 +1,65 @@
+# docker-compose.verify.yml — full-app compose for the JV-15 verify runner.
+#
+# Used ONLY by services.journey_verifier.boot.containerized_app, NOT for
+# normal dev/deploy. The generated app's docker-compose.yml stays as the
+# canonical Postgres-only file for host-mode `npm run dev`; this overlay
+# adds a `web` service that boots the app image built from Dockerfile.verify.
+#
+# The verify pipeline launches this with a unique compose project name
+# (`docker compose -p verify-<runId>`) so multiple verifies can run in
+# parallel and each has its own Postgres volume + network. Down -v on
+# exit wipes the volume so re-verify starts from a fresh DB.
+#
+# Ports are passed in via env (WEB_PORT / DB_PORT) so the container manager
+# can pick free ports and forward them for the Playwright driver + local
+# `psql`ing.
+#
+# Env expected in the verify context (see boot.py):
+#   WEB_PORT              — host port to expose the web app on
+#   DB_PORT               — host port to expose Postgres on
+#   PROJECT_DB_NAME       — DB name (defaults "app")
+#   NEXTAUTH_SECRET       — random per run
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${PROJECT_DB_NAME:-app}
+    ports:
+      - "${DB_PORT:-0}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.verify
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Inside the container network, Postgres is reachable by service name.
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/${PROJECT_DB_NAME:-app}
+      NEXTAUTH_URL: http://localhost:${WEB_PORT:-3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-verify-run-secret-not-for-production}
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "${WEB_PORT:-0}:3000"
+    healthcheck:
+      # `next start` on the root route — 200/302/307 (redirect to /login) all
+      # count as "up". Only 5xx or connection-refused fails the probe.
+      test: ["CMD-SHELL", "curl -sSfL -o /dev/null http://localhost:3000/ || curl -sS -o /dev/null -w '%{http_code}' http://localhost:3000/ | grep -qE '2..|3..'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  pgdata:

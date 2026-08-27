@@ -1,0 +1,98 @@
+{
+  "app_slug": "9y8de8i7",
+  "archetype": "crud_write",
+  "base_url": "http://localhost:6500/api/projects/e7964b5e-306a-469b-b0b5-dd4bd723ba29/preview/serve",
+  "seed_users": [
+    {
+      "email": "admin@example.com",
+      "password": "admin1234",
+      "role": "admin"
+    },
+    {
+      "email": "test@test.com",
+      "password": "admin1234",
+      "role": "member"
+    }
+  ],
+  "fixtures": {},
+  "journeys": [
+    {
+      "slug": "crud-write-document",
+      "name": "Create a Document through the UI",
+      "actor": "Admin",
+      "tags": [
+        "primary",
+        "archetype:crud_write"
+      ],
+      "steps": [
+        {
+          "kind": "login_as",
+          "timeout_ms": 15000,
+          "email": "admin@example.com",
+          "password": "admin1234"
+        },
+        {
+          "kind": "visit",
+          "timeout_ms": 15000,
+          "route": "/documents/new"
+        },
+        {
+          "kind": "wait_for_element",
+          "timeout_ms": 10000,
+          "name": "Create-Document form loaded",
+          "locator": {
+            "role": "button",
+            "label": "Cancel"
+          }
+        },
+        {
+          "kind": "fill",
+          "timeout_ms": 15000,
+          "name": "Fill Originalfilename",
+          "locator": {
+            "css": "[name=\"originalFilename\"]"
+          },
+          "value": "Journey Test"
+        },
+        {
+          "kind": "fill",
+          "timeout_ms": 15000,
+          "name": "Fill Fileurl",
+          "locator": {
+            "css": "[name=\"fileUrl\"]"
+          },
+          "value": "Journey Test"
+        },
+        {
+          "kind": "fill",
+          "timeout_ms": 15000,
+          "name": "Fill Mimetype",
+          "locator": {
+            "css": "[name=\"mimeType\"]"
+          },
+          "value": "Journey Test"
+        },
+        {
+          "kind": "click",
+          "timeout_ms": 15000,
+          "name": "Submit form",
+          "locator": {
+            "journey_slug": "form-submit",
+            "role": "button",
+            "label": "Create"
+          }
+        },
+        {
+          "kind": "assert_entity",
+          "timeout_ms": 15000,
+          "name": "A Document row lands",
+          "entity_filter": {
+            "entity": "Document",
+            "where": {},
+            "min_count": 1
+          }
+        }
+      ]
+    }
+  ]
+}

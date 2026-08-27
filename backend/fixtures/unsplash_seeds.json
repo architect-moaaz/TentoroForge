@@ -1,0 +1,28 @@
+{
+  "domains": {
+    "healthcare":   ["medical professional", "hospital interior", "doctor consultation"],
+    "real-estate":  ["modern home interior", "house exterior", "real estate property"],
+    "fitness":      ["athlete running", "gym workout", "yoga studio"],
+    "saas":         ["office workspace", "developer desk", "team meeting"],
+    "education":    ["classroom learning", "student studying", "library books"],
+    "fashion":      ["fashion model", "clothing rack", "boutique store"],
+    "consumer":     ["happy person", "lifestyle modern", "young adult"],
+    "media":        ["editorial photo", "magazine cover", "creative studio"],
+    "developer-tool": ["code editor screen", "developer working", "tech workspace"],
+    "data":         ["data visualization", "analytics dashboard", "tech office"],
+    "default":      ["abstract gradient", "minimal modern", "professional photo"]
+  },
+  "entities": {
+    "User":      ["professional portrait", "smiling person", "business headshot"],
+    "Customer":  ["happy customer", "person smiling", "casual portrait"],
+    "Employee":  ["professional headshot", "office worker"],
+    "Patient":   ["medical patient", "person consulting doctor"],
+    "Doctor":    ["medical doctor portrait", "doctor in coat"],
+    "Property":  ["modern house exterior", "luxury home interior"],
+    "Product":   ["product photography", "minimalist product shot"],
+    "Article":   ["editorial writing", "magazine spread"],
+    "Course":    ["online learning", "education classroom"],
+    "Recipe":    ["food photography", "plated dish"],
+    "Event":     ["event venue", "conference crowd"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "archetype": "commerce",
+  "source_app": "vulbzsi0",
+  "harvested_at": "2026-08-17T17:23:12.542628+00:00",
+  "profile": "fast",
+  "stresses": [
+    "cart runtime + checkout workflow",
+    "commerce entity flag",
+    "AddToCart/CartBadge placement",
+    "product imagery"
+  ]
+}

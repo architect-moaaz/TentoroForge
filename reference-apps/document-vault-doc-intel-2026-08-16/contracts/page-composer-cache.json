@@ -1,0 +1,707 @@
+{
+  "3ea3f34123ef5dd578ee572c85efb2056aa00dc5f6b31570679913b6bc57919e": {
+    "page_id": "/",
+    "provenance": {
+      "changes": {
+        "data_sources_emitted": 4,
+        "ids_assigned": 11,
+        "manifest_components_considered": 114,
+        "nodes_composed": 11
+      },
+      "route": "/",
+      "source": "composed",
+      "validation": {
+        "errors": [],
+        "warnings": [
+          "binding {{totalDocuments.count}} references field 'count' not declared on entity 'Document'",
+          "binding {{completeDocuments.count}} references field 'count' not declared on entity 'Document'",
+          "binding {{failedDocuments.count}} references field 'count' not declared on entity 'Document'",
+          "binding {{totalDocuments.avg_confidence}} references field 'avg_confidence' not declared on entity 'Document'"
+        ]
+      }
+    },
+    "schema": {
+      "dataSources": [
+        {
+          "entity": "Document",
+          "name": "totalDocuments",
+          "op": "aggregate"
+        },
+        {
+          "entity": "Document",
+          "filter": {
+            "status": "completed"
+          },
+          "name": "completeDocuments",
+          "op": "aggregate"
+        },
+        {
+          "entity": "Document",
+          "filter": {
+            "status": "failed"
+          },
+          "name": "failedDocuments",
+          "op": "aggregate"
+        },
+        {
+          "entity": "Document",
+          "limit": 10,
+          "name": "recentDocuments",
+          "op": "list",
+          "orderBy": [
+            {
+              "dir": "desc",
+              "field": "createdAt"
+            }
+          ]
+        }
+      ],
+      "id": "dashboard-page",
+      "layout": "main",
+      "root": {
+        "children": [
+          {
+            "children": [
+              {
+                "id": "root-Row-0-Heading-0",
+                "props": {
+                  "content": "Dashboard",
+                  "level": 1
+                },
+                "type": "Heading"
+              },
+              {
+                "id": "root-Row-0-Button-0",
+                "props": {
+                  "icon": "upload",
+                  "label": "Upload Documents",
+                  "onClick": {
+                    "action": "navigate",
+                    "route": "/upload"
+                  }
+                },
+                "type": "Button"
+              }
+            ],
+            "id": "root-Row-0",
+            "props": {
+              "align": "center",
+              "gap": "tokens.spacing.4",
+              "justify": "space-between"
+            },
+            "type": "Row"
+          },
+          {
+            "children": [
+              {
+                "id": "root-Grid-0-MetricTile-0",
+                "props": {
+                  "format": "number",
+                  "label": "Total Documents",
+                  "value": "{{totalDocuments.count}}"
+                },
+                "type": "MetricTile"
+              },
+              {
+                "id": "root-Grid-0-MetricTile-1",
+                "props": {
+                  "format": "number",
+                  "label": "Completed",
+                  "value": "{{completeDocuments.count}}"
+                },
+                "type": "MetricTile"
+              },
+              {
+                "id": "root-Grid-0-MetricTile-2",
+                "props": {
+                  "format": "number",
+                  "label": "Failed",
+                  "value": "{{failedDocuments.count}}"
+                },
+                "type": "MetricTile"
+              },
+              {
+                "id": "root-Grid-0-MetricTile-3",
+                "props": {
+                  "format": "percent",
+                  "label": "Avg Confidence",
+                  "value": "{{totalDocuments.avg_confidence}}"
+                },
+                "type": "MetricTile"
+              }
+            ],
+            "id": "root-Grid-0",
+            "props": {
+              "columns": 4,
+              "gap": "tokens.spacing.4"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "id": "root-Card-0-Table-0",
+                "props": {
+                  "columns": [
+                    {
+                      "key": "originalFilename",
+                      "label": "Filename",
+                      "width": "30%"
+                    },
+                    {
+                      "format": "badge",
+                      "key": "status",
+                      "label": "Status"
+                    },
+                    {
+                      "format": "percent",
+                      "key": "confidence",
+                      "label": "Confidence"
+                    },
+                    {
+                      "format": "number",
+                      "key": "pageCount",
+                      "label": "Pages"
+                    },
+                    {
+                      "format": "date",
+                      "key": "createdAt",
+                      "label": "Uploaded"
+                    }
+                  ],
+                  "dataSource": "recentDocuments",
+                  "emptyDescription": "No activity yet. Metrics will appear here once uploads start processing.",
+                  "rowActions": [
+                    {
+                      "label": "View",
+                      "navigate": "/documents/{id}"
+                    }
+                  ],
+                  "rowKey": "id"
+                },
+                "type": "Table"
+              }
+            ],
+            "id": "root-Card-0",
+            "props": {
+              "title": "Recent Documents"
+            },
+            "type": "Card"
+          }
+        ],
+        "id": "root",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.6"
+        },
+        "type": "Stack"
+      },
+      "route": "/",
+      "schemaVersion": "2"
+    },
+    "timestamp": 1786812810.857051
+  },
+  "5c8c1f67b8ed8aa16e11ef4a2a0f2db144698fd9dcfbff28ee5e0263da3dc1ca": {
+    "page_id": "/admins",
+    "provenance": {
+      "changes": {
+        "data_sources_emitted": 1,
+        "ids_assigned": 6,
+        "manifest_components_considered": 98,
+        "nodes_composed": 6
+      },
+      "route": "/admins",
+      "source": "composed",
+      "validation": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    "schema": {
+      "dataSources": [
+        {
+          "entity": "User",
+          "filter": {
+            "role": "admin"
+          },
+          "name": "admins",
+          "op": "list",
+          "orderBy": [
+            {
+              "dir": "desc",
+              "field": "createdAt"
+            }
+          ]
+        }
+      ],
+      "id": "admins-page",
+      "layout": "main",
+      "root": {
+        "children": [
+          {
+            "children": [
+              {
+                "id": "root-Row-0-Heading-0",
+                "props": {
+                  "content": "Admins",
+                  "level": 1
+                },
+                "type": "Heading"
+              }
+            ],
+            "id": "root-Row-0",
+            "props": {
+              "align": "center",
+              "gap": "tokens.spacing.4",
+              "justify": "space-between"
+            },
+            "type": "Row"
+          },
+          {
+            "id": "root-Text-0",
+            "props": {
+              "content": "Directory of admins in the app."
+            },
+            "type": "Text"
+          },
+          {
+            "children": [
+              {
+                "id": "root-Card-0-Table-0",
+                "props": {
+                  "columns": [
+                    {
+                      "key": "name",
+                      "label": "Name",
+                      "width": "30%"
+                    },
+                    {
+                      "key": "email",
+                      "label": "Email",
+                      "width": "35%"
+                    },
+                    {
+                      "format": "badge",
+                      "key": "role",
+                      "label": "Role",
+                      "width": "15%"
+                    },
+                    {
+                      "format": "date",
+                      "key": "createdAt",
+                      "label": "Created",
+                      "width": "20%"
+                    }
+                  ],
+                  "dataSource": "admins",
+                  "emptyDescription": "No users provisioned yet.",
+                  "rowActions": [
+                    {
+                      "label": "View",
+                      "navigate": "/users/{id}"
+                    }
+                  ],
+                  "rowKey": "id"
+                },
+                "type": "Table"
+              }
+            ],
+            "id": "root-Card-0",
+            "props": {
+              "density": "comfortable"
+            },
+            "type": "Card"
+          }
+        ],
+        "id": "root",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.6"
+        },
+        "type": "Stack"
+      },
+      "route": "/admins",
+      "schemaVersion": "2"
+    },
+    "timestamp": 1786812843.830841
+  },
+  "88298a71274086a56a62063b2e1234df74c84f04b91405e75ab3d4980231c389": {
+    "page_id": "/documents/[id]",
+    "provenance": {
+      "changes": {
+        "data_sources_emitted": 1,
+        "ids_assigned": 21,
+        "manifest_components_considered": 98,
+        "nodes_composed": 21
+      },
+      "route": "/documents/[id]",
+      "source": "composed",
+      "validation": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    "schema": {
+      "dataSources": [
+        {
+          "entity": "Document",
+          "name": "document",
+          "op": "get"
+        }
+      ],
+      "id": "document-detail-page",
+      "layout": "main",
+      "root": {
+        "children": [
+          {
+            "children": [
+              {
+                "id": "root-Row-0-Heading-0",
+                "props": {
+                  "content": "{{document.originalFilename}}",
+                  "level": 1
+                },
+                "type": "Heading"
+              },
+              {
+                "id": "root-Row-0-Badge-0",
+                "props": {
+                  "content": "{{document.status}}",
+                  "variant": "success"
+                },
+                "type": "Badge"
+              }
+            ],
+            "id": "root-Row-0",
+            "props": {
+              "align": "center",
+              "gap": "tokens.spacing.4",
+              "justify": "space-between"
+            },
+            "type": "Row"
+          },
+          {
+            "children": [
+              {
+                "id": "root-Conditional-0-Alert-0",
+                "props": {
+                  "message": "{{document.errorMessage}}",
+                  "title": "Processing Failed",
+                  "variant": "danger"
+                },
+                "type": "Alert"
+              }
+            ],
+            "id": "root-Conditional-0",
+            "props": {
+              "when": "{{document.errorMessage}}"
+            },
+            "type": "Conditional"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "id": "root-Split-0-Card-0-Stack-0-Conditional-0-CustomBlock-0",
+                            "props": {
+                              "html": "<iframe src=\"{{document.fileUrl}}\" style=\"width: 100%; height: 600px; border: 1px solid #E5E5E5; border-radius: 4px;\"></iframe>"
+                            },
+                            "type": "CustomBlock"
+                          }
+                        ],
+                        "id": "root-Split-0-Card-0-Stack-0-Conditional-0",
+                        "props": {
+                          "when": "{{document.fileUrl}}"
+                        },
+                        "type": "Conditional"
+                      }
+                    ],
+                    "id": "root-Split-0-Card-0-Stack-0",
+                    "props": {
+                      "gap": "tokens.spacing.4"
+                    },
+                    "type": "Stack"
+                  }
+                ],
+                "id": "root-Split-0-Card-0",
+                "props": {
+                  "density": "comfortable",
+                  "title": "Document Preview"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "id": "root-Split-0-Stack-0-Card-0-Stack-0-DescriptionList-0",
+                            "props": {
+                              "items": [
+                                {
+                                  "label": "Confidence",
+                                  "value": "{{document.confidence}}"
+                                },
+                                {
+                                  "label": "Page Count",
+                                  "value": "{{document.pageCount}}"
+                                },
+                                {
+                                  "label": "File Size",
+                                  "value": "{{document.fileSizeBytes}}"
+                                },
+                                {
+                                  "label": "MIME Type",
+                                  "value": "{{document.mimeType}}"
+                                },
+                                {
+                                  "label": "Processed At",
+                                  "value": "{{document.processedAt}}"
+                                },
+                                {
+                                  "label": "Uploaded By",
+                                  "value": "{{document.uploadedBy}}"
+                                }
+                              ],
+                              "orientation": "horizontal"
+                            },
+                            "type": "DescriptionList"
+                          },
+                          {
+                            "id": "root-Split-0-Stack-0-Card-0-Stack-0-Divider-0",
+                            "props": {
+                              "orientation": "horizontal"
+                            },
+                            "type": "Divider"
+                          },
+                          {
+                            "id": "root-Split-0-Stack-0-Card-0-Stack-0-Text-0",
+                            "props": {
+                              "content": "Extracted Data"
+                            },
+                            "type": "Text"
+                          },
+                          {
+                            "id": "root-Split-0-Stack-0-Card-0-Stack-0-CustomBlock-0",
+                            "props": {
+                              "html": "<div style=\"font-family: IBM Plex Mono, monospace; font-size: 14px; color: #171717;\">{{document.extractedFields}}</div>"
+                            },
+                            "type": "CustomBlock"
+                          }
+                        ],
+                        "id": "root-Split-0-Stack-0-Card-0-Stack-0",
+                        "props": {
+                          "gap": "tokens.spacing.4"
+                        },
+                        "type": "Stack"
+                      }
+                    ],
+                    "id": "root-Split-0-Stack-0-Card-0",
+                    "props": {
+                      "density": "comfortable",
+                      "title": "Extracted Fields"
+                    },
+                    "type": "Card"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "id": "root-Split-0-Stack-0-Accordion-0-AccordionPanel-0-CodeBlock-0",
+                            "props": {
+                              "code": "{{document.ocrText}}",
+                              "language": "text",
+                              "showCopy": true
+                            },
+                            "type": "CodeBlock"
+                          }
+                        ],
+                        "id": "root-Split-0-Stack-0-Accordion-0-AccordionPanel-0",
+                        "props": {
+                          "label": "Raw OCR Text",
+                          "value": "ocr"
+                        },
+                        "type": "AccordionPanel"
+                      }
+                    ],
+                    "id": "root-Split-0-Stack-0-Accordion-0",
+                    "props": {
+                      "mode": "single"
+                    },
+                    "type": "Accordion"
+                  }
+                ],
+                "id": "root-Split-0-Stack-0",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "type": "Stack"
+              }
+            ],
+            "id": "root-Split-0",
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "1:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "id": "root",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.6"
+        },
+        "type": "Stack"
+      },
+      "route": "/documents/[id]",
+      "schemaVersion": "2"
+    },
+    "timestamp": 1786812871.197262
+  },
+  "ddfa790853191cf213801ed8bba9bd4245023f012044cbc2c2ba32d0207d2575": {
+    "page_id": "/documents",
+    "provenance": {
+      "changes": {
+        "data_sources_emitted": 1,
+        "ids_assigned": 6,
+        "manifest_components_considered": 98,
+        "nodes_composed": 6
+      },
+      "route": "/documents",
+      "source": "composed",
+      "validation": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    "schema": {
+      "dataSources": [
+        {
+          "entity": "Document",
+          "name": "documents",
+          "op": "list",
+          "orderBy": [
+            {
+              "dir": "desc",
+              "field": "createdAt"
+            }
+          ]
+        }
+      ],
+      "id": "documents-list-page",
+      "layout": "main",
+      "root": {
+        "children": [
+          {
+            "children": [
+              {
+                "id": "root-Row-0-Heading-0",
+                "props": {
+                  "content": "Documents",
+                  "level": 1
+                },
+                "type": "Heading"
+              },
+              {
+                "id": "root-Row-0-Button-0",
+                "props": {
+                  "icon": "upload",
+                  "label": "Upload",
+                  "onClick": {
+                    "action": "navigate",
+                    "target": "/documents/upload"
+                  }
+                },
+                "type": "Button"
+              }
+            ],
+            "id": "root-Row-0",
+            "props": {
+              "align": "center",
+              "gap": "tokens.spacing.4",
+              "justify": "space-between"
+            },
+            "type": "Row"
+          },
+          {
+            "children": [
+              {
+                "id": "root-Card-0-Table-0",
+                "props": {
+                  "columns": [
+                    {
+                      "key": "originalFilename",
+                      "label": "Filename",
+                      "width": "25%"
+                    },
+                    {
+                      "format": "badge",
+                      "key": "status",
+                      "label": "Status",
+                      "width": "15%"
+                    },
+                    {
+                      "format": "percent",
+                      "key": "confidence",
+                      "label": "Confidence",
+                      "width": "12%"
+                    },
+                    {
+                      "key": "pageCount",
+                      "label": "Pages",
+                      "width": "10%"
+                    },
+                    {
+                      "key": "uploadedBy",
+                      "label": "Uploaded By",
+                      "width": "18%"
+                    },
+                    {
+                      "format": "date",
+                      "key": "createdAt",
+                      "label": "Created",
+                      "width": "20%"
+                    }
+                  ],
+                  "dataSource": "documents",
+                  "emptyDescription": "No documents yet. Uploads will appear here after OCR completes.",
+                  "rowActions": [
+                    {
+                      "label": "View",
+                      "navigate": "/documents/{id}"
+                    }
+                  ],
+                  "rowKey": "id"
+                },
+                "type": "Table"
+              }
+            ],
+            "id": "root-Card-0",
+            "props": {
+              "density": "comfortable"
+            },
+            "type": "Card"
+          }
+        ],
+        "id": "root",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.6"
+        },
+        "type": "Stack"
+      },
+      "route": "/documents",
+      "schemaVersion": "2"
+    },
+    "timestamp": 1786812820.432235
+  }
+}

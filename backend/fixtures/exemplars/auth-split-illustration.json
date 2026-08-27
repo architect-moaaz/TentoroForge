@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "2",
+  "id": "exemplar-auth-split-illustration",
+  "route": "/example/login",
+  "layout": "main",
+  "root": {
+    "id": "page-root",
+    "type": "Grid",
+    "props": { "columns": 2, "gap": "tokens.spacing.semantic.section" },
+    "children": [
+      {
+        "id": "auth-content",
+        "type": "Stack",
+        "props": { "direction": "vertical", "gap": "tokens.spacing.semantic.section" },
+        "children": [
+          {
+            "id": "auth-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "Welcome back",
+              "headline": "Sign in to your account",
+              "subhead": "Welcome back! Please enter your details.",
+              "layout": "stacked",
+              "ctas": []
+            }
+          },
+          {
+            "id": "auth-form",
+            "type": "Form",
+            "props": {
+              "workflow": "login",
+              "submitLabel": "Sign in",
+              "fields": [
+                { "kind": "email",    "name": "email",    "label": "Email",    "required": true,  "placeholder": "you@company.com" },
+                { "kind": "text",     "name": "password", "label": "Password", "required": true,  "placeholder": "Enter your password" },
+                { "kind": "checkbox", "name": "remember", "label": "Remember me" }
+              ]
+            }
+          },
+          {
+            "id": "social-row",
+            "type": "Row",
+            "props": { "gap": "tokens.spacing.semantic.card" },
+            "children": [
+              { "id": "google-login",   "type": "Button", "props": { "label": "Continue with Google",   "variant": "secondary", "icon": "chrome",   "iconPosition": "left" } },
+              { "id": "facebook-login", "type": "Button", "props": { "label": "Continue with Facebook", "variant": "secondary", "icon": "facebook", "iconPosition": "left" } }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "auth-illustration-pane",
+        "type": "Section",
+        "props": {
+          "variant": "split",
+          "illustration": { "slug": "running-athlete", "alt": "Welcome illustration" }
+        },
+        "children": []
+      }
+    ]
+  }
+}

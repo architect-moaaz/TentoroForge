@@ -1,0 +1,379 @@
+{
+  "$schema_version": "1",
+  "categories": [
+    { "id": "home",     "label": "Home / dashboard",   "recipes": 10 },
+    { "id": "list",     "label": "List / browse",       "recipes": 6 },
+    { "id": "detail",   "label": "Detail",              "recipes": 5 },
+    { "id": "form",     "label": "Form",                "recipes": 5 },
+    { "id": "flow",     "label": "Flow",                "recipes": 4 },
+    { "id": "system",   "label": "System / edge",       "recipes": 6 },
+    { "id": "workflow", "label": "Workflow",            "recipes": 4 },
+    { "id": "location", "label": "Location-primary",    "recipes": 4 },
+    { "id": "learning", "label": "Learning / practice", "recipes": 3 },
+    { "id": "calendar", "label": "Time / calendar",     "recipes": 3 }
+  ],
+
+  "recipes": {
+
+    "member_home": {
+      "category": "home",
+      "label": "Your day at [service]",
+      "purpose": "For a returning member of a recurring service — yoga studio, gym, salon, coworking, subscription box, fitness app. Opens with the next moment they care about.",
+      "personas": ["member", "subscriber", "returning_user"],
+      "anchors": ["pinned_moment_hero", "vitals_in_context", "scan_strip", "recs_rail_reasoned", "community_pulse", "sticky_primary_cta"]
+    },
+    "operator_console": {
+      "category": "home",
+      "label": "Ops floor · now",
+      "purpose": "For a person running live operations right now — dispatcher, charge nurse, restaurant expediter, network operator. Density is a feature. Silence is broken by alerts.",
+      "personas": ["dispatcher", "operator", "charge_nurse", "expediter", "network_operator"],
+      "anchors": ["attention_queue_hero", "sla_vitals_strip", "live_event_log", "team_status_board", "shift_metrics_rail", "emergency_action_rail"]
+    },
+    "creator_workspace": {
+      "category": "home",
+      "label": "Studio · today's draft",
+      "purpose": "For someone making a thing — writer, designer, video editor, PM drafting a spec. The current work fills the screen; navigation and metrics stay ambient.",
+      "personas": ["writer", "designer", "editor", "creator", "pm"],
+      "anchors": ["draft_focus_hero", "inventory_rail", "ambient_metric_row", "next_actions_list", "recent_activity_feed", "publish_cta"]
+    },
+    "manager_overview": {
+      "category": "home",
+      "label": "Team pulse",
+      "purpose": "For someone accountable for a group — sales manager, school principal, engineering lead. Opens with the team's state, not the manager's tasks.",
+      "personas": ["manager", "principal", "lead", "director"],
+      "anchors": ["team_glance_hero", "priorities_strip", "calendar_week", "escalations_queue", "recognition_feed"]
+    },
+    "field_worker_today": {
+      "category": "home",
+      "label": "Route",
+      "purpose": "For someone doing physical work in the world — delivery driver, technician, home-health worker, inspector. Big targets, high contrast, one-thing-at-a-time.",
+      "personas": ["driver", "technician", "field_worker", "inspector"],
+      "anchors": ["next_job_hero", "route_strip", "job_checklist", "team_comms_thread", "completion_capture", "emergency_call_button"]
+    },
+    "shopper_home": {
+      "category": "home",
+      "label": "For you",
+      "purpose": "For a browsing customer — commerce, marketplace, catalog. Opens with a curated moment and reasons-to-return.",
+      "personas": ["shopper", "customer", "browser"],
+      "anchors": ["featured_moment_hero", "reasons_to_return_row", "trending_rail", "taste_recs_rail", "brand_story_pulse", "cart_cta"]
+    },
+    "learner_home": {
+      "category": "home",
+      "label": "Continue",
+      "purpose": "For someone on a learning journey — language app, cooking course, MOOC, professional cert. Opens with resume-where-left-off.",
+      "personas": ["learner", "student", "trainee"],
+      "anchors": ["resume_hero", "progress_vitals", "up_next_rail", "peer_wins_feed", "discovery_rail"]
+    },
+    "analyst_workspace": {
+      "category": "home",
+      "label": "Read",
+      "purpose": "For someone interpreting data for others — marketing analyst, ops analyst, journalist, researcher. Headline metric with a sentence of narrative, then drill-downs.",
+      "personas": ["analyst", "researcher", "journalist"],
+      "anchors": ["narrative_headline", "trend_chart_annotated", "segment_breakdown", "saved_views_strip", "anomaly_feed", "share_export_cta"]
+    },
+    "patron_events": {
+      "category": "home",
+      "label": "On the calendar",
+      "purpose": "For someone who buys tickets, follows artists, attends events — venue, sports team, festival, theater.",
+      "personas": ["patron", "fan", "member_venue"],
+      "anchors": ["next_event_hero", "calendar_strip", "following_rail", "discovery_rail", "venue_pulse"]
+    },
+    "citizen_service": {
+      "category": "home",
+      "label": "Your status",
+      "purpose": "For someone interacting with a public service — permit, benefit, license, tax, court date. Opens with 'here is where your case is', never a form dashboard.",
+      "personas": ["citizen", "applicant", "petitioner"],
+      "anchors": ["case_status_hero", "milestone_strip", "document_checklist", "plain_language_notice_feed", "single_next_action_cta"]
+    },
+
+    "catalog_grid": {
+      "category": "list",
+      "label": "Browse the catalog",
+      "purpose": "For image-primary browsing — shopping catalog, media library, portfolio, template gallery. Cards are the unit; text is subordinate.",
+      "personas": ["shopper", "browser", "curator"],
+      "anchors": ["filter_search_bar", "refinement_chip_row", "item_card_grid", "pagination_or_infinite"]
+    },
+    "admin_table": {
+      "category": "list",
+      "label": "All [records]",
+      "purpose": "For dense-record management — invoices, users, orders, tickets. Sortable columns, bulk selection, row action menus.",
+      "personas": ["admin", "ops_lead", "analyst"],
+      "anchors": ["bulk_action_header", "filter_chip_row", "sortable_table", "row_action_menu", "pagination_footer"]
+    },
+    "kanban_board": {
+      "category": "list",
+      "label": "By status",
+      "purpose": "For work-in-flight visualisation — deals, candidates, tickets, tasks. Columns are statuses; cards flow across.",
+      "personas": ["salesperson", "recruiter", "pm", "support_lead"],
+      "anchors": ["board_header", "status_column", "draggable_card", "add_card_button", "board_filter_rail"]
+    },
+    "timeline_stream": {
+      "category": "list",
+      "label": "What's happening",
+      "purpose": "For chronological activity — social feed, notification list, audit log, event stream. Grouped by day, newest first.",
+      "personas": ["any"],
+      "anchors": ["stream_filter_row", "day_group_header", "activity_item", "load_more_cta", "unread_state_pill"]
+    },
+    "map_list": {
+      "category": "list",
+      "label": "On the map",
+      "purpose": "For geo-anchored listings — rentals, jobs near you, store locator. List on one side, map on the other; selection syncs.",
+      "personas": ["shopper", "job_seeker", "browser_geo"],
+      "anchors": ["geo_search_bar", "list_pane", "map_canvas", "pin_marker", "selection_sync"]
+    },
+    "search_results": {
+      "category": "list",
+      "label": "Results for [query]",
+      "purpose": "For universal or cross-entity search. Mixed result types with type badges. Facets on the side. Empty-state helper when nothing matches.",
+      "personas": ["any"],
+      "anchors": ["query_header", "facet_rail", "mixed_result_row", "type_badge", "empty_search_helper"]
+    },
+
+    "product_detail": {
+      "category": "detail",
+      "label": "This item",
+      "purpose": "For anything for sale — commerce, marketplace, ticketing. Gallery is huge. Price stack and variant picker are close. Primary CTA is unmissable.",
+      "personas": ["shopper", "customer"],
+      "anchors": ["image_gallery", "price_stack", "variant_picker", "primary_purchase_cta", "description_block", "specs_table", "reviews_feed", "related_rail"]
+    },
+    "record_detail": {
+      "category": "detail",
+      "label": "This [record]",
+      "purpose": "For an admin/CRM record — a contact, an invoice, a ticket, a case file. Header carries key metadata + status; body has tabs.",
+      "personas": ["admin", "csr", "ops"],
+      "anchors": ["record_header", "status_pill", "primary_tabs", "content_pane", "related_sidebar", "action_menu"]
+    },
+    "profile_public": {
+      "category": "detail",
+      "label": "About this person",
+      "purpose": "For a person's public presence — user profile, artist page, author page, teacher spotlight.",
+      "personas": ["visitor", "follower"],
+      "anchors": ["profile_cover_hero", "avatar_overlap", "bio_stats_row", "follow_cta", "profile_tabs", "featured_content_grid"]
+    },
+    "article_reader": {
+      "category": "detail",
+      "label": "This story",
+      "purpose": "For long-form reading — blog post, news article, docs page, help article. Typography is the design.",
+      "personas": ["reader"],
+      "anchors": ["article_headline", "byline_meta", "hero_media", "prose_body", "reaction_bar", "related_articles"]
+    },
+    "media_player": {
+      "category": "detail",
+      "label": "Watch / listen",
+      "purpose": "For video, podcast, audio class. The player is the whole point — biggest surface, minimal chrome.",
+      "personas": ["viewer", "listener"],
+      "anchors": ["media_viewport", "media_meta_row", "up_next_rail", "description_or_transcript", "related_media_grid"]
+    },
+
+    "create_entity": {
+      "category": "form",
+      "label": "New [thing]",
+      "purpose": "For a fresh record. All fields blank, grouped by section. Sticky footer with cancel + submit. Required marks. Live validation.",
+      "personas": ["any_authenticated"],
+      "anchors": ["form_header", "field_group", "form_field", "section_divider", "submit_bar_sticky"]
+    },
+    "edit_entity": {
+      "category": "form",
+      "label": "Edit [thing]",
+      "purpose": "Same bones as create but fields pre-filled, header names the record, footer adds discard/delete. Dirty-state tracking.",
+      "personas": ["record_owner", "admin"],
+      "anchors": ["form_header_named", "field_group", "form_field", "section_divider", "save_discard_delete_bar", "dirty_state_indicator"]
+    },
+    "wizard_multistep": {
+      "category": "form",
+      "label": "Guided flow",
+      "purpose": "For long forms broken into steps — application, tax filing, complex booking. Step indicator top, one stage at a time.",
+      "personas": ["applicant", "user"],
+      "anchors": ["step_indicator", "step_content_pane", "step_nav_bar", "progress_percent", "save_and_exit_link"]
+    },
+    "settings_tabbed": {
+      "category": "form",
+      "label": "Your settings",
+      "purpose": "For configuration with categories — account, notifications, integrations, billing. Vertical tab rail, per-tab save.",
+      "personas": ["account_owner", "admin"],
+      "anchors": ["settings_tab_rail", "active_tab_content", "per_tab_save_bar", "unsaved_changes_warning"]
+    },
+    "filter_builder": {
+      "category": "form",
+      "label": "Refine",
+      "purpose": "For advanced query construction — saved reports, complex search, list refinement. Stack of constraint rows; live preview count.",
+      "personas": ["analyst", "power_user"],
+      "anchors": ["constraint_stack", "add_constraint_button", "live_preview_count", "save_and_apply_bar"]
+    },
+
+    "onboarding": {
+      "category": "flow",
+      "label": "Get started",
+      "purpose": "For first-time user setup. Welcome + why. Progress dots. Skippable steps. Ends with a first-value moment.",
+      "personas": ["new_user"],
+      "anchors": ["welcome_hero", "progress_dots", "onboarding_step", "skip_link", "first_value_moment"]
+    },
+    "checkout": {
+      "category": "flow",
+      "label": "Almost done",
+      "purpose": "For commerce checkout. Order summary visible throughout. Shipping → payment → review. Trust markers around pay button.",
+      "personas": ["shopper", "customer"],
+      "anchors": ["checkout_progress", "order_summary_sidebar", "checkout_stage", "payment_form", "trust_markers", "place_order_cta"]
+    },
+    "approval": {
+      "category": "flow",
+      "label": "Your call",
+      "purpose": "For a single approve/reject decision — expense, PR, leave request, content moderation. Two verbs, no clutter.",
+      "personas": ["approver", "manager"],
+      "anchors": ["request_context_header", "request_evidence_body", "approve_reject_bar", "decision_comment", "policy_context_side"]
+    },
+    "upload_and_process": {
+      "category": "flow",
+      "label": "Working on it",
+      "purpose": "For upload-then-process flows — scan a product, OCR a doc, transcribe audio, run a batch.",
+      "personas": ["user_uploader"],
+      "anchors": ["drop_zone", "processing_status_strip", "live_progress_bar", "result_preview_pane", "next_action_cta"]
+    },
+
+    "empty_state": {
+      "category": "system",
+      "label": "Nothing yet",
+      "purpose": "For a list or dashboard with zero rows. Illustration + one honest sentence + the CTA that would populate this.",
+      "personas": ["any"],
+      "anchors": ["empty_illustration", "empty_headline", "empty_body", "empty_primary_cta"]
+    },
+    "error_page": {
+      "category": "system",
+      "label": "Something broke",
+      "purpose": "For 500/generic failure. Plain-language explanation. Recovery actions. No blame; no theatrics.",
+      "personas": ["any"],
+      "anchors": ["error_mark", "error_headline", "error_explanation", "retry_button", "secondary_recovery_row"]
+    },
+    "offline": {
+      "category": "system",
+      "label": "You're offline",
+      "purpose": "For lost network state. Signal icon. What still works (cached content). Retry when back.",
+      "personas": ["any"],
+      "anchors": ["offline_icon", "offline_message", "cached_content_note", "retry_button", "queued_actions_list"]
+    },
+    "success_confirm": {
+      "category": "system",
+      "label": "Done",
+      "purpose": "For after a successful action. Confirmation + what happens next + one clear next-step CTA.",
+      "personas": ["any"],
+      "anchors": ["success_mark", "confirmation_message", "what_happens_next", "next_step_cta", "confirmation_channel_note"]
+    },
+    "loading_wait": {
+      "category": "system",
+      "label": "Working…",
+      "purpose": "For long-running server operations — export, batch job, AI inference. Progress + status + ETA + cancel.",
+      "personas": ["any"],
+      "anchors": ["progress_indicator_large", "status_line", "eta_line", "cancel_option"]
+    },
+    "permission_denied": {
+      "category": "system",
+      "label": "Not for you",
+      "purpose": "For 403/access-denied. Lock icon. Why blocked (role, plan, invite-only). Path forward.",
+      "personas": ["any"],
+      "anchors": ["lock_icon", "denial_headline", "denial_reason", "request_access_cta", "nav_alternatives"]
+    },
+
+    "task_inbox": {
+      "category": "workflow",
+      "label": "Your tasks",
+      "purpose": "For a user's queue of assigned work — approvals, form fills, reviews. Count in header. Overdue pinned to top.",
+      "personas": ["approver", "assignee", "worker"],
+      "anchors": ["task_count_header", "task_filter_row", "task_row", "urgency_pill", "overdue_pin"]
+    },
+    "task_detail": {
+      "category": "workflow",
+      "label": "This task",
+      "purpose": "For a single user_task from a workflow. Task context header. Complete/reject bar sticky. History sidebar for audit.",
+      "personas": ["approver", "assignee"],
+      "anchors": ["task_context_header", "task_content_pane", "task_complete_bar", "task_history_sidebar", "reassign_action"]
+    },
+    "workflow_run_trace": {
+      "category": "workflow",
+      "label": "Run trace",
+      "purpose": "For debugging/audit of a workflow execution. Every node's status + timing. Inputs/outputs per node.",
+      "personas": ["admin", "developer", "support"],
+      "anchors": ["run_header", "node_timeline", "per_node_io_pane", "run_control_bar", "log_stream_toggle"]
+    },
+    "notification_center": {
+      "category": "workflow",
+      "label": "Notifications",
+      "purpose": "For the all-notifications view — mentions, updates, system messages. Category tabs, grouped by day.",
+      "personas": ["any"],
+      "anchors": ["category_tabs", "notification_item", "read_state_pill", "mark_all_read_bar", "jump_to_source_link"]
+    },
+
+    "hail_ride_map": {
+      "category": "location",
+      "label": "Where to?",
+      "purpose": "For the request-a-ride/delivery start screen. Full-screen map with user location pinned, destination-search sheet, fare estimate.",
+      "personas": ["rider", "requester", "customer_geo"],
+      "anchors": ["full_map_canvas", "me_pin", "destination_search_sheet", "fare_estimate_row", "confirm_cta", "service_type_selector"]
+    },
+    "ride_in_progress": {
+      "category": "location",
+      "label": "On the way",
+      "purpose": "For the live-tracking state during a ride/delivery. Map with driver moving. ETA prominent. Message/call one tap away.",
+      "personas": ["rider", "customer_in_transit"],
+      "anchors": ["live_tracking_map", "driver_courier_card", "eta_prominent", "contact_action_row", "share_trip_button", "cancel_ride_link"]
+    },
+    "live_tracking_status": {
+      "category": "location",
+      "label": "Where's my order",
+      "purpose": "For package/shipment/delivery tracking without a live driver — Amazon 'arriving today', food delivery countdown.",
+      "personas": ["customer_awaiting"],
+      "anchors": ["arrival_headline", "stage_timeline", "carrier_meta_row", "location_snapshot_map", "notify_me_toggle", "reroute_or_hold_action"]
+    },
+    "service_launcher": {
+      "category": "location",
+      "label": "What do you need",
+      "purpose": "For superapp home — one app, many verticals. Ride, food, package, groceries. Yango, Grab, DoorDash bundles.",
+      "personas": ["superapp_user"],
+      "anchors": ["greeting_context_hero", "service_tile_grid", "promoted_service_tile", "recent_activity_strip", "notification_pill"]
+    },
+
+    "lesson_viewer": {
+      "category": "learning",
+      "label": "Watch and learn",
+      "purpose": "For a single lesson — video + transcript + notes + next-lesson. Player dominates. Progress bar remembers position.",
+      "personas": ["learner", "student"],
+      "anchors": ["media_viewport_lesson", "lesson_progress_stepper", "transcript_or_notes_pane", "up_next_rail", "mark_complete_cta", "resume_position"]
+    },
+    "exercise_workflow": {
+      "category": "learning",
+      "label": "Try it",
+      "purpose": "For a practice exercise — question, answer options, submit, correctness feedback, next. Duolingo, Khan practice.",
+      "personas": ["learner", "student"],
+      "anchors": ["exercise_progress_header", "streak_pill", "question_stem", "answer_option_row", "correctness_feedback", "hint_action", "next_cta"]
+    },
+    "certificate_page": {
+      "category": "learning",
+      "label": "You did it",
+      "purpose": "For the completion moment — certificate, badge, milestone. Ceremony is the point: medal centered, name, course, date.",
+      "personas": ["learner", "graduate"],
+      "anchors": ["celebration_backdrop", "medal_or_badge", "learner_name", "course_name", "completion_date", "share_row", "download_pdf_button"]
+    },
+
+    "resource_calendar": {
+      "category": "calendar",
+      "label": "Who's when",
+      "purpose": "For rows-of-resources × columns-of-time with booking bars. Team leave, meeting rooms, hospital beds, interviewer availability.",
+      "personas": ["manager", "admin", "scheduler"],
+      "anchors": ["time_axis_header", "resource_row", "booking_bar", "today_marker", "book_cta", "legend_key", "zoom_range_toggle"]
+    },
+    "timesheet_grid": {
+      "category": "calendar",
+      "label": "Log your hours",
+      "purpose": "For matrix entry — rows are projects/tasks, columns are days, cells are hours. Classic timesheet.",
+      "personas": ["employee", "contractor", "worker"],
+      "anchors": ["period_header", "project_row", "day_hour_cell", "row_total", "grand_total", "submit_bar", "copy_last_week_link"]
+    },
+    "event_calendar_month": {
+      "category": "calendar",
+      "label": "This month",
+      "purpose": "For the traditional 7-column month grid with event dots/bars. Google-Calendar-style.",
+      "personas": ["any"],
+      "anchors": ["month_year_header", "weekday_row", "day_cell", "event_dot_or_bar", "today_marker", "view_switcher", "create_event_cta"]
+    }
+
+  }
+}

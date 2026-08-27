@@ -1,0 +1,23 @@
+{
+  "scores": {
+    "visualPolish": 9, "domainFeel": 8, "informationDensity": 8,
+    "componentCoherence": 9, "brandReflection": 8
+  },
+  "compositeScore": 8.4,
+  "pass": true,
+  "topIssues": [
+    {
+      "severity": "low",
+      "axis": "informationDensity",
+      "nodeIdHint": "advisor-grid",
+      "issue": "Cards show 4 fields each — could carry a 5th field without feeling crowded.",
+      "suggestion": "Add a small Badge bound to {{item.monthChange}} with a +/- arrow."
+    }
+  ],
+  "strengths": [
+    "Hero gradient + typography hierarchy is portfolio-tier",
+    "MetricTile row with deltas + trends communicates motion at a glance",
+    "Mobile composition stacks cleanly with no orphan elements"
+  ],
+  "designerApprovalRecommended": false
+}

@@ -1,0 +1,23 @@
+{
+  "capability": "background_tasks",
+  "permissions": {
+    "ios": {
+      "UIBackgroundModes": ["fetch", "processing"]
+    },
+    "android": [
+      "android.permission.WAKE_LOCK",
+      "android.permission.FOREGROUND_SERVICE"
+    ],
+    "expo_plugins": ["expo-background-fetch", "expo-task-manager"]
+  },
+  "native_imports": {
+    "expo": ["expo-background-fetch", "expo-task-manager"],
+    "web": []
+  },
+  "provider": {
+    "template_path": "providers/BackgroundTasksProvider.tsx.tmpl",
+    "wrap_at": "root",
+    "hook_names": ["useBackgroundTask", "useRegisteredTasks"]
+  },
+  "integration_keys": []
+}

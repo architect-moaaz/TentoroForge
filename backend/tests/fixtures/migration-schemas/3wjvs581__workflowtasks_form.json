@@ -1,0 +1,527 @@
+{
+  "schemaVersion": "2",
+  "id": "workflow-tasks/new",
+  "route": "/workflow-tasks/new",
+  "layout": "DashboardLayout",
+  "meta": {
+    "title": "Create Workflow Task",
+    "description": "Assign a new task in the approval workflow"
+  },
+  "dataSources": [
+    {
+      "name": "employees",
+      "entity": "Employee",
+      "op": "list"
+    },
+    {
+      "name": "leaveRequests",
+      "entity": "LeaveRequest",
+      "op": "list",
+      "filter": {
+        "status": "pending_approval"
+      }
+    },
+    {
+      "name": "departments",
+      "entity": "Department",
+      "op": "list"
+    }
+  ],
+  "root": {
+    "id": "page-root",
+    "type": "Container",
+    "props": {
+      "maxWidth": "xl"
+    },
+    "children": [
+      {
+        "id": "page-stack",
+        "type": "Stack",
+        "props": {
+          "direction": "vertical",
+          "gap": "tokens.spacing.semantic.section"
+        },
+        "style": {
+          "padding": "tokens.spacing.semantic.page"
+        },
+        "children": [
+          {
+            "id": "task-hero",
+            "type": "Hero",
+            "props": {
+              "eyebrow": "WORKFLOW MANAGEMENT",
+              "headline": "Create Workflow Task",
+              "subhead": "Assign a task to an employee as part of the leave approval workflow. Tasks track individual steps that must be completed before a request can proceed.",
+              "layout": "stacked",
+              "ctas": []
+            },
+            "style": {
+              "background": {
+                "type": "gradient",
+                "from": "tokens.color.accent.50",
+                "to": "tokens.color.surface.0",
+                "angle": 135
+              },
+              "padding": "tokens.spacing.semantic.section",
+              "radius": "tokens.radius.lg",
+              "motion": "fade-up"
+            }
+          },
+          {
+            "id": "section-task-details",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Task Details",
+              "subtitle": "Define what needs to be done and its priority level"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "task-details-stack",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "field-title",
+                    "type": "Input",
+                    "props": {
+                      "name": "title",
+                      "label": "Task Title",
+                      "type": "text",
+                      "placeholder": "e.g. Review leave request documentation",
+                      "validators": {
+                        "required": true,
+                        "message": "Task title is required"
+                      }
+                    }
+                  },
+                  {
+                    "id": "field-description",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "description",
+                      "label": "Description",
+                      "rows": 4,
+                      "placeholder": "Provide detailed instructions for completing this task...",
+                      "validators": {
+                        "required": true
+                      }
+                    }
+                  },
+                  {
+                    "id": "type-priority-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-type",
+                        "type": "Select",
+                        "props": {
+                          "name": "type",
+                          "label": "Task Type",
+                          "options": [
+                            {
+                              "value": "approval",
+                              "label": "Approval Required"
+                            },
+                            {
+                              "value": "review",
+                              "label": "Document Review"
+                            },
+                            {
+                              "value": "verification",
+                              "label": "Information Verification"
+                            },
+                            {
+                              "value": "notification",
+                              "label": "Notification/Communication"
+                            },
+                            {
+                              "value": "documentation",
+                              "label": "Documentation Update"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-priority",
+                        "type": "Select",
+                        "props": {
+                          "name": "priority",
+                          "label": "Priority",
+                          "options": [
+                            {
+                              "value": "low",
+                              "label": "Low"
+                            },
+                            {
+                              "value": "medium",
+                              "label": "Medium"
+                            },
+                            {
+                              "value": "high",
+                              "label": "High"
+                            },
+                            {
+                              "value": "urgent",
+                              "label": "Urgent"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-assignment",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Task Assignment",
+              "subtitle": "Who should complete this task and when"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "assignment-stack",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "field-assignee",
+                    "type": "Select",
+                    "props": {
+                      "name": "assigneeId",
+                      "label": "Assigned To",
+                      "options": [
+                        {
+                          "value": "sarah-johnson",
+                          "label": "Sarah Johnson - HR Manager"
+                        },
+                        {
+                          "value": "marcus-chen",
+                          "label": "Marcus Chen - Engineering Manager"
+                        },
+                        {
+                          "value": "priya-nair",
+                          "label": "Priya Nair - Department Head"
+                        },
+                        {
+                          "value": "tom-bakker",
+                          "label": "Tom Bakker - Senior Manager"
+                        }
+                      ],
+                      "validators": {
+                        "required": true
+                      }
+                    }
+                  },
+                  {
+                    "id": "dates-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-due-date",
+                        "type": "DatePicker",
+                        "props": {
+                          "name": "dueDate",
+                          "label": "Due Date",
+                          "min": "2026-05-08",
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-estimated-hours",
+                        "type": "Input",
+                        "props": {
+                          "name": "estimatedHours",
+                          "label": "Estimated Hours",
+                          "type": "number",
+                          "placeholder": "2",
+                          "validators": {
+                            "min": 0.5,
+                            "max": 40
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-context",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Task Context",
+              "subtitle": "What this task relates to and current status"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "context-stack",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "field-related-request",
+                    "type": "Select",
+                    "props": {
+                      "name": "relatedEntityId",
+                      "label": "Related Leave Request",
+                      "options": [
+                        {
+                          "value": "lr-001",
+                          "label": "LR-001: Sarah Johnson - Annual Leave"
+                        },
+                        {
+                          "value": "lr-002",
+                          "label": "LR-002: Marcus Chen - Sick Leave"
+                        },
+                        {
+                          "value": "lr-003",
+                          "label": "LR-003: Priya Nair - Maternity Leave"
+                        }
+                      ],
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  },
+                  {
+                    "id": "status-department-row",
+                    "type": "Row",
+                    "props": {
+                      "gap": "tokens.spacing.4",
+                      "align": "start"
+                    },
+                    "children": [
+                      {
+                        "id": "field-status",
+                        "type": "Select",
+                        "props": {
+                          "name": "status",
+                          "label": "Initial Status",
+                          "options": [
+                            {
+                              "value": "pending",
+                              "label": "Pending - Not Yet Started"
+                            },
+                            {
+                              "value": "in_progress",
+                              "label": "In Progress - Currently Active"
+                            }
+                          ],
+                          "validators": {
+                            "required": true
+                          }
+                        }
+                      },
+                      {
+                        "id": "field-department-context",
+                        "type": "Select",
+                        "props": {
+                          "name": "departmentId",
+                          "label": "Department Context",
+                          "options": [
+                            {
+                              "value": "hr",
+                              "label": "Human Resources"
+                            },
+                            {
+                              "value": "engineering",
+                              "label": "Engineering"
+                            },
+                            {
+                              "value": "finance",
+                              "label": "Finance"
+                            },
+                            {
+                              "value": "legal",
+                              "label": "Legal"
+                            }
+                          ],
+                          "validators": {
+                            "required": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "section-notes",
+            "type": "Section",
+            "props": {
+              "variant": "plain",
+              "title": "Additional Information",
+              "subtitle": "Any special instructions or notes for the assignee"
+            },
+            "style": {
+              "background": {
+                "type": "solid",
+                "value": "tokens.color.surface.0"
+              },
+              "padding": "tokens.spacing.8",
+              "radius": "tokens.radius.lg",
+              "shadow": "tokens.shadow.sm",
+              "motion": "fade-up"
+            },
+            "children": [
+              {
+                "id": "notes-stack",
+                "type": "Stack",
+                "props": {
+                  "direction": "vertical",
+                  "gap": "tokens.spacing.6"
+                },
+                "children": [
+                  {
+                    "id": "field-notes",
+                    "type": "Textarea",
+                    "props": {
+                      "name": "notes",
+                      "label": "Internal Notes",
+                      "rows": 3,
+                      "placeholder": "Any additional context or special instructions for the assignee...",
+                      "validators": {
+                        "required": false
+                      }
+                    }
+                  },
+                  {
+                    "id": "notification-options",
+                    "type": "Stack",
+                    "props": {
+                      "direction": "vertical",
+                      "gap": "tokens.spacing.3"
+                    },
+                    "children": [
+                      {
+                        "id": "field-send-notification",
+                        "type": "Checkbox",
+                        "props": {
+                          "name": "sendNotification",
+                          "label": "Send email notification to assignee when task is created"
+                        }
+                      },
+                      {
+                        "id": "field-reminder",
+                        "type": "Checkbox",
+                        "props": {
+                          "name": "enableReminder",
+                          "label": "Send reminder email 24 hours before due date"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "form-actions",
+            "type": "Row",
+            "props": {
+              "justify": "end",
+              "align": "center",
+              "gap": "tokens.spacing.4"
+            },
+            "style": {
+              "padding": "tokens.spacing.6"
+            },
+            "children": [
+              {
+                "id": "btn-cancel",
+                "type": "Button",
+                "props": {
+                  "label": "Cancel",
+                  "variant": "ghost",
+                  "navigate": "/workflow-tasks"
+                }
+              },
+              {
+                "id": "btn-save-draft",
+                "type": "Button",
+                "props": {
+                  "label": "Save as Draft",
+                  "variant": "secondary",
+                  "workflow": "saveWorkflowTaskDraft"
+                }
+              },
+              {
+                "id": "btn-create",
+                "type": "Button",
+                "props": {
+                  "label": "Create Task",
+                  "variant": "primary",
+                  "workflow": "createWorkflowTask"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

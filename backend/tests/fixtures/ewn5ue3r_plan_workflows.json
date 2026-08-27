@@ -1,0 +1,503 @@
+{
+  "AssessmentReminderWorkflow": {
+    "name": "AssessmentReminderWorkflow",
+    "description": "Scheduled daily to find assessment slots occurring within 24 hours and send reminder notifications to both applicants and assessors.",
+    "trigger": "schedule",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "query_upcoming_slots",
+        "type": "trigger",
+        "config": {
+          "cron": "0 7 * * *",
+          "triggerType": "schedule"
+        }
+      },
+      {
+        "id": "query_upcoming_slots",
+        "next": "send_applicant_reminder",
+        "type": "action",
+        "config": {
+          "table": "assessment_slots",
+          "filter": "scheduledAt BETWEEN NOW() AND NOW() + INTERVAL '24 hours' AND status = 'confirmed'",
+          "actionType": "db_query"
+        }
+      },
+      {
+        "id": "send_applicant_reminder",
+        "next": "send_assessor_reminder",
+        "type": "action",
+        "config": {
+          "to": "{{applicantEmail}}",
+          "template": "Reminder: Your cabin crew assessment is tomorrow at {{scheduledAt}}, {{venue}}. Please bring a valid passport and passport-sized photos.",
+          "actionType": "send_email"
+        }
+      },
+      {
+        "id": "send_assessor_reminder",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "Reminder: You have an assessment session tomorrow at {{scheduledAt}} for {{driveTitle}}. Applicant: {{applicantName}}.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  },
+  "ShortlistingWorkflow": {
+    "name": "ShortlistingWorkflow",
+    "description": "Triggered when a recruiter clicks Shortlist or Reject on an application. Updates application stage and status, sends a notification email to the applicant, and logs the decision.",
+    "trigger": "api_event",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "check_decision",
+        "type": "trigger",
+        "config": {
+          "triggerType": "user_input"
+        }
+      },
+      {
+        "id": "check_decision",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "decision == 'shortlist'"
+        },
+        "branches": {
+          "true": "update_shortlisted",
+          "false": "update_rejected"
+        }
+      },
+      {
+        "id": "update_shortlisted",
+        "next": "email_shortlisted",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "fields": [
+            "status",
+            "stage",
+            "shortlistedAt",
+            "shortlistedById"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "email_shortlisted",
+        "next": "notify_team_shortlisted",
+        "type": "action",
+        "config": {
+          "to": "{{applicantEmail}}",
+          "template": "Congratulations! You have been shortlisted for the {{driveTitle}} cabin crew assessment. Further details will follow.",
+          "actionType": "send_email"
+        }
+      },
+      {
+        "id": "notify_team_shortlisted",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "{{applicantName}} has been shortlisted for {{driveTitle}}.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "update_rejected",
+        "next": "email_rejected",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "fields": [
+            "status",
+            "stage",
+            "rejectionReason"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "email_rejected",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "to": "{{applicantEmail}}",
+          "template": "Thank you for your application for {{driveTitle}}. After careful review we will not be progressing your application at this time.",
+          "actionType": "send_email"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  },
+  "FeedbackSubmissionWorkflow": {
+    "name": "FeedbackSubmissionWorkflow",
+    "description": "Triggered when an assessor submits the structured feedback form. Persists feedback, computes a final recommendation, updates the application stage, and notifies the lead recruiter.",
+    "trigger": "api_event",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "insert_feedback",
+        "type": "trigger",
+        "config": {
+          "triggerType": "user_input"
+        }
+      },
+      {
+        "id": "insert_feedback",
+        "next": "update_slot_status",
+        "type": "action",
+        "config": {
+          "table": "interview_feedback",
+          "fields": [
+            "applicationId",
+            "assessmentSlotId",
+            "assessorId",
+            "safetyAwareness",
+            "customerService",
+            "teamwork",
+            "communication",
+            "appearance",
+            "overallScore",
+            "recommendation",
+            "comments"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "update_slot_status",
+        "next": "update_application_assessed",
+        "type": "action",
+        "config": {
+          "table": "assessment_slots",
+          "fields": [
+            "status"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "update_application_assessed",
+        "next": "check_recommendation",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "fields": [
+            "stage",
+            "status"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "check_recommendation",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "recommendation == 'Hire'"
+        },
+        "branches": {
+          "true": "generate_offer_summary",
+          "false": "notify_recruiter_review"
+        }
+      },
+      {
+        "id": "generate_offer_summary",
+        "next": "notify_recruiter_hire",
+        "type": "action",
+        "config": {
+          "fields": [
+            "applicantName",
+            "driveTitle",
+            "overallScore",
+            "recommendation",
+            "comments"
+          ],
+          "template": "assessment_summary_report",
+          "actionType": "generate_document"
+        }
+      },
+      {
+        "id": "notify_recruiter_hire",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "{{applicantName}} is recommended for hire with an overall score of {{overallScore}}. Assessment summary report attached.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "notify_recruiter_review",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "Feedback submitted for {{applicantName}}. Recommendation: {{recommendation}}. Please review and take action.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  },
+  "AssessmentSchedulingWorkflow": {
+    "name": "AssessmentSchedulingWorkflow",
+    "description": "Triggered when a recruiter schedules an assessment slot for a shortlisted applicant. Creates an AssessmentSlot record, updates the application stage, and sends calendar confirmation to both the applicant and assessor.",
+    "trigger": "api_event",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "create_slot",
+        "type": "trigger",
+        "config": {
+          "triggerType": "user_input"
+        }
+      },
+      {
+        "id": "create_slot",
+        "next": "update_application_stage",
+        "type": "action",
+        "config": {
+          "table": "assessment_slots",
+          "fields": [
+            "recruitmentDriveId",
+            "applicationId",
+            "applicantId",
+            "scheduledAt",
+            "venue",
+            "assessorId",
+            "type",
+            "status"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "update_application_stage",
+        "next": "email_applicant",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "fields": [
+            "stage",
+            "status"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "email_applicant",
+        "next": "email_assessor",
+        "type": "action",
+        "config": {
+          "to": "{{applicantEmail}}",
+          "template": "Your assessment for {{driveTitle}} is confirmed on {{scheduledAt}} at {{venue}}. Please arrive 15 minutes early.",
+          "actionType": "send_email"
+        }
+      },
+      {
+        "id": "email_assessor",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "to": "{{assessorEmail}}",
+          "template": "You are assigned to assess {{applicantName}} on {{scheduledAt}} at {{venue}} for {{driveTitle}}.",
+          "actionType": "send_email"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  },
+  "CVParsingWorkflow": {
+    "name": "CVParsingWorkflow",
+    "description": "Triggered when a recruiter uploads a CV. Extracts structured applicant data using AI, persists it to the Applicant record, creates an Application record in Applied stage, and notifies the recruiter.",
+    "trigger": "api_event",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "extract_cv",
+        "type": "trigger",
+        "config": {
+          "triggerType": "user_input"
+        }
+      },
+      {
+        "id": "extract_cv",
+        "next": "upsert_applicant",
+        "type": "action",
+        "config": {
+          "prompt": "Extract applicant first name, last name, email, phone, nationality, date of birth, languages spoken, work experience summary, education, and physical attributes from the uploaded CV document.",
+          "actionType": "ai_extract"
+        }
+      },
+      {
+        "id": "upsert_applicant",
+        "next": "ai_score",
+        "type": "action",
+        "config": {
+          "table": "applicants",
+          "fields": [
+            "firstName",
+            "lastName",
+            "email",
+            "phone",
+            "nationality",
+            "dateOfBirth",
+            "cvUrl",
+            "parsedProfile"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "ai_score",
+        "next": "create_application",
+        "type": "action",
+        "config": {
+          "prompt": "Score this cabin crew applicant from 0 to 100 based on their parsed profile considering aviation experience, language skills, customer service background, and physical suitability. Return an integer score and a one-paragraph summary.",
+          "actionType": "ai_decide"
+        }
+      },
+      {
+        "id": "create_application",
+        "next": "notify_recruiter",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "fields": [
+            "applicantId",
+            "recruitmentDriveId",
+            "status",
+            "stage",
+            "aiScore",
+            "aiSummary"
+          ],
+          "actionType": "db_insert"
+        }
+      },
+      {
+        "id": "notify_recruiter",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "New application received and AI-scored. Applicant: {{firstName}} {{lastName}}, Score: {{aiScore}}.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  },
+  "DriveStatusWorkflow": {
+    "name": "DriveStatusWorkflow",
+    "description": "Triggered when a recruiter opens or closes a recruitment drive. Updates the drive status, and if closing, sends a summary notification with final applicant counts.",
+    "trigger": "api_event",
+    "steps": [
+      {
+        "id": "trigger",
+        "next": "check_action",
+        "type": "trigger",
+        "config": {
+          "triggerType": "user_input"
+        }
+      },
+      {
+        "id": "check_action",
+        "type": "exclusive_gateway",
+        "config": {
+          "condition": "action == 'close'"
+        },
+        "branches": {
+          "true": "update_drive_closed",
+          "false": "update_drive_open"
+        }
+      },
+      {
+        "id": "update_drive_closed",
+        "next": "query_final_counts",
+        "type": "action",
+        "config": {
+          "table": "recruitment_drives",
+          "fields": [
+            "status",
+            "closeDate"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "query_final_counts",
+        "next": "generate_drive_report",
+        "type": "action",
+        "config": {
+          "table": "applications",
+          "filter": "recruitmentDriveId = {{driveId}}",
+          "actionType": "db_query"
+        }
+      },
+      {
+        "id": "generate_drive_report",
+        "next": "notify_team_closed",
+        "type": "action",
+        "config": {
+          "fields": [
+            "driveTitle",
+            "totalApplicants",
+            "shortlisted",
+            "assessed",
+            "hired"
+          ],
+          "template": "drive_closure_report",
+          "actionType": "generate_document"
+        }
+      },
+      {
+        "id": "notify_team_closed",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "Recruitment drive '{{driveTitle}}' has been closed. Final report generated.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "update_drive_open",
+        "next": "notify_team_open",
+        "type": "action",
+        "config": {
+          "table": "recruitment_drives",
+          "fields": [
+            "status",
+            "openDate"
+          ],
+          "actionType": "db_update"
+        }
+      },
+      {
+        "id": "notify_team_open",
+        "next": "end",
+        "type": "action",
+        "config": {
+          "template": "Recruitment drive '{{driveTitle}}' is now open for applications.",
+          "actionType": "send_notification"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end"
+      }
+    ]
+  }
+}
