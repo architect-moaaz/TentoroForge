@@ -225,7 +225,8 @@ def show_turn(smith: Smith, turn: Any) -> None:
                 for node in r.blocked:
                     print(f"    blocked: {node}")
                 for node in r.failed:
-                    print(f"    failed:  {node}")
+                    why = getattr(r, "failed_because", {}).get(node, "")
+                    print(f"    failed:  {node}" + (f" — {why}" if why else ""))
 
     if turn.trace:
         print("\n  --- traceability (§18) ---")

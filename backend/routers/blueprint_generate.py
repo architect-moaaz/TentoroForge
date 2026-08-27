@@ -76,7 +76,11 @@ def _report_payload(report: Any) -> dict:
             for n in report.skipped
         ],
         "blocked": list(report.blocked),
-        "failed": list(report.failed),
+        "failed": [
+            {"node": n,
+             "why": getattr(report, "failed_because", {}).get(n, "")}
+            for n in report.failed
+        ],
     }
 
 
@@ -133,10 +137,18 @@ async def generate_via_blueprint(
             resumed = existing.is_file() and not req.fresh
             if resumed:
                 svc = BlueprintService.load(output_dir=str(output_dir))
-                # A resumed Blueprint keeps its own product description unless
-                # this request restates it; the request is the newer intent.
+                # A resumed Blueprint keeps its own description unless this
+                # request restates it; the request is the newer intent.
+                #
+                # It belongs on `application`, not `product` — `product` holds
+                # objectives, personas, terminology and capabilities and admits
+                # nothing else. Writing it to the wrong section poisoned the
+                # document with a field the contract refuses, and every resumed
+                # run then failed on the first validate: the requirements node
+                # died and all twenty-one behind it were skipped.
                 if req.description:
-                    svc.doc.setdefault("product", {})["description"] = req.description
+                    svc.doc.setdefault("application", {})["description"] = req.description
+                    svc.validate()   # never persist a document that will not load
                     svc.save()
             else:
                 svc = BlueprintService.create(

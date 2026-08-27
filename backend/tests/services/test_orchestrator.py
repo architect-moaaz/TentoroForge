@@ -714,3 +714,47 @@ def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
                  max_attempts=1, app_root="/tmp/forge-partial-test")
     assert "frontend" not in report.skipped, (
         "a partial page_layouts must not skip the projection behind it")
+
+
+def test_a_failed_node_records_why(svc):
+    """`failed: ["data_model"]` and nothing else made a rate limit and a
+    malformed envelope indistinguishable. Four nodes failed consecutively on
+    one live run and the report could not say whether the cause was transport
+    or content — the reason was being computed for the retry's feedback and
+    then discarded."""
+    def boom(spec):
+        raise TimeoutError("upstream timed out")
+
+    report = run(svc, boom, plan=["requirements"], max_attempts=1)
+    assert report.failed == ["requirements"]
+    assert "TimeoutError" in report.failed_because["requirements"]
+    assert "upstream timed out" in report.failed_because["requirements"]
+
+
+def test_a_rejected_proposal_records_the_contract_error(svc):
+    """A rejection is a different kind of failure from a transport fault, and
+    the report has to be able to tell them apart."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+
+    def bad_shape(spec):
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="pages", natural_key="p",
+                body={"name": "No route or purpose"},
+            )],
+        )
+
+    report = run(svc, bad_shape, plan=["page_contracts"], max_attempts=1)
+    assert report.failed == ["page_contracts"]
+    why = report.failed_because["page_contracts"]
+    assert "BlueprintInvalid" in why or "required" in why
+
+
+def test_the_reason_is_one_readable_line(svc):
+    def boom(spec):
+        raise RuntimeError("line one\nline two\n" + "x" * 900)
+
+    report = run(svc, boom, plan=["requirements"], max_attempts=1)
+    why = report.failed_because["requirements"]
+    assert "\n" not in why and len(why) <= 400

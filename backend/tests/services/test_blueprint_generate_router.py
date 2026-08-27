@@ -182,3 +182,35 @@ def test_the_router_resumes_by_default_and_reports_which_it_did():
     # `fresh` defaults to off, so the destructive path is never the default
     assert blueprint_generate.BlueprintGenerateRequest(
         description="x").fresh is False
+
+
+def test_a_resumed_description_goes_where_the_contract_allows(tmp_path):
+    """`product` holds objectives, personas, terminology and capabilities and
+    admits nothing else; the description belongs on `application`.
+
+    Writing it to the wrong section poisoned the document with a field the
+    contract refuses. `save()` does not validate, so it reached disk, and every
+    resumed run then failed on the first validate — the requirements node died
+    and all twenty-one nodes behind it were skipped.
+    """
+    from services.blueprint.service import BlueprintService
+
+    svc = _seed(tmp_path)
+    svc.doc.setdefault("application", {})["description"] = "restated intent"
+    svc.validate()          # the section the router writes to must be legal
+
+    svc.doc.setdefault("product", {})["description"] = "wrong section"
+    import pytest
+    with pytest.raises(Exception):
+        svc.validate()
+
+
+def test_the_router_validates_before_it_persists():
+    import inspect
+
+    from routers import blueprint_generate
+
+    src = inspect.getsource(blueprint_generate.generate_via_blueprint)
+    assert '"application", {})["description"]' in src
+    assert "svc.validate()" in src, (
+        "an invalid document must not reach disk — save() does not check")

@@ -595,6 +595,12 @@ class RunReport:
     #: ``skipped`` rather than folded into it so the list stays node keys a
     #: caller can test membership against.
     skipped_because: dict[str, str] = field(default_factory=dict)
+    #: Failed node -> why. The reason was already being computed and then
+    #: thrown away: the exception went into the retry's feedback and the report
+    #: recorded only a name, so a rate limit and a malformed envelope looked
+    #: identical. Four nodes failed consecutively on one run and there was
+    #: nothing in the output to tell a transport fault from a content one.
+    failed_because: dict[str, str] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
     change_requests: list = field(default_factory=list)
@@ -716,6 +722,11 @@ def run(
     return report
 
 
+def _reason(exc: Exception) -> str:
+    """One line naming what went wrong, kept short enough to read in a report."""
+    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+
+
 def _run_agent_subject(
     svc: BlueprintService,
     executor: Executor,
@@ -752,6 +763,7 @@ def _run_agent_subject(
             feedback = str(exc)
             if attempt == max_attempts:
                 report.failed.append(label)
+                report.failed_because[label] = _reason(exc)
                 return None
             continue
 
@@ -768,6 +780,7 @@ def _run_agent_subject(
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
                 report.failed.append(label)
+                report.failed_because[label] = _reason(exc)
                 return None
             continue
         if application.applied:
@@ -780,6 +793,8 @@ def _run_agent_subject(
             return None
         if attempt == max_attempts:
             report.failed.append(label)
+            report.failed_because.setdefault(
+                label, "the agent returned a result that could not be applied")
             return None
     return None
 
