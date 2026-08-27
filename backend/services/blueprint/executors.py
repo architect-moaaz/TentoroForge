@@ -693,7 +693,20 @@ NODE_TASKS: dict[str, str] = {
         "Write a Page Contract per page: its purpose in business terms, the roles "
         "it serves, the tasks users come to it for, its pattern, its primary "
         "entity, and the states it must handle. Declare empty and error states up "
-        "front — a page that discovers them later ships broken."
+        "front — a page that discovers them later ships broken.\n\n"
+        "A page earns its route when it has a different job, a different primary "
+        "entity, or a different audience. A different filter over the same list "
+        "is not a page — it is a view. Put it in `views` with a key, a label and "
+        "the filter that narrows the list, and the page it belongs to renders it "
+        "as a saved view the user can switch to.\n\n"
+        "So one Jobs page carries views for assigned-to-me, unassigned, overdue "
+        "and ready-for-collection, rather than five routes over one list. Judge "
+        "it by what a user would call the thing: if they would say \"the jobs "
+        "page, filtered\", it is a view; if they would name it as its own place "
+        "to go, it is a page.\n\n"
+        "Fewer, richer pages are the goal. Every page costs its own design pass, "
+        "and a navigation with twenty-nine entries is harder to use than one with "
+        "twenty."
     ),
     "apis": (
         "Define the endpoints the pages and workflows need. Every state-changing "
@@ -778,10 +791,11 @@ def writable_shapes(agent: str) -> dict[str, Any]:
 PLACEHOLDER_VOCABULARY = (
     "$page.name", "$page.purpose", "$entity.name", "$entity.plural",
     "$titleField", "$subtitleField", "$summaryFields", "$formFields", "$columns",
+    "$savedViews",
 )
 REPEAT_SOURCES = (
     "actions", "primaryActions", "widgets", "relatedCollections", "columns",
-    "formFields", "states",
+    "formFields", "states", "views",
 )
 
 

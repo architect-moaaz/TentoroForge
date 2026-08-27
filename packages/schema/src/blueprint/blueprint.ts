@@ -161,6 +161,44 @@ export const PageContract = z.object({
 
   /** Roles for whom this page is meaningful; required by `role_restricted`. */
   users: z.array(RoleId).default([]),
+
+  /**
+   * Saved views over this page's data — the same list, filtered differently.
+   *
+   * Without this a filtered variant has nowhere to live, so the only way to
+   * express "recruiters need to see overdue jobs" is another page. A workshop
+   * tracker came back with `/jobs`, `/jobs/mine`, `/jobs/unassigned`,
+   * `/jobs/overdue`, `/jobs/ready-for-collection` and
+   * `/jobs/awaiting-decision` — six routes, one list, six page authorings.
+   * The component library could always do this: `FilterBar.savedViews` and
+   * `SavedViewsPicker` exist and went unused because the contract had no way
+   * to ask for them.
+   *
+   * A page earns its route when it has a different job, a different primary
+   * entity, or a different audience. A different filter over the same list is
+   * a view.
+   */
+  views: z
+    .array(
+      z.object({
+        /** Stable within the page; becomes the saved view's id. */
+        key: z.string(),
+        /** What a user calls it: "Overdue", "Assigned to me". */
+        label: z.string(),
+        /**
+         * Field -> value the list is narrowed by.
+         *
+         * String values, because that is what `FilterBar.savedViews[].filters`
+         * accepts — a boolean here validates in the Blueprint and is rejected
+         * at render, which is the split that has cost most of the debugging on
+         * this path. Write "true", not true.
+         */
+        filter: z.record(z.string(), z.string()).default({}),
+        /** The view shown when the page opens, if any. */
+        isDefault: z.boolean().default(false),
+      }),
+    )
+    .default([]),
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
 
@@ -310,6 +348,8 @@ export const RepeatSource = z.enum([
   "columns",
   "formFields",
   "states",
+  /** The saved views this page declares — one control per view. */
+  "views",
 ]);
 
 /**

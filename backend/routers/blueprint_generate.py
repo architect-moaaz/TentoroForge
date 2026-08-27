@@ -186,16 +186,29 @@ async def generate_via_blueprint(
             # tuning decision, and defaulting every node to one model keeps the
             # first wiring honest about what it is doing.
             executor = make_executor(svc, AnthropicModel())
-            done = 0
+            # Two different units, and conflating them made the progress
+            # meaningless: `done` counted executor calls while `total` counted
+            # nodes, so a fan-out node reported 44 of 22 and kept climbing.
+            # A node that fans out is one node and many calls; a reader wants
+            # both, and neither can stand in for the other.
+            nodes_done: set[str] = set()
+            calls_done = 0
 
             def traced(spec):
-                nonlocal done
+                nonlocal calls_done
                 emit("node:start", {"node": spec.node, "agent": spec.agent,
                                     "subject": spec.subject})
                 result = executor(spec)
-                done += 1
-                emit("node:done", {"node": spec.node, "done": done,
-                                   "total": len(plan)})
+                calls_done += 1
+                nodes_done.add(spec.node)
+                emit("node:done", {
+                    "node": spec.node,
+                    "subject": spec.subject,
+                    # progress through the graph
+                    "nodesDone": len(nodes_done), "nodesTotal": len(plan),
+                    # work done inside it, which a fan-out multiplies
+                    "callsDone": calls_done,
+                })
                 return result
 
             report = run(svc, traced, plan=plan, commit=True,

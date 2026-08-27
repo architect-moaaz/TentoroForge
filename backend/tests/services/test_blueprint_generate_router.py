@@ -270,3 +270,19 @@ def test_the_forecast_is_compared_to_the_outcome(tmp_path):
     assert drift["pages"] == {"planned": 18, "actual": 2, "delta": -16}
 
     assert compare(planned, {"pages": [{"id": f"P{i}"} for i in range(18)]}) == {}
+
+
+def test_progress_does_not_conflate_nodes_with_calls():
+    """`{"done": 44, "total": 22}` — a fan-out node is one node and many calls,
+    so counting calls against a node total overruns and keeps climbing. A
+    progress bar built on it fills up and then carries on."""
+    import inspect
+
+    from routers import blueprint_generate
+
+    src = inspect.getsource(blueprint_generate.generate_via_blueprint)
+    assert "nodesDone" in src and "nodesTotal" in src
+    assert "callsDone" in src
+    # the node count must be a set of node keys, not an increment per call
+    assert "nodes_done: set[str]" in src
+    assert '"done": done' not in src

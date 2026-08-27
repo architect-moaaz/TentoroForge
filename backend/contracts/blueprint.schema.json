@@ -386,6 +386,37 @@
             },
             "default": []
           },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "filter": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "default": {}
+                },
+                "isDefault": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "required": [
+                "key",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "primaryTasks": {
             "type": "array",
             "items": {
@@ -1506,7 +1537,8 @@
                   "relatedCollections",
                   "columns",
                   "formFields",
-                  "states"
+                  "states",
+                  "views"
                 ]
               },
               "visibleIf": {

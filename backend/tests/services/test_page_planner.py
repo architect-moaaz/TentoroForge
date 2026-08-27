@@ -460,3 +460,50 @@ def test_the_digest_states_scalar_array_types_too(catalog):
     """`columnOrder: array<string>` should not read as an array of objects."""
     digest = pp.catalog_digest(catalog)
     assert "columnOrder: [string]" in digest or "columnOrder: array<string>" in digest
+
+
+# --- views: a filtered variant is not a page -------------------------------
+
+def _viewed_page(page):
+    return dict(page, views=[
+        {"key": "mine", "label": "Assigned to me",
+         "filter": {"assignee": "$currentUser"}},
+        {"key": "overdue", "label": "Overdue", "filter": {"overdue": "true"},
+         "isDefault": False},
+    ])
+
+
+def test_saved_views_reach_the_component_that_renders_them(doc, page, entity, catalog):
+    """The library could always do this — FilterBar.savedViews and
+    SavedViewsPicker exist — and the contract had no way to ask for it. So a
+    workshop tracker produced /jobs, /jobs/mine, /jobs/unassigned,
+    /jobs/overdue and /jobs/ready-for-collection: six routes over one list.
+    """
+    ctx = pp.build_context(doc, _viewed_page(page), entity)
+    assert ctx["$savedViews"] == [
+        {"id": "mine", "label": "Assigned to me",
+         "filters": {"assignee": "$currentUser"}},
+        {"id": "overdue", "label": "Overdue", "filters": {"overdue": "true"}},
+    ]
+
+
+def test_a_template_can_repeat_over_views(doc, page, entity):
+    items = pp.repeat_items(doc, _viewed_page(page), entity, "views")
+    assert [i["id"] for i in items] == ["mine", "overdue"]
+    assert items[0]["label"] == "Assigned to me"
+
+
+def test_a_page_with_no_views_renders_nothing_extra(doc, page, entity):
+    """Absent views must degrade to nothing, like every other repeat."""
+    assert pp.build_context(doc, page, entity)["$savedViews"] == []
+    assert pp.repeat_items(doc, page, entity, "views") == []
+
+
+def test_the_bound_shape_is_the_one_the_component_accepts(doc, page, entity, catalog):
+    """$savedViews is only useful if FilterBar actually takes it."""
+    schema = {"root": {"type": "FilterBar", "props": {
+        "chips": [{"key": "status", "label": "Status",
+                   "options": [{"value": "open", "label": "Open"}]}],
+        "savedViews": pp.build_context(doc, _viewed_page(page), entity)["$savedViews"],
+    }}}
+    assert pp.validate_props(schema, catalog) == []

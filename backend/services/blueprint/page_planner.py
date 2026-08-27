@@ -317,6 +317,10 @@ def repeat_items(doc: dict, page: dict, entity: dict | None, over: str) -> list[
     if over == "formFields":
         return ([{"id": f["name"], "label": f["label"], "value": f["name"]}
                  for f in form_fields_for(entity)] if entity else [])
+    if over == "views":
+        return [{"id": v.get("key"), "label": v.get("label"),
+                 "value": v.get("key")}
+                for v in (page.get("views") or [])]
     if over == "states":
         states = page.get("states") or {}
         return [{"id": k, "label": _humanise(k), "value": v}
@@ -345,6 +349,15 @@ def build_context(doc: dict, page: dict, entity: dict | None) -> dict[str, Any]:
             "$summaryFields": summary_fields(entity),
             "$formFields": form_fields_for(entity),
             "$columns": columns_for(entity),
+            # The saved views this page declares, in the shape
+            # `FilterBar.savedViews` and `SavedViewsPicker.views` take. Without
+            # this the contract could describe a view and nothing would render
+            # it, which is how five filtered variants became five routes.
+            "$savedViews": [
+                {"id": v.get("key"), "label": v.get("label"),
+                 "filters": v.get("filter") or {}}
+                for v in (page.get("views") or [])
+            ],
         })
     return ctx
 
