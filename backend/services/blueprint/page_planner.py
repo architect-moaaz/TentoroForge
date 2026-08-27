@@ -141,14 +141,28 @@ def subtitle_field(entity: dict) -> str | None:
 
 
 def summary_fields(entity: dict, limit: int = 6) -> list[dict]:
-    """``[{label, value}]`` — the shape KeyValueList and DescriptionList take."""
+    """``[{term, description}]`` — the canonical DescriptionList pair.
+
+    Emitted in the shape the component actually wants, not the one it has
+    learned to repair. `DescriptionList.schema.ts` accepts `{label, value}` too
+    — "the more common shape LLM-authored schemas tend to emit" — and the
+    component normalises it at render. That is a loosened schema plus a repair
+    pass, added because generated output kept arriving wrong; producing the
+    canonical shape is what makes both unnecessary rather than load-bearing.
+
+    It also matters for correctness, not just tidiness: the strict node shape
+    in `page.ts` only knows `{term, description}`, so the repaired shape
+    rendered fine and failed validation, which is how six pages came to be
+    silently non-conforming.
+    """
     title = title_field(entity)
     out: list[dict] = []
     for f in _visible_fields(entity):
         name = f.get("name")
         if name == title:
             continue
-        out.append({"label": _humanise(name), "value": f"{{{{{RECORD}.{name}}}}}"})
+        out.append({"term": _humanise(name),
+                    "description": f"{{{{{RECORD}.{name}}}}}"})
         if len(out) >= limit:
             break
     return out

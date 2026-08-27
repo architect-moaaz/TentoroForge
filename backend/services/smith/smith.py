@@ -40,10 +40,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from services.blueprint.ids import IdAllocator, InvalidArtifactId, natural_key_for
-from services.blueprint.orchestrator import graph_pool
+from services.blueprint.orchestrator import (
+    ALLOWED_TRANSITIONS,
+    IllegalTransition,
+    RunReport,
+    build_plan_summary,
+    graph_pool,
+    transition,
+)
+from services.blueprint.orchestrator import run as run_dag
 from services.blueprint.service import BlueprintService
 from services.smith import clarification, decisions as decision_log
 from services.smith.change import ChangeResult, PreviewContext, apply_change, resolve_preview
@@ -57,6 +65,45 @@ from services.smith.turn import (
     explain as explain_call,
     interpret,
     phrase,
+)
+
+
+#: §94 as a turn-level table: (state, event) -> the state that turn moves to.
+#:
+#: §94 says "the orchestration engine controls allowed state transitions", and
+#: §25 plus §107 steps 8 and 10 say *when* the interesting ones happen — the
+#: user accepts the definition, and the user authorises the build. So the
+#: machine advances on turns, not on a timer, and this is the whole of what a
+#: turn is allowed to do to it.
+#:
+#: Declared rather than computed so that an illegal transition is impossible to
+#: express, not merely caught. ``test_every_declared_transition_is_legal``
+#: checks every entry against ``ALLOWED_TRANSITIONS``, so this table cannot
+#: drift from §94.
+TURN_TRANSITIONS: dict[tuple[str, str], str] = {
+    # §107 steps 3-5: the user describes, Smith starts clarifying.
+    ("DISCOVERY", "describe"): "CLARIFICATION",
+    # A change request against an application that has been previewed is §114
+    # maintenance, which §94 routes through ITERATION.
+    ("PREVIEW", "change"): "ITERATION",
+    ("READY", "change"): "ITERATION",
+    ("MAINTENANCE", "change"): "ITERATION",
+}
+
+#: §25/§107 step 8-9. Accepting the definition is one user act that produces the
+#: §26 plan and parks at the authorisation gate; it is not four separate asks.
+APPROVE_WALK: tuple[str, ...] = (
+    "BLUEPRINT_REVIEW", "PLANNING", "PLAN_REVIEW",
+)
+
+#: §107 steps 10-21, and the order §94 puts them in. Walked as far as the run
+#: actually got — see :meth:`Smith.build`.
+BUILD_WALK: tuple[tuple[str, str], ...] = (
+    ("IMPLEMENTATION", ""),                      # entered before anything runs
+    ("DATABASE_PROVISIONING", "database"),
+    ("BUILD", "integration"),
+    ("VERIFICATION", "verification"),
+    ("PREVIEW", "preview"),
 )
 
 
@@ -199,6 +246,18 @@ class Turn:
     context: Context | None = None
     smith: Message | None = None
     rejected: str = ""
+    #: §94 state before and after this turn. Equal when the turn did not move
+    #: the machine, which is most turns.
+    state_before: str = ""
+    state_after: str = ""
+    #: §26's countable plan, when the turn produced one.
+    plan_summary: dict[str, int] | None = None
+    #: What a command turn did. ``refused`` carries the reason when a command
+    #: is recognised but deliberately not executed.
+    command: str = ""
+    command_result: dict[str, Any] = field(default_factory=dict)
+    #: §72/§107 — the DAG run a build produced.
+    run: RunReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -207,6 +266,10 @@ class Turn:
     @property
     def intent(self) -> str:
         return self.plan.intent if self.plan else "unknown"
+
+    @property
+    def moved(self) -> bool:
+        return bool(self.state_after) and self.state_after != self.state_before
 
 
 class Smith:
@@ -343,13 +406,16 @@ class Smith:
 
         asked = self._last_asked()
         context = self.context_for(text, anchors=anchors)
-        turn = Turn(user=user_msg, context=context)
+        turn = Turn(user=user_msg, context=context,
+                    state_before=self.state, state_after=self.state)
 
         if self.model is None:
             raise RuntimeError("Smith needs a model to interpret a turn")
 
         try:
-            plan = interpret(self.model, context, self.doc, asked=asked)
+            plan = interpret(
+                self.model, context, self.doc, asked=asked, state=self.state,
+            )
         except TurnRejected as exc:
             # Not repaired into something usable. The turn failed, the user is
             # told, and the Blueprint is untouched.
@@ -375,6 +441,9 @@ class Smith:
             turn.smith = self.conversation.append("smith", turn.reply)
             return turn
 
+        if plan.intent == "command":
+            self._run_command(plan, turn)
+
         if plan.answers:
             turn.recorded = self._record_answers(plan, user_msg)
 
@@ -395,6 +464,23 @@ class Smith:
             if first.startswith("REQ-"):
                 turn.trace = self.trace(first)
 
+        # §94, last: the machine moves on what the turn *did*, so a describe
+        # that wrote no requirements does not claim the definition has started.
+        if plan.intent != "command":
+            event = plan.intent
+            if event == "describe" and not (turn.change and turn.change.applied):
+                event = ""
+            elif event == "change" and not (turn.change and turn.change.applied):
+                event = ""
+            if event:
+                self._advance(event)
+        # §107 step 5-6: once nothing is left below the ask-the-user line, the
+        # definition is no longer being clarified.
+        if self.state == "CLARIFICATION" and turn.recorded:
+            if not [q for q in clarification.candidates(self.doc) if q.blocking]:
+                self._walk(("DEFINITION",))
+        turn.state_after = self.state
+
         turn.smith = self.conversation.append(
             "smith", turn.reply, refs=tuple(plan.anchors),
             context={"intent": plan.intent},
@@ -411,7 +497,169 @@ class Smith:
         self.conversation.append("smith", answer, refs=tuple(anchors))
         return answer
 
+    # -- §94: the state machine ---------------------------------------------
+
+    @property
+    def state(self) -> str:
+        return self.doc.get("state", "DISCOVERY")
+
+    def _advance(self, event: str) -> str:
+        """Apply the one transition this (state, event) pair permits, if any.
+
+        Looked up rather than decided. A turn cannot move the machine anywhere
+        ``TURN_TRANSITIONS`` does not declare, so ``IllegalTransition`` is
+        unreachable from here by construction — §94 puts the orchestration
+        engine in charge of transitions, and this is Smith asking it rather
+        than overruling it.
+        """
+        dst = TURN_TRANSITIONS.get((self.state, event))
+        return transition(self.blueprint, dst) if dst else self.state
+
+    def _walk(self, states: Iterable[str]) -> str:
+        """Move through a sequence, stopping at the first step §94 refuses.
+
+        Stopping rather than skipping ahead: a state the machine would not
+        enter is a fact about the application, and jumping over it would make
+        `state` describe a path that was not taken.
+        """
+        for dst in states:
+            try:
+                transition(self.blueprint, dst)
+            except IllegalTransition:
+                break
+        return self.state
+
+    # -- §107 steps 8-21 -----------------------------------------------------
+
+    def approve(self) -> dict[str, int]:
+        """§25 / §107 steps 8-9 — accept the definition, produce the plan.
+
+        One user act. §25 says approval "applies at meaningful product
+        boundaries", not per property, so accepting walks the definition
+        through review into PLANNING and parks at PLAN_REVIEW — which is
+        exactly §107 step 10's gate, waiting for the user to authorise the
+        build.
+        """
+        self._walk(APPROVE_WALK)
+        return build_plan_summary(self.doc)
+
+    def build(self, *, app_root: str | None = None) -> RunReport:
+        """§107 steps 10-21 — run the whole DAG, not a sub-plan.
+
+        This is what `Smith.turn` alone could never do. Every other path here
+        computes an *incremental* plan (§72), and on an application that does
+        not exist yet there is nothing to be incremental about: no artifact to
+        anchor to, no impacted section, so an empty plan and a silent no-op.
+
+        The state walk follows what actually completed rather than what was
+        attempted. §94's sequence is a claim about the application, and
+        asserting VERIFICATION because a run was requested — rather than
+        because verification ran — would make the state a wish.
+        """
+        transition(self.blueprint, "IMPLEMENTATION")
+        if self.executor is None:
+            raise RuntimeError(
+                "Smith needs an executor to build; agents are injected so the "
+                "orchestration stays testable without a model (§116)"
+            )
+
+        report = run_dag(
+            self.blueprint, self.executor, plan=None, commit=False,
+            user_request="build", app_root=app_root or self.app_root,
+        )
+
+        done = set(report.completed)
+        reached: list[str] = []
+        for dst, gate in BUILD_WALK:
+            if gate and gate not in done:
+                break
+            if dst != "IMPLEMENTATION":
+                reached.append(dst)
+        self._walk(reached)
+        return report
+
+    def export(self, package_root: str | Path) -> Path:
+        """§83 — put the Blueprint beside the generated source.
+
+        Honest about its limit: this writes ``blueprint.json`` into the package
+        so the project can be re-imported (§4.6). The standalone source itself
+        is what the projections and assembly wrote to ``app_root``; this does
+        not archive or package it.
+        """
+        path = self.blueprint.export_to(package_root)
+        self._walk(("EXPORT_DEPLOY",))
+        return path
+
     # -- internals ----------------------------------------------------------
+
+    def _run_command(self, plan: TurnPlan, turn: "Turn") -> None:
+        """Dispatch a `command` turn (§107 steps 8, 10; §66, §83, §86).
+
+        Every command either does something or says why it did not. The one
+        thing none of them may do is nothing at all, which is what `command`
+        used to mean: the intent was parsed, no branch handled it, and "build
+        the app" got a confident reply and an untouched Blueprint.
+        """
+        turn.command = plan.command
+
+        if plan.command == "status":
+            turn.command_result = self.status()
+            return
+
+        if plan.command == "approve":
+            turn.plan_summary = self.approve()
+            turn.command_result = {"approved": True, "state": self.state}
+            return
+
+        if plan.command == "build":
+            if self.executor is None:
+                turn.command_result = {
+                    "refused": "no executor is configured, so there is nothing "
+                               "to delegate the build to",
+                }
+                return
+            turn.run = self.build()
+            turn.command_result = {
+                "completed": len(turn.run.completed),
+                "skipped": len(turn.run.skipped),
+                "failed": len(turn.run.failed),
+                "blocked": len(turn.run.blocked),
+                "state": self.state,
+            }
+            return
+
+        if plan.command == "preview":
+            runtime = self.doc.get("runtime") or {}
+            turn.command_result = (
+                {"runtime": runtime, "state": self.state} if runtime else
+                {"refused": "no preview runtime has been generated yet; "
+                            "build the application first (§107 step 21)"}
+            )
+            return
+
+        if plan.command == "export":
+            if not self.app_root:
+                turn.command_result = {
+                    "refused": "export needs an app_root — the standalone "
+                               "source the projections wrote (§83)",
+                }
+                return
+            turn.command_result = {"exported": str(self.export(self.app_root))}
+            return
+
+        if plan.command == "deploy":
+            # §86-89 exist as services, and this deliberately does not call
+            # them. Deploying publishes an application to the internet under
+            # the user's account: it is outward-facing, hard to reverse, and
+            # needs credentials. A chat turn saying "ship it" is not the place
+            # to decide that, so the command is recognised and refused with a
+            # reason rather than either executed or silently ignored.
+            turn.command_result = {
+                "refused": "deployment is not driven from a conversational "
+                           "turn: it publishes the application and needs "
+                           "explicit authorisation and credentials (§86-89)",
+            }
+            return
 
     def _last_asked(self) -> list[clarification.Question]:
         """The batch Smith most recently asked, so answers can be bound to it."""

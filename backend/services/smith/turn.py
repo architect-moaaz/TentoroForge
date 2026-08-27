@@ -59,6 +59,20 @@ INTENTS: tuple[str, ...] = (
 )
 
 
+#: What a `command` turn can ask for. §107's golden path has exactly two user
+#: authorisations in it — step 8 "user accepts the Blueprint" and step 10 "user
+#: authorizes build" — and those are `approve` and `build`. The rest are the
+#: lifecycle verbs §83/§86 name.
+COMMANDS: tuple[str, ...] = (
+    "approve",   # §25 — accept the definition, produce the §26 plan
+    "build",     # §107 step 10 — authorise the run
+    "preview",   # §66 — the running application
+    "export",    # §83 — standalone source
+    "deploy",    # §86-89
+    "status",    # what Smith knows right now
+)
+
+
 class TurnRejected(ValueError):
     """The plan did not survive validation and must be re-asked, not repaired."""
 
@@ -66,8 +80,8 @@ class TurnRejected(ValueError):
 TURN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["intent", "summary", "answers", "anchors", "proposals",
-                 "reply", "confidence"],
+    "required": ["intent", "command", "summary", "answers", "anchors",
+                 "proposals", "reply", "confidence"],
     "properties": {
         "intent": {
             "type": "string",
@@ -77,6 +91,18 @@ TURN_SCHEMA: dict[str, Any] = {
                 "questions you asked; change = modifies an existing app; "
                 "ask = wants to know something, changes nothing; "
                 "command = build/preview/export/deploy."
+            ),
+        },
+        "command": {
+            "type": "string",
+            "enum": ["", *COMMANDS],
+            "description": (
+                "Only for intent=command; empty string otherwise. "
+                "approve = the user accepts the definition so the build plan "
+                "can be produced; build = the user authorises the run; "
+                "preview/export/deploy/status are the lifecycle verbs. Pick "
+                "the one the user asked for — do not infer `build` from "
+                "enthusiasm."
             ),
         },
         "summary": {
@@ -175,6 +201,7 @@ class TurnPlan:
     """One interpreted turn, after validation."""
 
     intent: str
+    command: str = ""
     summary: str = ""
     reply: str = ""
     answers: list[dict] = field(default_factory=list)
@@ -237,6 +264,37 @@ contradicts one, say so in `reply` rather than quietly overriding it.
 INTERPRET_TASK = """The user has said something. Work out what they mean and \
 return the plan that carries it out."""
 
+#: What the turn is *for*, given where the application is (§94, §107).
+#:
+#: Without this a cold start silently does nothing: on an empty Blueprint there
+#: is no artifact to anchor to and nothing below §17's ask-the-user line, so
+#: Smith has nothing to ask about and nothing to change. §107 step 4 is
+#: "Smith analyses the input" and step 6 is "Smith generates the Application
+#: Definition" — which means extracting requirements is the first real act, and
+#: requirements are Smith's own to write (§115: they *are* the approved user
+#: intent).
+STATE_TASKS: dict[str, str] = {
+    "DISCOVERY": (
+        "This application has no definition yet — §107 step 3, the user is "
+        "describing what they want built.\n\n"
+        "Extract requirements from what they say: one per distinct capability, "
+        "each a sentence a non-technical stakeholder would recognise as a "
+        "promise the software makes. Propose them into `requirements`, and set "
+        "each one's confidence honestly — what the user stated outright is not "
+        "the same as what you inferred from the domain, and the difference is "
+        "what decides which questions get asked next.\n\n"
+        "Do not propose pages, entities or workflows yet. Specialist agents "
+        "author those from the requirements once the definition is accepted; "
+        "designing them now would be guessing ahead of the clarification."
+    ),
+    "CLARIFICATION": (
+        "The definition is being clarified (§107 step 5). If the user is "
+        "answering questions you asked, record each answer against the "
+        "artifact it settles. If they are adding new intent, extract it as "
+        "requirements."
+    ),
+}
+
 
 def _writes_for(agent: str = "smith") -> str:
     return "\n".join(f"  - {s}" for s in sorted(capability_for(agent).writes))
@@ -244,8 +302,15 @@ def _writes_for(agent: str = "smith") -> str:
 
 def build_interpret_prompt(
     context: Context, *, agent: str = "smith", inline_schema: bool = False,
+    state: str = "",
 ) -> tuple[str, str]:
-    """(system, user) for one interpretation call."""
+    """(system, user) for one interpretation call.
+
+    ``state`` is §94's application state. It changes what the turn is for: in
+    DISCOVERY the job is to extract requirements from a description, and
+    everywhere else it is to interpret a request against a definition that
+    already exists.
+    """
     decisions = context.decisions[:40]
     decisions_block = (
         DECISIONS_ADDENDUM.format(
@@ -258,7 +323,8 @@ def build_interpret_prompt(
         if decisions else ""
     )
     system = SYSTEM.format(
-        writes=_writes_for(agent), decisions=decisions_block, task=INTERPRET_TASK,
+        writes=_writes_for(agent), decisions=decisions_block,
+        task=STATE_TASKS.get(state, INTERPRET_TASK),
     )
     if inline_schema:
         system += (
@@ -319,6 +385,7 @@ def parse_turn(raw: str) -> TurnPlan:
 
     return TurnPlan(
         intent=intent,
+        command=str(data.get("command") or ""),
         summary=str(data.get("summary") or ""),
         reply=str(data.get("reply") or ""),
         answers=[dict(a) for a in (data.get("answers") or [])],
@@ -387,6 +454,21 @@ def validate_turn(
     if not 0.0 <= plan.confidence <= 1.0:
         problems.append(f"confidence {plan.confidence} is outside 0..1")
 
+    # A command turn that does not say which command is the failure mode this
+    # field exists to close: `intent: command` used to be parsed and then
+    # silently dispatched to nothing, so "build it" got a confident reply and
+    # no build. Refuse rather than guess which verb was meant.
+    if plan.intent == "command" and plan.command not in COMMANDS:
+        problems.append(
+            f"intent is 'command' but command is {plan.command!r}; "
+            f"expected one of {', '.join(COMMANDS)}"
+        )
+    if plan.intent != "command" and plan.command:
+        problems.append(
+            f"command {plan.command!r} was set on a {plan.intent!r} turn; "
+            "commands are only carried by intent='command'"
+        )
+
     if problems:
         raise TurnRejected("; ".join(problems))
 
@@ -398,6 +480,7 @@ def interpret(
     *,
     asked: Sequence[Question] = (),
     agent: str = "smith",
+    state: str = "",
     retries: int = 1,
 ) -> TurnPlan:
     """One interpretation call, re-asked once if the plan does not validate.
@@ -410,6 +493,7 @@ def interpret(
     system, user = build_interpret_prompt(
         context, agent=agent,
         inline_schema=not getattr(client, "enforces_schema", True),
+        state=state,
     )
     last: Exception | None = None
 
