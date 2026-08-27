@@ -316,3 +316,42 @@ def test_definedness_is_derived_not_read_off_the_state_label(ats, tmp_path):
 def test_an_application_with_only_requirements_is_not_yet_defined(smith):
     say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
     assert smith.doc["requirements"] and not smith.defined
+
+
+def test_smith_carries_an_app_root_so_projections_are_not_blocked(tmp_path):
+    """A projection with nowhere to write blocks, and takes its dependents.
+
+    An incremental change planned eighteen nodes and quietly ran a handful:
+    `integration` had no app root, so it blocked, and `testing`, `memory` and
+    `verification` were skipped behind it. The Blueprint kept the endpoints and
+    tests it already had while the data model had gained two entities.
+    """
+    from services.blueprint.orchestrator import run
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path / "bp", app_id="a",
+                                  name="n", domain="d")
+
+    def never(spec):
+        raise AssertionError("a projection must not call a model")
+
+    blocked = run(svc, never, plan=["backend", "frontend"])
+    assert set(blocked.blocked) == {"backend", "frontend"}
+    assert blocked.completed == []
+
+    ran = run(svc, never, plan=["backend", "frontend"],
+              app_root=str(tmp_path / "app"))
+    assert ran.completed == ["backend", "frontend"]
+    assert ran.blocked == []
+
+
+def test_the_cli_defaults_the_app_root_beside_the_blueprint():
+    """It has to default to something, or every conversational change
+    regenerates the definition and not the application."""
+    import inspect
+
+    from services.smith import cli
+
+    src = inspect.getsource(cli.main)
+    assert "--app-root" in inspect.getsource(cli)
+    assert 'args.output_dir / "app"' in src

@@ -328,6 +328,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT,
                         help="Working directory. Resumed if it already exists.")
     parser.add_argument("--model", default="claude-opus-5")
+    parser.add_argument("--app-root", type=Path, default=None,
+                        help="Where the generated application is written. "
+                             "Defaults to <output-dir>/app, beside the "
+                             "Blueprint it is projected from.")
     parser.add_argument("--new", default="", metavar="NAME",
                         help="Start an empty application instead of adopting a "
                              "Blueprint (§107 step 1).")
@@ -349,17 +353,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.fresh and args.output_dir.exists():
         shutil.rmtree(args.output_dir)
 
+    # Every projection node blocks without somewhere to write, and a blocked
+    # projection takes its dependents with it — an incremental change planned
+    # eighteen nodes and silently ran a handful, because `integration` had
+    # nowhere to project to and `testing`, `memory` and `verification` all hang
+    # off it. Defaulting this beside the Blueprint means a change regenerates
+    # the application by default rather than only the definition of it.
+    app_root = str(args.app_root or (args.output_dir / "app"))
+
     model = _model(args.dry_run, args.model)
     executor = None
     if args.run_agents and not args.dry_run:
         from services.blueprint.executors import make_executor
 
         smith = _open(args.blueprint, args.output_dir, model=model,
-                      new=args.new, domain=args.domain)
+                      new=args.new, domain=args.domain, app_root=app_root)
         smith.executor = make_executor(smith.blueprint, model)
     else:
         smith = _open(args.blueprint, args.output_dir, model=model,
-                      executor=executor, new=args.new, domain=args.domain)
+                      executor=executor, new=args.new, domain=args.domain,
+                      app_root=app_root)
 
     show_status(smith)
 
