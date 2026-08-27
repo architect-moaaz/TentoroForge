@@ -91,6 +91,12 @@ DEFAULT_BUDGET = 60
 _CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
+#: How far back to carry artifacts a conversation has already touched. Ten
+#: turns matches what the resolver already reads for message history, so the
+#: slice and the transcript agree about what "recently" means.
+CONVERSATION_SEED_TURNS = 10
+
+
 def _tokens(text: str) -> set[str]:
     split = _CASE_BOUNDARY.sub(" ", text or "")
     return {
@@ -231,6 +237,27 @@ def resolve(
             why[mention] = "named in the request"
             seeds.append(mention)
 
+    # §8 Layer 1 — what this conversation has already touched.
+    #
+    # Every message records the artifacts it was about, and the resolver used
+    # that only to attach recent messages, never to decide what the slice
+    # contains. So Smith could not see its own output from two turns ago: asked
+    # to restate a requirement it had proposed earlier, it could not find it,
+    # invented a fresh natural key, and the Blueprint ended up holding the same
+    # promise twice — REQ-019 and REQ-022 on the ATS fixture, both saying an
+    # offer records an amount. Smith predicted this itself in the transcript and
+    # was right.
+    #
+    # Guaranteed rather than ranked, for the same reason an anchor is: an
+    # artifact this conversation is demonstrably about must not be budgeted away
+    # by token similarity to the latest sentence.
+    if conversation is not None:
+        for message in conversation.recent(CONVERSATION_SEED_TURNS):
+            for touched in getattr(message, "refs", None) or ():
+                if touched in known and touched not in why:
+                    why[touched] = "proposed earlier in this conversation"
+                    seeds.append(touched)
+
     ranked = score_artifacts(doc, request)
     for hit in ranked:
         if hit.artifact_id not in why:
@@ -241,7 +268,10 @@ def resolve(
 
     # Anchors and explicit mentions are guaranteed; matched artifacts fill the
     # remaining budget in rank order.
-    guaranteed = [s for s in seeds if why[s].startswith(("anchor", "named"))]
+    guaranteed = [
+        s for s in seeds
+        if why[s].startswith(("anchor", "named", "proposed earlier"))
+    ]
     optional = [s for s in seeds if s not in guaranteed]
     room = max(0, budget - len(guaranteed))
     kept = guaranteed + optional[:room]

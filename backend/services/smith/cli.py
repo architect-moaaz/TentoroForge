@@ -91,16 +91,34 @@ def _model(dry_run: bool, model_name: str) -> Any:
     return AnthropicModel(model=model_name)
 
 
-def _open(blueprint: Path, output_dir: Path, **kw: Any) -> Smith:
-    """Adopt the Blueprint into a working directory, or resume one.
+def _open(
+    blueprint: Path, output_dir: Path, *, new: str = "", domain: str = "",
+    **kw: Any,
+) -> Smith:
+    """Adopt the Blueprint into a working directory, resume one, or start empty.
 
     Resuming is the interesting half: the conversation, the versions and the
     ids are all on disk, so a second run continues rather than restarts (§118).
+
+    ``new`` starts from nothing — §107 step 1, the case Smith could not handle
+    at all until the lifecycle was wired: no artifacts, no impact, nothing to
+    be incremental about.
     """
     current = output_dir / ".forge" / "blueprint" / "current.json"
     if current.exists():
         print(f"resuming {output_dir}")
         return Smith.load(output_dir, **kw)
+
+    if new:
+        from services.blueprint.service import BlueprintService
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"new application {new!r} ({domain or 'unknown domain'}) in {output_dir}")
+        svc = BlueprintService.create(
+            output_dir=output_dir, app_id=new.lower().replace(" ", "-"),
+            name=new, domain=domain or "unknown",
+        )
+        return Smith(svc, **kw)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     doc = json.loads(blueprint.read_text("utf-8"))
@@ -157,6 +175,29 @@ def show_turn(smith: Smith, turn: Any) -> None:
         print(f"  intent {turn.plan.intent}  confidence {turn.plan.confidence:.2f}")
         if turn.plan.summary:
             print(f"  read as: {turn.plan.summary}")
+
+    if turn.moved:
+        print(f"  §94 state: {turn.state_before} -> {turn.state_after}")
+
+    if turn.command:
+        result = turn.command_result or {}
+        if "refused" in result:
+            print(f"  {turn.command}: refused — {result['refused']}")
+        else:
+            print(f"  {turn.command}: " + ", ".join(
+                f"{k}={v}" for k, v in result.items() if not isinstance(v, dict)))
+
+    if turn.plan_summary:
+        print("\n  --- build plan (§26) ---")
+        for key, count in turn.plan_summary.items():
+            print(f"  {count:5}  {key}")
+
+    if turn.run and not turn.command_result.get("refused"):
+        r = turn.run
+        print(f"  ran {len(r.completed)} nodes, {len(r.skipped)} skipped, "
+              f"{len(r.blocked)} blocked, {len(r.failed)} failed")
+        if r.failed:
+            print(f"  failed: {', '.join(r.failed)}")
 
     for rec in turn.recorded:
         kind = "delegated to Smith" if rec.delegated else "your decision"
@@ -244,6 +285,8 @@ def handle(smith: Smith, line: str, *, run_agents: bool) -> None:
 
 def repl(smith: Smith, *, run_agents: bool) -> None:
     print("\nType a request, or: status | ask | trace REQ-017 | explain <q>")
+    print("Lifecycle (§107): describe it, then \"draft the blueprint\", "
+          "\"looks good\", \"build it\".")
     print("§69 preview selection: /page PAGE-009 /cmp CMP-033 make this compact")
     print("Ctrl-D to leave. Everything is saved as you go.\n")
     while True:
@@ -269,6 +312,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT,
                         help="Working directory. Resumed if it already exists.")
     parser.add_argument("--model", default="claude-opus-5")
+    parser.add_argument("--new", default="", metavar="NAME",
+                        help="Start an empty application instead of adopting a "
+                             "Blueprint (§107 step 1).")
+    parser.add_argument("--domain", default="",
+                        help="Domain for --new: ATS, CRM, HRMS, … (§96).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the prompt that would be sent, then stop.")
     parser.add_argument("--fresh", action="store_true",
@@ -280,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("say", nargs="*", help="One request, then exit.")
     args = parser.parse_args(argv)
 
-    if not args.blueprint.exists():
+    if not args.new and not args.blueprint.exists():
         parser.error(f"no Blueprint at {args.blueprint}")
     if args.fresh and args.output_dir.exists():
         shutil.rmtree(args.output_dir)
@@ -290,10 +338,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_agents and not args.dry_run:
         from services.blueprint.executors import make_executor
 
-        smith = _open(args.blueprint, args.output_dir, model=model)
+        smith = _open(args.blueprint, args.output_dir, model=model,
+                      new=args.new, domain=args.domain)
         smith.executor = make_executor(smith.blueprint, model)
     else:
-        smith = _open(args.blueprint, args.output_dir, model=model, executor=executor)
+        smith = _open(args.blueprint, args.output_dir, model=model,
+                      executor=executor, new=args.new, domain=args.domain)
 
     show_status(smith)
 

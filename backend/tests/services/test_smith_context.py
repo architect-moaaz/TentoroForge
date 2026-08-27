@@ -147,3 +147,50 @@ def test_deprecated_artifacts_are_not_offered(ats):
     target = ats["pages"][0]["id"]
     ctx = resolve(ats, ats["pages"][0]["name"])
     assert ctx.why.get(target) is None
+
+
+def test_the_slice_carries_what_this_conversation_already_touched(tmp_path):
+    """§8 Layer 1 — Smith must be able to see its own output from earlier turns.
+
+    Every message records the artifacts it was about, and the resolver used
+    that only to attach message history, never to decide what the slice
+    contains. So asked to restate a requirement it had proposed two turns
+    earlier, Smith could not find it, invented a fresh natural key, and the
+    Blueprint ended up holding the same promise twice — REQ-019 and REQ-022 on
+    the ATS fixture, both saying an offer records an amount.
+    """
+    from services.smith.context import resolve
+    from services.smith.conversation import Conversation
+
+    doc = {
+        "requirements": [
+            {"id": "REQ-019", "description": "An offer carries a monetary amount."},
+            {"id": "REQ-001", "description": "Recruiters scan open roles by status."},
+        ],
+    }
+    convo = Conversation(tmp_path)
+    convo.append(role="smith", text="Proposed the offer amount requirement.",
+                 refs=["REQ-019"])
+
+    # A follow-up whose wording shares nothing with REQ-019's text, so ranking
+    # alone would never surface it.
+    ctx = resolve(doc, "confirm the currency and basis", conversation=convo,
+                  budget=1)
+    assert "REQ-019" in ctx.why, "the requirement this conversation proposed was dropped"
+    assert "conversation" in ctx.why["REQ-019"]
+
+
+def test_conversation_seeds_are_not_budgeted_away(tmp_path):
+    """Guaranteed like an anchor: an artifact the conversation is demonstrably
+    about must not lose to token similarity with the latest sentence."""
+    from services.smith.context import resolve
+    from services.smith.conversation import Conversation
+
+    doc = {"requirements": [
+        {"id": f"REQ-{i:03d}", "description": "roles status scan open"} for i in range(1, 12)
+    ] + [{"id": "REQ-099", "description": "An offer carries a monetary amount."}]}
+    convo = Conversation(tmp_path)
+    convo.append(role="smith", text="Proposed it.", refs=["REQ-099"])
+
+    ctx = resolve(doc, "roles status scan open", conversation=convo, budget=2)
+    assert "REQ-099" in ctx.why

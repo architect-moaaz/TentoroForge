@@ -64,6 +64,7 @@ INTENTS: tuple[str, ...] = (
 #: authorizes build" — and those are `approve` and `build`. The rest are the
 #: lifecycle verbs §83/§86 name.
 COMMANDS: tuple[str, ...] = (
+    "define",    # §107 steps 6-7 — author the Blueprint from the requirements
     "approve",   # §25 — accept the definition, produce the §26 plan
     "build",     # §107 step 10 — authorise the run
     "preview",   # §66 — the running application
@@ -98,8 +99,10 @@ TURN_SCHEMA: dict[str, Any] = {
             "enum": ["", *COMMANDS],
             "description": (
                 "Only for intent=command; empty string otherwise. "
-                "approve = the user accepts the definition so the build plan "
-                "can be produced; build = the user authorises the run; "
+                "define = draft the Blueprint from the requirements agreed "
+                "so far; approve = the user accepts that definition so the "
+                "build plan can be produced; build = the user authorises the "
+                "run; "
                 "preview/export/deploy/status are the lifecycle verbs. Pick "
                 "the one the user asked for — do not infer `build` from "
                 "enthusiasm."
@@ -300,6 +303,76 @@ def _writes_for(agent: str = "smith") -> str:
     return "\n".join(f"  - {s}" for s in sorted(capability_for(agent).writes))
 
 
+SHAPE_ADDENDUM = """
+
+## The shape of what you write
+
+Each artifact `body` must match the contract for its section exactly. Extra
+properties are rejected outright — the Blueprint's schema is closed, and a body
+carrying a field it invented is thrown away whole rather than trimmed to fit.
+Omit `id`; identity is assigned for you.
+
+```json
+{shapes}
+```"""
+
+#: Sections worth showing the shape of, given where the application is. A cold
+#: start only ever writes requirements, and inlining nineteen section schemas
+#: to say so costs ~4,900 tokens to no purpose.
+STATE_SHAPES: dict[str, tuple[str, ...]] = {
+    "DISCOVERY": ("requirements",),
+    "CLARIFICATION": ("requirements",),
+}
+
+
+def shapes_for(agent: str, state: str) -> dict[str, Any]:
+    """The contract slice describing what this turn may produce.
+
+    Smith was told *which* sections it owns and never what an artifact in them
+    looks like. The first live cold start is what surfaced it: asked for
+    requirements, the model returned `title`, `statement`, `actor`, `priority`,
+    `source` and `notes` — a perfectly reasonable requirement shape, and not
+    this contract's. All five were rejected.
+
+    That is the same defect already found and fixed on the agent path, where
+    `writable_shapes` inlines the contract slice into the prompt. Smith simply
+    never got the same treatment.
+    """
+    from services.blueprint.executors import writable_shapes
+
+    shapes = writable_shapes(agent)
+    wanted = STATE_SHAPES.get(state)
+    if wanted:
+        shapes = {k: v for k, v in shapes.items() if k in wanted}
+    return shapes
+
+
+def body_errors(section: str, body: dict, agent: str = "smith") -> list[str]:
+    """Contract errors for one proposal body, before anything is written.
+
+    Checked here so a bad shape is *re-asked* rather than raised. Without it the
+    failure surfaced from ``BlueprintService.validate`` deep inside
+    ``apply_change``, which is past the point where a retry is possible: the
+    turn died with a traceback instead of Smith saying "that did not fit, let me
+    try again".
+    """
+    import json as _json
+    import warnings
+
+    from services.blueprint.service import CONTRACT_PATH
+
+    shape = shapes_for(agent, "").get(section)
+    if not shape:
+        return []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from jsonschema import Draft7Validator, RefResolver
+
+        contract = _json.loads(CONTRACT_PATH.read_text("utf-8"))
+        validator = Draft7Validator(shape, resolver=RefResolver.from_schema(contract))
+        return [e.message for e in validator.iter_errors(body)]
+
+
 def build_interpret_prompt(
     context: Context, *, agent: str = "smith", inline_schema: bool = False,
     state: str = "",
@@ -326,6 +399,11 @@ def build_interpret_prompt(
         writes=_writes_for(agent), decisions=decisions_block,
         task=STATE_TASKS.get(state, INTERPRET_TASK),
     )
+    shapes = shapes_for(agent, state)
+    if shapes:
+        system += SHAPE_ADDENDUM.format(
+            shapes=json.dumps(shapes, indent=2)[:12000]
+        )
     if inline_schema:
         system += (
             "\n\nReturn JSON matching this schema exactly:\n"
@@ -448,8 +526,11 @@ def validate_turn(
                 f"proposal writes {p.section!r}, outside Smith's boundary "
                 f"({', '.join(sorted(cap.writes))})"
             )
+            continue
         if not p.natural_key:
             problems.append(f"proposal for {p.section!r} has no natural_key")
+        for message in body_errors(p.section, p.body, agent):
+            problems.append(f"{p.section} body for {p.natural_key!r}: {message}")
 
     if not 0.0 <= plan.confidence <= 1.0:
         problems.append(f"confidence {plan.confidence} is outside 0..1")

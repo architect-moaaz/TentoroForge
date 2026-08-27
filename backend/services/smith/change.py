@@ -373,6 +373,7 @@ def apply_change(
     executor: Callable[[Any], Any] | None = None,
     app_root: str | None = None,
     run_agents: bool = True,
+    regenerate: bool = True,
 ) -> ChangeResult:
     """§114 steps 3–7: analyse, update the Blueprint, then run the sub-DAG.
 
@@ -381,6 +382,14 @@ def apply_change(
     If the commit fails the run does not happen at all — a half-applied change
     is worse than a refused one, because the next impact analysis is computed
     against a document nobody believes.
+
+    ``regenerate`` is False while the application is still being defined. §72's
+    incremental plan answers "what must be rebuilt", and before there is a
+    definition the answer is nothing — the requirements have just been written
+    and the authoring pass has not run yet, so a plan computed here would
+    re-run seventeen nodes to regenerate an application that does not exist.
+    The write still goes through the Blueprint and is still versioned; only the
+    regeneration is skipped.
 
     ``executor`` is injected, exactly as :func:`orchestrator.run` takes it, so
     this is testable without a model. With ``run_agents=False`` the change lands
@@ -439,6 +448,12 @@ def apply_change(
     # Newly-created artifacts change the graph, so the plan is recomputed
     # against the committed document. Computing it once before the write would
     # plan against a Blueprint that did not yet contain the change.
+    if not regenerate:
+        impact.plan = []
+        return ChangeResult(
+            impact=impact, version=version, committed=committed, applied=True,
+        )
+
     written = {p.section for p in proposals}
     impact.plan = incremental_plan(
         svc.doc,

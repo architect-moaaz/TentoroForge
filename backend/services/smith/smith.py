@@ -47,8 +47,11 @@ from services.blueprint.orchestrator import (
     ALLOWED_TRANSITIONS,
     IllegalTransition,
     RunReport,
+    DAG,
     build_plan_summary,
+    can_transition,
     graph_pool,
+    levels,
     transition,
 )
 from services.blueprint.orchestrator import run as run_dag
@@ -92,18 +95,51 @@ TURN_TRANSITIONS: dict[tuple[str, str], str] = {
 
 #: §25/§107 step 8-9. Accepting the definition is one user act that produces the
 #: §26 plan and parks at the authorisation gate; it is not four separate asks.
+#: Starts at DEFINITION so it is reachable from CLARIFICATION, where a user who
+#: is happy with the answers actually is.
 APPROVE_WALK: tuple[str, ...] = (
-    "BLUEPRINT_REVIEW", "PLANNING", "PLAN_REVIEW",
+    "DEFINITION", "BLUEPRINT_REVIEW", "PLANNING", "PLAN_REVIEW",
 )
+
+
+def definition_nodes() -> list[str]:
+    """Nodes that author the Blueprint — §107 steps 6-7, *before* approval.
+
+    The split matters and is easy to get backwards. §107 step 7 creates the
+    Living Blueprint and step 8 is "user accepts or modifies the Blueprint", so
+    the entities, pages, workflows and rules must exist before the user is
+    asked to accept anything. Run them after the build authorisation instead
+    and §26's plan reports 18 pages as 0, and approval means accepting a blank
+    document.
+
+    So: agent and derivation nodes define, projections implement. Verification
+    is excluded because §107 puts it at step 20, after the build — a report
+    against a definition nobody has built yet has nothing to check.
+    """
+    order = [k for lvl in levels() for k in lvl]
+    return [
+        k for k in order
+        if DAG[k].kind in ("agent", "service") and k != "verification"
+    ]
+
+
+def build_nodes() -> list[str]:
+    """Nodes that turn an accepted definition into a running app (§107 12-21)."""
+    order = [k for lvl in levels() for k in lvl]
+    return [k for k in order if DAG[k].kind == "projection" or k == "verification"]
 
 #: §107 steps 10-21, and the order §94 puts them in. Walked as far as the run
 #: actually got — see :meth:`Smith.build`.
+#: Each state is gated on a node from :func:`build_nodes` — the ones that
+#: actually run in this phase. Gating on `database` or `data_model` would never
+#: fire: those author the definition and have already run by now, so the walk
+#: would stop at IMPLEMENTATION however well the build went.
 BUILD_WALK: tuple[tuple[str, str], ...] = (
-    ("IMPLEMENTATION", ""),                      # entered before anything runs
-    ("DATABASE_PROVISIONING", "database"),
-    ("BUILD", "integration"),
-    ("VERIFICATION", "verification"),
-    ("PREVIEW", "preview"),
+    ("IMPLEMENTATION", ""),                       # entered before anything runs
+    ("DATABASE_PROVISIONING", "backend"),         # §56-62: schema, migrations, seed
+    ("BUILD", "integration"),                     # the join projection
+    ("VERIFICATION", "verification"),             # §107 step 20
+    ("PREVIEW", "preview"),                       # §107 step 21
 )
 
 
@@ -457,6 +493,7 @@ class Smith:
                 executor=self.executor,
                 app_root=self.app_root,
                 run_agents=run_agents and self.executor is not None,
+                regenerate=self.defined,
             )
 
         if plan.intent == "ask" and plan.anchors:
@@ -503,6 +540,26 @@ class Smith:
     def state(self) -> str:
         return self.doc.get("state", "DISCOVERY")
 
+    @property
+    def defined(self) -> bool:
+        """Whether there is an application for §72 to regenerate.
+
+        Derived from the document rather than read off ``state``. The obvious
+        implementation — "is the state DISCOVERY or CLARIFICATION" — trusts a
+        label, and the ATS fixture is the counterexample sitting in the repo: a
+        complete application with eighteen pages and eight entities whose state
+        is still DISCOVERY, because until the lifecycle was wired nothing ever
+        transitioned it. Gating regeneration on that label stops a real
+        application from ever rebuilding.
+
+        Pages or entities, because those are what the projections need. A
+        Blueprint holding only requirements has been described, not defined.
+        """
+        return bool(
+            self.doc.get("pages")
+            or (self.doc.get("data") or {}).get("entities")
+        )
+
     def _advance(self, event: str) -> str:
         """Apply the one transition this (state, event) pair permits, if any.
 
@@ -531,6 +588,26 @@ class Smith:
 
     # -- §107 steps 8-21 -----------------------------------------------------
 
+    def define(self) -> RunReport:
+        """§107 steps 6-7 — author the Blueprint from the requirements.
+
+        Explicit rather than automatic. §107 has this follow clarification with
+        no user act between, but it is a dozen model calls: running it as a
+        side effect of someone answering a question would spend their money
+        without asking. The deviation is the trigger, not the order.
+        """
+        if self.executor is None:
+            raise RuntimeError(
+                "Smith needs an executor to author a definition; agents are "
+                "injected so orchestration stays testable without a model (§116)"
+            )
+        report = run_dag(
+            self.blueprint, self.executor, plan=definition_nodes(),
+            commit=False, user_request="define", app_root=self.app_root,
+        )
+        self._walk(("DEFINITION",))
+        return report
+
     def approve(self) -> dict[str, int]:
         """§25 / §107 steps 8-9 — accept the definition, produce the plan.
 
@@ -556,7 +633,7 @@ class Smith:
         asserting VERIFICATION because a run was requested — rather than
         because verification ran — would make the state a wish.
         """
-        transition(self.blueprint, "IMPLEMENTATION")
+        transition(self.blueprint, "IMPLEMENTATION")  # §107 step 10's gate
         if self.executor is None:
             raise RuntimeError(
                 "Smith needs an executor to build; agents are injected so the "
@@ -564,7 +641,7 @@ class Smith:
             )
 
         report = run_dag(
-            self.blueprint, self.executor, plan=None, commit=False,
+            self.blueprint, self.executor, plan=build_nodes(), commit=False,
             user_request="build", app_root=app_root or self.app_root,
         )
 
@@ -606,6 +683,22 @@ class Smith:
             turn.command_result = self.status()
             return
 
+        if plan.command == "define":
+            if self.executor is None:
+                turn.command_result = {
+                    "refused": "no executor is configured, so there is nothing "
+                               "to delegate the authoring to",
+                }
+                return
+            report = self.define()
+            turn.run = report
+            turn.plan_summary = build_plan_summary(self.doc)
+            turn.command_result = {
+                "completed": len(report.completed), "failed": len(report.failed),
+                "blocked": len(report.blocked), "state": self.state,
+            }
+            return
+
         if plan.command == "approve":
             turn.plan_summary = self.approve()
             turn.command_result = {"approved": True, "state": self.state}
@@ -616,6 +709,18 @@ class Smith:
                 turn.command_result = {
                     "refused": "no executor is configured, so there is nothing "
                                "to delegate the build to",
+                }
+                return
+            # §107 step 10 authorises the build *from* the plan-review gate.
+            # Refuse with the reason rather than raise: the state machine
+            # saying no is an answer to give the user, not a crash.
+            if not can_transition(self.state, "IMPLEMENTATION"):
+                turn.command_result = {
+                    "refused": (
+                        f"the application is in {self.state}; a build is "
+                        "authorised from PLAN_REVIEW (§107 step 10). Draft the "
+                        "definition and accept it first."
+                    ),
                 }
                 return
             turn.run = self.build()
