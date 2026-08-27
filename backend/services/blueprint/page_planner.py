@@ -822,6 +822,21 @@ def _prop_line(name: str, spec: dict, *, required: bool = False) -> str:
                     if spec.get("enum"):
                         return f"{k}{mark}:" + "|".join(
                             str(v) for v in spec["enum"][:4])
+                    # A nested array of objects needs its own shape stated.
+                    # `FilterBar.chips[].options` is a list of {value, label},
+                    # and rendering it as a bare name let an author write a
+                    # list of plain strings — correct-looking, and rejected.
+                    if spec.get("type") == "array":
+                        inner = spec.get("items") or {}
+                        if inner.get("type") == "object":
+                            keys = list(inner.get("properties") or {})[:4]
+                            inner_req = set(inner.get("required") or [])
+                            if keys:
+                                fields = ", ".join(
+                                    f"{n}{'*' if n in inner_req else ''}"
+                                    for n in keys)
+                                return f"{k}{mark}: [{{{fields}}}]"
+                        return f"{k}{mark}: [{inner.get('type') or 'any'}]"
                     return f"{k}{mark}"
 
                 fields = ", ".join(_item_field(k) for k in list(shape)[:6])

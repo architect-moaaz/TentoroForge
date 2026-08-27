@@ -442,3 +442,21 @@ def test_the_gate_still_rejects_a_value_the_component_refuses(catalog):
     }}}
     errors = pp.validate_props(schema, catalog)
     assert len(errors) == 1 and "ghost" in errors[0]
+
+
+def test_the_digest_states_nested_array_item_shapes(catalog):
+    """A list inside a list item needs its own shape stated.
+
+    `FilterBar.chips[].options` is a list of {value, label}. Rendered as a bare
+    name, an author wrote a list of plain strings — correct-looking, and
+    rejected by the gate. That one page failed twice and, before fan-out
+    failures were made survivable, took six downstream nodes with it.
+    """
+    digest = pp.catalog_digest(catalog)
+    assert "options*: [{value*, label*}]" in digest
+
+
+def test_the_digest_states_scalar_array_types_too(catalog):
+    """`columnOrder: array<string>` should not read as an array of objects."""
+    digest = pp.catalog_digest(catalog)
+    assert "columnOrder: [string]" in digest or "columnOrder: array<string>" in digest
