@@ -60,6 +60,15 @@ class BlueprintGenerateRequest(BaseModel):
     #: (§20) and the ids every generated artifact is keyed to (§12), so
     #: replacing one silently is not a regeneration, it is amnesia.
     fresh: bool = False
+    #: §25 — the user has seen the definition and accepted it.
+    #:
+    #: The PRD puts a checkpoint between understanding and building: "once the
+    #: application definition is accepted, Smith generates the build plan."
+    #: Without it a single POST spends forty minutes and a dozen model calls on
+    #: an understanding nobody has looked at. Approval applies at meaningful
+    #: product boundaries (§25), not per property — so this is one flag, not a
+    #: field-by-field diff.
+    approved: bool = False
 
 
 def _report_payload(report: Any) -> dict:
@@ -159,13 +168,19 @@ async def generate_via_blueprint(
                     description=req.description,
                 )
 
-            plan = [k for lvl in levels() for k in lvl]
-            if req.define_only:
-                # Requirements and the product model only — enough to show the
-                # user what was understood before spending on the rest.
-                plan = ["requirements", "application_model"]
+            from services.blueprint.plan_forecast import forecast
 
-            emit("plan", {"nodes": plan, "total": len(plan)})
+            definition = ["requirements", "application_model"]
+            plan = [k for lvl in levels() for k in lvl]
+            if req.define_only or not req.approved:
+                # §25 — stop at the definition and wait to be accepted. The
+                # definition is two calls; what follows is a dozen or more, so
+                # the checkpoint costs almost nothing and saves the case where
+                # the understanding was wrong.
+                plan = definition
+
+            emit("plan", {"nodes": plan, "total": len(plan),
+                          "awaitingApproval": plan == definition and not req.approved})
 
             # A single client rather than a router: per-node model choice is a
             # tuning decision, and defaulting every node to one model keeps the
@@ -185,7 +200,15 @@ async def generate_via_blueprint(
 
             report = run(svc, traced, plan=plan, commit=True,
                          user_request=req.description, app_root=app_root)
+
+            # §26 — what the finished application should contain, so the run
+            # can be checked against the plan rather than only watched.
+            counts = forecast(svc.doc)
+            emit("forecast", counts)
+
             return {"resumed": resumed,
+                    "awaitingApproval": plan == definition and not req.approved,
+                    "forecast": counts,
                     "report": _report_payload(report),
                     "version": svc.doc.get("version"),
                     "blueprint": str(svc.current_path)}

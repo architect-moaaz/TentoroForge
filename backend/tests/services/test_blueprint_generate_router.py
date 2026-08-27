@@ -214,3 +214,59 @@ def test_the_router_validates_before_it_persists():
     assert '"application", {})["description"]' in src
     assert "svc.validate()" in src, (
         "an invalid document must not reach disk — save() does not check")
+
+
+def test_a_bare_post_stops_at_the_definition(tmp_path):
+    """§25 — 'once the application definition is accepted, Smith generates the
+    build plan.' Without a checkpoint one POST spends forty minutes and a dozen
+    model calls on an understanding nobody has looked at."""
+    import inspect
+
+    from routers import blueprint_generate
+
+    assert blueprint_generate.BlueprintGenerateRequest(
+        description="x").approved is False
+
+    src = inspect.getsource(blueprint_generate.generate_via_blueprint)
+    assert "not req.approved" in src
+    assert "awaitingApproval" in src, "the client has to know it is being asked"
+
+
+def test_the_plan_forecasts_what_should_exist(tmp_path):
+    """§26's plan is counts, not an order. A node list says what will happen;
+    a forecast says what should exist afterwards, and only the second can be
+    checked against the result."""
+    from services.blueprint.plan_forecast import forecast, render
+
+    doc = {
+        "requirements": [{"id": "REQ-001"}],
+        "pages": [{"id": "PAGE-001"}, {"id": "PAGE-002"}],
+        "data": {"entities": [{"id": "ENTITY-001"}]},
+        "workflows": [{"id": "FLOW-001"}],
+        "businessRules": [], "apis": [], "roles": [], "integrations": [],
+    }
+    f = forecast(doc)
+    assert f["pages"] == 2 and f["entities"] == 1
+    # 2 pages x 2 + 1 workflow x 3
+    assert f["expectedTests"] == 7
+    assert "2 pages" in render(f)
+
+
+def test_deprecated_artifacts_are_not_forecast(tmp_path):
+    from services.blueprint.plan_forecast import forecast
+
+    doc = {"pages": [{"id": "P1"}, {"id": "P2", "status": "DEPRECATED"}]}
+    assert forecast(doc)["pages"] == 1
+
+
+def test_the_forecast_is_compared_to_the_outcome(tmp_path):
+    """Reported, not enforced: nineteen pages where eighteen were forecast has
+    not failed. Two has."""
+    from services.blueprint.plan_forecast import compare, forecast
+
+    planned = forecast({"pages": [{"id": f"P{i}"} for i in range(18)]})
+    thin = {"pages": [{"id": "P1"}, {"id": "P2"}]}
+    drift = compare(planned, thin)
+    assert drift["pages"] == {"planned": 18, "actual": 2, "delta": -16}
+
+    assert compare(planned, {"pages": [{"id": f"P{i}"} for i in range(18)]}) == {}
