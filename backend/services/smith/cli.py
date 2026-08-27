@@ -216,6 +216,16 @@ def show_turn(smith: Smith, turn: Any) -> None:
                 r = change.run
                 print(f"  ran {len(r.completed)} nodes, "
                       f"{len(r.skipped)} skipped, {len(r.failed)} failed")
+                # Naming them matters more than counting them: a skipped node
+                # leaves the Blueprint holding whatever it held before, which
+                # is indistinguishable from a node that ran and changed nothing.
+                for node in r.skipped:
+                    why = getattr(r, "skipped_because", {}).get(node, "")
+                    print(f"    skipped: {node}" + (f" (unmet: {why})" if why else ""))
+                for node in r.blocked:
+                    print(f"    blocked: {node}")
+                for node in r.failed:
+                    print(f"    failed:  {node}")
 
     if turn.trace:
         print("\n  --- traceability (§18) ---")
@@ -304,6 +314,12 @@ def repl(smith: Smith, *, run_agents: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A run that takes half an hour and prints nothing is a run nobody can
+    # review. Unbuffered so the report survives however the process ends.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001 - not worth failing a run over
+        pass
     parser = argparse.ArgumentParser(
         prog="services.smith.cli", description="Talk to Smith about an application.",
     )

@@ -591,6 +591,10 @@ class TaskSpec:
 class RunReport:
     completed: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: Skipped node -> the dependencies that never completed. Kept beside
+    #: ``skipped`` rather than folded into it so the list stays node keys a
+    #: caller can test membership against.
+    skipped_because: dict[str, str] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
     change_requests: list = field(default_factory=list)
@@ -633,7 +637,13 @@ def run(
         node = DAG[key]
         unmet = {d for d in node.depends_on if d in order and d not in done}
         if unmet:
+            # Say which dependency stopped it. A plan that quietly drops eight
+            # of eighteen nodes reads exactly like one that ran them: the
+            # `apis` node was skipped for an unmet dependency during an
+            # incremental change and the Blueprint simply kept the endpoints it
+            # already had, with nothing to indicate the derivation never ran.
             report.skipped.append(key)
+            report.skipped_because[key] = ", ".join(sorted(unmet))
             continue
 
         capability_for(node.agent)  # §28: no unregistered agents

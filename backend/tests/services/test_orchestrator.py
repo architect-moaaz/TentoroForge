@@ -618,3 +618,27 @@ def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
     plan = incremental_plan(ats, ["CMP-033"])
     for required in ("patterns", "frontend", "integration", "verification", "preview"):
         assert required in plan, required
+
+
+def test_a_skipped_node_records_which_dependency_stopped_it(svc):
+    """A plan that quietly drops nodes reads exactly like one that ran them.
+
+    During an incremental change the `apis` node was skipped for an unmet
+    dependency, so the Blueprint kept the 51 endpoints it already had while the
+    data model had gained two entities — and nothing in the output said the
+    derivation never ran. Counting skips is not enough; the reason is the part
+    that makes it actionable.
+    """
+    def fails(spec):
+        raise RuntimeError("no")
+
+    report = run(svc, fails, plan=["page_contracts", "page_designs"],
+                 max_attempts=1)
+    # `skipped` stays node keys, so membership tests keep working.
+    assert report.skipped == ["page_designs"]
+    assert report.skipped_because["page_designs"] == "page_contracts"
+
+
+def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
+    report = run(svc, lambda spec: None, plan=[])
+    assert report.skipped == [] and report.skipped_because == {}
