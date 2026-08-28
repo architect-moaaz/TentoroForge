@@ -1002,3 +1002,46 @@ def page_brief(doc: dict, page_id: str) -> dict:
             for rel in related_collections(doc, entity.get("id"))
         ]
     return brief
+
+
+# ---------------------------------------------------------------------------
+# §32 — the page set as slots, not as a free list
+# ---------------------------------------------------------------------------
+
+#: One slot per job an entity's UI has to do. A filter over a list is not on
+#: this list, which is the whole point: the page-design prompt was already told
+#: at length that a filter belongs in `views`, with the `/jobs` example spelled
+#: out, and a run still returned `/jobs/mine`, `/jobs/unassigned`,
+#: `/jobs/overdue`, `/jobs/awaiting-decision`, `/jobs/ready-for-collection` and
+#: `/jobs/awaiting-extra-work`. A free list of pages admits a filtered page as a
+#: perfectly good answer, so the instruction was arguing with the question.
+#:
+#: Asking slot by slot removes the room rather than policing it. There is no
+#: sixth jobs slot to put "overdue" in, so it goes where it fits: `views`.
+ENTITY_SLOTS = (
+    ("list", "entity_list", "Every {name}, in one place."),
+    ("detail", "record_workspace", "One {name}, with everything about it."),
+    ("create", "form", "Add a {name}."),
+)
+
+
+def page_slots(doc: dict) -> list[dict]:
+    """The slots this application's page set may fill.
+
+    Derived from the data model, so the answer space is a consequence of the
+    entities rather than of what the model felt like proposing.
+    """
+    slots: list[dict] = [
+        {"slot": "home", "pattern": "dashboard", "entity": None,
+         "prompt": "Where a user lands. Omit only if the app opens on a list."},
+    ]
+    for entity in (doc.get("data") or {}).get("entities") or []:
+        name = entity.get("name") or entity.get("id")
+        for slot, pattern, why in ENTITY_SLOTS:
+            slots.append({
+                "slot": f"{entity.get('id')}.{slot}",
+                "pattern": pattern,
+                "entity": entity.get("id"),
+                "prompt": why.format(name=name),
+            })
+    return slots
