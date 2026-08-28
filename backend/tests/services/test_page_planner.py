@@ -556,3 +556,56 @@ def test_repeat_over_states_is_empty_when_none_are_declared():
 
     assert repeat_items({}, {"states": []}, {}, "states") == []
     assert repeat_items({}, {}, {}, "states") == []
+
+
+# --- §33: the page declares the process it starts ---------------------------
+
+
+def _wf_doc():
+    return {
+        "workflows": [
+            {"id": "FLOW-001", "name": "Bike Drop-off Intake",
+             "status": "active", "trigger": {"kind": "manual"},
+             # Opens by registering a Customer, though /jobs/new starts it:
+             # this is exactly what an inference over step order gets wrong.
+             "steps": [{"type": "action", "entity": "ENTITY-001"},
+                       {"type": "action", "entity": "ENTITY-002"}]},
+            {"id": "FLOW-006", "name": "Flag a Job Awaiting Parts",
+             "status": "active", "trigger": {"kind": "manual"},
+             "steps": [{"type": "action", "entity": "ENTITY-002"}]},
+        ],
+    }
+
+
+def test_a_page_dispatches_the_workflow_it_declares():
+    page = {"id": "PAGE-010", "route": "/jobs/new", "dispatches": "FLOW-001"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) == "FLOW-001"
+
+
+def test_a_page_that_declares_nothing_dispatches_nothing():
+    """Silence is not a licence to guess."""
+    page = {"id": "PAGE-010", "route": "/jobs/new"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) is None
+
+
+def test_a_declared_workflow_that_does_not_exist_is_refused():
+    page = {"id": "PAGE-010", "route": "/jobs/new", "dispatches": "FLOW-999"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) is None
+
+
+def test_the_form_carries_the_workflow_and_the_button_does_not():
+    """A twelve-step intake dispatched from a button has nowhere to type."""
+    root = {"type": "Stack", "children": [
+        {"type": "Button", "props": {"label": "New drop-off",
+                                     "navigate": "/jobs/new"}},
+        {"type": "Form", "props": {"fields": [{"name": "x"}]}},
+    ]}
+    out = pp.bind_workflows(root, "FLOW-001")
+    assert out["children"][1]["props"]["workflow"] == "FLOW-001"
+    assert "workflow" not in out["children"][0]["props"]
+
+
+def test_an_authored_workflow_is_not_overwritten():
+    root = {"type": "Form", "props": {"fields": [{"name": "x"}],
+                                      "workflow": "invoice.update"}}
+    assert pp.bind_workflows(root, "FLOW-001")["props"]["workflow"] == "invoice.update"

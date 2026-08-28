@@ -417,6 +417,11 @@
             },
             "default": []
           },
+          "dispatches": {
+            "type": "string",
+            "pattern": "^FLOW-\\d{3,}$",
+            "description": "Stable FLOW identifier (§12)"
+          },
           "primaryTasks": {
             "type": "array",
             "items": {
@@ -1043,9 +1048,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "pattern": "^FLOW-\\d{3,}$",
-            "description": "Stable FLOW identifier (§12)"
+            "$ref": "#/properties/pages/items/properties/dispatches"
           },
           "name": {
             "type": "string"

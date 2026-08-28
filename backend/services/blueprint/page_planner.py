@@ -627,6 +627,44 @@ def _bindings_used(node: dict, found: set[str] | None = None) -> set[str]:
     return found
 
 
+def workflow_for_page(doc: dict, page: dict, entity: dict | None) -> str | None:
+    """The workflow a form on this page dispatches on submit.
+
+    Read from `PageContract.dispatches`, not inferred. Inferring it from step
+    order binds the wrong flow: `Bike Drop-off Intake` opens by searching for
+    the owner and registering a Customer, so its first mutating step names
+    Customer while the page that starts it is `/jobs/new`. A rule over "first
+    mutating step" sent the drop-off wizard to `Flag a Job as Awaiting Parts`.
+
+    The workflow states its own entry point in the trigger's prose — "started
+    from the New Drop-off wizard (/jobs/new)" — which is exactly the shape that
+    string-matching would turn into a rule. So the contract carries it instead
+    and the agent that already knows declares it.
+
+    Bound to the form, not to the button that navigates here: a twelve-step
+    intake dispatched from a list page gives the user nowhere to enter
+    anything.
+    """
+    declared = page.get("dispatches")
+    if not declared:
+        return None
+    known = {wf.get("id") for wf in _live(doc.get("workflows"))}
+    return declared if declared in known else None
+
+
+def bind_workflows(node: dict, workflow: str | None) -> dict:
+    """Give every declarative Form on the page the workflow it submits to."""
+    if not workflow or not isinstance(node, dict):
+        return node
+    props = node.get("props") or {}
+    if (node.get("type") == "Form" and props.get("fields")
+            and not props.get("workflow")):
+        node["props"] = {**props, "workflow": workflow}
+    for child in node.get("children") or []:
+        bind_workflows(child, workflow)
+    return node
+
+
 def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
     """The fetches this page needs, keyed to the bindings its tree actually uses.
 
@@ -808,7 +846,8 @@ def plan_page(doc: dict, page: dict, template: dict,
             f"{page.get('id')}: template root produced {len(roots)} nodes; "
             f"a repeat on the root would leave the page without a single root"
         )
-    root = prune_unsatisfiable(roots[0], catalog)
+    root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
+                          workflow_for_page(doc, page, entity))
     if root is not None:
         root = assign_node_ids(root)
     if root is None:

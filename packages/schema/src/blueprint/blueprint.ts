@@ -199,6 +199,24 @@ export const PageContract = z.object({
       }),
     )
     .default([]),
+  /**
+   * The workflow this page starts, when it starts one.
+   *
+   * Not inferable from the workflow's steps. `Bike Drop-off Intake` begins by
+   * searching for the owner and registering a Customer, so its first mutating
+   * step names Customer while the page that starts it is `/jobs/new` — a rule
+   * over step order binds the drop-off wizard to whichever flow happens to
+   * touch Job first. The workflow knows its own entry point and says so in
+   * prose ("started from the New Drop-off wizard (/jobs/new)"), which no later
+   * stage can read.
+   *
+   * Declared here because the agent writing the page contract already knows
+   * which process it opens. A form on this page dispatches it on submit; the
+   * button that navigates here does not, since a twelve-step intake needs the
+   * fields filled first.
+   */
+  dispatches: WorkflowId.optional(),
+
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
 
