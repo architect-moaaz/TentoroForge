@@ -83,16 +83,34 @@ def test_optional_props_are_not_required(catalog):
 
 # ---------------------------------------------------------------------- enums
 
+def _members(spec: dict) -> list:
+    """The literal members an enum prop accepts, whether or not it also
+    accepts a binding."""
+    if "enum" in spec:
+        return spec["enum"]
+    return next(b["enum"] for b in spec["anyOf"] if "enum" in b)
+
+
 def test_direction_is_an_enum_not_a_bare_string(catalog):
     """Told only that direction is a string, a composer reasonably emits CSS's
     "column"."""
-    assert body(catalog, "Stack")["properties"]["direction"] == {
-        "enum": ["vertical", "horizontal"]
-    }
+    assert _members(body(catalog, "Stack")["properties"]["direction"]) == [
+        "vertical", "horizontal"
+    ]
+
+
+def test_an_enum_prop_also_accepts_a_binding(catalog):
+    """A status badge whose colour follows the row is the ordinary case.
+    Described as a bare enum, A2UI bound {'path': '/plant/statusVariant'},
+    its own validator refused it three times, and the page fell back."""
+    spec = body(catalog, "Badge")["properties"]["variant"]
+    assert "anyOf" in spec
+    assert any("$ref" in b for b in spec["anyOf"]), "no binding alternative"
+    assert "success" in _members(spec)
 
 
 def test_charttype_carries_every_real_variant(catalog):
-    members = body(catalog, "Chart")["properties"]["chartType"]["enum"]
+    members = _members(body(catalog, "Chart")["properties"]["chartType"])
     # radar was missing from the hand-written list.
     assert {"bar", "line", "area", "pie", "donut", "funnel", "radar"} <= set(members)
 

@@ -297,7 +297,19 @@ def _prop_schema(name: str, spec: dict) -> dict:
     # the type alone silently turned every overlaid enum into a free string.
     members = spec.get("enum")
     if isinstance(members, list) and members:
-        return {"enum": list(members)}
+        # A literal member, or a binding that resolves to one. A status badge
+        # whose colour follows the row is the ordinary case, and describing
+        # `variant` as a bare enum refused it: A2UI bound
+        # {'path': '/plant/statusVariant'}, its own validator rejected the
+        # binding three times, and the page fell back to the authoring agent.
+        #
+        # Safe on our side: validate_props already treats a binding string as
+        # deferred, because the renderer supplies the value later and there is
+        # nothing to type-check until it does.
+        return {"anyOf": [
+            {"enum": list(members)},
+            {"$ref": f"{_COMMON}#/$defs/DynamicString"},
+        ]}
     if raw == "boolean":
         return {"type": "boolean"}
     if raw in ("number", "integer"):
