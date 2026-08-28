@@ -32,6 +32,8 @@ threshold is refused rather than applied with a warning.
 """
 from __future__ import annotations
 
+import copy
+
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -506,21 +508,40 @@ def apply_agent_result(
         [(p.section, p.natural_key, p.body) for p in result.proposals], allocated
     )
 
-    ids: list[str] = []
-    for p in result.proposals:
-        art = svc.upsert(p.section, p.body, natural_key=p.natural_key)
-        # Singleton sections (database, security, …) carry no id — there is
-        # nothing to reference, so there is nothing to collect.
-        if art.get("id"):
-            ids.append(art["id"])
-    result.artifacts = ids
+    # Upsert mutates the shared document and `validate` raises after it, so a
+    # rejected proposal used to stay in memory: the next node validated against
+    # someone else's bad artifact and failed for it. A fresh run lost fourteen
+    # nodes that way — `page_contracts` proposed a widget with `unit: "jobs"`,
+    # was rightly rejected, and `security`, which writes no widgets at all,
+    # failed on the same five errors moments later because it shared the
+    # document. The forecast then counted 29 pages that were never saved.
+    #
+    # Level waves made this load-bearing rather than causing it: siblings in a
+    # wave share one document, so a rejection reaches further than the node
+    # that earned it. Rejecting has to leave the Blueprint exactly as it was.
+    snapshot = copy.deepcopy(svc.doc)
+    try:
+        ids: list[str] = []
+        for p in result.proposals:
+            art = svc.upsert(p.section, p.body, natural_key=p.natural_key)
+            # Singleton sections (database, security, …) carry no id — there is
+            # nothing to reference, so there is nothing to collect.
+            if art.get("id"):
+                ids.append(art["id"])
+        result.artifacts = ids
 
-    # §17 middle band: proceed, but the assumption must be on the record.
-    recorded: list[str] = []
-    if result.confidence < AUTO_DECIDE and result.assumptions:
-        recorded = list(result.assumptions)
+        # §17 middle band: proceed, but the assumption must be on the record.
+        recorded: list[str] = []
+        if result.confidence < AUTO_DECIDE and result.assumptions:
+            recorded = list(result.assumptions)
 
-    svc.validate()
+        svc.validate()
+    except Exception:
+        # Restored in place: callers and the orchestrator hold this dict, so
+        # rebinding the attribute would leave them on the poisoned copy.
+        svc.doc.clear()
+        svc.doc.update(snapshot)
+        raise
 
     if commit:
         svc.commit(

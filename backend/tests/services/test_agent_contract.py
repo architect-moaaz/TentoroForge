@@ -487,3 +487,50 @@ def test_a2ui_is_scoped_but_can_see_the_intent_it_designs_for():
         assert {"requirements", "pages", "data"} <= cap.reads, agent
     # Still not everything: it composes UI, it does not reason about endpoints.
     assert "apis" not in AGENT_REGISTRY["a2ui_patterns"].reads
+
+
+# ---------------------------------------------------------------------------
+# A rejected proposal must leave the Blueprint exactly as it was
+# ---------------------------------------------------------------------------
+
+
+def _bad_widget() -> AgentResult:
+    """A widget whose `unit` is what is counted, not a unit — the enum says no."""
+    return page_result(proposals=[
+        ArtifactProposal(
+            section="widgets",
+            natural_key=prose_key("open-jobs"),
+            body={"name": "Open jobs", "title": "Open jobs", "unit": "jobs",
+                  "dataSource": {"entity": "ENTITY-001"}},
+        )
+    ])
+
+
+def test_a_rejected_proposal_leaves_no_trace(tmp_path):
+    """Upsert mutates before validate raises. Without a rollback the next node
+    validates against someone else's bad artifact and fails for it: a fresh run
+    lost fourteen nodes when `security`, which writes no widgets, failed on the
+    widget `page_contracts` had just been rejected for."""
+    import copy as _copy
+
+    svc = BlueprintService.create(
+        output_dir=tmp_path, app_id="a", name="A", domain="D")
+    before = _copy.deepcopy(svc.doc)
+
+    with pytest.raises(Exception):
+        apply_agent_result(svc, _bad_widget())
+
+    assert svc.doc.get("widgets") in (None, []), "the rejected widget survived"
+    assert svc.doc == before, "the document changed despite the rejection"
+
+
+def test_the_document_object_is_restored_in_place(tmp_path):
+    """The orchestrator holds this dict; rebinding would strand it."""
+    svc = BlueprintService.create(
+        output_dir=tmp_path, app_id="a", name="A", domain="D")
+    held = svc.doc
+
+    with pytest.raises(Exception):
+        apply_agent_result(svc, _bad_widget())
+
+    assert svc.doc is held, "callers were left holding the poisoned copy"
