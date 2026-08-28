@@ -707,3 +707,40 @@ def test_a_caller_supplied_registry_is_used_over_the_plan(tmp_path):
     assert "registry" in inspect.signature(compose_page_via_a2ui).parameters
     src = inspect.getsource(compose_page_via_a2ui)
     assert "registry if registry is not None else registry_for_binder" in src
+
+
+# --- the job asked for must match the screen --------------------------------
+
+
+def test_blueprint_patterns_map_to_their_job_family():
+    """page_family knows the old pipeline's kinds and returns None for every
+    Blueprint pattern but `form`, so a create screen was handed the dashboard
+    job: "decide which numbers matter and what breakdown is worth charting",
+    sent verbatim to /recipes/new."""
+    from services.a2ui_authority import _family_of
+
+    assert _family_of("entity_list") == "collection"
+    assert _family_of("record_workspace") == "record"
+    assert _family_of("master_detail") == "record"
+    assert _family_of("form") == "form"
+    assert _family_of("wizard") == "form"
+    assert _family_of("dashboard") == "dashboard"
+
+
+def test_an_unknown_kind_still_falls_back():
+    """Right for a kind nobody declared; it was only wrong for known ones."""
+    from services.a2ui_authority import _family_of
+
+    assert _family_of("something-nobody-declared") == "dashboard"
+
+
+def test_the_domain_context_can_come_from_a_supplied_registry():
+    """It read plan.json through registry_for_binder — the same missing file
+    that emptied the registry — so `domainContext` reached the server blank."""
+    from services.a2ui_authority import build_domain_context
+
+    reg = {"entities": {"Recipe": {"slug": "recipes", "columns": [
+        {"name": "name", "type": "varchar"},
+        {"name": "minutes", "type": "integer"}]}}}
+    ctx = build_domain_context(None, reg)
+    assert "Recipe" in ctx and "minutes" in ctx

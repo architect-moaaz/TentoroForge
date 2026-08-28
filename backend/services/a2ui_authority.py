@@ -107,13 +107,30 @@ _JOB = {
 }
 
 
+#: Blueprint page patterns, in the four shapes _JOB describes. page_family
+#: knows the old pipeline's kinds and returns None for every one of these
+#: except `form`, so a create screen was asked to "decide which numbers matter
+#: and what breakdown is worth charting" — the dashboard job, sent verbatim to
+#: /recipes/new. Falling back to dashboard is right for an unknown kind and
+#: wrong for a known one nobody mapped.
+_PATTERN_FAMILY = {
+    "dashboard": "dashboard",
+    "entity_list": "collection",
+    "approval_inbox": "collection",
+    "record_workspace": "record",
+    "master_detail": "record",
+    "form": "form",
+    "wizard": "form",
+}
+
+
 def _family_of(kind: Any) -> str:
     """Every declared kind reduced to one of the four shapes above."""
     from services.page_kind_anatomy import page_family
     fam = page_family(kind)
     if fam:
         return fam
-    return "dashboard"
+    return _PATTERN_FAMILY.get(str(kind or "").strip().lower(), "dashboard")
 
 
 def is_a2ui_enabled() -> bool:
@@ -365,8 +382,15 @@ def build_composition_guidance(root: Path,
     return "\n".join(lines)
 
 
-def build_domain_context(root: Path) -> str:
-    reg = registry_for_binder(root)
+def build_domain_context(root: Path, registry: dict | None = None) -> str:
+    """The entities and columns a composition may bind to.
+
+    Came back empty for every Blueprint-pipeline page — it read plan.json
+    through registry_for_binder, the same missing file that emptied the
+    registry. A composer told to bind only what exists, and handed nothing,
+    has nothing to bind.
+    """
+    reg = registry if registry is not None else registry_for_binder(root)
     lines = []
     for name, ent in (reg.get("entities") or {}).items():
         cols = ", ".join(
@@ -543,7 +567,7 @@ def compose_page_via_a2ui(
     try:
         payload = surface_provider(build_requirement(root, kind, route,
                                                      shared_context),
-                                   build_domain_context(root))
+                                   build_domain_context(root, registry))
     except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
         logger.warning("[a2ui] %s composition failed: %s", route, exc)
         return {"applied": False, "route": route, "kind": kind,
