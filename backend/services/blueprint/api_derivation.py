@@ -100,6 +100,23 @@ def _workflow_permission(doc: dict, workflow: dict) -> str | None:
     return None
 
 
+#: The scaffold serves entity CRUD from one catch-all backed by the Data
+#: Engine — `src/app/api/data/[...path]/route.ts`, whose own header says "no
+#: per-entity route files needed". Deriving `/api/bikes` described an endpoint
+#: no file answers: the Blueprint claimed a surface the application does not
+#: expose, and nothing noticed (§76). These helpers state the runtime's shape
+#: once so the contract cannot drift from it again.
+def _data_path(slug: str, by_id: bool = False) -> str:
+    return f"/api/data/{slug}/{{id}}" if by_id else f"/api/data/{slug}"
+
+
+#: Workflows diverged the same way: the derivation wrote
+#: `/api/workflows/{name}/run` while the scaffold routes
+#: `/api/workflows/[id]/execute`.
+def _workflow_path(workflow_id: str) -> str:
+    return f"/api/workflows/{workflow_id}/execute"
+
+
 def derive_apis(doc: dict) -> list[dict]:
     """Every endpoint the Blueprint implies, as ``(method, path)``-keyed dicts.
 
@@ -139,9 +156,9 @@ def derive_apis(doc: dict) -> list[dict]:
     for eid, ent in entities.items():
         slug = _slug(ent.get("name") or "")
         reqs = list(ent.get("requirements") or [])
-        add("GET", f"/api/{slug}", entity=eid,
+        add("GET", _data_path(slug), entity=eid,
             purpose=f"List {ent.get('name')} records.", requirements=reqs)
-        add("GET", f"/api/{slug}/{{id}}", entity=eid,
+        add("GET", _data_path(slug, by_id=True), entity=eid,
             purpose=f"Fetch one {ent.get('name')} by id.", requirements=reqs)
 
     # --- mutations: from workflows ---------------------------------------
@@ -149,8 +166,7 @@ def derive_apis(doc: dict) -> list[dict]:
         wid, wname = wf.get("id"), wf.get("name") or "workflow"
         reqs = list(wf.get("requirements") or [])
         if (wf.get("trigger") or {}).get("kind") == "manual":
-            add("POST", f"/api/workflows/{_slug(wname)[:-1] or 'run'}/run",
-                entity=None,
+            add("POST", _workflow_path(wid), entity=None,
                 purpose=f"Launch the {wname} workflow ({wid}).", requirements=reqs,
                 permission=_workflow_permission(doc, wf))
         for step in wf.get("steps") or []:
@@ -158,10 +174,10 @@ def derive_apis(doc: dict) -> list[dict]:
             if step.get("type") not in MUTATING_STEPS or eid not in entities:
                 continue
             slug = _slug(entities[eid].get("name") or "")
-            add("POST", f"/api/{slug}", entity=eid,
+            add("POST", _data_path(slug), entity=eid,
                 purpose=f"Create {entities[eid].get('name')} "
                         f"(written by {wname}).", requirements=reqs)
-            add("PUT", f"/api/{slug}/{{id}}", entity=eid,
+            add("PUT", _data_path(slug, by_id=True), entity=eid,
                 purpose=f"Update {entities[eid].get('name')} "
                         f"(written by {wname}).", requirements=reqs)
 
@@ -175,7 +191,7 @@ def derive_apis(doc: dict) -> list[dict]:
             method = ACTION_METHOD.get(str(action).lower())
             if not method:
                 continue
-            path = f"/api/{slug}" if method == "POST" else f"/api/{slug}/{{id}}"
+            path = _data_path(slug, by_id=method != "POST")
             add(method, path, entity=eid,
                 purpose=f"{str(action).title()} {entities[eid].get('name')} "
                         f"(used by {page.get('name')}).",
@@ -188,7 +204,12 @@ def derive_apis(doc: dict) -> list[dict]:
         if src.get("op") not in ("aggregate", "series") or eid not in entities:
             continue
         slug = _slug(entities[eid].get("name") or "")
-        add("GET", f"/api/{slug}/metrics", entity=eid,
+        # The catch-all's aggregate endpoint is `stats`. It counts; a
+        # `series` widget is not fully served by it, which is a real gap —
+        # but naming an endpoint that exists is honest where `/metrics` was
+        # not, and the gap is now visible against the route rather than
+        # hidden behind a path nothing answers.
+        add("GET", _data_path(slug) + "/stats", entity=eid,
             purpose=f"Aggregate {entities[eid].get('name')} for dashboard widgets.",
             requirements=list(widget.get("requirements") or []))
 
