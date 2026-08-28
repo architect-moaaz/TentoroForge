@@ -694,3 +694,40 @@ def test_a_timestamp_that_is_not_system_stamped_survives():
     """`publishedAt` is a fact about the article, not a lifecycle stamp."""
     entity = {"fields": [{"name": "publishedAt", "type": "datetime"}]}
     assert [f["name"] for f in pp.form_fields_for(entity, creating=True)] == ["publishedAt"]
+
+
+def test_the_default_view_narrows_the_fetch():
+    """/articles offered Unread, Read and All saved, and every one showed the
+    same rows: the view declared a filter and nothing narrowed the query."""
+    page = {"id": "PAGE-001", "route": "/articles", "pattern": "entity_list",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "unread", "filter": {"isRead": "false"},
+                       "isDefault": True},
+                      {"key": "all", "filter": {}, "isDefault": False}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Table", "props": {"rows": "{{articles}}"}}
+    doc = {"data": {"entities": [entity]}}
+    src = pp.data_sources(doc, page, entity, root)[0]
+    assert src["filter"] == {"isRead": "false"}
+
+
+def test_a_view_that_is_not_the_default_does_not_narrow_the_load():
+    page = {"id": "PAGE-001", "route": "/articles",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "all", "filter": {"x": "1"}, "isDefault": False}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Table", "props": {"rows": "{{articles}}"}}
+    src = pp.data_sources({"data": {"entities": [entity]}}, page, entity, root)[0]
+    assert "filter" not in src
+
+
+def test_a_detail_source_is_never_filtered_by_a_view():
+    """A view narrows a list; a record is fetched by id."""
+    page = {"id": "PAGE-002", "route": "/articles/[id]",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "unread", "filter": {"isRead": "false"},
+                       "isDefault": True}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Text", "props": {"value": "{{record}}"}}
+    src = pp.data_sources({"data": {"entities": [entity]}}, page, entity, root)[0]
+    assert src["op"] == "get" and "filter" not in src

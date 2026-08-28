@@ -784,11 +784,23 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
             continue
         singular = name == RECORD or (detail and target is entity
                                       and name != ROWS)
-        out.append({
+        source = {
             "name": name,
             "entity": target.get("name"),
             "op": "get" if singular else "list",
-        })
+        }
+        # A saved view declared a filter, the picker rendered it, and nothing
+        # narrowed the fetch: /articles offered Unread, Read and All saved and
+        # every one showed the same rows. The default view's filter belongs on
+        # the source so the page opens showing what it says it is showing.
+        # Switching views is the renderer's job — this is the load.
+        if not singular and target is entity:
+            default = next(
+                (v for v in (page.get("views") or []) if v.get("isDefault")),
+                None)
+            if default and default.get("filter"):
+                source["filter"] = dict(default["filter"])
+        out.append(source)
     return out
 
 
