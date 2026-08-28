@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from services.blueprint.agent_contract import (
@@ -194,7 +195,8 @@ class ModelClient(Protocol):
 
     enforces_schema: bool
 
-    def __call__(self, *, system: str, user: str, schema: dict[str, Any]) -> str: ...
+    def __call__(self, *, system: str, user: str, schema: dict[str, Any],
+                 image: str | Path | None = None) -> str: ...
 
 
 #: Below this, a prefix is not worth a cache breakpoint. Opus will not cache a
@@ -227,6 +229,44 @@ def _cacheable(system: str) -> Any:
     if len(system) // 4 < CACHE_MIN_TOKENS:
         return system
     return [{"type": "text", "text": system, "cache_control": _CACHE_CONTROL}]
+
+
+#: What a montage may be. Anthropic accepts these; anything else is a file
+#: someone pointed at by mistake, and a 400 from the API is a worse way to
+#: find that out than a refusal here.
+IMAGE_MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
+
+
+def image_block(path: str | Path) -> dict[str, Any]:
+    """A design montage as a cache-tagged image block.
+
+    A2UI authors against the component catalog and nothing visual, which is
+    why generated apps come back structurally right and looking like nothing:
+    no register, no density, no colour temperature. A montage is the missing
+    input, and it is identical for every page in a thirty-page fan-out — the
+    strongest cache candidate in the pipeline, more so than the catalog.
+
+    Cached and placed first so the prefix is stable: the per-page brief varies
+    and must follow it, or the image is re-billed on every call.
+    """
+    import base64
+
+    p = Path(path)
+    media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
+    if media is None:
+        raise ValueError(
+            f"{p.name}: not an image Anthropic accepts "
+            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))})"
+        )
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media,
+                   "data": base64.standard_b64encode(p.read_bytes()).decode()},
+        "cache_control": _CACHE_CONTROL,
+    }
 
 
 @dataclass
@@ -271,12 +311,15 @@ class AnthropicModel:
         if self.max_tokens == DEFAULT_MAX_TOKENS and self.effort in ("xhigh", "max"):
             self.max_tokens = 64000
 
-    def __call__(self, *, system: str, user: str, schema: dict[str, Any]) -> str:
+    def __call__(self, *, system: str, user: str, schema: dict[str, Any],
+                 image: str | Path | None = None) -> str:
         kwargs: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
             system=_cacheable(system),
-            messages=[{"role": "user", "content": user}],
+            messages=[{"role": "user", "content": (
+                [image_block(image), {"type": "text", "text": user}]
+                if image else user)}],
             output_config={
                 "effort": self.effort,
                 "format": {"type": "json_schema", "schema": schema},

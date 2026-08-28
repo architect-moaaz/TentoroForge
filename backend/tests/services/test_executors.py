@@ -1048,3 +1048,81 @@ def test_every_tiered_node_is_a_real_dag_node():
     from services.blueprint.orchestrator import DAG
 
     assert set(EFFORT_BY_NODE) <= set(DAG)
+
+
+# ---------------------------------------------------------------------------
+# A design montage the authoring agent can see
+# ---------------------------------------------------------------------------
+
+_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+    "de0000000c4944415408d76360000000020001e221bc330000000049454e44ae426082")
+
+
+def test_a_montage_is_sent_as_a_cache_tagged_image_block(tmp_path):
+    """Identical for every page in a fan-out — the strongest cache candidate."""
+    from services.blueprint.executors import image_block
+
+    p = tmp_path / "montage.png"
+    p.write_bytes(_PNG)
+    block = image_block(p)
+    assert block["type"] == "image"
+    assert block["source"]["media_type"] == "image/png"
+    assert block["source"]["type"] == "base64"
+    assert block["cache_control"] == {"type": "ephemeral"}
+
+
+def test_a_file_that_is_not_an_image_is_refused_here(tmp_path):
+    """A 400 from the API is a worse way to learn this."""
+    from services.blueprint.executors import image_block
+
+    p = tmp_path / "notes.txt"
+    p.write_text("hello")
+    with pytest.raises(ValueError, match="not an image"):
+        image_block(p)
+
+
+def test_the_montage_leads_and_the_page_brief_follows(tmp_path):
+    """The brief varies per page; a montage after it would be re-billed."""
+    from services.blueprint.executors import AnthropicModel
+
+    p = tmp_path / "m.png"
+    p.write_bytes(_PNG)
+    sent: dict = {}
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                sent.update(kw)
+                raise RuntimeError("stop after capture")
+
+    # Small max_tokens keeps this on the non-streaming path.
+    model = AnthropicModel(_client=_Client(), max_tokens=1000)
+    try:
+        model(system="s", user="author PAGE-003", schema={}, image=p)
+    except RuntimeError:
+        pass
+    content = sent["messages"][0]["content"]
+    assert content[0]["type"] == "image"
+    assert content[1] == {"type": "text", "text": "author PAGE-003"}
+
+
+def test_without_a_montage_the_message_is_unchanged(tmp_path):
+    from services.blueprint.executors import AnthropicModel
+
+    sent: dict = {}
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                sent.update(kw)
+                raise RuntimeError("stop")
+
+    model = AnthropicModel(_client=_Client(), max_tokens=1000)
+    try:
+        model(system="s", user="u", schema={})
+    except RuntimeError:
+        pass
+    assert sent["messages"][0]["content"] == "u"
