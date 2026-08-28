@@ -466,6 +466,7 @@ def compose_page_via_a2ui(
     *,
     surface_provider: Optional[SurfaceProvider] = None,
     shared_context: str = "",
+    page_id: str = "",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -487,10 +488,13 @@ def compose_page_via_a2ui(
 
     from services.a2ui_to_forge import translate
 
+    # No schema file is required. This used to decline when
+    # `_schema_path_for_route` found nothing, which made it a post-projection
+    # composer: it could only improve a page `frontend` had already written.
+    # §34 puts A2UI inside the Page Design Agent's own generation step, so it
+    # has to compose before anything is projected — and at that point no file
+    # exists by definition.
     target = _schema_path_for_route(root, route)
-    if target is None:
-        return {"applied": False, "route": route, "kind": kind,
-                "reason": f"no schema file serves {route}"}
 
     registry = registry_for_binder(root)
     if not registry.get("entities"):
@@ -517,11 +521,15 @@ def compose_page_via_a2ui(
     except Exception as exc:  # noqa: BLE001 — debug artifact, never a blocker
         logger.warning("[a2ui] could not persist the %s surface: %s", route, exc)
 
-    try:
-        existing = json.loads(target.read_text(encoding="utf-8"))
-        page_id = str(existing.get("id") or _route_slug(route))
-    except Exception:  # noqa: BLE001
-        page_id = _route_slug(route)
+    # The caller knows the page id — `page_layouts` fans out over them. Read
+    # from an existing schema only when improving one, and fall back to the
+    # route slug when there is neither.
+    if not page_id:
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            page_id = str(existing.get("id") or _route_slug(route))
+        except Exception:  # noqa: BLE001
+            page_id = _route_slug(route)
 
     # `kind` reaches the binder: a dashboard's Selects and date pickers are
     # filter chrome, not form fields naming missing columns.
@@ -585,9 +593,18 @@ def compose_page_via_a2ui(
                 "unresolved": result["unresolved"],
                 "warnings": result["warnings"]}
 
-    tmp = target.with_suffix(".json.a2ui-tmp")
-    tmp.write_text(json.dumps(schema, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(target)
+    # Written only when this is improving a page that already exists on disk.
+    # Composing into a `pageLayouts` artifact is the §115 path: the Blueprint
+    # is the source of truth, `frontend` projects it, and every binder built
+    # around that artifact — data_sources, gate_states, bind_workflows — runs
+    # over A2UI's tree exactly as it runs over an agent's. A composer that
+    # writes the output file instead leaves the Blueprint saying something
+    # different, which is the divergence codeMap and the API routes both were.
+    if target is not None:
+        tmp = target.with_suffix(".json.a2ui-tmp")
+        tmp.write_text(json.dumps(schema, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(target)
 
     logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved",
                 route, kind, len(schema.get("dataSources") or []),
@@ -595,7 +612,12 @@ def compose_page_via_a2ui(
     return {
         "applied": True, "route": route, "kind": kind, "reason": "ok",
         "pruned": pruned,
-        "schema_path": str(target),
+        # The composition itself, for a caller emitting an artifact rather
+        # than reading the file back.
+        "root": schema.get("root"),
+        "schema": schema,
+        "page_id": page_id,
+        "schema_path": str(target) if target is not None else None,
         "data_sources": len(schema.get("dataSources") or []),
         "assumptions": result["assumptions"],
         "unresolved": result["unresolved"],

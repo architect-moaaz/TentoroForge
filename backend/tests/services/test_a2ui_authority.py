@@ -610,3 +610,56 @@ def test_the_sibling_pages_are_context_not_a_specification(tmp_path):
                             shared_context='{"pages": ["/x"]}')
     assert "Reuse a pattern already established" in req
     assert "render exactly" not in req
+
+
+# --- §34: compose before projection, return the surface ---------------------
+
+
+def test_a_page_composes_without_a_schema_file(tmp_path):
+    """It used to decline when no file served the route, which made it a
+    post-projection composer — it could only improve a page `frontend` had
+    already written. §34 puts A2UI inside the generation step, where by
+    definition nothing has been projected yet."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/nowhere-on-disk", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-007")
+    assert "no schema file" not in (res.get("reason") or "")
+
+
+def test_the_composition_comes_back_for_a_caller_to_emit(tmp_path):
+    """`page_layouts` emits a pageLayouts artifact; it cannot read a file the
+    composer wrote, because at wave 7 there is none."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-001")
+    assert res["applied"] is True, res.get("reason")
+    assert res["root"], "the tree the caller turns into an artifact"
+    assert res["page_id"] == "PAGE-001"
+
+
+def test_the_caller_s_page_id_wins_over_the_file(tmp_path):
+    """Blueprint ids are allocated by the pipeline, not read back off disk."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-042")
+    assert res["page_id"] == "PAGE-042"
+
+
+def test_an_existing_page_is_still_written_in_place(tmp_path):
+    """Improving a projected page keeps working — the write did not move, it
+    became conditional on there being something to write to."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    before = _page(root)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD)
+    assert res["applied"] is True
+    assert _page(root) != before
+    assert res["schema_path"]
