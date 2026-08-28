@@ -38,7 +38,7 @@ placements are marked and are the parts to argue with.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from services.blueprint.agent_contract import (
     AgentResult,
@@ -562,6 +562,45 @@ def incremental_plan(
 
     order = [k for lvl in levels() for k in lvl]
     return [k for k in order if k in plan]
+
+
+def _section(doc: Mapping[str, Any], path: str) -> Any:
+    """Resolve a dotted ``produces`` path such as ``data.entities``."""
+    cur: Any = doc
+    for part in path.split("."):
+        if not isinstance(cur, Mapping):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def completed_nodes(
+    doc: Mapping[str, Any], nodes: dict[str, DagNode] = DAG,
+) -> set[str]:
+    """Agent nodes whose every produced section already has content.
+
+    Resume means *continue*, not *redo*. A run that died at `testing` had
+    already paid for fourteen agent nodes; re-executing them costs the same
+    again, and — because a re-run appends to a section rather than replacing
+    it — leaves the Blueprint larger each time rather than converging. One
+    resumed run took requirements from 31 to 39 and pages from 30 to 34
+    without being asked for a single new thing.
+
+    Only ``agent`` nodes are eligible. Projections and services write files
+    from what the Blueprint already says: they cost no tokens, they are
+    deterministic, and re-running them is how a fix to a projection reaches
+    disk at all. Skipping those would preserve the very output the fix was
+    meant to replace.
+
+    A node that declares no ``produces`` cannot be judged and so always runs.
+    """
+    done: set[str] = set()
+    for key, node in nodes.items():
+        if node.kind != "agent" or not node.produces:
+            continue
+        if all(_section(doc, path) for path in node.produces):
+            done.add(key)
+    return done
 
 
 # ---------------------------------------------------------------------------

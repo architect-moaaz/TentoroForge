@@ -15,6 +15,7 @@ import pytest
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal
 from services.blueprint.ids import entity_key, page_key
 from services.blueprint.orchestrator import (
+    completed_nodes,
     ALLOWED_TRANSITIONS,
     DAG,
     STATES,
@@ -836,3 +837,46 @@ def test_a_retry_still_carries_its_own_feedback(svc):
     assert report.failed == []
     # subjects that succeeded first time are not called again
     assert len(seen["PAGE-001"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Resume skips what is already authored
+# ---------------------------------------------------------------------------
+
+
+def test_completed_nodes_reports_sections_with_content():
+    """A node whose produced sections are populated has already run."""
+    doc = {"requirements": [{"id": "REQ-001"}], "product": {"objectives": ["x"]}}
+    done = completed_nodes(doc)
+    assert "requirements" in done
+    assert "application_model" in done
+    # `data_model` produces data.entities, which this document does not have.
+    assert "data_model" not in done
+
+
+def test_completed_nodes_resolves_dotted_paths():
+    """`data.entities` is nested, not a top-level key."""
+    assert "data_model" not in completed_nodes({"data": {}})
+    assert "data_model" in completed_nodes({"data": {"entities": [{"id": "E1"}]}})
+
+
+def test_completed_nodes_treats_empty_sections_as_unrun():
+    """An empty list is what an un-run node leaves behind, not an answer."""
+    assert "requirements" not in completed_nodes({"requirements": []})
+
+
+def test_completed_nodes_never_skips_projections():
+    """Projections cost no tokens and are how a fixed projection reaches disk.
+
+    `backend` produces codeMap; a populated codeMap must not stop it re-running,
+    or a repaired projection would preserve the output it was meant to replace.
+    """
+    doc = {"codeMap": [{"artifact": "PAGE-001"}], "runtime": {"port": 3000}}
+    done = completed_nodes(doc)
+    assert "backend" not in done
+    assert "frontend" not in done
+    assert "preview" not in done
+
+
+def test_completed_nodes_empty_for_a_fresh_document():
+    assert completed_nodes({}) == set()

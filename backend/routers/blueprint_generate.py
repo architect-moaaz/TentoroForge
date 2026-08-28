@@ -104,7 +104,8 @@ async def generate_via_blueprint(
     project = await get_project_with_auth(project_id, user, db)
 
     from services.blueprint.executors import AnthropicModel, make_executor
-    from services.blueprint.orchestrator import DAG, levels, run
+    from services.blueprint.orchestrator import (
+        DAG, completed_nodes, levels, run)
     from services.blueprint.service import BlueprintService
 
     try:
@@ -172,15 +173,28 @@ async def generate_via_blueprint(
 
             definition = ["requirements", "application_model"]
             plan = [k for lvl in levels() for k in lvl]
-            if req.define_only or not req.approved:
+            awaiting = req.define_only or not req.approved
+            if awaiting:
                 # §25 — stop at the definition and wait to be accepted. The
                 # definition is two calls; what follows is a dozen or more, so
                 # the checkpoint costs almost nothing and saves the case where
                 # the understanding was wrong.
                 plan = definition
 
+            # Resume means continue, not redo. Without this the endpoint
+            # re-executed all 22 nodes against a document that was already
+            # fourteen nodes in: it paid for them twice and, because a re-run
+            # appends to a section rather than replacing it, came back with 39
+            # requirements and 34 pages where the first pass had 31 and 30.
+            # `fresh` remains the escape hatch for starting over.
+            already: set[str] = set()
+            if resumed:
+                already = completed_nodes(svc.doc)
+                plan = [k for k in plan if k not in already]
+
             emit("plan", {"nodes": plan, "total": len(plan),
-                          "awaitingApproval": plan == definition and not req.approved})
+                          "alreadyComplete": sorted(already),
+                          "awaitingApproval": awaiting and not req.approved})
 
             # A single client rather than a router: per-node model choice is a
             # tuning decision, and defaulting every node to one model keeps the
@@ -220,7 +234,7 @@ async def generate_via_blueprint(
             emit("forecast", counts)
 
             return {"resumed": resumed,
-                    "awaitingApproval": plan == definition and not req.approved,
+                    "awaitingApproval": awaiting and not req.approved,
                     "forecast": counts,
                     "report": _report_payload(report),
                     "version": svc.doc.get("version"),
