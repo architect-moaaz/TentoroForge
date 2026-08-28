@@ -835,3 +835,34 @@ def test_a_node_without_a_style_gains_no_empty_one():
     out = translate(surface, REG, route="/x", page_id="PAGE-001",
                     kind="entity_list")
     assert "style" not in out["schema"]["root"]
+
+
+def test_no_node_anywhere_keeps_style_in_props():
+    """c051f6f lifted `style` in the general builder and missed the field
+    builder, so a form field still arrived with style inside props and the
+    identical rejection recurred on the next run. Walking the whole tree is
+    what a per-builder test could not say."""
+    surface = payload([
+        {"id": "root", "component": "Stack", "style": {"maxWidth": "680px"},
+         "children": ["form", "txt"]},
+        {"id": "form", "component": "Form", "style": {"gap": "12px"},
+         "children": ["field"]},
+        {"id": "field", "component": "Input", "label": "Name",
+         "field": "name", "style": {"width": "100%"}},
+        {"id": "txt", "component": "Text", "content": "hi",
+         "style": {"padding": "8px"}},
+    ])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001", kind="form")
+
+    offenders = []
+
+    def walk(n):
+        if not isinstance(n, dict):
+            return
+        if "style" in (n.get("props") or {}):
+            offenders.append(n.get("type"))
+        for kid in n.get("children") or []:
+            walk(kid)
+
+    walk(out["schema"]["root"])
+    assert offenders == [], f"style left in props on: {offenders}"

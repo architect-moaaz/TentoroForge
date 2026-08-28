@@ -898,6 +898,13 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 return None
             new_kind, field_props = resolved
             node: dict[str, Any] = {"type": new_kind, "props": field_props}
+            # Same lift as the general builder below. c051f6f patched only
+            # that one, and a form field composed through this path still
+            # arrived with `style` inside props — the identical rejection, in
+            # a branch the synthetic tree I verified against never reached.
+            style = field_props.pop("style", None)
+            if style is not None:
+                node["style"] = style
             if c.get("id"):
                 node["id"] = c["id"]
             return node
