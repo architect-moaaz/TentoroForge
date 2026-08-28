@@ -228,8 +228,11 @@ def test_frontend_projection_writes_a_renderable_schema_per_page(tmp_path):
     # The columns are real definitions, derived from the entity's own fields.
     table = schema["root"]["children"][1]
     assert [c["key"] for c in table["props"]["columns"]] == ["fullName", "stage"]
+    # {name, entity, op} — what the renderer resolves. `source` was never a
+    # field of the DataSource contract, and /api/candidates is the path the
+    # API derivation moved to /api/data/.
     assert schema["dataSources"] == [
-        {"name": "rows", "source": "/api/candidates", "op": "list"}]
+        {"name": "rows", "entity": "Candidate", "op": "list"}]
 
 
 def test_frontend_projection_is_idempotent(tmp_path):

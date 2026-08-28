@@ -628,28 +628,54 @@ def _bindings_used(node: dict, found: set[str] | None = None) -> set[str]:
 
 
 def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
-    """Fetches the instantiated page needs, keyed to the bindings it uses."""
-    from services.blueprint.api_derivation import _slug
+    """The fetches this page needs, keyed to the bindings its tree actually uses.
 
+    Emitted empty on every generated page, for three compounding reasons.
+
+    It keyed on the planner's own placeholder names — `rows`, `record` — while
+    an authored tree binds the entity: A2UI writes `{{customers}}`, so `rows in
+    used` was false and nothing was emitted. It carried a `source` URL, which
+    is not a field of the DataSource contract at all (`{name, entity, op}` is —
+    see a reference app's documents.json). And that URL was `/api/{slug}`, the
+    path this morning's derivation fix moved to `/api/data/{slug}`.
+
+    The consequence was the whole visible product: tables bound to
+    `{{customers}}` that never fetched, dashboards of em-dashes, empty states
+    beside a spinner that never resolves, and no SSR — schema-page.tsx falls
+    back to live client rendering when a page declares no sources, so nothing
+    is fetched on the server either.
+
+    The binding name *is* the source name. That is what the renderer looks up,
+    so it is derived from the tree rather than assumed.
+    """
     used = _bindings_used(root)
+    if not used:
+        return []
+
+    entities = _entities(doc)
+    by_name = {_lower_first(e.get("name") or ""): e for e in entities.values()}
+    detail = "[id]" in str(page.get("route") or "")
     out: list[dict] = []
-    if entity:
-        slug = _slug(entity.get("name") or "")
-        if ROWS in used:
-            out.append({"name": ROWS, "source": f"/api/{slug}", "op": "list"})
-        if RECORD in used:
-            out.append({"name": RECORD, "source": f"/api/{slug}/{{id}}", "op": "get"})
-        if "metrics" in used:
-            out.append({"name": "metrics", "source": f"/api/{slug}/metrics", "op": "list"})
-        for rel in related_collections(doc, entity.get("id")):
-            child = _entities(doc).get(rel["entity"]) or {}
-            name = _lower_first(child.get("name") or "")
-            if name and name in used:
-                out.append({
-                    "name": name,
-                    "source": f"/api/{_slug(child.get('name') or '')}",
-                    "op": "list",
-                })
+
+    for name in sorted(used):
+        # A binding that names an entity resolves to it; anything else falls
+        # back to the page's own entity, which is what `rows`/`record` mean.
+        target = by_name.get(_lower_first(name)) or by_name.get(
+            _lower_first(name.rstrip("s"))) or (
+            entity if name in {ROWS, RECORD, "metrics"} else None)
+        if not target:
+            continue
+        if name == "metrics":
+            out.append({"name": name, "entity": target.get("name"),
+                        "op": "aggregate"})
+            continue
+        singular = name == RECORD or (detail and target is entity
+                                      and name != ROWS)
+        out.append({
+            "name": name,
+            "entity": target.get("name"),
+            "op": "get" if singular else "list",
+        })
     return out
 
 

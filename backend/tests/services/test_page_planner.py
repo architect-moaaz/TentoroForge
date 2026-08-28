@@ -203,10 +203,36 @@ def test_plan_produces_a_renderable_page(doc, page, catalog):
 
 
 def test_data_sources_follow_the_bindings_actually_used(doc, page, catalog):
+    """`{name, entity, op}` — the shape the renderer resolves.
+
+    This asserted `source: "/api/job-roles"` for as long as the bug lived:
+    `source` is not a field of the DataSource contract, and that path is the
+    one the API derivation moved to /api/data/. Pinning it meant every
+    generated page shipped `dataSources: []` with the suite green.
+    """
     schema = pp.plan_page(doc, page, list_template(), catalog)
     assert schema["dataSources"] == [
-        {"name": "rows", "source": "/api/job-roles", "op": "list"},
+        {"name": "rows", "entity": "JobRole", "op": "list"},
     ]
+
+
+def test_an_authored_binding_names_its_own_source(doc, page, catalog):
+    """A2UI binds `{{jobRoles}}`, not `{{rows}}`: the binding name is the
+    source name, because that is what the renderer looks up."""
+    template = list_template()
+    table = template["root"]["children"][2]
+    table["props"]["rows"] = "{{jobRoles}}"
+    schema = pp.plan_page(doc, page, template, catalog)
+    assert schema["dataSources"] == [
+        {"name": "jobRoles", "entity": "JobRole", "op": "list"},
+    ]
+
+
+def test_a_page_with_no_bindings_declares_no_sources(doc, page, catalog):
+    template = list_template()
+    template["root"]["children"] = []
+    schema = pp.plan_page(doc, page, template, catalog)
+    assert schema["dataSources"] == []
 
 
 def test_a_page_missing_what_its_pattern_requires_fails_loudly(doc, catalog):
