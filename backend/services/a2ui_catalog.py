@@ -179,6 +179,21 @@ def load_contracts(path: Path | str | None = None) -> dict:
         return {}
 
 
+#: Props a component renders happily without and cannot be *composed* without.
+#: The render/compose split again: `List.items` is `z.array(Item).default([])`,
+#: so an empty list renders as an empty list — correct at runtime, and useless
+#: as a composition. A2UI, given a component that declared no place to put its
+#: content, put children on it instead and the page was rejected.
+#:
+#: Kept here rather than in the generated contract because it is a judgement
+#: about composition, not a fact about the component, and the generated file
+#: describes the component. `Chart.series` needs no entry: the contract already
+#: marks it required, for the same reason.
+_COMPOSE_REQUIRED: dict[str, frozenset[str]] = {
+    "List": frozenset({"items"}),
+}
+
+
 def _zod_facts(name: str) -> dict[str, dict]:
     """Types, enums and item shapes for `name`, as Zod declares them.
 
@@ -290,7 +305,7 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
         # `format` and rendered a blank value (schema-valid to A2UI, rejected
         # by Forge's node, silently empty on the page), and why a Chart arrived
         # without `series` and plotted nothing.
-        if not spec.get("optional"):
+        if not spec.get("optional") or pname in _COMPOSE_REQUIRED.get(name, ()):
             required.append(pname)
 
     if name in CONTAINERS:

@@ -152,3 +152,27 @@ def test_a_prop_with_no_zod_shape_is_left_as_the_contract_has_it():
     from services.a2ui_catalog import _prop_schema
 
     assert _prop_schema("tags", {"type": "array"}) == {"type": "array"}
+
+
+def test_list_requires_items_at_composition_time():
+    """`items` is z.array(Item).default([]), so an empty list renders as an
+    empty list — correct at runtime, useless as a composition. A2UI, given a
+    component with no declared place for its content, put children on it and
+    the page was rejected for taking children it does not accept."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    body = [b for b in build_a2ui_catalog()["components"]["List"]["allOf"]
+            if "properties" in b][0]
+    assert "items" in body["required"]
+    assert "children" not in body["properties"], "List accepts no children"
+
+
+def test_a_render_time_default_does_not_become_a_compose_time_option():
+    """The distinction _COMPOSE_REQUIRED exists to hold: Chart.series carries
+    a default too and is required by the contract already, so it needs no
+    entry here."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    body = [b for b in build_a2ui_catalog()["components"]["Chart"]["allOf"]
+            if "properties" in b][0]
+    assert "series" in body["required"]
