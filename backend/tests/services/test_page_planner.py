@@ -731,3 +731,48 @@ def test_a_detail_source_is_never_filtered_by_a_view():
     root = {"type": "Text", "props": {"value": "{{record}}"}}
     src = pp.data_sources({"data": {"entities": [entity]}}, page, entity, root)[0]
     assert src["op"] == "get" and "filter" not in src
+
+
+# --- a legal node and a contracted node are different questions -------------
+
+
+def _tpl(root):
+    return {"pattern": "entity_list", "root": root}
+
+
+def test_a_structural_node_is_legal_without_a_catalog_entry(catalog):
+    """Repeat is declared in NodeV2 (page.ts:332) and dispatched by the
+    renderer, and has no catalog entry because it is not a component. It was
+    reported as unregistered, which rejected the page A2UI composed."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Repeat", "props": {"source": "plants", "as": "p"},
+         "children": [{"type": "Text", "props": {"content": "x"}}]}), catalog)
+    assert not [e for e in errs if "Repeat" in e]
+
+
+def test_an_unknown_component_is_still_rejected(catalog):
+    """The point of the check. Widening it to let Repeat through must not let
+    a phantom through — `Kanbam` was the name that motivated the catalog."""
+    errs = pp.validate_template(_tpl({"type": "Kanbam", "props": {}}), catalog)
+    assert any("Kanbam" in e for e in errs)
+
+
+def test_children_of_a_structural_node_are_still_checked(catalog):
+    """The half a guarded early-return loses. `entry is None` answered "is
+    this legal" with "do I have a contract", so a subtree under a structural
+    node went entirely unwalked."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Stack", "props": {}, "children": [
+            {"type": "Repeat", "props": {}, "children": [
+                {"type": "Kanbam", "props": {}}]}]}), catalog)
+    assert any("Kanbam" in e for e in errs), "the subtree was not walked"
+
+
+def test_an_unknown_node_stops_its_own_subtree(catalog):
+    """Nothing under an unregistered type can be judged against a contract
+    that does not exist, so it reports once rather than cascading."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Kanbam", "props": {}, "children": [
+            {"type": "AlsoFake", "props": {}}]}), catalog)
+    assert any("Kanbam" in e for e in errs)
+    assert not any("AlsoFake" in e for e in errs)

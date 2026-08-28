@@ -511,6 +511,16 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
 # Validation — against the real registry, before anything renders
 # ---------------------------------------------------------------------------
 
+#: Node types the engine dispatches directly instead of resolving through the
+#: component registry — RESERVED_V2 in packages/schema/src/page.ts. They are
+#: legal nodes with no catalog entry.
+STRUCTURAL_NODES = frozenset({
+    "Stack", "Row", "Grid", "Container", "Spacer",
+    "Box", "Text", "Image",
+    "Repeat", "Conditional", "DataBoundary", "Slot",
+})
+
+
 def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
     """Structural errors in a template. Empty list means it can be planned.
 
@@ -523,13 +533,23 @@ def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
     def walk(node: dict, path: str) -> None:
         kind = node.get("type")
         entry = catalog.get(kind)
-        if entry is None:
+
+        # Two questions, and one variable used to answer both. Is this a legal
+        # node? — which decides whether its subtree is worth walking. And do I
+        # have a contract for it? — which decides whether the child rules below
+        # apply. `entry is None` answered the first with the second, so a
+        # `Repeat` was called unregistered and its subtree went unchecked;
+        # NodeV2 declares Repeat at page.ts:332 and the renderer dispatches it.
+        if entry is None and kind not in STRUCTURAL_NODES:
+            # An unknown type makes its children meaningless — nothing below it
+            # can be judged against a contract that does not exist.
             errors.append(f"{path}: '{kind}' is not a registered component")
             return
+
         children = node.get("children") or []
-        if children and not entry["acceptsChildren"]:
+        contract = entry.get("childContract") if entry else None
+        if entry and children and not entry["acceptsChildren"]:
             errors.append(f"{path}: '{kind}' takes no children, got {len(children)}")
-        contract = entry.get("childContract")
         if contract and not node.get("repeat"):
             if contract["kind"] == "roles":
                 roles = contract["roles"]
