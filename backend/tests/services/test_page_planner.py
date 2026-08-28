@@ -609,3 +609,55 @@ def test_an_authored_workflow_is_not_overwritten():
     root = {"type": "Form", "props": {"fields": [{"name": "x"}],
                                       "workflow": "invoice.update"}}
     assert pp.bind_workflows(root, "FLOW-001")["props"]["workflow"] == "invoice.update"
+
+
+# --- §33: exactly one state renders -----------------------------------------
+
+
+def _state_tree():
+    return {"type": "Stack", "children": [
+        {"type": "Table", "props": {"rows": "{{customers}}"}},
+        {"type": "LoadingState", "props": {"label": "Loading customers"}},
+        {"type": "Skeleton"},
+        {"type": "EmptyState", "props": {"message": "No customers yet"}},
+        {"type": "Alert", "props": {"message": "did not load"}},
+    ]}
+
+
+def test_the_loading_state_is_dropped_not_gated():
+    """Sources resolve server-side, so nothing is ever in flight when a
+    Conditional evaluates. A LoadingState here is a node for a state that
+    cannot occur — which is why "Loading customers" sat under a loaded table."""
+    out = pp.gate_states(_state_tree(), "customers")
+    types = [c["type"] for c in out["children"]]
+    assert "LoadingState" not in str(types)
+    assert "Skeleton" not in str(types)
+
+
+def test_the_empty_state_is_gated_on_an_empty_source():
+    out = pp.gate_states(_state_tree(), "customers")
+    gate = next(c for c in out["children"]
+                if c["type"] == "Conditional"
+                and c["children"][0]["type"] == "EmptyState")
+    assert gate["props"]["when"] == "customers != null and count(customers) == 0"
+
+
+def test_the_error_state_is_gated_on_an_absent_source():
+    """A failed source is absent: schema-page.tsx logs and never sets the key,
+    so one bad source cannot blank a page."""
+    out = pp.gate_states(_state_tree(), "customers")
+    gate = next(c for c in out["children"]
+                if c["type"] == "Conditional"
+                and c["children"][0]["type"] == "Alert")
+    assert gate["props"]["when"] == "customers == null"
+
+
+def test_content_is_left_alone():
+    out = pp.gate_states(_state_tree(), "customers")
+    assert out["children"][0]["type"] == "Table"
+
+
+def test_a_page_with_no_list_source_is_untouched():
+    """Nothing to gate on — a form page has no dataSources at all."""
+    tree = _state_tree()
+    assert pp.gate_states(tree, None) is tree

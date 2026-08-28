@@ -665,6 +665,49 @@ def bind_workflows(node: dict, workflow: str | None) -> dict:
     return node
 
 
+#: What each authored state node is for. A2UI writes all four as siblings in
+#: a Stack, so they render at once and permanently: a spinner beside an empty
+#: state beside an error alert, on a page that fetched successfully.
+STATE_NODES = {
+    "LoadingState": "loading", "Skeleton": "loading",
+    "EmptyState": "empty", "IllustratedEmpty": "empty", "Alert": "error",
+}
+
+
+def gate_states(node: dict, source: str | None) -> dict:
+    """Gate the authored state nodes on the data source, and drop the unreachable.
+
+    `ctx.data` distinguishes three cases, not four: a resolved source is present
+    (empty or not), and a failed one is absent entirely — schema-page.tsx logs
+    the failure and never sets the key, so one bad source cannot blank a page.
+
+    Loading is not among them. Sources resolve server-side before the page
+    renders, so nothing is ever in flight when a Conditional evaluates. A
+    LoadingState on a server-rendered page is a node for a state that cannot
+    occur, which is why "Loading customers" sat permanently under a table that
+    had already loaded. Dropped rather than gated: no expression selects it.
+    """
+    if not source or not isinstance(node, dict):
+        return node
+    kept: list[dict] = []
+    for child in node.get("children") or []:
+        state = STATE_NODES.get(child.get("type")) if isinstance(child, dict) else None
+        if state == "loading":
+            continue
+        if state:
+            kept.append({
+                "type": "Conditional",
+                "props": {"when": (f"{source} == null" if state == "error"
+                                   else f"{source} != null and count({source}) == 0")},
+                "children": [child],
+            })
+            continue
+        kept.append(gate_states(child, source))
+    if node.get("children") is not None:
+        node["children"] = kept
+    return node
+
+
 def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
     """The fetches this page needs, keyed to the bindings its tree actually uses.
 
@@ -848,6 +891,9 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
     root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
                           workflow_for_page(doc, page, entity))
+    sources = data_sources(doc, page, entity, root) if root else []
+    primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
+    root = gate_states(root, primary) if root else root
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
