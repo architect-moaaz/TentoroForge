@@ -546,6 +546,22 @@ export const Field = z.object({
   enumValues: z.array(z.string()).optional(),
   /** Marks PII / financial data so security rules can act on it structurally. */
   sensitive: z.boolean().default(false),
+  /**
+   * The entity this field points at, when it is a foreign key.
+   *
+   * Relations were real but unwritten: PartUsage carried `jobId: uuid` with
+   * "Job the part was consumed on." in its description and nothing structural,
+   * so every consumer re-derived them from the `Id` suffix or from English.
+   * The page planner could not tell PartUsage — a row only ever written while
+   * looking at a job — from Customer, and gave both a full list/detail/create
+   * feature. Six of thirty-two pages on one run existed for records nobody
+   * navigates to.
+   *
+   * Declaring it makes "reachable only through another entity" a fact rather
+   * than an inference, which the seed order, cascade rules and the Data Engine
+   * all currently guess at too.
+   */
+  references: EntityId.optional(),
   description: z.string().default(""),
 });
 

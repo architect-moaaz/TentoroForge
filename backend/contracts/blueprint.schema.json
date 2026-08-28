@@ -910,6 +910,10 @@
                       "type": "boolean",
                       "default": false
                     },
+                    "references": {
+                      "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                      "description": "Stable ENTITY identifier (§12)"
+                    },
                     "description": {
                       "type": "string",
                       "default": ""

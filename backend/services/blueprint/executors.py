@@ -740,9 +740,12 @@ NODE_TASKS: dict[str, str] = {
         "field is the human-readable label, and which fields hold sensitive data. "
         "Mark `sensitive: true` on anything personal or financial — downstream "
         "agents rely on that flag and cannot see this section to second-guess it. "
-        "Declare every association as a relationship rather than leaving a bare "
-        "foreign-key column to be inferred: the relationship is what later stages "
-        "read to wire pages, endpoints and joins. Add constraints for uniqueness "
+        "Declare every association with `references` on the field, naming the "
+        "entity it points at. Not the description: `jobId: uuid` explained in "
+        "English as \"Job the part was consumed on\" is a relationship no "
+        "later stage can read. The page planner could not tell a row only ever "
+        "written while looking at a job from a top-level record, and gave both "
+        "a full list, detail and create page. Add constraints for uniqueness "
         "and checks the columns cannot express on their own."
     ),
     "ux_architecture": (

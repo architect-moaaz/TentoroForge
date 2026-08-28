@@ -62,3 +62,49 @@ def test_the_prompt_carries_features_and_the_blueprint():
     assert "feature by feature" in user
     assert "ENTITY-001.list" in user
     assert "join table" in user
+
+
+# --- §32: a relation is a fact, not an inference ----------------------------
+
+REL_DOC = {
+    "application": {"description": "Track bikes dropped off for repair."},
+    "data": {"entities": [
+        {"id": "E1", "name": "Job", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True}]},
+        {"id": "E2", "name": "PartUsage", "fields": [
+            {"name": "jobId", "type": "uuid", "required": True, "references": "E1"}]},
+        {"id": "E3", "name": "Draft", "fields": [
+            {"name": "jobId", "type": "uuid", "required": False, "references": "E1"}]},
+    ]},
+    "pages": [],
+}
+
+
+def test_a_required_reference_marks_the_feature_as_reached_through_it():
+    by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
+    assert by["E2"]["reachedThrough"] == ["Job"]
+
+
+def test_a_top_level_entity_is_reached_through_nothing():
+    by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
+    assert by["E1"]["reachedThrough"] == []
+
+
+def test_an_optional_reference_does_not_make_a_feature_a_child():
+    """A nullable FK is an association, not a containment: a draft that may
+    belong to a job is still something you go to."""
+    by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
+    assert by["E3"]["reachedThrough"] == []
+
+
+def test_the_prompt_tells_the_agent_what_reached_through_means():
+    text = page_slot_prompt(REL_DOC)
+    assert "reachedThrough" in text
+    assert "declining" in text
+
+
+def test_relations_are_named_not_ided():
+    """`reachedThrough: ['Job']` reads; `['E1']` needs a lookup the model
+    has to do itself."""
+    by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
+    assert by["E2"]["reachedThrough"] == ["Job"]

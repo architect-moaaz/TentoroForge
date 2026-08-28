@@ -1060,13 +1060,24 @@ def page_slots(doc: dict) -> list[dict]:
                     "prompt": "Where a user lands."}],
          "prompt": "Omit if the app opens on a list."},
     ]
-    for entity in (doc.get("data") or {}).get("entities") or []:
+    entities = (doc.get("data") or {}).get("entities") or []
+    names = {e.get("id"): e.get("name") or e.get("id") for e in entities}
+    for entity in entities:
         eid = entity.get("id")
         name = entity.get("name") or eid
+        # A field that references another entity is how "reachable only
+        # through" becomes a fact instead of a guess. PartUsage.jobId and
+        # RepairLine.jobId are the difference between a record a user goes to
+        # and one they only ever write while looking at something else.
+        parents = sorted({
+            f.get("references") for f in (entity.get("fields") or [])
+            if f.get("references") and f.get("required")
+        })
         slots.append({
             "feature": eid,
             "entity": eid,
             "name": name,
+            "reachedThrough": [names.get(p, p) for p in parents],
             "requirements": list(entity.get("requirements") or []),
             "pages": [
                 {"slot": f"{eid}.{slot}", "pattern": pattern,
@@ -1090,6 +1101,10 @@ def page_slot_prompt(doc: dict) -> str:
         "Decline a feature when the entity is a join table, a lookup, or "
         "something only ever edited inside another record — a line item is "
         "edited on its invoice, not on a page of its own.\n\n"
+        "`reachedThrough` names the entities a feature hangs off, taken from "
+        "its required references. A feature that is reached through another is "
+        "usually written while looking at that one, not visited: default to "
+        "declining it and giving the parent the means to edit it.\n\n"
         "Except: anything the user asked for is not declinable, however "
         "lookup-shaped it shows up here. These are their words:\n\n"
         f"  \u201c{described}\u201d\n\n"
