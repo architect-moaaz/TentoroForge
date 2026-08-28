@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -58,6 +59,8 @@ from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 #: Per the claude-api reference: use Claude Opus 5 unless the caller asks
 #: otherwise. Note this deliberately differs from `services.llm_client`'s
 #: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
+logger = logging.getLogger(__name__)
+
 DEFAULT_MODEL = "claude-opus-5"
 
 #: `max_tokens` caps thinking *and* response text together on Opus 5, where
@@ -1293,7 +1296,53 @@ def make_executor(
     to the Blueprint, so a rejected proposal simply never becomes an artifact.
     """
 
+    def _compose_via_a2ui(spec: TaskSpec) -> AgentResult | None:
+        """§34 — A2UI composes the page; the agent is what runs if it declines.
+
+        Returns None rather than raising when A2UI does not own this page, so
+        the caller falls through to the authoring agent. An unreachable server
+        must cost the composition, never the page: this node fans out 34 times
+        on a real app, and a run that finished 28 of 32 pages is the reason
+        per-subject tolerance exists.
+        """
+        from services.a2ui_authority import compose_page_via_a2ui
+        from services.a2ui_ui_composition import shared_context
+
+        page = next((p for p in svc.doc.get("pages") or []
+                     if p.get("id") == spec.subject), None)
+        if not page or not page.get("route"):
+            return None
+        try:
+            out = compose_page_via_a2ui(
+                svc.output_dir, page["route"], page.get("pattern") or "",
+                shared_context=shared_context(svc.doc),
+                page_id=spec.subject,
+            )
+        except Exception as exc:  # noqa: BLE001 — composition, never the build
+            logger.warning("[a2ui] %s: %s", spec.subject, exc)
+            return None
+        if not out.get("applied") or not out.get("root"):
+            logger.info("[a2ui] %s declined (%s) — authoring agent runs",
+                        spec.subject, out.get("reason"))
+            return None
+        return AgentResult(
+            task_id=spec.task_id,
+            agent=spec.agent,
+            proposals=[ArtifactProposal(
+                section="pageLayouts",
+                natural_key=spec.subject,
+                body={"page": spec.subject, "root": out["root"],
+                      "rationale": "composed by A2UI (§34)",
+                      "requirements": list(page.get("requirements") or [])},
+            )],
+            confidence=0.95,
+        )
+
     def executor(spec: TaskSpec) -> AgentResult:
+        if spec.agent == "a2ui_pages" and spec.subject:
+            composed = _compose_via_a2ui(spec)
+            if composed is not None:
+                return composed
         client = (
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)

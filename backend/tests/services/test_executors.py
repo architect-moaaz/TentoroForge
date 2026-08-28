@@ -1152,3 +1152,92 @@ def test_the_authoring_prompt_forbids_a_loading_state():
     _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
     assert "loading or skeleton" in user
     assert "gated for you" in user
+
+
+# --- §34: A2UI composes the page, the agent is the fallback -----------------
+
+
+def test_a2ui_composition_becomes_a_pagelayouts_artifact(tmp_path, monkeypatch):
+    """The composer returns a tree; page_layouts emits it as the artifact the
+    agent would have. `frontend` projects it and every binder built around
+    that artifact runs over A2UI's tree exactly as over an agent's."""
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/articles",
+                         "pattern": "entity_list", "requirements": ["REQ-1"]}]
+
+    monkeypatch.setattr(
+        "services.a2ui_authority.compose_page_via_a2ui",
+        lambda *a, **k: {"applied": True, "root": {"type": "Stack"},
+                         "page_id": k.get("page_id")})
+
+    run = ex.make_executor(svc, object())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    result = run(spec)
+    p = result.proposals[0]
+    assert p.section == "pageLayouts"
+    assert p.natural_key == "PAGE-001"
+    assert p.body["page"] == "PAGE-001"
+    assert p.body["root"] == {"type": "Stack"}
+
+
+def test_a_declined_page_falls_through_to_the_authoring_agent(tmp_path, monkeypatch):
+    """An unreachable server must cost the composition, never the page: this
+    node fans out 34 times, and a run finishing 28 of 32 is why per-subject
+    tolerance exists."""
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/articles",
+                         "pattern": "entity_list"}]
+    monkeypatch.setattr(
+        "services.a2ui_authority.compose_page_via_a2ui",
+        lambda *a, **k: {"applied": False, "reason": "below the floor"})
+
+    called = {}
+
+    class _Model:
+        enforces_schema = True
+
+        def __call__(self, **kw):
+            called["llm"] = True
+            raise RuntimeError("reached the agent")
+
+    run = ex.make_executor(svc, _Model())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    with pytest.raises(Exception):
+        run(spec)
+    assert called.get("llm"), "a declined composition must reach the agent"
+
+
+def test_a_composer_that_raises_does_not_lose_the_page(tmp_path, monkeypatch):
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/a", "pattern": "form"}]
+
+    def boom(*a, **k):
+        raise RuntimeError("server went away")
+
+    monkeypatch.setattr("services.a2ui_authority.compose_page_via_a2ui", boom)
+
+    class _Model:
+        enforces_schema = True
+
+        def __call__(self, **kw):
+            raise RuntimeError("reached the agent")
+
+    run = ex.make_executor(svc, _Model())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    with pytest.raises(Exception, match="reached the agent"):
+        run(spec)
