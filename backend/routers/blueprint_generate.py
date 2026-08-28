@@ -39,6 +39,8 @@ from sse_starlette.sse import EventSourceResponse
 from database import get_db
 from models.auth import PlatformUser
 from auth import get_current_user
+from pathlib import Path
+
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
 
@@ -94,6 +96,25 @@ def _report_payload(report: Any) -> dict:
     }
 
 
+def _output_dir(project: Any) -> Path:
+    """Where this project's application lives.
+
+    `create_project` makes output/<short-id>, git-initialises it and records
+    it on the row; generation derived output/<uuid> instead and wrote there.
+    Every project therefore had two directories — an empty git repo the
+    product knows about, and the actual application it does not — and
+    export_service and git_service both operate on the recorded one. Export
+    would have shipped an empty repository.
+
+    The row wins. `project_root` remains the fallback for rows created before
+    output_dir was populated, and it validates the id against traversal.
+    """
+    recorded = getattr(project, "output_dir", None)
+    if recorded:
+        return Path(recorded)
+    return project_root(str(project.id))
+
+
 @router.post("/api/projects/{project_id}/generate/blueprint")
 async def generate_via_blueprint(
     project_id: uuid.UUID,
@@ -111,7 +132,7 @@ async def generate_via_blueprint(
     from services.blueprint.service import BlueprintService
 
     try:
-        output_dir = project_root(str(project_id))
+        output_dir = _output_dir(project)
     except ValueError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -290,11 +311,13 @@ async def read_blueprint(
     db: AsyncSession = Depends(get_db),
 ):
     """The Blueprint as it stands — §110's tree, and what §113 links against."""
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
     from services.blueprint.service import BlueprintService
 
     try:
-        svc = BlueprintService.load(output_dir=str(project_root(str(project_id))))
+        # Same directory the generator writes to, or this reads a Blueprint
+        # from a path nothing produces.
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
     except FileNotFoundError:
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
