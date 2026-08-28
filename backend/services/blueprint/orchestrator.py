@@ -675,206 +675,307 @@ def run(
     a swarm produces confident nonsense.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
+    in_plan = set(order)
     report = RunReport()
     done: set[str] = set()
 
-    for key in order:
+    # §28's graph declares which nodes are independent; running them one after
+    # another threw that declaration away. A *wave* is the set of nodes whose
+    # in-plan dependencies are all complete — the same shape `levels` computes
+    # for the whole DAG, recomputed here because a plan is a subset and because
+    # a node that failed must not let its dependents into a later wave.
+    remaining = list(order)
+    while remaining:
+        wave = [
+            key for key in remaining
+            if {d for d in DAG[key].depends_on if d in in_plan} <= done
+        ]
+        if not wave:
+            break
+        for key in wave:
+            capability_for(DAG[key].agent)  # §28: no unregistered agents
+        _run_wave(
+            svc, executor, wave, report=report, done=done,
+            max_attempts=max_attempts, commit=commit,
+            user_request=user_request, app_root=app_root,
+        )
+        ran = set(wave)
+        remaining = [key for key in remaining if key not in ran]
+
+    # Whatever never made a wave is waiting on something that never completed.
+    # Say which dependency stopped it. A plan that quietly drops eight of
+    # eighteen nodes reads exactly like one that ran them: the `apis` node was
+    # skipped for an unmet dependency during an incremental change and the
+    # Blueprint simply kept the endpoints it already had, with nothing to
+    # indicate the derivation never ran.
+    for key in remaining:
+        unmet = {d for d in DAG[key].depends_on if d in in_plan and d not in done}
+        report.skipped.append(key)
+        report.skipped_because[key] = ", ".join(sorted(unmet))
+
+    return report
+
+
+#: How many model calls one fanning-out node keeps in flight. Pages are
+#: genuinely independent — each call is given one page's brief and produces one
+#: tree, reading nothing another page wrote — and a serial fan-out was the
+#: dominant cost of a run: twenty-four pages at roughly seventy-five seconds
+#: each is half an hour inside a single node.
+FANOUT_CONCURRENCY = 6
+
+#: How many model calls a whole wave keeps in flight, across every node in it.
+#: A wave of four fanning-out nodes would otherwise open twenty-four
+#: connections at once, which is how you find the provider's rate limit rather
+#: than the machine's. Kept above :data:`FANOUT_CONCURRENCY` so a lone fan-out
+#: still runs at full width, and low enough that four nodes share rather than
+#: multiply. If a run starts failing several nodes at the same level, lower
+#: this: ``RunReport.failed_because`` names the exception, so the report says
+#: whether the cause was transport or content.
+WAVE_CONCURRENCY = 8
+
+
+@dataclass
+class _NodeRun:
+    """One agent node's progress through a wave's retry rounds."""
+
+    #: Every subject the node authors for; ``[""]`` when it does not fan out.
+    subjects: list[str]
+    #: The subjects still to be called in the next round.
+    pending: list[str]
+    #: Subject -> why its last attempt was rejected (§102).
+    feedback: dict[str, str] = field(default_factory=dict)
+    #: Subjects that exhausted their attempts.
+    failed: list[str] = field(default_factory=list)
+
+
+def _run_wave(
+    svc: BlueprintService,
+    executor: Executor,
+    wave: Sequence[str],
+    *,
+    report: RunReport,
+    done: set[str],
+    max_attempts: int,
+    commit: bool,
+    user_request: str,
+    app_root: str | None,
+) -> None:
+    """Run one wave: model calls wide, applies narrow and ordered.
+
+    What runs concurrently is the executor and nothing else. ``apply_agent_result``
+    allocates stable ids (§12) into one shared document and saves it, and that
+    allocation is order-dependent — so applies stay on this thread, node by node
+    in wave order and, inside a node, subject by subject in the order the
+    subjects were given.
+
+    A lock around the applies would be safe against corruption and would still
+    be wrong: apply order would become whichever thread arrived first, and a
+    re-projection that is supposed to be byte-identical would stop being one.
+    ``project_frontend`` is idempotent by design and
+    ``test_frontend_projection_is_idempotent`` holds it to that.
+
+    Service and projection nodes stay serial throughout. They are deterministic
+    and fast, and they mutate the document directly, so there is nothing to win
+    and a race to lose.
+    """
+    import threading
+
+    # Deterministic and cheap; done before the wave's model calls so the long
+    # pole is the only thing left to wait on.
+    for key in wave:
         node = DAG[key]
-        unmet = {d for d in node.depends_on if d in order and d not in done}
-        if unmet:
-            # Say which dependency stopped it. A plan that quietly drops eight
-            # of eighteen nodes reads exactly like one that ran them: the
-            # `apis` node was skipped for an unmet dependency during an
-            # incremental change and the Blueprint simply kept the endpoints it
-            # already had, with nothing to indicate the derivation never ran.
-            report.skipped.append(key)
-            report.skipped_because[key] = ", ".join(sorted(unmet))
-            continue
-
-        capability_for(node.agent)  # §28: no unregistered agents
-
         if node.kind == "service":
             handler = SERVICE_HANDLERS.get(key)
             if handler is None:
                 report.blocked.append(key)
                 continue
             handler(svc)
-            report.completed.append(key)
-            done.add(key)
-            continue
-
-        if node.kind == "projection":
+        elif node.kind == "projection":
             projector = PROJECTION_HANDLERS.get(key)
-            if projector is not None and app_root:
-                projector(svc, app_root)
-                report.completed.append(key)
-                done.add(key)
+            if projector is None or not app_root:
+                # Deterministic, but not ported into this package yet. Blocked
+                # rather than handed to a model: a model asked to fill codeMap
+                # would invent plausible paths that pass validation, and
+                # Blueprint<->Implementation would go green against files
+                # nobody wrote.
+                report.blocked.append(key)
                 continue
-            # Deterministic, but not ported into this package yet. Blocked
-            # rather than handed to a model: a model asked to fill codeMap
-            # would invent plausible paths that pass validation, and
-            # Blueprint<->Implementation would go green against files nobody
-            # wrote.
-            report.blocked.append(key)
-            continue
-
-        # A fanning-out node authors one artifact per subject, and a subject
-        # that fails is reported and stepped over rather than taking the node
-        # with it.
-        #
-        # It used to abort the whole node, on the reasoning that seventeen
-        # pages out of eighteen looks exactly like success. That reasoning was
-        # right about the danger and wrong about the remedy: on a live run one
-        # page of twenty-four failed, `page_layouts` failed with it, and
-        # `frontend`, `integration`, `testing`, `memory`, `verification` and
-        # `preview` were all skipped behind it. One bad page cost the entire
-        # application.
-        #
-        # The hole is what had to be closed, not the node. Failed subjects are
-        # named in the report, the projection separately reports any page it
-        # could not plan, and a page with no authored tree still falls back to
-        # its pattern — so the failure is visible and survivable at once.
-        subjects = subjects_for(node, svc.doc)
-        if not subjects:
-            report.completed.append(key)
-            done.add(key)
-            continue
-
-        failed_subjects = _run_fanout(
-            svc, executor, key, node, subjects,
-            max_attempts=max_attempts, commit=commit,
-            user_request=user_request, report=report,
-        )
-
-        # Only a node that authored nothing at all has genuinely failed;
-        # anything less is a partial result its dependents can still use.
-        if failed_subjects and len(failed_subjects) == len(subjects):
+            projector(svc, app_root)
+        else:
             continue
         report.completed.append(key)
         done.add(key)
-        continue
 
-    return report
+    # Subjects are resolved once, before anything in the wave applies. Nodes in
+    # a wave are independent by construction, so none of them can change
+    # another's subject list — resolving up front just makes that explicit.
+    runs: dict[str, _NodeRun] = {}
+    for key in wave:
+        if DAG[key].kind != "agent":
+            continue
+        subjects = subjects_for(DAG[key], svc.doc)
+        runs[key] = _NodeRun(subjects=subjects, pending=list(subjects))
+
+    limits = {key: threading.Semaphore(FANOUT_CONCURRENCY) for key in runs}
+
+    for attempt in range(1, max_attempts + 1):
+        specs = _round_specs(wave, runs, attempt)
+        if not specs:
+            break
+        results = _gather(executor, specs, limits=limits)
+        for key in wave:  # apply order is wave order, never completion order
+            state = runs.get(key)
+            if state is None or not state.pending:
+                continue
+            state.pending = _apply_round(
+                svc, key, state, results,
+                attempt=attempt, max_attempts=max_attempts, commit=commit,
+                user_request=user_request, report=report,
+            )
+
+    for key in wave:
+        state = runs.get(key)
+        if state is None:
+            continue
+        # Only a node that authored nothing at all has genuinely failed;
+        # anything less is a partial result its dependents can still use.
+        if state.subjects and len(state.failed) == len(state.subjects):
+            continue
+        report.completed.append(key)
+        done.add(key)
 
 
-#: How many subjects to have in flight at once. §28: "independent work may
-#: execute concurrently." Pages are genuinely independent — each call is given
-#: one page's brief and produces one tree, reading nothing another page wrote —
-#: and a serial fan-out was the dominant cost of a run: twenty-four pages at
-#: roughly seventy-five seconds each is half an hour inside a single node.
-FANOUT_CONCURRENCY = 6
+def _round_specs(
+    wave: Sequence[str], runs: dict[str, _NodeRun], attempt: int,
+) -> list[TaskSpec]:
+    """This round's calls, interleaved across the wave's nodes.
+
+    Round-robin rather than node-by-node so :data:`WAVE_CONCURRENCY` is shared
+    out instead of being spent entirely on whichever node happens to be first.
+    Ordering here decides only who gets a slot; it decides nothing about the
+    document, because applies are re-ordered by :func:`_run_wave`.
+    """
+    queues = [(key, list(runs[key].pending)) for key in wave if key in runs]
+    specs: list[TaskSpec] = []
+    for i in range(max((len(q) for _, q in queues), default=0)):
+        for key, pending in queues:
+            if i >= len(pending):
+                continue
+            subject = pending[i]
+            state = runs[key]
+            specs.append(TaskSpec(
+                task_id=f"TASK-{key}{':' + subject if subject else ''}-{attempt}",
+                node=key,
+                agent=DAG[key].agent,
+                attempt=attempt,
+                subject=subject,
+                feedback=state.feedback.get(subject, ""),
+            ))
+    return specs
 
 
-def _run_fanout(
-    svc: BlueprintService,
+def _gather(
     executor: Executor,
-    key: str,
-    node: DagNode,
-    subjects: list[str],
+    specs: Sequence[TaskSpec],
     *,
+    limits: dict[str, Any],
+) -> dict[tuple[str, str], Any]:
+    """Call the executor for every spec concurrently. Calls, and nothing else.
+
+    No applies happen here and no report is touched, which is what makes it
+    safe to run this wide: the half that is network I/O is the half that
+    parallelises, and the half that mutates the Blueprint stays on one thread.
+
+    ``limits`` caps each node at :data:`FANOUT_CONCURRENCY` while the pool caps
+    the wave at :data:`WAVE_CONCURRENCY`, so one node cannot spend the whole
+    budget.
+
+    Returns ``{(node, subject): AgentResult | Exception}``. An exception is a
+    classified outcome (§102), not a crash; the caller decides whether it is a
+    retry or a failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def call(spec: TaskSpec) -> tuple[tuple[str, str], Any]:
+        key = (spec.node, spec.subject)
+        with limits[spec.node]:
+            try:
+                return key, executor(spec)
+            except Exception as exc:  # §102 — a classified outcome, not a crash
+                return key, exc
+
+    workers = max(1, min(WAVE_CONCURRENCY, len(specs)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return dict(pool.map(call, specs))
+
+
+def _apply_round(
+    svc: BlueprintService,
+    key: str,
+    state: _NodeRun,
+    results: dict[tuple[str, str], Any],
+    *,
+    attempt: int,
     max_attempts: int,
     commit: bool,
     user_request: str,
     report: RunReport,
 ) -> list[str]:
-    """Author every subject, calling the model concurrently and applying serially.
+    """Commit one round's results for one node, in the order its subjects were given.
 
-    The split is the whole design. ``executor`` is a network call and safe to
-    run in parallel; ``apply_agent_result`` is not — it allocates ids, mutates
-    one shared document and saves it, so concurrent applies would race on the
-    allocator and interleave writes. Worse, id allocation is order-dependent,
-    and a re-projection that is supposed to be byte-identical would stop being
-    so.
-
-    So each round calls up to :data:`FANOUT_CONCURRENCY` subjects at once, then
-    applies the results **in the order the subjects were given**, whatever order
-    they came back in. Determinism is preserved because the applies are ordered,
-    not because the calls were.
-
-    Retries keep their §102 feedback: a subject whose apply was rejected goes
-    into the next round carrying the reason, exactly as the serial path did.
-
-    Returns the subjects that never succeeded.
+    Records the report entries and returns the subjects to retry, each left in
+    ``state.feedback`` with the reason it was rejected. §102: a retry that is
+    not told what went wrong is just the same request again.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    retry: list[str] = []
+    for subject in state.pending:  # given order, not completion order
+        # A node that does not fan out has one empty subject, and its label is
+        # just the node key — callers test membership by it.
+        label = f"{key}:{subject}" if subject else key
+        outcome = results.get((key, subject))
 
-    pending = list(subjects)
-    feedback: dict[str, str] = {}
-    failed: list[str] = []
-
-    for attempt in range(1, max_attempts + 1):
-        if not pending:
-            break
-        results: dict[str, Any] = {}
-
-        def call(subject: str) -> tuple[str, Any]:
-            spec = TaskSpec(
-                task_id=f"TASK-{key}{':' + subject if subject else ''}-{attempt}",
-                node=key,
-                agent=node.agent, attempt=attempt, subject=subject,
-                feedback=feedback.get(subject, ""),
-            )
-            try:
-                return subject, executor(spec)
-            except Exception as exc:  # §102 — a classified outcome, not a crash
-                return subject, exc
-
-        workers = max(1, min(FANOUT_CONCURRENCY, len(pending)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            for subject, outcome in pool.map(call, pending):
-                results[subject] = outcome
-
-        retry: list[str] = []
-        for subject in pending:          # given order, not completion order
-            # A node that does not fan out has one empty subject, and its
-            # label is just the node key — callers test membership by it.
-            label = f"{key}:{subject}" if subject else key
-            outcome = results.get(subject)
-
-            if isinstance(outcome, Exception):
-                feedback[subject] = _reason(outcome)
-                if attempt == max_attempts:
-                    report.failed.append(label)
-                    report.failed_because[label] = _reason(outcome)
-                    failed.append(subject)
-                else:
-                    retry.append(subject)
-                continue
-
-            try:
-                application = apply_agent_result(
-                    svc, outcome, commit=commit, user_request=user_request,
-                )
-            except (BlueprintInvalid, InvalidPatternTemplate) as exc:
-                feedback[subject] = _reason(exc)
-                if attempt == max_attempts:
-                    report.failed.append(label)
-                    report.failed_because[label] = _reason(exc)
-                    failed.append(subject)
-                else:
-                    retry.append(subject)
-                continue
-
-            if application.applied:
-                report.artifacts.extend(application.artifacts)
-                report.change_requests.extend(application.change_requests)
-                continue
-            if application.needs_clarification or outcome.status == "blocked":
-                report.blocked.append(label)
-                report.change_requests.extend(application.change_requests)
-                failed.append(subject)
-                continue
+        if isinstance(outcome, Exception):
+            state.feedback[subject] = _reason(outcome)
             if attempt == max_attempts:
                 report.failed.append(label)
-                report.failed_because.setdefault(
-                    label, "the agent returned a result that could not be applied")
-                failed.append(subject)
+                report.failed_because[label] = _reason(outcome)
+                state.failed.append(subject)
             else:
                 retry.append(subject)
+            continue
 
-        pending = retry
+        try:
+            application = apply_agent_result(
+                svc, outcome, commit=commit, user_request=user_request,
+            )
+        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+            state.feedback[subject] = _reason(exc)
+            if attempt == max_attempts:
+                report.failed.append(label)
+                report.failed_because[label] = _reason(exc)
+                state.failed.append(subject)
+            else:
+                retry.append(subject)
+            continue
 
-    return failed
+        if application.applied:
+            report.artifacts.extend(application.artifacts)
+            report.change_requests.extend(application.change_requests)
+            continue
+        if application.needs_clarification or outcome.status == "blocked":
+            report.blocked.append(label)
+            report.change_requests.extend(application.change_requests)
+            state.failed.append(subject)
+            continue
+        if attempt == max_attempts:
+            report.failed.append(label)
+            report.failed_because.setdefault(
+                label, "the agent returned a result that could not be applied")
+            state.failed.append(subject)
+        else:
+            retry.append(subject)
+
+    return retry
 
 
 def _reason(exc: Exception) -> str:
