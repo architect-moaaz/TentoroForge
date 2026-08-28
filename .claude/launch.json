@@ -25,6 +25,28 @@
       "cwd": "backend",
       "port": 6577,
       "autoPort": true
+    },
+    {
+      "name": "generated-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3210,
+      "cwd": "output/l0a0tgi6/app",
+      "autoPort": true
+    },
+    {
+      "name": "reading-list",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3220,
+      "cwd": "output/6vaj13oh/app",
+      "autoPort": true
     }
   ]
 }

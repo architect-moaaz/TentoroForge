@@ -1912,7 +1912,13 @@ say "${GREEN}🚀 Starting generated app...${NC}"
 #
 # Derived from the project directory (output/<project-id>/app), so it needs no
 # substitution plumbing. Postgres will not take a leading digit or a dash.
-DB_NAME="app_$(basename "$(dirname "$PWD")" | tr -c 'a-zA-Z0-9' '_')"
+# The directory is the project's short_id — eight lowercase alphanumerics,
+# which is already a valid Postgres identifier and a valid compose project
+# name. `printf` rather than a bare command substitution into `tr`: `tr -c`
+# treats the trailing newline as "not alphanumeric" too, which is how the
+# first version of this produced `app_6vaj13oh_`. The sanitise stays for the
+# uuid-named directories that predate short_id paths.
+DB_NAME="app_$(printf '%s' "$(basename "$(dirname "$PWD")")" | tr -c 'a-z0-9' '_')"
 # Deliberately not read back from .env.local: assembly writes `/app` there for
 # every application, which is the value that put two apps in one database.
 
