@@ -1282,6 +1282,33 @@ def tiered_router(
     )
 
 
+def _as_template(node: Any) -> Any:
+    """An A2UI tree as a TemplateNode — which carries no ids.
+
+    TemplateNode is type, props, children, repeat, visibleIf, and strict. A
+    template has no identity of its own: `plan_page` calls `assign_node_ids`
+    after instantiating it, so ids arriving here would be overwritten anyway.
+    Fifteen of them arrived and the whole artifact was rejected.
+
+    A2UI's ids are composition-time references — how it points at a child —
+    and `translate` has already resolved them into a nested tree by the time
+    this runs. They have done their work. Dropped here rather than in
+    `translate`, which also feeds the path that writes schema files directly,
+    where a node id becomes a React key.
+    """
+    if isinstance(node, list):
+        return [_as_template(n) for n in node]
+    if not isinstance(node, dict):
+        return node
+    # Only a node's own id, and a node is what has a `type`. Recursing blindly
+    # also stripped `props.id`, where `id` is an ordinary prop value — a Table
+    # keyed by a column called id would have lost it.
+    if "type" not in node:
+        return node
+    return {k: (_as_template(v) if k == "children" else v)
+            for k, v in node.items() if k != "id"}
+
+
 def make_executor(
     svc: BlueprintService,
     model: ModelClient | ModelRouter,
@@ -1334,7 +1361,7 @@ def make_executor(
             proposals=[ArtifactProposal(
                 section="pageLayouts",
                 natural_key=spec.subject,
-                body={"page": spec.subject, "root": out["root"],
+                body={"page": spec.subject, "root": _as_template(out["root"]),
                       "rationale": "composed by A2UI (§34)",
                       "requirements": list(page.get("requirements") or [])},
             )],

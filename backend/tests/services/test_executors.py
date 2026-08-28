@@ -1241,3 +1241,30 @@ def test_a_composer_that_raises_does_not_lose_the_page(tmp_path, monkeypatch):
                        subject="PAGE-001")
     with pytest.raises(Exception, match="reached the agent"):
         run(spec)
+
+
+def test_a2ui_ids_do_not_reach_the_template():
+    """TemplateNode is type/props/children/repeat/visibleIf and strict — a
+    template has no identity, because plan_page calls assign_node_ids after
+    instantiating it. Fifteen A2UI ids arrived and the artifact was rejected
+    whole."""
+    from services.blueprint.executors import _as_template
+
+    out = _as_template({
+        "id": "root", "type": "Stack", "props": {},
+        "children": [{"id": "t", "type": "Table", "props": {},
+                      "children": [{"id": "x", "type": "Text", "props": {}}]}],
+    })
+    assert "id" not in out
+    assert "id" not in out["children"][0]
+    assert "id" not in out["children"][0]["children"][0]
+
+
+def test_only_a_node_s_own_id_is_stripped():
+    """`id` inside props is an ordinary prop value — a Table keyed by a column
+    called id would have lost it to a blind recursion."""
+    from services.blueprint.executors import _as_template
+
+    out = _as_template({"id": "t", "type": "Table",
+                        "props": {"rowKey": "id", "id": "a-real-prop"}})
+    assert out["props"] == {"rowKey": "id", "id": "a-real-prop"}
