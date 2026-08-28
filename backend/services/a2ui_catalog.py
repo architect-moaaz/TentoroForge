@@ -179,6 +179,32 @@ def load_contracts(path: Path | str | None = None) -> dict:
         return {}
 
 
+def _zod_facts(name: str) -> dict[str, dict]:
+    """Types, enums and item shapes for `name`, as Zod declares them.
+
+    Facts about a component, not judgements about a composition — which is the
+    line this stops short of. Zod also says `Chart.series` is optional, and it
+    is right to: charts.ts coerces a null series to [] so an unbound chart
+    renders empty in the editor rather than "invalid props". That is a
+    *renderer* tolerance. A composer that omits series has drawn a chart of
+    nothing, so required-ness stays with the contract that governs composition.
+
+    A prop optional at render time can be mandatory at compose time. Never the
+    reverse — which is why this returns shape and says nothing about presence.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        entry = (load_catalog().get(name) or {}).get("props") or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        prop: {k: v for k, v in spec.items()
+               if k in ("type", "enum", "items", "format")}
+        for prop, spec in (entry.get("properties") or {}).items()
+        if isinstance(spec, dict)
+    }
+
+
 def _zod_shapes(name: str) -> dict[str, dict]:
     """Array item shapes from the Zod-derived catalog, keyed by prop.
 
@@ -215,9 +241,12 @@ def props_for(name: str, contracts: dict) -> dict[str, dict]:
                if k not in _SKIP_PROPS and isinstance(v, dict)}
     else:
         out = dict(_PRIMITIVE_PROPS.get(name, {}))
-    for prop, shape in _zod_shapes(name).items():
+    # Shape from Zod, presence from the contract: `optional` is never taken
+    # from the overlay, so a renderer tolerance cannot loosen a compose-time
+    # requirement.
+    for prop, facts in _zod_facts(name).items():
         if prop in out:
-            out[prop] = {**out[prop], "items": shape["items"]}
+            out[prop] = {**out[prop], **facts}
     return out
 
 
@@ -231,8 +260,12 @@ def _prop_schema(name: str, spec: dict) -> dict:
         return {"description": f"{name} — data for this component."}
     raw = str(spec.get("type") or "").lower()
     # Enum members come from the contract, never from a list maintained here.
+    # Two conventions reach this: component-contracts.json writes
+    # {"type": "enum", "enum": [...]}, and JSON Schema — which is what the Zod
+    # overlay supplies — writes {"enum": [...]} with no such type. Keying on
+    # the type alone silently turned every overlaid enum into a free string.
     members = spec.get("enum")
-    if raw == "enum" and isinstance(members, list) and members:
+    if isinstance(members, list) and members:
         return {"enum": list(members)}
     if raw == "boolean":
         return {"type": "boolean"}
