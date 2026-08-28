@@ -179,13 +179,46 @@ def load_contracts(path: Path | str | None = None) -> dict:
         return {}
 
 
+def _zod_shapes(name: str) -> dict[str, dict]:
+    """Array item shapes from the Zod-derived catalog, keyed by prop.
+
+    component-contracts.json stops at ``{"type": "array"}``. The Zod catalog
+    carries the item schema — ``Chart.series`` items require ``name`` and
+    ``dataKey`` — and A2UI composed a series with neither, because nothing it
+    was shown said they existed. Same shape of gap that cost three page trees
+    to a prose digest describing ``array<object>`` with no item schema.
+
+    Read lazily and never fatally: a missing catalog degrades this to what the
+    contract alone says, which is where it started.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        props = ((load_catalog().get(name) or {}).get("props") or {})
+        return {k: v for k, v in (props.get("properties") or {}).items()
+                if isinstance(v, dict) and v.get("items")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def props_for(name: str, contracts: dict) -> dict[str, dict]:
-    """Every authorable prop for `name`, contract first, primitives second."""
+    """Every authorable prop for `name`, contract first, primitives second.
+
+    Merged, not swapped. The contract is richer for the structural primitives
+    — Stack's align/direction/gap, Container's maxWidth — which the Zod
+    catalog omits because the renderer dispatches them directly rather than
+    registering them. The Zod catalog is richer for everything nested. Taking
+    either alone loses real constraints.
+    """
     entry = contracts.get(name)
     if isinstance(entry, dict) and entry:
-        return {k: v for k, v in entry.items()
-                if k not in _SKIP_PROPS and isinstance(v, dict)}
-    return dict(_PRIMITIVE_PROPS.get(name, {}))
+        out = {k: v for k, v in entry.items()
+               if k not in _SKIP_PROPS and isinstance(v, dict)}
+    else:
+        out = dict(_PRIMITIVE_PROPS.get(name, {}))
+    for prop, shape in _zod_shapes(name).items():
+        if prop in out:
+            out[prop] = {**out[prop], "items": shape["items"]}
+    return out
 
 
 def _prop_schema(name: str, spec: dict) -> dict:
@@ -206,7 +239,11 @@ def _prop_schema(name: str, spec: dict) -> dict:
     if raw in ("number", "integer"):
         return {"type": "number"}
     if raw == "array":
-        return {"type": "array"}
+        # The item shape when the merge supplied one, so a required nested
+        # field reaches the composer instead of being discovered by our
+        # validator after the fact.
+        items = spec.get("items")
+        return {"type": "array", "items": items} if items else {"type": "array"}
     return {"$ref": f"{_COMMON}#/$defs/DynamicString"}
 
 

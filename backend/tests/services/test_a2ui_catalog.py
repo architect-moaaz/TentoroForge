@@ -122,3 +122,33 @@ def test_identity_and_styling_props_are_never_authorable(catalog):
 
 def test_catalog_serialises(catalog):
     json.dumps(catalog)
+
+
+# --- the catalog carries what a composer needs to get a prop right ----------
+
+
+def test_array_props_carry_their_item_shape():
+    """component-contracts.json stops at {"type": "array"}. The Zod catalog
+    carries the item schema — Chart.series items require name and dataKey —
+    and A2UI composed a series with neither, because nothing it was shown said
+    they existed."""
+    from services.a2ui_catalog import load_contracts, props_for
+
+    series = props_for("Chart", load_contracts()).get("series") or {}
+    items = series.get("items") or {}
+    assert set(items.get("required") or []) >= {"name", "dataKey"}
+
+
+def test_the_merge_keeps_the_contract_s_structural_props():
+    """Merged, not swapped. Stack's align/direction/gap live in the contract
+    and not in the Zod catalog, because the renderer dispatches Stack directly
+    rather than registering it. Taking either source alone loses constraints."""
+    from services.a2ui_catalog import load_contracts, props_for
+
+    assert {"align", "direction", "gap"} <= set(props_for("Stack", load_contracts()))
+
+
+def test_a_prop_with_no_zod_shape_is_left_as_the_contract_has_it():
+    from services.a2ui_catalog import _prop_schema
+
+    assert _prop_schema("tags", {"type": "array"}) == {"type": "array"}
