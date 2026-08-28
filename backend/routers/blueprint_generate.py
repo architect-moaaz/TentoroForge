@@ -104,7 +104,8 @@ async def generate_via_blueprint(
     """Generate an application through the Blueprint engine, streaming progress."""
     project = await get_project_with_auth(project_id, user, db)
 
-    from services.blueprint.executors import AnthropicModel, make_executor
+    from services.blueprint.executors import (
+        RunUsage, make_executor, tiered_router)
     from services.blueprint.orchestrator import (
         DAG, completed_nodes, levels, run)
     from services.blueprint.service import BlueprintService
@@ -200,7 +201,11 @@ async def generate_via_blueprint(
             # A single client rather than a router: per-node model choice is a
             # tuning decision, and defaulting every node to one model keeps the
             # first wiring honest about what it is doing.
-            executor = make_executor(svc, AnthropicModel())
+            # Effort is per node: thinking bills as output, and a node filling
+            # in a constrained shape does not need a frontier thinking budget.
+            # The nodes everything downstream derives from stay at `high`.
+            usage = RunUsage()
+            executor = make_executor(svc, tiered_router(), usage=usage)
             # Two different units, and conflating them made the progress
             # meaningless: `done` counted executor calls while `total` counted
             # nodes, so a fan-out node reported 44 of 22 and kept climbing.
@@ -241,6 +246,10 @@ async def generate_via_blueprint(
             # can be checked against the plan rather than only watched.
             counts = forecast(svc.doc)
             emit("forecast", counts)
+
+            # What the run actually cost, per node — so the next question about
+            # a bill is answered from the run rather than from prompt sizes.
+            emit("usage", usage.summary())
 
             return {"resumed": resumed,
                     "awaitingApproval": awaiting and not req.approved,

@@ -1141,6 +1141,50 @@ class RunUsage:
         return "\n".join(lines)
 
 
+#: §27 — agents are not interchangeable, and neither is how hard they should
+#: think. Effort buys thinking tokens, thinking bills as output at $25/M, and
+#: output is 56% of a run's cost. Spending `high` on a node that fills in a
+#: constrained shape buys nothing the schema was not already going to enforce.
+#:
+#: Left at `high` deliberately: every node whose output the rest of the run is
+#: derived *from*. A worse data model or a worse page contract is not a cheaper
+#: run, it is a worse application plus a cheaper run — and the cost of
+#: re-deriving it dwarfs what the effort saved.
+#:
+#: `page_layouts` is the largest single line item — 34 of roughly 47 calls —
+#: and is left high on purpose. Lowering it is the biggest saving available and
+#: also the one most likely to show up as worse UI, so it wants an A/B against
+#: the scoreboard rather than an assumption.
+EFFORT_BY_NODE: dict[str, str] = {
+    # Structure over work already decided; the shape is tightly constrained.
+    "ux_architecture": "medium",
+    "design_system": "medium",
+    "page_designs": "medium",
+    "patterns": "medium",
+    # Tests are enumerated from what the Blueprint already claims, not invented.
+    "testing": "medium",
+    # A short list of named third parties.
+    "integrations": "low",
+}
+
+
+def tiered_router(
+    default_effort: str = "high", model: str = DEFAULT_MODEL,
+) -> "ModelRouter":
+    """A router that varies effort per node and nothing else.
+
+    Same model everywhere: this isolates the effort question, so a regression
+    can be attributed to thinking budget rather than to a model swap.
+    """
+    return ModelRouter(
+        default=AnthropicModel(model=model, effort=default_effort),
+        by_node={
+            node: AnthropicModel(model=model, effort=effort)
+            for node, effort in EFFORT_BY_NODE.items()
+        },
+    )
+
+
 def make_executor(
     svc: BlueprintService,
     model: ModelClient | ModelRouter,

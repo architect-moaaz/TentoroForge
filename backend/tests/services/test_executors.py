@@ -1018,3 +1018,33 @@ def test_stripping_provenance_leaves_nested_structures_intact():
 
     v = {"a": [{"b": {"c": 1, "evidence": "x"}}], "syncNote": "y"}
     assert _without_provenance(v) == {"a": [{"b": {"c": 1}}]}
+
+
+def test_effort_is_tiered_per_node_and_the_load_bearing_nodes_stay_high():
+    """Cheapening a node the rest of the run derives from is a false economy."""
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    for node in ("requirements", "application_model", "data_model",
+                 "page_contracts", "business_rules", "security", "workflows",
+                 "page_layouts"):
+        assert r.for_task(node, "x").effort == "high", node
+    assert r.for_task("testing", "x").effort == "medium"
+    assert r.for_task("integrations", "x").effort == "low"
+
+
+def test_tiering_varies_effort_and_nothing_else():
+    """Same model everywhere, so a regression is attributable to thinking."""
+    from services.blueprint.executors import DEFAULT_MODEL, tiered_router
+
+    r = tiered_router()
+    assert r.default.model == DEFAULT_MODEL
+    assert all(c.model == DEFAULT_MODEL for c in r.by_node.values())
+
+
+def test_every_tiered_node_is_a_real_dag_node():
+    """A typo here silently leaves the node at the default effort."""
+    from services.blueprint.executors import EFFORT_BY_NODE
+    from services.blueprint.orchestrator import DAG
+
+    assert set(EFFORT_BY_NODE) <= set(DAG)
