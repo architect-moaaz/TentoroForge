@@ -13,7 +13,7 @@ import { resolveStyle } from "../../style/resolveStyle";
  *
  * Pure infrastructure — no image assets, no external fonts.
  */
-type Action = { label: string; workflow: string };
+type Action = { label: string; workflow?: string; navigate?: string };
 type Props = {
   kind?: "list" | "search" | "filtered" | "first-use" | "no-data"
        | "success" | "error" | "coming-soon" | "no-access" | "offline";
@@ -88,10 +88,15 @@ export function IllustratedEmpty({
         </div>
       ) : null}
       {action ? (
-        <button
-          type="button"
-          data-forge-workflow={action.workflow}
-          style={{
+        // An anchor when it navigates, a button when it dispatches: the
+        // element has to match what activating it does.
+        React.createElement(
+          action.navigate ? "a" : "button",
+          {
+            ...(action.navigate
+              ? { href: action.navigate }
+              : { type: "button", "data-forge-workflow": action.workflow }),
+            style: {
             marginTop: 8,
             padding: "8px 16px",
             borderRadius: "var(--radius-md, 0.375rem)",
@@ -100,10 +105,12 @@ export function IllustratedEmpty({
             border: "none",
             cursor: "pointer",
             fontSize: "0.875rem",
-          }}
-        >
-          {action.label}
-        </button>
+              display: "inline-block",
+              textDecoration: "none",
+            },
+          },
+          action.label,
+        )
       ) : null}
     </div>
   );

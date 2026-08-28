@@ -4647,22 +4647,44 @@
             "type": "string"
           },
           "action": {
-            "type": "object",
-            "properties": {
-              "label": {
-                "type": "string",
-                "minLength": 1
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "workflow"
+                ],
+                "additionalProperties": false
               },
-              "workflow": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "navigate": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "navigate"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "label",
-              "workflow"
-            ],
-            "additionalProperties": false
+            ]
           },
           "style": {
             "type": "object",
@@ -7380,22 +7402,44 @@
             "type": "string"
           },
           "action": {
-            "type": "object",
-            "properties": {
-              "label": {
-                "type": "string",
-                "minLength": 1
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "workflow"
+                ],
+                "additionalProperties": false
               },
-              "workflow": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "navigate": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "navigate"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "label",
-              "workflow"
-            ],
-            "additionalProperties": false
+            ]
           },
           "style": {
             "type": "object",
