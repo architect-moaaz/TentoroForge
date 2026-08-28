@@ -100,8 +100,24 @@ CONTAINERS = frozenset(
 # Props whose value is a data binding rather than a literal. Typed as unknown so
 # the model may emit either a literal or a path — the binder decides later which
 # it was, and a stricter type here would just cause retry churn.
+#: Props whose value is a data binding rather than a literal, described to the
+#: composer as "data for this component" so it points rather than invents.
+#:
+#: `series` was here and is not one. A Chart's `data` is the measurement;
+#: `series` says how to plot it — {name, dataKey, color} per line, where only
+#: dataKey names a field. Described as data, A2UI sent a pointer, and the
+#: binder had to notice and synthesise a descriptor: "A2UI's series is another
+#: DATA pointer, not a Recharts series descriptor, so it resolves to nothing
+#: and the prop vanishes — leaving the chart with rows but no encoding."
+#: a2ui_to_forge already prefers a literal descriptor list (`already_shaped`)
+#: and lists series in _CONFIG_DATA_PROPS as config rather than measurement.
+#: So the binder wanted the descriptor all along; the catalog was asking for
+#: the wrong thing.
+#:
+#: Out of this set it carries its item schema, and the composer is told what a
+#: series entry must contain instead of discovering it from our validator.
 _BINDING_PROPS = frozenset(
-    {"data", "rows", "items", "series", "bind", "dataSource", "columns", "entries"}
+    {"data", "rows", "items", "bind", "dataSource", "columns", "entries"}
 )
 
 

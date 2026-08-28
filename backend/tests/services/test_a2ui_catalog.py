@@ -176,3 +176,29 @@ def test_a_render_time_default_does_not_become_a_compose_time_option():
     body = [b for b in build_a2ui_catalog()["components"]["Chart"]["allOf"]
             if "properties" in b][0]
     assert "series" in body["required"]
+
+
+def test_series_is_a_descriptor_not_a_binding():
+    """`data` is the measurement; `series` says how to plot it. Described as a
+    binding, A2UI sent a pointer and a2ui_to_forge had to notice and
+    synthesise a descriptor — it already prefers a literal list
+    (`already_shaped`) and calls series config, not measurement. The catalog
+    was asking for the wrong thing."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    body = [b for b in build_a2ui_catalog()["components"]["Chart"]["allOf"]
+            if "properties" in b][0]
+    series = body["properties"]["series"]
+    assert series["type"] == "array"
+    assert set(series["items"]["required"]) == {"name", "dataKey"}
+    assert series["items"]["additionalProperties"] is False
+
+
+def test_the_real_bindings_are_still_described_as_data():
+    """rows and data are pointers — the composer must not invent their values."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    body = [b for b in build_a2ui_catalog()["components"]["Chart"]["allOf"]
+            if "properties" in b][0]
+    assert "description" in body["properties"]["data"]
+    assert "items" not in body["properties"]["data"]
