@@ -10,6 +10,8 @@ So these tests care most about restraint: unmet dependencies skip rather than
 attempt, illegal state transitions raise, and an incremental change re-runs the
 sub-DAG rather than everything.
 """
+import time
+
 import pytest
 
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal
@@ -836,3 +838,199 @@ def test_a_retry_still_carries_its_own_feedback(svc):
     assert report.failed == []
     # subjects that succeeded first time are not called again
     assert len(seen["PAGE-001"]) == 1
+
+
+# --- §28: independent *nodes*, not just independent subjects ----------------
+
+#: Four nodes with no dependency between them — §28's own example of work that
+#: "may execute concurrently", and the level the DAG spends longest in.
+_WAVE = ["data_model", "design_system", "integrations", "ux_architecture"]
+
+#: One valid proposal per node of that wave, so the ordering claim below is
+#: about applies that really happened rather than about rejected ones.
+_WAVE_PROPOSAL = {
+    "data_model": ("data.entities", "Candidate",
+                   {"name": "Candidate", "table": "candidates",
+                    "fields": [{"name": "id", "type": "uuid"}]}),
+    "design_system": ("designSystem", "designSystem",
+                      {"visualPersonality": "calm",
+                       "informationDensity": "comfortable"}),
+    "integrations": ("integrations", "Slack", {"name": "Slack", "kind": "webhook"}),
+    "ux_architecture": ("modules", "Hiring", {"name": "Hiring", "description": "x"}),
+}
+
+
+def _wave_result(spec: TaskSpec) -> AgentResult:
+    section, natural_key, body = _WAVE_PROPOSAL[spec.node]
+    return AgentResult(
+        task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+        proposals=[ArtifactProposal(section=section, natural_key=natural_key,
+                                    body=body)],
+    )
+
+
+def test_a_wave_of_independent_nodes_runs_concurrently(svc):
+    """The graph already declared these four independent and we ran them one
+    after another. Fifteen agent nodes at a level apiece is most of the wall
+    time of a run, and none of it was work that had to wait."""
+    import threading
+    import time
+
+    from services.blueprint.orchestrator import WAVE_CONCURRENCY
+
+    inflight, peak = 0, 0
+    lock = threading.Lock()
+
+    def executor(spec):
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        time.sleep(0.05)
+        with lock:
+            inflight -= 1
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    assert report.ok
+    assert sorted(report.completed) == sorted(_WAVE)
+    assert peak > 1, "independent nodes ran one at a time"
+    assert peak <= WAVE_CONCURRENCY
+
+
+def test_a_wave_applies_node_by_node_whatever_order_calls_return(svc):
+    """The node-level half of the same rule the fan-out obeys.
+
+    Four nodes calling at once means four nodes applying into one shared
+    document, and ``apply_agent_result`` allocates stable ids (§12) in the order
+    it is called. If applies interleaved by whichever call returned first, a
+    re-projection meant to be byte-identical would stop being one — and
+    ``project_frontend`` is idempotent by design.
+
+    A lock would not fix this. It would make the applies safe against
+    corruption and leave the order nondeterministic, which is the half that
+    matters.
+    """
+    import time
+
+    applied: list[str] = []
+
+    def executor(spec):
+        # last node returns first, so completion order is exactly reversed
+        time.sleep(0.05 * (len(_WAVE) - 1 - _WAVE.index(spec.node)))
+        return _wave_result(spec)
+
+    from services.blueprint import orchestrator
+
+    real_apply = orchestrator.apply_agent_result
+
+    def tracking(service, result, **kw):
+        applied.append(result.task_id.split("-")[1])
+        return real_apply(service, result, **kw)
+
+    orchestrator.apply_agent_result = tracking
+    try:
+        report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    finally:
+        orchestrator.apply_agent_result = real_apply
+
+    assert report.ok
+    assert applied == _WAVE
+
+
+def test_a_node_retried_inside_a_wave_still_carries_its_feedback(svc):
+    """§102 survives the widening, at node level as well as subject level: a
+    retry that is not told what went wrong is just the same request again."""
+    seen: dict[str, list[str]] = {}
+
+    def executor(spec):
+        seen.setdefault(spec.node, []).append(spec.feedback)
+        if spec.node == "integrations" and spec.attempt == 1:
+            raise RuntimeError("provider list was empty")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=2)
+    assert report.ok
+    assert seen["integrations"][0] == ""
+    assert "provider list was empty" in seen["integrations"][1]
+    # nodes that succeeded first time are not called again
+    assert len(seen["data_model"]) == 1
+
+
+def test_a_failed_node_does_not_stop_its_neighbours_in_the_wave(svc):
+    """Independence cuts both ways: a node that fails takes its own dependents
+    with it and nothing else."""
+    def executor(spec):
+        if spec.node == "data_model":
+            raise RuntimeError("entity agent is down")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    assert report.failed == ["data_model"]
+    assert sorted(report.completed) == ["design_system", "integrations",
+                                        "ux_architecture"]
+
+
+def test_a_wave_never_starts_a_node_whose_dependency_failed(svc):
+    """§28's restraint is unchanged by the widening: a dependent of a failed
+    node is skipped, not attempted on missing inputs."""
+    attempted: list[str] = []
+
+    def executor(spec):
+        attempted.append(spec.node)
+        if spec.node == "data_model":
+            raise RuntimeError("entity agent is down")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE + ["database"], max_attempts=1)
+    assert "database" in report.skipped
+    assert report.skipped_because["database"] == "data_model"
+    assert "database" not in attempted
+
+
+def test_one_node_cannot_spend_the_whole_wave_budget(svc):
+    """A wave of fanning-out nodes multiplies, and the multiplication is what
+    finds the provider's rate limit rather than the machine's.
+
+    Two caps, and they answer different questions: how wide one node may go,
+    and how wide the run may go. `page_layouts` here has more subjects than
+    either budget, so it would take every slot if only the wave cap existed.
+    """
+    import threading
+
+    from services.blueprint.orchestrator import (
+        FANOUT_CONCURRENCY, WAVE_CONCURRENCY,
+    )
+
+    _fanout_svc(svc, pages=24)
+    lock = threading.Lock()
+    inflight: dict[str, int] = {}
+    total = peak_total = 0
+    peak_node: dict[str, int] = {}
+
+    def executor(spec):
+        nonlocal total, peak_total
+        with lock:
+            total += 1
+            peak_total = max(peak_total, total)
+            inflight[spec.node] = inflight.get(spec.node, 0) + 1
+            peak_node[spec.node] = max(peak_node.get(spec.node, 0),
+                                       inflight[spec.node])
+        time.sleep(0.02)
+        with lock:
+            total -= 1
+            inflight[spec.node] -= 1
+        if spec.node == "page_layouts":
+            return _layout_result(spec)
+        return _wave_result(spec)
+
+    # `page_layouts` depends on `patterns`, which is not in this plan — so all
+    # three nodes are ready at once and share one wave.
+    plan = ["page_layouts", "data_model", "integrations"]
+    report = run(svc, executor, plan=plan, max_attempts=1)
+
+    assert report.ok
+    assert sorted(report.completed) == sorted(plan)
+    assert peak_total <= WAVE_CONCURRENCY, "the wave budget was exceeded"
+    assert peak_node["page_layouts"] <= FANOUT_CONCURRENCY, (
+        "one node took more than its own width out of the shared budget")

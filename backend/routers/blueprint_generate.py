@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import uuid
 from typing import Any
 
@@ -193,21 +194,29 @@ async def generate_via_blueprint(
             # both, and neither can stand in for the other.
             nodes_done: set[str] = set()
             calls_done = 0
+            # `traced` is called from the orchestrator's worker threads, and a
+            # wave of independent nodes now has several of them in flight at
+            # once. `calls_done += 1` is a read and a write, so concurrent
+            # calls lose increments and the progress the user watches drifts
+            # below the work actually done.
+            counted = threading.Lock()
 
             def traced(spec):
                 nonlocal calls_done
                 emit("node:start", {"node": spec.node, "agent": spec.agent,
                                     "subject": spec.subject})
                 result = executor(spec)
-                calls_done += 1
-                nodes_done.add(spec.node)
+                with counted:
+                    calls_done += 1
+                    nodes_done.add(spec.node)
+                    done_now, calls_now = len(nodes_done), calls_done
                 emit("node:done", {
                     "node": spec.node,
                     "subject": spec.subject,
                     # progress through the graph
-                    "nodesDone": len(nodes_done), "nodesTotal": len(plan),
+                    "nodesDone": done_now, "nodesTotal": len(plan),
                     # work done inside it, which a fan-out multiplies
-                    "callsDone": calls_done,
+                    "callsDone": calls_now,
                 })
                 return result
 
