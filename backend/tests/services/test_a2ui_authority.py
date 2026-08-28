@@ -572,3 +572,41 @@ def test_an_app_with_no_dashboard_attempts_nothing_by_default(tmp_path, monkeypa
         _plan_app(tmp_path, [{"route": "/sessions", "kind": "list"}]),
         surface_provider=lambda **kw: None)
     assert res["attempted"] == 0, res
+
+
+# --- §35: a screen is composed as part of a set -----------------------------
+
+
+def test_the_requirement_carries_the_rest_of_the_application(tmp_path):
+    """Navigation presentation and density are properties of a set. Composed
+    alone, a bike shop rendered its heading twice and wrote its empty states
+    in three voices."""
+    from services.a2ui_authority import build_requirement
+
+    root = _app(tmp_path)
+    req = build_requirement(root, "entity_list", "/articles",
+                            shared_context='{"pages": ["/articles/[id]"]}')
+    assert "/articles/[id]" in req
+    assert "belongs beside them" in req
+
+
+def test_without_a_shared_context_the_requirement_is_unchanged(tmp_path):
+    """A composer with no siblings to know about asks exactly what it did."""
+    from services.a2ui_authority import build_requirement
+
+    root = _app(tmp_path)
+    assert build_requirement(root, "entity_list", "/articles") == \
+        build_requirement(root, "entity_list", "/articles", shared_context="")
+
+
+def test_the_sibling_pages_are_context_not_a_specification(tmp_path):
+    """The maquette was sent as "render exactly these" and A2UI obeyed,
+    which constrained away the second opinion the step exists for. The page
+    set must not repeat that mistake."""
+    from services.a2ui_authority import build_requirement
+
+    root = _app(tmp_path)
+    req = build_requirement(root, "entity_list", "/articles",
+                            shared_context='{"pages": ["/x"]}')
+    assert "Reuse a pattern already established" in req
+    assert "render exactly" not in req

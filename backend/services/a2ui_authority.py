@@ -200,7 +200,7 @@ def registry_for_binder(root: Path) -> dict:
 
 
 def build_requirement(root: Path, kind: str = "dashboard",
-                      route: str = "/") -> str:
+                      route: str = "/", shared_context: str = "") -> str:
     """What to ask for — a JOB, not a parts list.
 
     This used to hand over the maquette with "the content has already been
@@ -228,6 +228,25 @@ def build_requirement(root: Path, kind: str = "dashboard",
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
+    if shared_context:
+        # The rest of the application, so this screen is composed as part of a
+        # set rather than alone. §35 gives A2UI navigation presentation and
+        # information density, and neither is decidable one page at a time: a
+        # bike shop composed page-by-page rendered its heading twice, put its
+        # primary action in white on white, and wrote its empty states in
+        # three different voices.
+        #
+        # Placed before the job's own guidance, and framed as context rather
+        # than instruction — this is the same mistake the maquette made, and
+        # sending the sibling pages as a spec would make A2UI a renderer of
+        # decisions already taken.
+        parts.append(
+            "\nTHE REST OF THIS APPLICATION — compose this screen so it "
+            "belongs beside them. Reuse a pattern already established rather "
+            "than inventing a second one for the same job, and keep the "
+            "density and the voice consistent with what is here:\n"
+            + shared_context
+        )
     guidance = build_composition_guidance(root, _family_of(kind))
     if guidance:
         parts.append("\n" + guidance)
@@ -446,6 +465,7 @@ def compose_page_via_a2ui(
     kind: str,
     *,
     surface_provider: Optional[SurfaceProvider] = None,
+    shared_context: str = "",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -478,7 +498,8 @@ def compose_page_via_a2ui(
                 "reason": "no entities in the plan — every binding would be a guess"}
 
     try:
-        payload = surface_provider(build_requirement(root, kind, route),
+        payload = surface_provider(build_requirement(root, kind, route,
+                                                     shared_context),
                                    build_domain_context(root))
     except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
         logger.warning("[a2ui] %s composition failed: %s", route, exc)
