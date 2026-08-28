@@ -1026,22 +1026,71 @@ ENTITY_SLOTS = (
 
 
 def page_slots(doc: dict) -> list[dict]:
-    """The slots this application's page set may fill.
+    """The features this application's page set may fill, one per entity.
 
-    Derived from the data model, so the answer space is a consequence of the
-    entities rather than of what the model felt like proposing.
+    Two rules, both encoded in the shape of the question rather than argued in
+    prose the agent has already been observed to ignore.
+
+    **A feature is filled or declined whole.** The unit is the entity, not the
+    page: a list with no way to create a record is not a cheaper feature, it is
+    a broken one. A per-page question invites exactly that — each page looks
+    reasonable alone while the set does not add up to a job a user can finish.
+    Fewer complete features beat more incomplete ones.
+
+    **What the user asked for is not a candidate for pruning.** Deliberately
+    *not* computed here. The obvious signals do not discriminate: every one of
+    21 entities in a live run carried requirements, and 37 of 39 requirements
+    cited `application.description`, so both mark everything required and mean
+    nothing. Matching entity names against the description would discriminate,
+    but only by string-matching a heuristic into a rule.
+
+    So the judgement stays with the model and the evidence travels to it: the
+    slots carry their requirements, and :func:`page_slot_prompt` puts the
+    user's own words beside them. "The user named this" is a reading of their
+    sentence, which is the one thing a model is better at than a rule.
     """
     slots: list[dict] = [
-        {"slot": "home", "pattern": "dashboard", "entity": None,
-         "prompt": "Where a user lands. Omit only if the app opens on a list."},
+        {"feature": "home", "entity": None, "requirements": [],
+         "pages": [{"slot": "home", "pattern": "dashboard",
+                    "prompt": "Where a user lands."}],
+         "prompt": "Omit if the app opens on a list."},
     ]
     for entity in (doc.get("data") or {}).get("entities") or []:
-        name = entity.get("name") or entity.get("id")
-        for slot, pattern, why in ENTITY_SLOTS:
-            slots.append({
-                "slot": f"{entity.get('id')}.{slot}",
-                "pattern": pattern,
-                "entity": entity.get("id"),
-                "prompt": why.format(name=name),
-            })
+        eid = entity.get("id")
+        name = entity.get("name") or eid
+        slots.append({
+            "feature": eid,
+            "entity": eid,
+            "name": name,
+            "requirements": list(entity.get("requirements") or []),
+            "pages": [
+                {"slot": f"{eid}.{slot}", "pattern": pattern,
+                 "prompt": why.format(name=name)}
+                for slot, pattern, why in ENTITY_SLOTS
+            ],
+        })
     return slots
+
+
+def page_slot_prompt(doc: dict) -> str:
+    """The slot question, with the user's own words attached (§115)."""
+    described = (doc.get("application") or {}).get("description") or ""
+    return (
+        "Fill in this application's page set feature by feature. A feature is "
+        "one entity's pages: fill it completely or decline it completely.\n\n"
+        "Filling it completely matters more than filling many. A list with no "
+        "way to add a record, or a record with nowhere to open it, is not a "
+        "smaller feature — it is one a user cannot finish a job with. Prefer "
+        "few features a user can complete over many they cannot.\n\n"
+        "Decline a feature when the entity is a join table, a lookup, or "
+        "something only ever edited inside another record — a line item is "
+        "edited on its invoice, not on a page of its own.\n\n"
+        "Except: anything the user asked for is not declinable, however "
+        "lookup-shaped it shows up here. These are their words:\n\n"
+        f"  \u201c{described}\u201d\n\n"
+        "If they named it, it gets its feature, and it gets it complete.\n\n"
+        "There is no slot for a filtered list, because a filter is not a page. "
+        "Every \u2018only mine\u2019, \u2018overdue\u2019, \u2018unassigned\u2019 or "
+        "\u2018awaiting X\u2019 belongs in that list page\u2019s `views` as "
+        "{key, label, filter}."
+    )

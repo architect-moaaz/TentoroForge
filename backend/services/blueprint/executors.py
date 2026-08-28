@@ -980,21 +980,14 @@ def build_prompt(
         # /jobs/ready-for-collection and /jobs/awaiting-extra-work. The
         # instruction was arguing with the question: a free list of pages admits
         # a filtered page as a good answer. Slots remove the room instead.
-        from services.blueprint.page_planner import page_slots
+        from services.blueprint.page_planner import (
+            page_slot_prompt, page_slots,
+        )
 
-        slots = page_slots(doc)
         user = (
-            "Fill in this application's page set slot by slot. For each slot, "
-            "either write the Page Contract or decline it.\n\n"
-            "Most entities do not need all three. Decline a slot when the "
-            "entity is a join table, a lookup, or something only ever edited "
-            "inside another record — a line item is edited on its invoice, not "
-            "on a page of its own.\n\n"
-            "There is no slot for a filtered list, because a filter is not a "
-            "page. Every 'only mine', 'overdue', 'unassigned' or 'awaiting X' "
-            "belongs in that list page's `views` as {key, label, filter}.\n\n"
-            "```json\n" + json.dumps(slots, indent=2) + "\n```\n\n"
-            "Here is the Blueprint the slots were derived from.\n\n```json\n"
+            page_slot_prompt(doc) + "\n\n```json\n"
+            + json.dumps(page_slots(doc), indent=2) + "\n```\n\n"
+            "Here is the Blueprint the features were derived from.\n\n```json\n"
             + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
             + "\n```"
         )
