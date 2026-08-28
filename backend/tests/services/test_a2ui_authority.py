@@ -663,3 +663,47 @@ def test_an_existing_page_is_still_written_in_place(tmp_path):
     assert res["applied"] is True
     assert _page(root) != before
     assert res["schema_path"]
+
+
+# --- §115: the Blueprint is where this pipeline's entities live -------------
+
+
+def test_the_registry_can_come_from_the_blueprint():
+    """registry_for_binder adapts plan.json, which the Blueprint pipeline does
+    not have. Every page declined with "no entities in the plan — every
+    binding would be a guess" and fell through to the authoring agent. The
+    composer was right to refuse; it was reading the wrong source."""
+    from services.a2ui_authority import registry_from_blueprint
+
+    doc = {"data": {"entities": [
+        {"id": "E1", "name": "Habit", "table": "habits", "fields": [
+            {"name": "id", "type": "uuid"},
+            {"name": "name", "type": "string"},
+            {"name": "cadence", "type": "string",
+             "enumValues": ["daily", "weekly"]},
+        ]},
+    ]}, "workflows": [{"name": "Tick a habit off"}]}
+    reg = registry_from_blueprint(doc)
+    habit = reg["entities"]["Habit"]
+    assert habit["slug"] == "habits"
+    assert {c["name"] for c in habit["columns"]} == {"id", "name", "cadence"}
+    assert habit["columns"][2]["enum"] == ["daily", "weekly"]
+    assert reg["workflows"] == ["Tick a habit off"]
+
+
+def test_an_entity_without_a_table_falls_back_to_its_name():
+    from services.a2ui_authority import registry_from_blueprint
+
+    reg = registry_from_blueprint({"data": {"entities": [{"name": "Habit"}]}})
+    assert reg["entities"]["Habit"]["slug"] == "habit"
+
+
+def test_a_caller_supplied_registry_is_used_over_the_plan(tmp_path):
+    """The plan.json adapter stays for the pipeline that has a plan."""
+    import inspect
+
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    assert "registry" in inspect.signature(compose_page_via_a2ui).parameters
+    src = inspect.getsource(compose_page_via_a2ui)
+    assert "registry if registry is not None else registry_for_binder" in src

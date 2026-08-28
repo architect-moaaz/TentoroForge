@@ -154,6 +154,42 @@ def availability() -> tuple[bool, str]:
 
 # ------------------------------------------------------------------ registry
 
+def registry_from_blueprint(doc: dict) -> dict:
+    """The Blueprint's entities in the shape ``a2ui_to_forge`` reads.
+
+    ``registry_for_binder`` adapts ``plan.json``, which is what the old
+    pipeline resolved names against. The Blueprint pipeline has no plan file,
+    so every page declined with "no entities in the plan — every binding would
+    be a guess" and fell through to the authoring agent. The composer was
+    right to refuse: a binder with no entities invents them.
+
+    Not a second source of truth, which is what that docstring warns against —
+    the same adapter, over the source this pipeline actually has. §115: the
+    Blueprint is what the application is.
+    """
+    out: dict[str, Any] = {}
+    for ent in (doc.get("data") or {}).get("entities") or []:
+        name = ent.get("name") or ent.get("id")
+        if not name:
+            continue
+        cols = []
+        for f in ent.get("fields") or []:
+            if not isinstance(f, dict) or not f.get("name"):
+                continue
+            col: dict[str, Any] = {"name": f["name"],
+                                   "type": f.get("type") or "varchar"}
+            if f.get("enumValues"):
+                col["enum"] = list(f["enumValues"])
+            cols.append(col)
+        out[name] = {"slug": ent.get("table") or str(name).lower(),
+                     "columns": cols}
+    return {
+        "entities": out,
+        "workflows": [w.get("name") for w in doc.get("workflows") or []
+                      if w.get("name")],
+    }
+
+
 def registry_for_binder(root: Path) -> dict:
     """The plan's entities in the shape ``a2ui_to_forge`` reads.
 
@@ -467,6 +503,7 @@ def compose_page_via_a2ui(
     surface_provider: Optional[SurfaceProvider] = None,
     shared_context: str = "",
     page_id: str = "",
+    registry: dict | None = None,
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -496,7 +533,9 @@ def compose_page_via_a2ui(
     # exists by definition.
     target = _schema_path_for_route(root, route)
 
-    registry = registry_for_binder(root)
+    # A caller that has the entities passes them; the plan.json
+    # adapter remains for the pipeline that has a plan.
+    registry = registry if registry is not None else registry_for_binder(root)
     if not registry.get("entities"):
         return {"applied": False, "route": route, "kind": kind,
                 "reason": "no entities in the plan — every binding would be a guess"}

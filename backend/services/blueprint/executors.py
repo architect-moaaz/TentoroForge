@@ -1305,7 +1305,9 @@ def make_executor(
         on a real app, and a run that finished 28 of 32 pages is the reason
         per-subject tolerance exists.
         """
-        from services.a2ui_authority import compose_page_via_a2ui
+        from services.a2ui_authority import (
+            compose_page_via_a2ui, registry_from_blueprint,
+        )
         from services.a2ui_ui_composition import shared_context
 
         page = next((p for p in svc.doc.get("pages") or []
@@ -1317,6 +1319,7 @@ def make_executor(
                 svc.output_dir, page["route"], page.get("pattern") or "",
                 shared_context=shared_context(svc.doc),
                 page_id=spec.subject,
+                registry=registry_from_blueprint(svc.doc),
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
