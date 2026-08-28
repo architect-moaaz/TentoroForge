@@ -492,3 +492,67 @@ def test_the_root_never_forwards_to_a_login_screen(tmp_path):
     doc = {"pages": [{"route": "/login"}, {"route": "/sign-up"},
                      {"route": "/dashboard"}]}
     assert landing_route(doc) == "/dashboard"
+
+
+# ---------------------------------------------------------------------------
+# Design tokens — the whole system, in the format the scaffold consumes
+# ---------------------------------------------------------------------------
+
+_DESIGN = {
+    "designSystem": {
+        "colors": {"primary": "#125E8A", "background": "#F7F8F9",
+                   "foreground": "#16202A", "danger": "#A8261F",
+                   "focusRing": "#0B72C4", "statusPaid": "#1B6B3A"},
+        "radius": {"md": "6px", "card": "8px", "pill": "999px"},
+        "typography": {"baseSize": "15px", "fontFamilyBase": "'Inter', sans-serif"},
+        "spacing": {"md": "16px"},
+    }
+}
+
+
+def test_the_whole_design_system_reaches_the_stylesheet(tmp_path):
+    """Four of thirteen sections used to survive, so apps looked unstyled."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    assert "--status-paid: #1B6B3A;" in css       # a role shadcn never names
+    assert "--radius-card: 8px;" in css           # radius is an object
+    assert "--font-size-base: 15px;" in css       # typography was never read
+    assert "--space-md: 16px;" in css
+
+
+def test_names_the_scaffold_wraps_are_emitted_as_hsl_triplets(tmp_path):
+    """`hsl(var(--primary))` with a hex is invalid and silently drops."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    assert "--primary: 202 77% 31%;" in css
+    assert "--primary: #125E8A;" not in css
+    # Roles the scaffold does not wrap keep their hex.
+    assert "--focus-ring: #0B72C4;" in css
+
+
+def test_a_shadcn_name_the_blueprint_omits_falls_back_to_a_declared_role(tmp_path):
+    """The Blueprint says `danger`; components ask for `--destructive`."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    # Aliases are triplets too: the scaffold wraps these in hsl() as well.
+    assert "--destructive: 3 69% 39%;" in css
+    assert "--ring: 207 89% 41%;" in css
+
+
+def test_the_scaffold_imports_the_tokens_and_defines_none_of_them_itself():
+    """Nothing imported tokens.css for the life of the file, and globals.css
+    held __CSS_*__ placeholders nothing substituted — which won by source
+    order, because Tailwind flattens @layer base instead of emitting a layer."""
+    from pathlib import Path
+
+    globals_css = Path(__file__).resolve().parents[2] / (
+        "templates/app-foundation/src/app/globals.css")
+    text = globals_css.read_text()
+    assert '@import "./tokens.css";' in text
+    assert "__CSS_" not in text

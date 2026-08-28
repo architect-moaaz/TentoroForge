@@ -534,6 +534,56 @@ _COLOR_TOKENS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _hsl_triplet(value: str) -> str | None:
+    """`#125E8A` -> `203 78% 30%`, the bare triplet shadcn wraps in `hsl()`.
+
+    The scaffold writes `hsl(var(--primary))`, so a hex under that name yields
+    `hsl(#125E8A)` — invalid, silently dropped, and the component falls back to
+    a default. Emitting hex for the aliases did not lose the cascade; it
+    poisoned it. Blueprint-named roles keep their hex, since nothing wraps
+    those.
+    """
+    v = str(value).strip().lstrip("#")
+    if len(v) == 3:
+        v = "".join(c * 2 for c in v)
+    if len(v) != 6:
+        return None
+    try:
+        r, g, b = (int(v[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return None
+    hi, lo = max(r, g, b), min(r, g, b)
+    light = (hi + lo) / 2
+    if hi == lo:
+        hue = sat = 0.0
+    else:
+        d = hi - lo
+        sat = d / (2 - hi - lo) if light > 0.5 else d / (hi + lo)
+        hue = {r: (g - b) / d + (6 if g < b else 0),
+               g: (b - r) / d + 2, b: (r - g) / d + 4}[hi] * 60
+    return f"{round(hue)} {round(sat * 100)}% {round(light * 100)}%"
+
+
+def _kebab(name: str) -> str:
+    """`mutedForeground` -> `muted-foreground`."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
+
+
+#: Where a component expects a shadcn name the Blueprint does not use, the
+#: nearest declared role stands in. Only aliases — every declared role is
+#: emitted under its own name regardless, so nothing depends on this table
+#: being complete.
+_TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("--foreground", ("foreground", "text", "textPrimary")),
+    ("--primary-foreground", ("primaryForeground", "onPrimary", "background")),
+    ("--muted", ("muted", "primarySubtle", "surfaceMuted")),
+    ("--muted-foreground", ("mutedForeground", "textMuted", "textSecondary")),
+    ("--secondary", ("secondary", "accent")),
+    ("--destructive", ("destructive", "danger")),
+    ("--ring", ("focusRing", "primary")),
+)
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -541,17 +591,70 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     into it: ``globals.css`` is one of the files the app emitter deliberately
     preserves, and a projection that edits preserved files in place would make
     re-projection destructive.
+
+    This wrote four variables from a thirteen-section design system, and every
+    generated app looked unstyled as a result. It read a fixed list of shadcn
+    role names — foreground, mutedForeground, destructive — against a Blueprint
+    that declares its own: primaryHover, dangerSubtle, focusRing, borderStrong,
+    statusAwaitingParts. Four names overlapped; the other seven lookups
+    returned None and were skipped in silence, because a missing CSS variable
+    is not an error. `radius` was read as a string and the Blueprint emits an
+    object, so every corner token was dropped, and typography and spacing were
+    never read at all.
+
+    So it emits what the Blueprint declares, under the Blueprint's own names,
+    and aliases the handful of shadcn names components ask for onto the nearest
+    declared role. A design system that grows a new role now reaches the app
+    without anyone editing a list here.
     """
     design = doc.get("designSystem") or {}
     colors = design.get("colors") or {}
     lines: list[str] = []
-    for token, role in _COLOR_TOKENS:
-        value = colors.get(role)
-        if value:
-            lines.append(f"  {token}: {value};")
+
+    # These four are the names the scaffold wraps in hsl(); the rest are ours
+    # alone and keep their hex.
+    WRAPPED = {"background", "foreground", "primary", "secondary"}
+    for role, value in sorted(colors.items()):
+        if isinstance(value, str) and value:
+            out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
+            lines.append(f"  --{_kebab(role)}: {out_value};")
+    for token, candidates in _TOKEN_ALIASES:
+        if any(line.startswith(f"  {token}:") for line in lines):
+            continue
+        for role in candidates:
+            raw = colors.get(role)
+            if isinstance(raw, str) and raw:
+                triplet = _hsl_triplet(raw)
+                lines.append(f"  {token}: {triplet or raw};")
+                break
+
     radius = design.get("radius")
     if isinstance(radius, str) and radius:
         lines.append(f"  --radius: {radius};")
+    elif isinstance(radius, dict):
+        for key, value in sorted(radius.items()):
+            if isinstance(value, str) and value:
+                lines.append(f"  --radius-{_kebab(key)}: {value};")
+        # Components ask for a bare `--radius`; `md` is the sane middle.
+        for key in ("md", "control", "card"):
+            if isinstance(radius.get(key), str):
+                lines.append(f"  --radius: {radius[key]};")
+                break
+
+    typography = design.get("typography") or {}
+    for key, token in (("fontFamilyBase", "--font-family-base"),
+                       ("fontFamilyNumeric", "--font-family-numeric"),
+                       ("baseSize", "--font-size-base"),
+                       ("lineHeightBase", "--line-height-base")):
+        value = typography.get(key)
+        if isinstance(value, str) and value:
+            lines.append(f"  {token}: {value};")
+
+    spacing = design.get("spacing")
+    if isinstance(spacing, dict):
+        for key, value in sorted(spacing.items()):
+            if isinstance(value, str) and value:
+                lines.append(f"  --space-{_kebab(key)}: {value};")
 
     out = Path(app_root) / "src" / "app"
     out.mkdir(parents=True, exist_ok=True)
