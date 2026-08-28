@@ -146,3 +146,57 @@ def test_everything_a_projection_writes_is_protected_from_the_scaffold(tmp_path)
     unprotected = [f for f in written
                    if not any(f.startswith(p) for p in assembly.PROJECTED_PATHS)]
     assert not unprotected, f"scaffold would overwrite: {unprotected}"
+
+
+# ---------------------------------------------------------------------------
+# The build is what makes an assembled tree an application
+# ---------------------------------------------------------------------------
+
+
+def test_a_failing_build_raises_with_the_compiler_message(tmp_path, monkeypatch):
+    """The reason must name the module, not just say the node failed."""
+    import subprocess
+
+    from services.blueprint import assembly
+
+    def fake_run(cmd, **kw):
+        rc = 0 if "install" in cmd else 1
+        return subprocess.CompletedProcess(
+            cmd, rc, stdout="", stderr="Module not found: Can't resolve '@/db/schema/user'")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    try:
+        assembly.verify_build(tmp_path)
+        raise AssertionError("expected BuildFailed")
+    except assembly.BuildFailed as exc:
+        assert "@/db/schema/user" in str(exc)
+        assert "npm build failed" in str(exc)
+
+
+def test_a_failing_install_stops_before_the_build(tmp_path, monkeypatch):
+    import subprocess
+
+    from services.blueprint import assembly
+
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="ENOENT")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    try:
+        assembly.verify_build(tmp_path)
+    except assembly.BuildFailed:
+        pass
+    assert len(seen) == 1, "build ran after install failed"
+
+
+def test_a_passing_build_reports_both_exit_codes(tmp_path, monkeypatch):
+    import subprocess
+
+    from services.blueprint import assembly
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert assembly.verify_build(tmp_path) == {"install": 0, "build": 0}

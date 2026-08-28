@@ -69,6 +69,22 @@ PROJECTED_PATHS: tuple[str, ...] = (
     # scaffold's redirects to a hardcoded "/home".
     "src/app/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
+    "src/lib/append-only-entities.ts",
+)
+
+#: Files inside a projected directory that the *scaffold* still owns.
+#:
+#: `src/db/schema` holds two kinds of table. The projection writes one file per
+#: business entity, and the scaffold ships the platform's own — the user table
+#: auth.ts and the signup route import. Marking the directory projection-owned
+#: is right for the first kind and deletes the second: the build failed on
+#: `Can't resolve '@/db/schema/user'` because nothing ever wrote it and
+#: assembly was told to keep its hands off the directory that would have.
+#:
+#: Directory-level ownership cannot express "these 28 files are generated and
+#: this one is not", so the exception is stated by name.
+SCAFFOLD_OWNED: tuple[str, ...] = (
+    "src/db/schema/user.ts",
 )
 
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";
@@ -126,7 +142,8 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS):
+            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
+                    and str(dst_rel) not in SCAFFOLD_OWNED):
                 continue
             dst = out / dst_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -398,3 +415,41 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
     result["deployment"] = svc.doc["deployment"]
     result["dependencies"] = len(svc.doc["dependencies"])
     return result
+
+
+class BuildFailed(RuntimeError):
+    """The assembled application does not compile."""
+
+
+def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
+    """Install and build the assembled app; raise if it does not compile.
+
+    The `preview` node assembled a tree and reported success without ever
+    compiling it, so "an application was generated" meant "files were written".
+    Two build-breaking faults survived every run that way: the scaffold's own
+    user table was deleted by the projection guard, and the data engine's
+    catch-all imported a module no projection wrote. Both would have surfaced
+    the first time anything ran `next build`.
+
+    Slow — install and build are minutes, not seconds — and that is the cost of
+    the claim. A generated app that has not been compiled has not been checked.
+    """
+    import subprocess
+
+    root = Path(app_root)
+    steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
+             ("build", ["npm", "run", "build"]))
+    out: dict[str, Any] = {}
+    for name, cmd in steps:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              timeout=timeout)
+        out[name] = proc.returncode
+        if proc.returncode != 0:
+            # The tail carries the compiler's own message; the head is npm
+            # noise. Keep enough to name the module that could not resolve.
+            detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            raise BuildFailed(
+                f"npm {name} failed ({proc.returncode}):\n"
+                + "\n".join(detail[-25:])
+            )
+    return out

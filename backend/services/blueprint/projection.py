@@ -1058,3 +1058,44 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
     (out / "page.tsx").write_text(body, "utf-8")
     return {"files": ["src/app/page.tsx"], "claimedBy": claimed,
             "redirectsTo": None if root_page else landing_route(doc)}
+
+
+def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/append-only-entities.ts`` — imported by the data engine.
+
+    The catch-all imports this to reject PUT/DELETE on a ledger with a 405. The
+    scaffold ships the route but not the module, so every generated app failed
+    to compile on `Can't resolve '@/lib/append-only-entities'`. Nothing caught
+    it because nothing had ever run `next build` on a generated app.
+
+    The Blueprint has no append-only declaration yet, so the set is empty and
+    the file exists — which is what the reference app ships too. When entities
+    gain the flag, this reads it; until then it is honest about knowing of no
+    ledgers rather than guessing at which tables look like one.
+    """
+    names = sorted({
+        str(n) for entity in (doc.get("data") or {}).get("entities") or []
+        if entity.get("appendOnly")
+        for n in (entity.get("name"), entity.get("table"), entity.get("id"))
+        if n
+    })
+    names += [n.lower() for n in names if n.lower() not in names]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "append-only-entities.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// Every entity listed here is a ledger: rows INSERTed only, never\n"
+        "// UPDATEd or DELETEd. The Data Engine catch-all imports this Set and\n"
+        '// rejects PUT/DELETE with a 405 { error: { code: "LEDGER_IMMUTABLE" } }.\n\n'
+        "export const APPEND_ONLY_ENTITIES: ReadonlySet<string> = new Set([\n"
+        + "".join(f'  "{n}",\n' for n in sorted(set(names)))
+        + "]);\n\n"
+        "export function isAppendOnly(entity: string): boolean {\n"
+        "  if (!entity) return false;\n"
+        "  return APPEND_ONLY_ENTITIES.has(entity)\n"
+        "    || APPEND_ONLY_ENTITIES.has(String(entity).toLowerCase());\n"
+        "}\n",
+        "utf-8",
+    )
+    return {"files": ["src/lib/append-only-entities.ts"], "entities": len(set(names))}

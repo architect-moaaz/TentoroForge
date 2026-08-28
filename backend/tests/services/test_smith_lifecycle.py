@@ -71,7 +71,15 @@ def authoring_executor(spec):
 
 
 @pytest.fixture()
-def smith(tmp_path):
+def smith(tmp_path, monkeypatch):
+    # `preview` compiles what it assembles, which is the point of that node and
+    # not what these tests are about: they exercise §107's state machine, and
+    # an `npm install` per test would make the file minutes long for a fact it
+    # never asserts. The build itself is covered in test_assembly.
+    monkeypatch.setattr(
+        "services.blueprint.assembly.verify_build",
+        lambda app_root, **kw: {"install": 0, "build": 0},
+    )
     svc = BlueprintService.create(
         output_dir=tmp_path, app_id="a", name="ATS", domain="ATS")
     return Smith(svc, model=Scripted(), executor=authoring_executor,

@@ -789,7 +789,15 @@ def _run_wave(
             if handler is None:
                 report.blocked.append(key)
                 continue
-            handler(svc)
+            try:
+                handler(svc)
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                # A derived node that raises used to take the whole run with
+                # it: the dispatch was unguarded, so one bad projection lost
+                # every node behind it and the report said nothing at all.
+                report.failed.append(key)
+                report.failed_because[key] = _reason(exc)
+                continue
         elif node.kind == "projection":
             projector = PROJECTION_HANDLERS.get(key)
             if projector is None or not app_root:
@@ -800,7 +808,12 @@ def _run_wave(
                 # nobody wrote.
                 report.blocked.append(key)
                 continue
-            projector(svc, app_root)
+            try:
+                projector(svc, app_root)
+            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+                report.failed.append(key)
+                report.failed_because[key] = _reason(exc)
+                continue
         else:
             continue
         report.completed.append(key)
@@ -1065,13 +1078,14 @@ def _run_verification(svc: BlueprintService) -> None:
 def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     """Entities -> Drizzle modules, plus the mask manifest the engine reads."""
     from services.blueprint.projection import (
-        apply_data_projection, project_searchable_columns,
-        project_sensitive_columns,
+        apply_data_projection, project_append_only_entities,
+        project_searchable_columns, project_sensitive_columns,
     )
 
     apply_data_projection(svc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
+    project_append_only_entities(svc.doc, app_root)
 
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
@@ -1108,10 +1122,19 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     ``assembly.SUPERSEDED_REPAIRS`` for what each of those repaired and which
     projection makes it unnecessary.
     """
-    from services.blueprint.assembly import apply_assembly
+    from services.blueprint.assembly import apply_assembly, verify_build
 
     apply_assembly(svc, app_root,
                    project_short_id=(svc.doc.get("application") or {}).get("id", "forge"))
+    # Assembly writes a tree; the build is what makes it an application. Kept
+    # inside the node so a run that cannot compile fails here, where the reason
+    # is a compiler error, rather than later when someone opens the directory.
+    result = verify_build(app_root)
+    runtime = dict(svc.doc.get("runtime") or {})
+    runtime["build"] = {"install": result["install"], "build": result["build"],
+                        "status": "passed"}
+    svc.doc["runtime"] = runtime
+    svc.save()
 
 
 PROJECTION_HANDLERS: dict[str, Any] = {
