@@ -307,9 +307,21 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # every migration, and the generated app had nothing to authenticate
     # against — login failed with "relation \"user\" does not exist" rather
     # than a wrong password.
+    # Named, not globbed. Globbing the directory looked right and ran at the
+    # wrong time: the data layer writes this barrel while `user.ts` is still in
+    # the scaffold, and assembly does not copy it in until the preview node,
+    # several levels later. The glob saw the _forge_* tables (written here) and
+    # missed the one it was added for, so the users table was absent from every
+    # migration and login failed with "relation does not exist" — the same
+    # symptom as before the fix, from the opposite cause.
+    from services.blueprint.assembly import SCAFFOLD_OWNED
+
     platform = sorted(
-        f.stem for f in root.glob("*.ts")
-        if f.stem not in {"index"} and f.stem not in {_module_name(e) for e in entities}
+        Path(rel).stem for rel in SCAFFOLD_OWNED
+        if rel.startswith("src/db/schema/") and rel.endswith(".ts")
+    )
+    platform += sorted(
+        f.stem for f in root.glob("_forge_*.ts") if f.stem not in platform
     )
     barrel = ["// Re-exports every projected entity schema, and the platform",
               "// tables that share this directory.",

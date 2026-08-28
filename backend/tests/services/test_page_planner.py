@@ -661,3 +661,36 @@ def test_a_page_with_no_list_source_is_untouched():
     """Nothing to gate on — a form page has no dataSources at all."""
     tree = _state_tree()
     assert pp.gate_states(tree, None) is tree
+
+
+# --- §33: a create form asks about a record that does not exist yet ---------
+
+_ARTICLE = {"fields": [
+    {"name": "title", "type": "text"}, {"name": "url", "type": "text"},
+    {"name": "reason", "type": "text"}, {"name": "isRead", "type": "boolean"},
+    {"name": "takeaway", "type": "text"},
+    {"name": "savedAt", "type": "datetime"}, {"name": "readAt", "type": "datetime"},
+]}
+
+
+def test_a_create_form_does_not_ask_about_the_record_s_afterlife():
+    """A generated /articles/new offered `Is Read`, `Saved At` and `Read At`
+    while its own description said an article "starts unread with no
+    takeaway"."""
+    names = [f["name"] for f in pp.form_fields_for(_ARTICLE, creating=True)]
+    assert "isRead" not in names
+    assert "savedAt" not in names
+    assert "readAt" not in names
+    assert names[:3] == ["title", "url", "reason"]
+
+
+def test_an_edit_form_still_shows_lifecycle_state():
+    """Editing an article that exists may legitimately show whether it is read."""
+    names = [f["name"] for f in pp.form_fields_for(_ARTICLE)]
+    assert "isRead" in names and "readAt" in names
+
+
+def test_a_timestamp_that_is_not_system_stamped_survives():
+    """`publishedAt` is a fact about the article, not a lifecycle stamp."""
+    entity = {"fields": [{"name": "publishedAt", "type": "datetime"}]}
+    assert [f["name"] for f in pp.form_fields_for(entity, creating=True)] == ["publishedAt"]

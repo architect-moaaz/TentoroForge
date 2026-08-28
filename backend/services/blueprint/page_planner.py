@@ -196,10 +196,39 @@ def columns_for(entity: dict, limit: int = 7) -> list[dict]:
     return cols
 
 
-def form_fields_for(entity: dict) -> list[dict]:
+#: Fields a person never fills in on a create form. A record's own lifecycle
+#: state and the timestamps the system stamps are outcomes of using the app,
+#: not questions to answer before it exists.
+DERIVED_ON_CREATE = ("createdat", "updatedat", "savedat", "readat",
+                     "completedat", "deletedat", "archivedat")
+
+
+def _asked_of_a_person(field: dict, *, creating: bool) -> bool:
+    """Whether a create form should ask for this field.
+
+    A generated reading list offered `Is Read`, `Takeaway`, `Read At` and
+    `Saved At` on its *new article* page — while the page's own description
+    said an article "starts unread with no takeaway". The template emitted
+    every entity field indiscriminately, so a form for something that does not
+    exist yet asked about what happens to it later.
+    """
+    if not creating:
+        return True
+    name = str(field.get("name") or "").lower()
+    if name.endswith("at") and name in DERIVED_ON_CREATE:
+        return False
+    # A boolean lifecycle flag defaults false on a new record; asking inverts
+    # the meaning of the form.
+    return not (str(field.get("type") or "").lower() == "boolean"
+                and name.startswith("is"))
+
+
+def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
     """Form ``fields`` — this is what an app-specific ``*-form`` component was."""
     out: list[dict] = []
     for f in _visible_fields(entity):
+        if not _asked_of_a_person(f, creating=creating):
+            continue
         kind = FORM_KINDS.get(str(f.get("type") or "").lower(), "text")
         field: dict[str, Any] = {
             "kind": kind,
@@ -352,7 +381,10 @@ def build_context(doc: dict, page: dict, entity: dict | None) -> dict[str, Any]:
             "$subtitleField": (f"{{{{{RECORD}.{subtitle_field(entity)}}}}}"
                                if subtitle_field(entity) else ""),
             "$summaryFields": summary_fields(entity),
-            "$formFields": form_fields_for(entity),
+            # A create route asks a person for a new record; a detail route
+            # edits one that exists and may legitimately show its lifecycle.
+            "$formFields": form_fields_for(
+                entity, creating=str(page.get("route") or "").endswith("/new")),
             "$columns": columns_for(entity),
             # The saved views this page declares, in the shape
             # `FilterBar.savedViews` and `SavedViewsPicker.views` take. Without
@@ -1144,7 +1176,8 @@ def page_brief(doc: dict, page_id: str) -> dict:
         brief["derived"] = {
             "titleField": title_field(entity),
             "columns": columns_for(entity),
-            "formFields": form_fields_for(entity),
+            "formFields": form_fields_for(
+                entity, creating=str(page.get("route") or "").endswith("/new")),
             "summaryFields": summary_fields(entity),
         }
         brief["relatedCollections"] = [

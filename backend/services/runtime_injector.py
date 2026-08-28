@@ -1903,11 +1903,18 @@ say "${GREEN}🚀 Starting generated app...${NC}"
 
 # Derive the DB name from .env.local's DATABASE_URL (segment after the last '/'),
 # so it matches the database docker-compose creates. Default: app.
-DB_NAME="app"
-if [ -f .env.local ]; then
-  _u=$(grep -E '^DATABASE_URL=' .env.local 2>/dev/null | head -1 | sed -E 's|.*/([^/?]+).*|\\1|' || true)
-  [ -n "$_u" ] && DB_NAME="$_u"
-fi
+# Every generated app used DB_NAME="app" and no COMPOSE_PROJECT_NAME, so the
+# second app to run reused the FIRST one's container and database. Picking a
+# free PORT isolates nothing when the container is shared: drizzle-kit found
+# another app's tables and asked, interactively, whether `articles` was a
+# rename of `bikes` — hanging the seed, and one keystroke away from renaming
+# another application's table.
+#
+# Derived from the project directory (output/<project-id>/app), so it needs no
+# substitution plumbing. Postgres will not take a leading digit or a dash.
+DB_NAME="app_$(basename "$(dirname "$PWD")" | tr -c 'a-zA-Z0-9' '_')"
+# Deliberately not read back from .env.local: assembly writes `/app` there for
+# every application, which is the value that put two apps in one database.
 
 # Pick a free host port for Postgres — every generated app otherwise hardcodes
 # 5432 and collides the moment a second app is already running.
@@ -1922,6 +1929,10 @@ if ! is_free "$DB_PORT"; then
   done
 fi
 export DB_PORT
+# Names the compose project, and so the container: without it Docker derives
+# it from the directory, which is `app` for every generated application.
+export COMPOSE_PROJECT_NAME="$DB_NAME"
+export PROJECT_DB_NAME="$DB_NAME"
 export DATABASE_URL="postgresql://postgres:postgres@localhost:${DB_PORT}/${DB_NAME}"
 say "${YELLOW}🔌 Database port: ${DB_PORT} (DATABASE_URL exported)${NC}"
 
