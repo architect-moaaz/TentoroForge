@@ -1126,3 +1126,29 @@ def test_without_a_montage_the_message_is_unchanged(tmp_path):
     except RuntimeError:
         pass
     assert sent["messages"][0]["content"] == "u"
+
+
+def test_the_authoring_prompt_asks_for_the_empty_state_to_carry_its_action():
+    """A sibling button repeats the header's and shows even with rows: one
+    generated page had "Add customer" twice, the second under a full table."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
+                      "purpose": "p", "pattern": "entity_list"}],
+           "data": {"entities": []}}
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "EmptyState.action" in user
+    assert "not as a Button beside it" in user
+
+
+def test_the_authoring_prompt_forbids_a_loading_state():
+    """Sources resolve server-side, so a spinner is a state that cannot occur.
+    gate_states drops these; not authoring them is the cheaper half."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
+                      "purpose": "p", "pattern": "entity_list"}],
+           "data": {"entities": []}}
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "loading or skeleton" in user
+    assert "gated for you" in user
