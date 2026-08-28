@@ -431,7 +431,8 @@ def resolve(value: Any, ctx: dict[str, Any]) -> Any:
 
 
 def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
-                entity: dict | None) -> list[dict]:
+                entity: dict | None,
+                catalog: dict[str, dict] | None = None) -> list[dict]:
     """One template node -> zero or more page-schema nodes.
 
     Returns a list because ``repeat`` fans a subtree out over a derived list;
@@ -451,18 +452,22 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
             if item.get("columns") is not None:
                 scoped["$item.columns"] = item["columns"]
             bare = {k: v for k, v in node.items() if k != "repeat"}
-            out.extend(instantiate(bare, scoped, doc, page, entity))
+            out.extend(instantiate(bare, scoped, doc, page, entity, catalog))
         return out
 
     built: dict[str, Any] = {"type": node["type"]}
     if node.get("id"):
         built["id"] = node["id"]
     props = resolve(node.get("props") or {}, ctx)
+    # A binding carries one concept; each prop takes the shape it declares.
+    entry = (catalog or {}).get(node["type"]) or {}
+    declared = ((entry.get("props") or {}).get("properties") or {})
+    props = {k: narrow_to_prop(v, declared.get(k) or {}) for k, v in props.items()}
     if props:
         built["props"] = props
     children: list[dict] = []
     for child in node.get("children") or []:
-        children.extend(instantiate(child, ctx, doc, page, entity))
+        children.extend(instantiate(child, ctx, doc, page, entity, catalog))
     if children:
         built["children"] = children
     if node.get("visibleIf"):
@@ -517,6 +522,35 @@ def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
         return ["root: missing"]
     walk(root, "root")
     return errors
+
+
+def narrow_to_prop(value: Any, spec: dict) -> Any:
+    """Trim a resolved binding to the keys the receiving prop declares.
+
+    One concept, two contracts: a page's saved views feed `FilterBar.savedViews`
+    as {id, label, filters} — where `filters` is required — and
+    `SavedViewsPicker.views` as {id, label, isDefault}, where `filters` is
+    rejected outright. A single `$savedViews` binding cannot satisfy both, and
+    emitting the union failed the stricter one: every collection page in a
+    generated app died on "Additional properties are not allowed ('filters'
+    was unexpected)" and was dropped before it reached disk.
+
+    The planner knows which prop it is filling and the catalog declares that
+    prop's shape, so the binding carries everything and each prop takes what it
+    accepts. Naming two placeholders instead would make A2UI pick correctly
+    between them, which is a thing to get wrong rather than a thing to derive.
+    """
+    items = (spec or {}).get("items") or {}
+    allowed = set((items.get("properties") or {}))
+    if not allowed or items.get("additionalProperties") is not False:
+        return value
+    if not isinstance(value, list):
+        return value
+    return [
+        {k: v for k, v in item.items() if k in allowed}
+        if isinstance(item, dict) else item
+        for item in value
+    ]
 
 
 def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
@@ -742,7 +776,7 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
 
     ctx = build_context(doc, page, entity)
-    roots = instantiate(template["root"], ctx, doc, page, entity)
+    roots = instantiate(template["root"], ctx, doc, page, entity, catalog)
     if len(roots) != 1:
         raise PlanError(
             f"{page.get('id')}: template root produced {len(roots)} nodes; "

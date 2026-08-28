@@ -300,9 +300,22 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "service": [rel],
         })
 
-    barrel = ["// Re-exports every projected entity schema.",
+    # The platform's own tables live in this directory beside the projected
+    # ones and are not Blueprint entities, so nothing here would name them.
+    # drizzle resolves the schema through this barrel: a module no one
+    # re-exports is invisible to it, so `user.ts` was on disk, absent from
+    # every migration, and the generated app had nothing to authenticate
+    # against — login failed with "relation \"user\" does not exist" rather
+    # than a wrong password.
+    platform = sorted(
+        f.stem for f in root.glob("*.ts")
+        if f.stem not in {"index"} and f.stem not in {_module_name(e) for e in entities}
+    )
+    barrel = ["// Re-exports every projected entity schema, and the platform",
+              "// tables that share this directory.",
               "// Generated from the Living Blueprint."]
     barrel += [f'export * from "./{_module_name(e)}";' for e in entities]
+    barrel += [f'export * from "./{name}";' for name in platform]
     (root / "index.ts").write_text("\n".join(barrel) + "\n", "utf-8")
     written.append("src/db/schema/index.ts")
 

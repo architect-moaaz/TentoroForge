@@ -1090,12 +1090,26 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
+    from services.blueprint.page_planner import PlanError
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
         project_nav_flow, project_root_route,
     )
 
-    apply_frontend_projection(svc, app_root)
+    result = apply_frontend_projection(svc, app_root)
+    # A page A2UI authored and the planner cannot render is a defect, not an
+    # acceptable loss. This projection wrote 23 schemas from 30 authored trees
+    # and reported success: every collection page — /jobs, /customers, /bikes,
+    # /parts, /invoices, /staff — failed on one bad prop and vanished. The app
+    # built, deployed, and had no lists in it. plan_pages recorded every
+    # reason; nothing between it and here ever read them.
+    if result.get("failed"):
+        raise PlanError(
+            f"{len(result['failed'])} page(s) authored but could not be "
+            "planned:\n" + "\n".join(
+                f"  {f['page']}: {f['reason'][:200]}" for f in result["failed"]
+            )
+        )
     project_nav_flow(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
