@@ -804,3 +804,34 @@ def test_a_resolved_binding_emits_no_question():
     r = translate(payload(_root([kpi("k", "Total Tasks", "/kpis/total")]),
                           {"kpis": {"total": 1}, "tasks": {"rows": []}}), REG)
     assert not [q for q in r.get("questions") or [] if q["component"] == "k"]
+
+
+def test_style_is_lifted_out_of_props():
+    """NodeV2 puts `style` beside `type`, `id` and `bind` — not in props.
+    A2UI emits it inside props, its own catalog accepts that, and ours
+    rejected the same tree:
+
+      InvalidPatternTemplate: root.children[0].props.(root):
+      {'style': {'maxWidth': ...}} is not valid under any of the schemas
+
+    Both pages of a live run were lost to it. Lifted here rather than
+    widening NodeV2 to take both placements: two spellings of one thing in
+    the Blueprint is the drift this binder exists to close.
+    """
+    surface = payload([
+        {"id": "root", "component": "Stack", "style": {"maxWidth": "1200px"},
+         "children": [{"id": "t", "component": "Text", "content": "hi",
+                       "style": {"padding": "8px"}}]},
+    ])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001",
+                    kind="entity_list")
+    root = out["schema"]["root"]
+    assert root["style"] == {"maxWidth": "1200px"}
+    assert "style" not in (root.get("props") or {})
+
+
+def test_a_node_without_a_style_gains_no_empty_one():
+    surface = payload([{"id": "root", "component": "Stack", "children": []}])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001",
+                    kind="entity_list")
+    assert "style" not in out["schema"]["root"]

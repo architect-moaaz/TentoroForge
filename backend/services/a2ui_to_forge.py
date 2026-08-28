@@ -1014,6 +1014,19 @@ def translate(payload: dict, registry: dict, route: str = "/",
         props.update(binder.extra_props.get(str(c.get("id")), {}))
 
         node: dict[str, Any] = {"type": kind, "props": props}
+        # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
+        # not a prop. A2UI emits it inside props, its own catalog accepts that,
+        # and ours rejected the same tree:
+        #
+        #   InvalidPatternTemplate: root.children[0].props.(root):
+        #   {'style': {'maxWidth': ...}} is not valid under any of the schemas
+        #
+        # Lifted here rather than widening NodeV2 to accept both placements:
+        # two spellings of one thing in the Blueprint is the drift this whole
+        # binder exists to close.
+        style = props.pop("style", None)
+        if style is not None:
+            node["style"] = style
         if c.get("id"):
             node["id"] = c["id"]
 
