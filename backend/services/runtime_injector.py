@@ -184,7 +184,24 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "runtime"
 
 
-def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
+    """Clear ``target`` but keep anything under a preserved path.
+
+    Ownership of a shared directory has to be decided in one place. Handing the
+    preserved list in — rather than teaching this module which paths are
+    generated — keeps that decision with the caller that projects them.
+    """
+    for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
+        rel = str(child.relative_to(root))
+        if any(rel == p or rel.startswith(p + "/") for p in preserve):
+            continue
+        if child.is_file() or child.is_symlink():
+            child.unlink()
+        elif not any(child.iterdir()):
+            child.rmdir()
+
+
+def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | None = None, project_id: str | None = None, preserve: tuple[str, ...] = ()) -> dict[str, Any]:
     """Copy runtime files into a generated app's src/lib/ directory.
 
     Args:
@@ -223,9 +240,16 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             continue
 
         try:
+            # `preserve` names paths a projection owns. This used to rmtree the
+            # whole directory, which installed the workflow engine correctly and
+            # deleted the 13 workflow definitions written moments earlier —
+            # `src/lib/workflows/definitions` is in PROJECTED_PATHS, but that
+            # list only governs copy_scaffold, and this is a second copier with
+            # its own idea of ownership. Two copiers, one directory, and the
+            # generated half lost every run.
             if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+                _remove_except(dst, output_path, preserve)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
             # Track files
             for f in dst.rglob("*.ts"):
                 copied.append(str(f.relative_to(output_path)))

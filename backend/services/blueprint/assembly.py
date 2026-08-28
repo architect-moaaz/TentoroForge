@@ -236,6 +236,9 @@ def inject_runtime_layer(app_root: str | Path, doc: dict) -> dict[str, Any]:
     application = doc.get("application") or {}
     return inject_runtime(
         str(app_root),
+        # The projections own these; the injector must install the engine
+        # around them rather than over them.
+        preserve=PROJECTED_PATHS,
         app_name=application.get("name"),
         domain=application.get("domain"),
         project_id=application.get("id"),

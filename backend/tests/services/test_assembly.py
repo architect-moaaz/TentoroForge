@@ -200,3 +200,33 @@ def test_a_passing_build_reports_both_exit_codes(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
     assert assembly.verify_build(tmp_path) == {"install": 0, "build": 0}
+
+
+def test_the_runtime_injector_installs_around_projected_files_not_over_them():
+    """Two copiers share `src/lib/workflows`, and only one read PROJECTED_PATHS.
+
+    copy_scaffold skipped the directory correctly; inject_runtime rmtree'd it to
+    install the engine and took the 13 projected workflow definitions with it.
+    Ownership has to be decided once, so the preserved list is handed in.
+    """
+    import inspect
+
+    from services.blueprint.assembly import PROJECTED_PATHS, inject_runtime_layer
+
+    src = inspect.getsource(inject_runtime_layer)
+    assert "preserve=PROJECTED_PATHS" in src
+    assert "src/lib/workflows/definitions" in PROJECTED_PATHS
+
+
+def test_remove_except_keeps_preserved_paths_and_clears_the_rest(tmp_path):
+    from services.runtime_injector import _remove_except
+
+    (tmp_path / "src/lib/workflows/definitions").mkdir(parents=True)
+    (tmp_path / "src/lib/workflows/definitions/a.json").write_text("{}")
+    (tmp_path / "src/lib/workflows/engine.ts").write_text("//")
+
+    _remove_except(tmp_path / "src/lib/workflows", tmp_path,
+                   ("src/lib/workflows/definitions",))
+
+    assert (tmp_path / "src/lib/workflows/definitions/a.json").exists()
+    assert not (tmp_path / "src/lib/workflows/engine.ts").exists()
