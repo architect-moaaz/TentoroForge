@@ -724,6 +724,45 @@ class _Binder:
 
 
 
+def dangling_bindings(schema: dict) -> list[str]:
+    """`{{name}}` in the tree with no dataSource named `name`.
+
+    A composed /plants carried four stat tiles bound to
+    {{plantstracked.value}}, {{overdue.value}}, {{duetoday.value}} and
+    {{neverwatered.value}} against a single declared source, `plants`. A2UI
+    invented a source per metric and nothing checked, so the page rendered
+    four em-dashes — or the raw placeholder, which is worse, because it looks
+    like a template that failed rather than a number that is missing.
+
+    The binder rewrites the pointers it recognises and reports what it could
+    not resolve; a name it never saw is neither. This is the check that says
+    the two halves agree — every binding backed by a source that will actually
+    be fetched.
+    """
+    import re
+
+    declared = {s.get("name") for s in (schema.get("dataSources") or [])}
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for n in node:
+                walk(n)
+            return
+        if not isinstance(node, dict):
+            return
+        for value in node.values():
+            if isinstance(value, str):
+                # `{{plants}}` and `{{record.title}}` both name `plants`/`record`.
+                found.update(m.split(".")[0].strip()
+                             for m in re.findall(r"\{\{([^}]+)\}\}", value))
+            else:
+                walk(value)
+
+    walk(schema.get("root"))
+    return sorted(n for n in found if n and n not in declared)
+
+
 def translate(payload: dict, registry: dict, route: str = "/",
               page_id: str = "home", kind: str = "",
               entity_hints: dict | None = None) -> dict:
@@ -1074,6 +1113,9 @@ def translate(payload: dict, registry: dict, route: str = "/",
         "dominant_entity": binder.dominant,
         "assumptions": binder.assumptions,
         "unresolved": binder.unresolved,
+        # Bindings with no source behind them: the composition names data the
+        # page will never fetch.
+        "dangling": dangling_bindings(schema),
         # What a resolver could still answer — every place the binder had to
         # guess an entity, in a shape the next pass can act on. Empty when
         # every binding resolved on its own.

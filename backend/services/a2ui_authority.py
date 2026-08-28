@@ -514,9 +514,28 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list
     from services.dashboard_anatomy import dashboard_findings
     from services.page_kind_anatomy import page_kind_findings
 
+    from services.a2ui_to_forge import dangling_bindings
+
     if _family_of(kind) == "dashboard":
-        return dashboard_findings(route, schema, registry)
-    return page_kind_findings(kind, route, schema)
+        findings = dashboard_findings(route, schema, registry)
+    else:
+        findings = page_kind_findings(kind, route, schema)
+
+    # EVERY BINDING NEEDS A SOURCE BEHIND IT. A composed /plants shipped four
+    # stat tiles reading {{plantstracked.value}}, {{overdue.value}},
+    # {{duetoday.value}} and {{neverwatered.value}} against one declared
+    # source, `plants` — A2UI invented a source per metric, the binder passed
+    # names it had never seen straight through, and the page rendered four
+    # blanks. Nothing else catches this: `unresolved` reports pointers the
+    # binder could not bind, and these bound fine, to nothing.
+    #
+    # Named as `ref` so salvage treats it like any other bad widget: drop the
+    # tiles that read phantom data and re-judge. A page missing four tiles is
+    # a page; a page of four blanks reads as broken.
+    findings += [{"rule": f"binding '{name}' has no declared data source",
+                  "ref": name}
+                 for name in dangling_bindings(schema)]
+    return findings
 
 
 def compose_page_via_a2ui(
@@ -822,6 +841,19 @@ def _resolver_enabled() -> bool:
     return mode not in ("off", "0", "false", "no")
 
 
+def _reads(blob: str, ref: str) -> bool:
+    """Whether serialised JSON binds to the source named `ref`.
+
+    Three shapes, because a binding is written three ways: `{{plants}}` whole,
+    `{{plants.count}}` into a field, and a bare `"plants"` where a prop names
+    its source. Matching only the first let `{{plantstracked.value}}` survive a
+    prune that was supposed to remove it.
+    """
+    return (f"{{{{{ref}}}}}" in blob
+            or f"{{{{{ref}." in blob
+            or f'"{ref}"' in blob)
+
+
 def _prune_failing_widgets(schema: dict,
                            findings: list[dict]) -> tuple[dict, list[str]]:
     """Drop the dataSources a floor rejected, and whatever bound to them.
@@ -851,8 +883,7 @@ def _prune_failing_widgets(schema: dict,
     def binds_to_pruned(node: dict) -> bool:
         """Whether this subtree reads one of the removed sources. Checked over
         the serialised node so a `{{name}}` anywhere in props counts."""
-        blob = json.dumps(node)
-        return any(f"{{{{{r}}}}}" in blob or f'"{r}"' in blob for r in refs)
+        return any(_reads(json.dumps(node), r) for r in refs)
 
     def strip(node: Any) -> Optional[dict]:
         if not isinstance(node, dict):
@@ -872,7 +903,9 @@ def _prune_failing_widgets(schema: dict,
 
     root = strip(out.get("root") or {})
     out["root"] = root if root is not None else {"type": "Stack", "children": []}
-    return out, [str(s.get("name")) for s in pruned]
+    before = json.dumps(schema)
+    named = {str(s.get("name")) for s in pruned}
+    return out, sorted(r for r in refs if r in named or _reads(before, r))
 
 
 # Leaf types that are worth keeping even with no children — they render their
