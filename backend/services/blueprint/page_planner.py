@@ -322,9 +322,14 @@ def repeat_items(doc: dict, page: dict, entity: dict | None, over: str) -> list[
                  "value": v.get("key")}
                 for v in (page.get("views") or [])]
     if over == "states":
-        states = page.get("states") or {}
-        return [{"id": k, "label": _humanise(k), "value": v}
-                for k, v in states.items() if v]
+        # `states` is an array of state names — see PageContract.states, which
+        # is z.array(z.enum([...])). This read it as a mapping and crashed the
+        # whole frontend projection with `'list' object has no attribute
+        # 'items'` the first time a pattern template repeated over it, taking
+        # five nodes down with it. Nothing caught it because no template had
+        # repeated over states before.
+        return [{"id": name, "label": _humanise(name), "value": name}
+                for name in (page.get("states") or []) if name]
     raise PlanError(f"unknown repeat source {over!r}")
 
 

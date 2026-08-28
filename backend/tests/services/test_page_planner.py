@@ -507,3 +507,26 @@ def test_the_bound_shape_is_the_one_the_component_accepts(doc, page, entity, cat
         "savedViews": pp.build_context(doc, _viewed_page(page), entity)["$savedViews"],
     }}}
     assert pp.validate_props(schema, catalog) == []
+
+
+def test_repeat_over_states_reads_the_array_the_contract_declares():
+    """PageContract.states is z.array(z.enum([...])), not a mapping.
+
+    Reading it as a dict crashed the entire frontend projection the first time
+    a pattern template repeated over it — five nodes lost to `'list' object has
+    no attribute 'items'`.
+    """
+    from services.blueprint.page_planner import repeat_items
+
+    page = {"states": ["loading", "empty", "populated", "error"]}
+    items = repeat_items({}, page, {}, "states")
+    assert [i["id"] for i in items] == ["loading", "empty", "populated", "error"]
+    assert items[0]["value"] == "loading"
+    assert items[1]["label"]
+
+
+def test_repeat_over_states_is_empty_when_none_are_declared():
+    from services.blueprint.page_planner import repeat_items
+
+    assert repeat_items({}, {"states": []}, {}, "states") == []
+    assert repeat_items({}, {}, {}, "states") == []
