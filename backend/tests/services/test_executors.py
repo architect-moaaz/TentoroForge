@@ -944,3 +944,77 @@ def test_the_two_agents_that_need_everything_still_get_it():
 
     for agent in ("verification", "memory"):
         assert "*" in AGENT_REGISTRY[agent].reads, agent
+
+# ---------------------------------------------------------------------------
+# Prompt caching
+# ---------------------------------------------------------------------------
+
+
+def test_a_large_system_prompt_is_sent_as_a_cache_tagged_block():
+    """The catalog is identical for every page; it should be billed once."""
+    from services.blueprint.executors import _cacheable
+
+    blocks = _cacheable("x" * (2048 * 4))
+    assert isinstance(blocks, list)
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert blocks[0]["text"] == "x" * (2048 * 4)
+
+
+def test_a_short_system_prompt_is_left_alone():
+    """A write costs more than a read; below the minimum it never pays off."""
+    from services.blueprint.executors import _cacheable
+
+    assert _cacheable("short") == "short"
+
+
+def test_the_page_authoring_prefix_is_identical_across_subjects():
+    """What makes the cache hit: the catalog does not vary by page.
+
+    If a subject ever leaks into the system prompt this silently becomes 34
+    cache writes and no reads, which costs more than not caching at all.
+    """
+    from services.blueprint.executors import build_prompt
+
+    doc = {
+        "pages": [
+            {"id": "PAGE-001", "route": "/a", "purpose": "a", "pattern": "list"},
+            {"id": "PAGE-002", "route": "/b", "purpose": "b", "pattern": "list"},
+        ],
+        "data": {"entities": []},
+    }
+    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    assert first == second
+
+
+def test_an_agent_sees_provenance_only_for_what_it_owns():
+    """`evidence` is 27% of the requirements section and no consumer reads it.
+
+    The requirement agent must keep it — it cannot update a citation it cannot
+    see. Everyone else gets the statement without the derivation.
+    """
+    from services.blueprint.executors import context_for
+
+    doc = {
+        "requirements": [
+            {"id": "REQ-001", "description": "d",
+             "evidence": [{"message": "m", "source": "s", "type": "conversation"}]},
+        ],
+        "data": {"entities": []},
+        "pages": [{"id": "PAGE-001", "syncNote": "reconciled", "purpose": "p"}],
+    }
+    owner = context_for(doc, "requirement")
+    assert "evidence" in owner["requirements"][0]
+
+    consumer = context_for(doc, "testing")
+    assert "evidence" not in consumer["requirements"][0]
+    assert consumer["requirements"][0]["description"] == "d"
+    assert "syncNote" not in consumer["pages"][0]
+    assert consumer["pages"][0]["purpose"] == "p"
+
+
+def test_stripping_provenance_leaves_nested_structures_intact():
+    from services.blueprint.executors import _without_provenance
+
+    v = {"a": [{"b": {"c": 1, "evidence": "x"}}], "syncNote": "y"}
+    assert _without_provenance(v) == {"a": [{"b": {"c": 1}}]}

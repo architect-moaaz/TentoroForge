@@ -197,6 +197,38 @@ class ModelClient(Protocol):
     def __call__(self, *, system: str, user: str, schema: dict[str, Any]) -> str: ...
 
 
+#: Below this, a prefix is not worth a cache breakpoint. Opus will not cache a
+#: block under ~1024 tokens at all, and a write costs 1.25x what a plain read
+#: does — so tagging a short system prompt is a small guaranteed loss in
+#: exchange for nothing. Estimated at 4 chars/token, which is close enough to
+#: decide a threshold with.
+CACHE_MIN_TOKENS = 2048
+
+#: 5-minute TTL. The fan-out it exists for issues its calls seconds apart.
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _cacheable(system: str) -> Any:
+    """Return the system prompt as blocks, cache-tagged when it is big enough.
+
+    The page-authoring agent carries the whole component catalog in its system
+    prompt — 8,830 tokens, byte-identical for every page — and the fan-out then
+    re-sent it once per page. On a 34-page application that is 300,220 input
+    tokens per run spent restating the same catalog, uncached, at full price.
+
+    Tagged as a prefix rather than per-request state: the cache is keyed on the
+    block's content, so the first page in a wave writes it and the other
+    thirty-three read it. Retries hit it too — the system prompt does not carry
+    the feedback, so a rejected attempt and its retry share this prefix exactly.
+
+    Returned as a string when it is too short to cache, so short-prompt nodes
+    keep the plain shape and pay no write premium.
+    """
+    if len(system) // 4 < CACHE_MIN_TOKENS:
+        return system
+    return [{"type": "text", "text": system, "cache_control": _CACHE_CONTROL}]
+
+
 @dataclass
 class AnthropicModel:
     """The real client. Uses the official SDK — see the claude-api reference.
@@ -243,7 +275,7 @@ class AnthropicModel:
         kwargs: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=system,
+            system=_cacheable(system),
             messages=[{"role": "user", "content": user}],
             output_config={
                 "effort": self.effort,
@@ -590,10 +622,38 @@ def context_for(doc: dict, agent: str) -> dict:
         readable |= cap.reads
 
     # Whatever it writes, it must also see — otherwise it cannot update.
-    for section in cap.writes:
-        readable.add(section.split(".")[0])
+    owned = {section.split(".")[0] for section in cap.writes}
+    readable |= owned
 
-    return {k: v for k, v in doc.items() if k in readable}
+    return {
+        k: (v if k in owned else _without_provenance(v))
+        for k, v in doc.items() if k in readable
+    }
+
+
+#: Where an artifact came from, not what it says. `evidence` cites the turn a
+#: requirement was derived from (§12) and `syncNote` records a reconciliation
+#: (§76). The agent that owns a section needs both to update them; every other
+#: agent is handed them as dead weight — `evidence` alone is 27% of the
+#: requirements section, restated in full to eight agents that only ever read
+#: the statement.
+#:
+#: Dropping them for consumers is §30 as much as cost: an agent that cannot see
+#: another section's provenance cannot cite it, and a fabricated citation is
+#: harder to catch than a missing one.
+PROVENANCE_FIELDS = frozenset({"evidence", "syncNote"})
+
+
+def _without_provenance(value: Any) -> Any:
+    """Strip provenance from a section an agent reads but does not own."""
+    if isinstance(value, list):
+        return [_without_provenance(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            k: _without_provenance(v)
+            for k, v in value.items() if k not in PROVENANCE_FIELDS
+        }
+    return value
 
 
 # ---------------------------------------------------------------------------
