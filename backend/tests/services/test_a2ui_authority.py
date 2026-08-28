@@ -145,12 +145,23 @@ def test_a_thin_composition_is_discarded_not_written(tmp_path):
     assert _page(root) == before, "a rejected composition must not touch the page"
 
 
-def test_the_flag_off_is_a_no_op(tmp_path, monkeypatch):
+def test_a2ui_composes_by_default(tmp_path, monkeypatch):
+    """§34: "The Page Design Agent shall use A2UI MCP as its primary
+    page-generation capability."
+
+    This asserted the opposite — that composition was a no-op unless
+    FORGE_A2UI was set — for an A/B the PRD has since decided. A flag gating
+    the specified default is the divergence, not the default.
+
+    What still protects a build is not a flag: a composition that does not
+    clear its substance floor writes nothing and the deterministic composer
+    runs, which the two tests either side of this one cover.
+    """
     monkeypatch.delenv("FORGE_A2UI", raising=False)
     root = _app(tmp_path)
     res = compose_dashboard_via_a2ui(str(root), surface_provider=GOOD)
-    assert res["applied"] is False and "off" in res["reason"]
-    assert _page(root) == THIN_PAGE
+    assert res["applied"] is True, res.get("reason")
+    assert _page(root) != THIN_PAGE, "the composition should have been written"
 
 
 def test_a_failing_composer_never_fails_the_build(tmp_path):

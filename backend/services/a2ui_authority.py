@@ -117,10 +117,24 @@ def _family_of(kind: Any) -> str:
 
 
 def is_a2ui_enabled() -> bool:
-    """Off unless asked for. See A2UI-4 for the A/B this flag exists to run."""
-    return (os.environ.get("FORGE_A2UI") or "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    """Always. §34: "The Page Design Agent shall use A2UI MCP as its primary
+    page-generation capability."
+
+    This was off unless FORGE_A2UI was set, for an A/B that has since been
+    decided by the PRD. A flag gating the specified default is the divergence,
+    not the default.
+
+    What is NOT a flag, and stays: `availability()` reports a missing checkout
+    up front, and a composition that does not clear its substance floor returns
+    `applied: False` having written nothing, so the deterministic composer runs
+    untouched. That is a handoff, and it is what keeps an unreachable MCP
+    server from taking down a build.
+
+    Kept as a function rather than deleted: three call sites read it, and a
+    later decision to gate on something real — a per-project setting, a page
+    kind — has somewhere to live.
+    """
+    return True
 
 
 def availability() -> tuple[bool, str]:
@@ -443,7 +457,8 @@ def compose_page_via_a2ui(
     root = Path(output_dir)
 
     if not is_a2ui_enabled():
-        return {"applied": False, "route": route, "kind": kind, "reason": "FORGE_A2UI is off"}
+        return {"applied": False, "route": route, "kind": kind,
+                "reason": "A2UI composition is disabled"}
     if surface_provider is None:
         ok, why = availability()
         if not ok:
