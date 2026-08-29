@@ -350,11 +350,42 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "entities": len(entities), "codeMap": code_map}
 
 
+#: Every derived endpoint is served by one catch-all route, so an API has no
+#: file of its own to be mapped to.
+_DATA_ROUTE = "src/app/api/data/[...path]/route.ts"
+
+
+def api_code_map(doc: dict) -> list[dict]:
+    """A ``codeMap`` entry per declared API, pointing at the route that serves it.
+
+    Nothing recorded APIs at all. Entities, workflows and pages each project to
+    their own file and were mapped; endpoints are derived and served
+    generically, so `project_backend` wrote no file per API and therefore no
+    entry — and absence in `codeMap` is indistinguishable from absent code.
+    `code_intelligence.unimplemented` read six endpoints as unbuilt on an app
+    that serves all six, which is §115's divergence check crying wolf on every
+    application it runs against.
+
+    Many artifacts to one file, which the resolver already expects:
+    `artifacts_for` on this path returns every endpoint, because a file
+    genuinely can implement more than one thing.
+    """
+    return [
+        {"artifact": str(a["id"]), "service": [_DATA_ROUTE]}
+        for a in _live(doc.get("apis"))
+        if a.get("id")
+    ]
+
+
 def apply_data_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
     """Project, then record every file in ``codeMap`` so §75's
     Blueprint↔Implementation edge has real paths to check."""
     result = project_data_layer(svc.doc, app_root)
     for entry in result["codeMap"]:
+        svc.upsert("codeMap", entry, natural_key=entry["artifact"])
+    # Recorded here because this is the projection that stands up the data
+    # layer the endpoints read; the route itself ships with the scaffold.
+    for entry in api_code_map(svc.doc):
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     svc.save()
     return result

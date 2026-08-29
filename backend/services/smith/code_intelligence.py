@@ -115,8 +115,14 @@ def unimplemented(doc: dict) -> list[str]:
         for e in _live(doc.get("codeMap"))
         if e.get("artifact") and _paths(e)
     }
+    # NOT requirements. A requirement is not implemented by a file — it is
+    # satisfied by the artifacts that claim it, which is what §75's
+    # Requirement<->Code edge already checks. Counting them here reported ten
+    # divergences on an application whose every page, entity and endpoint was
+    # built, which is the same mistake as the APIs one layer over: assuming
+    # every declared id maps to a file of its own.
     declared: list[str] = []
-    for section in ("pages", "workflows", "apis", "requirements"):
+    for section in ("pages", "workflows", "apis"):
         declared += [
             str(a["id"]) for a in _live(doc.get(section)) if a.get("id")
         ]

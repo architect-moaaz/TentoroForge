@@ -69,3 +69,32 @@ def test_context_keeps_artifacts_that_have_no_code():
 def test_unimplemented_flags_what_the_blueprint_claims_and_code_lacks():
     """§115 — divergence is flagged, not silently resolved."""
     assert unimplemented(DOC) == ["PAGE-003"]
+
+
+def test_apis_map_to_the_route_that_serves_them():
+    """Endpoints are derived and served by one catch-all, so no file is written
+    per API and nothing recorded them — `unimplemented` then read six live
+    endpoints as unbuilt on every application."""
+    from services.blueprint.projection import api_code_map
+
+    doc = {"apis": [{"id": "API-001"}, {"id": "API-002"}]}
+    entries = api_code_map(doc)
+    assert [e["artifact"] for e in entries] == ["API-001", "API-002"]
+    # One file, both artifacts — the many-to-one case the resolver expects.
+    assert entries[0]["service"] == entries[1]["service"]
+
+    doc["codeMap"] = entries
+    assert artifacts_for(doc, entries[0]["service"][0]) == ["API-001", "API-002"]
+    assert unimplemented(doc) == []
+
+
+def test_requirements_are_not_expected_to_have_files():
+    """A requirement is satisfied by the artifacts that claim it, not by a file
+    of its own — §75's Requirement↔Code edge is what checks that. Counting them
+    here reported ten divergences on a fully built application."""
+    doc = {
+        "requirements": [{"id": "REQ-001"}, {"id": "REQ-002"}],
+        "pages": [{"id": "PAGE-001"}],
+        "codeMap": [{"artifact": "PAGE-001", "service": ["src/p.json"]}],
+    }
+    assert unimplemented(doc) == []
