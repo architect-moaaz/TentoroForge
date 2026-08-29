@@ -200,3 +200,44 @@ class TestIdempotent:
         # No more {{tokens}} to find → no files rewritten.
         assert second["files"] == 0
         assert second["tokens_replaced"] == 0
+
+
+def test_a_route_pattern_is_not_a_link_target():
+    """`/survey/[slug]` is a template. Next's app router throws on it as a
+    Link href — "Dynamic href found in <Link> while using the /app router" —
+    and it reached a generated error page because it was simply the first
+    route in nav-flow."""
+    from services.edge_page_customizer import _is_linkable
+
+    assert not _is_linkable("/survey/[slug]")
+    assert not _is_linkable("/responses/[id]")
+    assert _is_linkable("/surveys")
+    assert _is_linkable("/")
+    assert not _is_linkable("surveys")   # not absolute
+    assert not _is_linkable(None)
+
+
+def test_the_home_route_skips_patterns_and_takes_the_first_real_one(tmp_path):
+    import json
+    from services.edge_page_customizer import _derive_home_route
+
+    nav = tmp_path / "src" / "contracts"
+    nav.mkdir(parents=True)
+    (nav / "nav-flow.json").write_text(json.dumps({
+        "pages": [{"route": "/survey/[slug]"}, {"route": "/responses/[id]"},
+                  {"route": "/surveys"}],
+    }))
+    assert _derive_home_route(tmp_path) == "/surveys"
+
+
+def test_an_app_of_only_detail_routes_falls_back_to_root(tmp_path):
+    """Better a link to / than a link that throws."""
+    import json
+    from services.edge_page_customizer import _derive_home_route
+
+    nav = tmp_path / "src" / "contracts"
+    nav.mkdir(parents=True)
+    (nav / "nav-flow.json").write_text(json.dumps({
+        "pages": [{"route": "/survey/[slug]"}],
+    }))
+    assert _derive_home_route(tmp_path) == "/"
