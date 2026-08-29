@@ -131,6 +131,8 @@ export interface SmithPanelProps {
   initialBrief?: string;
   /** Text of any requirements documents attached during Discovery (§14). */
   evidence?: string[];
+  /** The Blueprint as it stands — §109's Application Definition reads it. */
+  blueprint?: Record<string, unknown> | null;
   /** Told when a run finishes, so the preview pane can refresh itself. */
   onRunComplete?: () => void;
   className?: string;
@@ -140,6 +142,7 @@ export function SmithPanel({
   projectId,
   initialBrief,
   evidence,
+  blueprint,
   onRunComplete,
   className,
 }: SmithPanelProps) {
@@ -342,7 +345,7 @@ export function SmithPanel({
         )}
 
         {run.nodes.length > 0 && (
-          <StageList run={run} onApprove={approve} />
+          <StageList run={run} onApprove={approve} definition={blueprint} />
         )}
 
         {run.status === "error" && (
@@ -396,9 +399,11 @@ export function SmithPanel({
 function StageList({
   run,
   onApprove,
+  definition,
 }: {
   run: ReturnType<typeof useBlueprintRun>["run"];
   onApprove: () => void;
+  definition?: Record<string, unknown> | null;
 }) {
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -481,6 +486,10 @@ function StageList({
       {run.events.length > 0 && <EventLog events={run.events} />}
 
       {run.awaitingApproval && run.status === "complete" && (
+        <Definition doc={definition} />
+      )}
+
+      {run.awaitingApproval && run.status === "complete" && (
         // §25 — the approval gate. The definition is done and the run is
         // holding; nothing further is spent until this is answered.
         <div className="mt-3 border-t pt-3">
@@ -535,6 +544,64 @@ function EventLog({ events }: { events: RunEventT[] }) {
             </li>
           ))}
         </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * §109's Application Definition — what Smith understood, at the moment it asks
+ * whether it understood correctly.
+ *
+ * The approval gate said "Here's what I understood" and then showed a stage
+ * list and a cost, so approving was an act of faith: the one thing being
+ * approved was the one thing not on screen. The requirements are already in
+ * the Blueprint by this point — `requirements` and `application_model` are the
+ * two nodes a define-only run executes — so this reads them rather than asking
+ * for anything new.
+ */
+function Definition({ doc }: { doc?: Record<string, unknown> | null }) {
+  const reqs = (doc?.requirements as Array<Record<string, unknown>>) ?? [];
+  const product = (doc?.product ?? {}) as Record<string, unknown>;
+  const app = (doc?.application ?? {}) as Record<string, unknown>;
+  const roles = (product.personas ?? product.actors ?? doc?.roles ?? []) as
+    Array<Record<string, unknown> | string>;
+
+  if (!reqs.length && !app.description) return null;
+
+  const nameOf = (r: Record<string, unknown> | string) =>
+    typeof r === "string" ? r : String(r.name ?? r.role ?? r.id ?? "");
+
+  return (
+    <div className="mt-3 border-t pt-3">
+      {typeof app.description === "string" && app.description && (
+        <p className="text-xs leading-relaxed">{app.description}</p>
+      )}
+
+      {roles.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          For {roles.map(nameOf).filter(Boolean).join(", ")}
+        </p>
+      )}
+
+      {reqs.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium">
+            What it needs to do ({reqs.length})
+          </p>
+          <ul className="mt-1 space-y-1">
+            {reqs.map((r, i) => (
+              <li key={String(r.id ?? i)} className="flex gap-1.5 text-xs">
+                <span className="text-muted-foreground/50">·</span>
+                <span>{String(r.description ?? r.name ?? r.id ?? "")}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Anything missing or wrong? Tell me below and I&apos;ll change it
+            before building.
+          </p>
+        </>
       )}
     </div>
   );

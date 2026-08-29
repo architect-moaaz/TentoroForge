@@ -159,6 +159,7 @@ export default function WorkspacePage({
           projectId={projectId}
           initialBrief={brief}
           evidence={evidence}
+          blueprint={doc}
           onRunComplete={onRunComplete}
           className="w-[380px] shrink-0"
         />
