@@ -93,6 +93,8 @@ const EMPTY: BlueprintRun = {
 export interface StartOptions {
   description: string;
   domain?: string;
+  /** §14 — text of documents the user supplied rather than typed. */
+  evidence?: string[];
   /** §25 — false stops after the definition and waits to be accepted. */
   approved?: boolean;
   defineOnly?: boolean;
@@ -140,6 +142,7 @@ export function useBlueprintRun(projectId: string | null) {
             body: JSON.stringify({
               description: opts.description,
               domain: opts.domain ?? "",
+              evidence: opts.evidence ?? [],
               approved: opts.approved ?? false,
               define_only: opts.defineOnly ?? false,
               fresh: opts.fresh ?? false,

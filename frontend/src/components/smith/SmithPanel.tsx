@@ -129,6 +129,8 @@ export interface SmithPanelProps {
   projectId: string | null;
   /** What Discovery already collected — sent as the opening turn, once. */
   initialBrief?: string;
+  /** Text of any requirements documents attached during Discovery (§14). */
+  evidence?: string[];
   /** Told when a run finishes, so the preview pane can refresh itself. */
   onRunComplete?: () => void;
   className?: string;
@@ -137,6 +139,7 @@ export interface SmithPanelProps {
 export function SmithPanel({
   projectId,
   initialBrief,
+  evidence,
   onRunComplete,
   className,
 }: SmithPanelProps) {
@@ -230,7 +233,7 @@ export function SmithPanel({
           text: "I'll define this first, then build it once you approve.",
         },
       ]);
-      void start({ description: text, approved: false, defineOnly: true });
+      void start({ description: text, evidence, approved: false, defineOnly: true });
     }
   };
 
@@ -241,7 +244,7 @@ export function SmithPanel({
       ...m,
       { role: "smith", text: "Approved — building the rest of the application." },
     ]);
-    void start({ description: brief.text, approved: true });
+    void start({ description: brief.text, evidence, approved: true });
   };
 
   return (

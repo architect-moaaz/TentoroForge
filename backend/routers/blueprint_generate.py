@@ -54,6 +54,15 @@ class BlueprintGenerateRequest(BaseModel):
     description: str = Field(..., min_length=1)
     #: §96 — CRM, HRMS, ATS… Left blank when the domain agent should infer it.
     domain: str = ""
+    #: §4/§14 — text the user supplied rather than typed: a requirements
+    #: document, a spec, a brief. §5 says there is one engine with several ways
+    #: of expressing intent, not a second pipeline per input, so evidence joins
+    #: the description instead of arriving through a parallel path.
+    #:
+    #: Text only, and extracted by the client. A .docx or .pdf reader here
+    #: would be a second file-format dependency in the request path, and the
+    #: requirements agent reads prose either way.
+    evidence: list[str] = Field(default_factory=list)
     #: Stop after the Blueprint. §114 step 4 proposes before it regenerates,
     #: and the same courtesy is worth having on a first build: the definition
     #: is cheap, the dozen agent calls that follow are not.
@@ -113,6 +122,30 @@ def _output_dir(project: Any) -> Path:
     if recorded:
         return Path(recorded)
     return project_root(str(project.id))
+
+
+def _with_evidence(req: "BlueprintGenerateRequest") -> str:
+    """The description, plus whatever the user uploaded.
+
+    Appended rather than carried separately because §5 asks for one engine
+    with several ways of expressing intent — a second field would mean a
+    second path through every agent that reads the brief. The requirements
+    agent already extracts requirements from prose; a specification is prose
+    the user did not have to retype.
+
+    Labelled, so the agent can tell what the person said from what a document
+    said. An unlabelled concatenation makes a 40-page spec look like it was
+    typed into a chat box, and the agent weights it accordingly.
+    """
+    blocks = [t.strip() for t in (req.evidence or []) if t and t.strip()]
+    if not blocks:
+        return req.description
+    parts = [req.description, "", "SUPPLIED DOCUMENTS — the user provided these "
+             "rather than typing them. Treat them as requirements evidence "
+             "(\u00a714), not as conversation:"]
+    for i, block in enumerate(blocks, start=1):
+        parts.append(f"\n--- document {i} ---\n{block}")
+    return "\n".join(parts)
 
 
 @router.post("/api/projects/{project_id}/generate/blueprint")
@@ -189,7 +222,7 @@ async def generate_via_blueprint(
                     app_id=str(project_id),
                     name=getattr(project, "name", "") or "Application",
                     domain=req.domain or "unknown",
-                    description=req.description,
+                    description=_with_evidence(req),
                 )
 
             from services.blueprint.plan_forecast import forecast

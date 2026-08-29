@@ -56,8 +56,8 @@
         "dev"
       ],
       "cwd": "frontend",
-      "port": 3300,
-      "autoPort": true
+      "port": 6501,
+      "autoPort": false
     }
   ]
 }

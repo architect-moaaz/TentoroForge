@@ -70,7 +70,9 @@ export default function WorkspacePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
-  const brief = useSearchParams().get("brief") ?? undefined;
+  const search = useSearchParams();
+  const brief = search.get("brief") ?? undefined;
+  const evidence = search.getAll("doc");
   const [doc, setDoc] = useState<Blueprint | null>(null);
   const [missing, setMissing] = useState(false);
   const [route, setRoute] = useState<string | null>(null);
@@ -156,6 +158,7 @@ export default function WorkspacePage({
         <SmithPanel
           projectId={projectId}
           initialBrief={brief}
+          evidence={evidence}
           onRunComplete={onRunComplete}
           className="w-[380px] shrink-0"
         />

@@ -20,7 +20,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight, Paperclip, X } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Org {
@@ -36,6 +36,7 @@ export default function NewApplicationPage() {
   const router = useRouter();
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [docs, setDocs] = useState<{ name: string; text: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const begin = async () => {
@@ -66,9 +67,12 @@ export default function NewApplicationPage() {
 
       // The workspace picks the conversation up from here: §25 holds at the
       // definition, so nothing is built until it has been approved.
-      router.push(
-        `/blueprint/${project.id}?brief=${encodeURIComponent(text)}`,
-      );
+      // Evidence travels with the brief rather than in a second request: the
+      // workspace starts the run, and a run that began without the documents
+      // would have to be discarded and repeated once they arrived.
+      const qs = new URLSearchParams({ brief: text });
+      for (const d of docs) qs.append("doc", d.text);
+      router.push(`/blueprint/${project.id}?${qs}`);
     } catch (e) {
       setError(
         (e as Error).message || "Could not start — is the session still valid?",
@@ -103,6 +107,50 @@ export default function NewApplicationPage() {
         className="mt-8 w-full resize-none rounded-lg border bg-background p-4 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
 
+      {/*
+        §4 "Upload Requirements". Text is read here rather than posted, because
+        the engine takes prose and the requirements agent reads prose — a
+        server-side extractor would add a file-format dependency to the request
+        path for no gain on the formats a specification is usually written in.
+      */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">
+          <Paperclip className="h-3.5 w-3.5" />
+          Attach requirements
+          <input
+            type="file"
+            multiple
+            accept=".txt,.md,.markdown,.csv,text/plain"
+            className="hidden"
+            onChange={async (e) => {
+              const files = Array.from(e.target.files ?? []);
+              const read = await Promise.all(
+                files.map(async (f) => ({ name: f.name, text: await f.text() })),
+              );
+              // Empty files are dropped: an attachment that contributes nothing
+              // still looks, on screen, like something was supplied.
+              setDocs((d) => [...d, ...read.filter((r) => r.text.trim())]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+
+        {docs.map((d, i) => (
+          <span
+            key={`${d.name}-${i}`}
+            className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
+          >
+            {d.name}
+            <button
+              onClick={() => setDocs((all) => all.filter((_, j) => j !== i))}
+              aria-label={`Remove ${d.name}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+
       {error && (
         <p className="mt-3 text-sm text-destructive" role="alert">
           {error}
@@ -135,8 +183,8 @@ export default function NewApplicationPage() {
         happen. Listed as unbuilt rather than shown as broken.
       */}
       <p className="mt-10 text-center text-xs text-muted-foreground">
-        Figma, requirements upload, screenshot and import are not yet connected
-        to the Blueprint engine.
+        Figma, screenshot and import are not yet connected to the Blueprint
+        engine. Plain-text and Markdown requirements are.
       </p>
     </main>
   );
