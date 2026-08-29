@@ -85,11 +85,25 @@ _JOB = {
         "judgement of the domain calls for — you are not filling in a template."
     ),
     "collection": (
+        # NAMES NO COMPONENTS, DELIBERATELY. The A2UI server scans this text
+        # for capability keywords and makes any match mandatory
+        # (tools/a2ui-mcp/checks.py, _CAPABILITIES) — chart, kpi, metric,
+        # stats, pill, badge, chip, table, data grid, timeline, gantt, kanban,
+        # swimlane. A component named as an *example* reads as a demand.
+        #
+        # "a table, a board, a calendar, a timeline" offered four ways to think
+        # about a list; the checker read two demands, so every collection page
+        # had to carry a Table and a Timeline or be rejected. That is where the
+        # Timeline on a two-entity plant tracker came from, and a table
+        # demanded on a create form. Naming shapes rather than components says
+        # the same thing to a reader and nothing to the scanner.
         "This screen shows many records of one kind. Decide how they are best "
-        "surveyed in this domain — a table, a board, a calendar, a timeline — "
-        "which columns or facets actually help someone find what they came for, "
-        "how they narrow the set down, and what they do to a record once they "
-        "have found it. A list nobody can act on is a reading dead end."
+        "surveyed in this domain: rows of fields, cards on a board, positions "
+        "on a calendar, points along a sequence. Choose the shape the data "
+        "actually has — which fields or facets help someone find what they "
+        "came for, how they narrow the set down, and what they do to a record "
+        "once they have found it. A list nobody can act on is a reading dead "
+        "end."
     ),
     "record": (
         "This screen shows ONE record in detail. Decide what a reader needs to "

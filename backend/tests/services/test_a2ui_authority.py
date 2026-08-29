@@ -868,3 +868,31 @@ def test_the_closing_rule_does_not_read_as_a_chart_request(tmp_path):
     for word in ("chart", "graph", "trend", "distribution", "histogram",
                  "funnel", "sparkline", "plot", "over time"):
         assert not re.search(rf"\b{re.escape(word)}\b", req), word
+
+
+def test_no_job_text_names_a_component_the_checker_will_demand():
+    """The A2UI server scans the requirement for capability keywords and makes
+    any match mandatory. "a table, a board, a calendar, a timeline" offered
+    four ways to think about a list; the checker read two demands, so every
+    collection page carried a Table and a Timeline or was rejected — a Timeline
+    on a two-entity plant tracker, a table on a create form.
+
+    Pinned across every family, so a future rewrite cannot put a component name
+    back into any of them without this failing.
+    """
+    import re
+    from services.a2ui_authority import _JOB
+
+    # The server's own list, restated here so the test fails if the prose
+    # drifts back even when the vendored copy is unavailable.
+    keywords = (
+        "chart", "graph", "trend", "distribution", "histogram", "funnel",
+        "sparkline", "plot", "over time", "by hour", "by week", "by stage",
+        "kpi", "metric", "stat tile", "stats", "scorecard", "key figure",
+        "status pill", "pill", "badge", "chip", "table", "data grid",
+        "datagrid", "timeline", "gantt", "kanban", "swimlane", "board column",
+    )
+    for family, text in _JOB.items():
+        hits = [k for k in keywords
+                if re.search(rf"\b{re.escape(k)}\b", text.lower())]
+        assert not hits, f"{family}: {hits}"
