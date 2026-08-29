@@ -1048,6 +1048,51 @@ def access_map(doc: dict) -> dict[str, list[str]]:
     return out
 
 
+def public_apis(doc: dict) -> list[str]:
+    """The endpoints a public page has to be able to reach.
+
+    A page's access declaration stopped at the page. `/plants` was public and
+    rendered for anyone; `/api/data/plants` and `/api/workflows/FLOW-002/execute`
+    were not, so the table came up empty and adding a plant did nothing — a
+    generated app that looks broken on first open, with no error anywhere,
+    because a 307 to /login is a perfectly successful HTTP exchange.
+
+    Derived per page rather than opened wholesale. `/api/data` as a blanket
+    exclusion would expose every entity in the application because one page is
+    public; what a public page needs is the data behind *its own* bindings and
+    the workflows *it* launches, and the Blueprint states both.
+    """
+    public_pages = {p.get("id") for p in _live(doc.get("pages"))
+                    if (p.get("access") or "authenticated") == "public"}
+    if not public_pages:
+        return []
+
+    entities = {e.get("id"): e for e in
+                ((doc.get("data") or {}).get("entities") or [])}
+    by_name = {e.get("name"): e for e in entities.values()}
+
+    slugs: set[str] = set()
+    layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    for page in _live(doc.get("pages")):
+        if page.get("id") not in public_pages:
+            continue
+        named = [s.get("entity") for s
+                 in (layouts.get(page.get("id"), {}).get("dataSources") or [])]
+        named.append((entities.get((page.get("data") or {})
+                                   .get("primaryEntity")) or {}).get("name"))
+        for name in named:
+            ent = by_name.get(name)
+            if ent:
+                slugs.add(str(ent.get("table") or str(name).lower()))
+
+    out = [f"api/data/{slug}" for slug in sorted(slugs)]
+    out += [f"api/workflows/{w['id']}" for w in sorted(
+        (w for w in _live(doc.get("workflows"))
+         if w.get("id") and public_pages & set(w.get("launchedFrom") or [])),
+        key=lambda w: w["id"])]
+    return out
+
+
 def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/middleware.ts`` from what the pages declare.
 
@@ -1065,7 +1110,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # A public route at "/" needs the bare root excluded too.
     root_public = "/" in access["public"]
 
-    excluded = list(_ALWAYS_OPEN) + open_routes
+    # A public page is only public if what it fetches is reachable too.
+    apis = public_apis(doc)
+    excluded = list(_ALWAYS_OPEN) + open_routes + apis
     pattern = "|".join(excluded)
     # A negative lookahead cannot exclude the empty path, so `/` is matched by
     # `.*` no matter what is listed. When the landing route is public, requiring
@@ -1086,6 +1133,8 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   public: {route}')
     for route in access["role_restricted"]:
         lines.append(f'//   by role: {route}')
+    for route in apis:
+        lines.append(f'//   public: /{route}  (reached by a public page)')
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
@@ -1106,6 +1155,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {
         "files": ["src/middleware.ts"],
         "public": access["public"],
+        "publicApis": apis,
         "gated": len(access["authenticated"]) + len(access["role_restricted"]),
     }
 

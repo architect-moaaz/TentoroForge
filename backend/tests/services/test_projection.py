@@ -557,3 +557,75 @@ def test_the_scaffold_imports_the_tokens_and_defines_none_of_them_itself():
     text = globals_css.read_text()
     assert '@import "./tokens.css";' in text
     assert "__CSS_" not in text
+
+
+# ---------------------------------------------------------------------------
+# A public page is only public if what it fetches is reachable.
+#
+# /plants was public and rendered for anyone; /api/data/plants and
+# /api/workflows/FLOW-002/execute were not. The table came up empty and adding
+# a plant did nothing, with no error anywhere — a 307 to /login is a perfectly
+# successful HTTP exchange.
+# ---------------------------------------------------------------------------
+
+def _access_doc(access="public"):
+    return {
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Plant", "table": "plants"},
+            {"id": "ENTITY-002", "name": "WateringEvent", "table": "waterings"},
+        ]},
+        "pages": [
+            {"id": "PAGE-001", "name": "Plants", "route": "/plants",
+             "access": access, "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-009", "name": "Admin", "route": "/admin",
+             "access": "authenticated", "data": {"primaryEntity": "ENTITY-002"}},
+        ],
+        "pageLayouts": [
+            {"page": "PAGE-001",
+             "dataSources": [{"name": "waterings", "entity": "WateringEvent",
+                              "op": "list"}],
+             "root": {"type": "Stack", "props": {}, "children": []}},
+        ],
+        "workflows": [
+            {"id": "FLOW-001", "name": "Record Watering",
+             "trigger": {"kind": "manual"}, "launchedFrom": ["PAGE-001"]},
+            {"id": "FLOW-009", "name": "Purge", "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-009"]},
+        ],
+    }
+
+
+def test_a_public_page_opens_the_data_and_workflows_it_uses():
+    from services.blueprint.projection import public_apis
+
+    apis = public_apis(_access_doc())
+    # Its own entity, and the entity its tree binds through a carried source.
+    assert "api/data/plants" in apis
+    assert "api/data/waterings" in apis
+    assert "api/workflows/FLOW-001" in apis
+
+
+def test_a_gated_pages_data_and_workflows_stay_gated():
+    """Opening `/api/data` wholesale because one page is public would expose
+    every entity in the application."""
+    from services.blueprint.projection import public_apis
+
+    apis = public_apis(_access_doc())
+    assert "api/workflows/FLOW-009" not in apis
+
+
+def test_an_app_with_no_public_page_opens_nothing():
+    from services.blueprint.projection import public_apis
+
+    assert public_apis(_access_doc(access="authenticated")) == []
+
+
+def test_the_matcher_excludes_the_apis_a_public_page_needs(tmp_path):
+    from services.blueprint.projection import project_middleware
+
+    result = project_middleware(_access_doc(), tmp_path / "app")
+    written = (tmp_path / "app" / "src" / "middleware.ts").read_text("utf-8")
+    assert "api/data/plants" in written
+    assert "api/workflows/FLOW-001" in written
+    assert "api/workflows/FLOW-009" not in written
+    assert result["publicApis"]

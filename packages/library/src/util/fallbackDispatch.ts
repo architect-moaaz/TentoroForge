@@ -17,6 +17,23 @@ export async function fallbackDispatch(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: args ?? {} }),
     });
+    // A REDIRECT IS NOT A RESULT. When the execute route is gated and there is
+    // no session, it answers 307 to /login; fetch follows it, the login page
+    // returns 200 HTML, `res.ok` is true, `.json()` throws, the catch below
+    // leaves `ok` true — and this reloaded the page and reported success. A
+    // user pressing "Add plant" saw the page blink and nothing else, which is
+    // the worst available outcome: the write never happened and nothing said
+    // so. `redirected` is true here and `res.url` is the login page; either
+    // alone distinguishes it, and neither was being read.
+    if (res.redirected) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[forge] workflow ${workflow} was not run — the request was redirected ` +
+          `to ${res.url}. This usually means the session has expired or the ` +
+          `workflow route requires sign-in.`,
+      );
+      return;
+    }
     let ok = res.ok;
     try {
       const body = await res.clone().json();

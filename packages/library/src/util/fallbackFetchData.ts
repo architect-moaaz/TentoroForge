@@ -32,6 +32,21 @@ export async function fallbackFetchData(
     const q = qs.toString();
     const url = `/api/data/${encodeURIComponent(resource)}${q ? `?${q}` : ""}`;
     const res = await fetch(url);
+    // A REDIRECT IS NOT AN EMPTY RESULT. A gated /api/data answers 307 to
+    // /login, fetch follows it, and the login page comes back 200 HTML — so
+    // `res.ok` is true, `.json()` throws, and this returned [] as though the
+    // table were genuinely empty. A public page whose data route is gated then
+    // renders a perfect empty state and says nothing, which reads as "the app
+    // has no data" rather than "you are not signed in".
+    if (res.redirected) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[forge] ${resource} could not be read — the request was redirected to ` +
+          `${res.url}. This usually means the session has expired or the data ` +
+          `route requires sign-in.`,
+      );
+      return [];
+    }
     if (!res.ok) return [];
     let payload: unknown = await res.json();
     // Unwrap the list API's pagination envelope down to its array (mirrors
