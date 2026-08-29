@@ -362,6 +362,8 @@ class SmithChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     source: str = "user"
+    #: §25 — the definition has been seen and accepted, so build the rest.
+    approved: bool = False
 
 
 @router.post("/api/projects/{project_id}/smith/chat")
@@ -371,47 +373,168 @@ async def smith_chat(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """§6/§114 — talk to the architect, not to a file-editing agent.
+    """§6 — Smith decides what to do, says so, and does it. One stream.
 
-    `handle_chat_v2` has existed, complete, with no production caller: the only
-    references to it outside its own module are in its tests. `generate.py`
-    imported the flag that gated it and never called the handler, so
-    every chat message in the product went to the tactical path — an LLM agent
-    that edits files, which is what §118 forbids. This is the endpoint it was
-    written for.
+    The routing used to live in the panel: it decided whether a message was a
+    first build, whether to consult the architect, and whether a verdict should
+    start the DAG. §6 makes Smith the Engineering Manager — "delegate
+    implementation tasks, monitor agent execution" — and that logic sat in a
+    React component, where a second client would have to reimplement it and the
+    two would drift.
 
-    Synchronous on purpose. `handle_chat_v2` returns a decided turn — an
-    answer, a question, or a no-op — rather than a token stream, and wrapping a
-    completed result in SSE to look busy would be theatre. The generation run
-    is where the stream belongs, and that endpoint already has one.
+    So the decision moves here and the panel renders what arrives. Smith emits
+    `message` for what it is doing, `asked` when §16 says ask first, and the
+    generator's own events — plan, node:start, node:done, forecast, usage —
+    when it runs the DAG. One protocol, so the client needs no rules of its own.
+
+    §116 keeps the lifecycle deterministic: Smith INVOKES `run()`, it never
+    chooses the node order. §28's graph stays authoritative.
     """
     project = await get_project_with_auth(project_id, user, db)
 
+    from services.blueprint.executors import (
+        RunUsage, make_executor, tiered_router)
+    from services.blueprint.orchestrator import (
+        DAG, completed_nodes, levels, run)
+    from services.blueprint.service import BlueprintService
+    from services.blueprint.plan_forecast import forecast
     from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
     try:
         output_dir = _output_dir(project)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_dir.mkdir(parents=True, exist_ok=True)
+    app_root = str(output_dir / "app")
 
-    def work():
-        return handle_chat_v2(ChatV2Request(
-            project_id=str(project_id),
-            output_dir=str(output_dir),
-            message=req.message,
-            source=req.source,
-        ))
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
-    # The architect reads the Blueprint and may write to it — filesystem and
-    # model work, both blocking. Off the event loop, or one turn stalls every
-    # other request on the process.
-    result = await asyncio.get_running_loop().run_in_executor(None, work)
+    def emit(event: str, data: dict) -> None:
+        loop.call_soon_threadsafe(
+            queue.put_nowait, {"event": event, "data": json.dumps(data)})
 
-    return {
-        "status": result.status,
-        "answer": result.answer,
-        "options": result.options,
-        "diffSummary": result.diff_summary,
-        "touchedPaths": result.touched_paths,
-        "intent": result.intent,
-    }
+    async def turn() -> None:
+
+        def work() -> dict:
+            existing = output_dir / ".forge" / "blueprint" / "current.json"
+            built = False
+            if existing.is_file():
+                svc = BlueprintService.load(output_dir=str(output_dir))
+                built = bool(svc.doc.get("pages"))
+
+            # WHAT KIND OF MESSAGE IS THIS. Nothing built yet means there is
+            # nothing to change and nothing to reason over, so the architect is
+            # not consulted — its bootstrap flow is unwired on purpose, because
+            # the DAG below already builds new applications.
+            if not built:
+                emit("message", {
+                    "text": "Let me define that first — I'll show you what I "
+                            "understood before building anything.",
+                })
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=req.approved, emit=emit)
+
+            # An application exists, so Smith reasons about it.
+            turn_result = handle_chat_v2(ChatV2Request(
+                project_id=str(project_id), output_dir=str(output_dir),
+                message=req.message,
+            ))
+            emit("message", {
+                "text": turn_result.answer,
+                "options": turn_result.options,
+                "diffSummary": turn_result.diff_summary,
+                "status": turn_result.status,
+                "intent": turn_result.intent,
+            })
+
+            # `asked` and `needs_user` are the conversation doing its job —
+            # §16 holds rather than guessing. `resolved` already changed the
+            # Blueprint. Only a handoff needs the graph.
+            if turn_result.status in ("handoff", "not_enabled"):
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=req.approved, emit=emit)
+            return {"status": turn_result.status}
+
+        try:
+            emit("started", {"projectId": str(project_id)})
+            emit("done", await loop.run_in_executor(None, work))
+        except Exception as exc:  # noqa: BLE001 - the client needs the reason
+            logger.exception("smith turn failed for %s", project_id)
+            emit("error", {"message": str(exc)})
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    async def stream():
+        task = asyncio.create_task(turn())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            task.cancel()
+
+    return EventSourceResponse(stream())
+
+
+def _run_dag(output_dir: str, app_root: str, description: str, *,
+             approved: bool, emit) -> dict:
+    """Invoke §28's graph and narrate it. Never reorders it (§116)."""
+    from services.blueprint.executors import (
+        RunUsage, make_executor, tiered_router)
+    from services.blueprint.orchestrator import completed_nodes, levels, run
+    from services.blueprint.plan_forecast import forecast
+    from services.blueprint.service import BlueprintService
+
+    existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
+    if existing.is_file():
+        svc = BlueprintService.load(output_dir=output_dir)
+        if description:
+            svc.doc.setdefault("application", {})["description"] = description
+            svc.validate()
+            svc.save()
+    else:
+        svc = BlueprintService.create(
+            output_dir=output_dir, app_id=Path(output_dir).name,
+            name="Application", domain="unknown", description=description)
+
+    plan = [k for lvl in levels() for k in lvl]
+    if not approved:
+        # §25 — the definition is two calls, what follows is a dozen more.
+        plan = ["requirements", "application_model"]
+    already = completed_nodes(svc.doc)
+    plan = [k for k in plan if k not in already]
+
+    emit("plan", {"nodes": plan, "total": len(plan),
+                  "alreadyComplete": sorted(already),
+                  "awaitingApproval": not approved})
+
+    usage = RunUsage()
+    executor = make_executor(svc, tiered_router(), usage=usage)
+    done: set[str] = set()
+    calls = 0
+    counted = threading.Lock()
+
+    def traced(spec):
+        nonlocal calls
+        emit("node:start", {"node": spec.node, "agent": spec.agent,
+                            "subject": spec.subject})
+        result = executor(spec)
+        with counted:
+            calls += 1
+            done.add(spec.node)
+            n, c = len(done), calls
+        emit("node:done", {"node": spec.node, "subject": spec.subject,
+                           "nodesDone": n, "nodesTotal": len(plan),
+                           "callsDone": c})
+        return result
+
+    report = run(svc, traced, plan=plan, commit=True,
+                 user_request=description, app_root=app_root)
+    counts = forecast(svc.doc)
+    emit("forecast", counts)
+    emit("usage", usage.summary())
+    return {"awaitingApproval": not approved, "forecast": counts,
+            "report": _report_payload(report)}

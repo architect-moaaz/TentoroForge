@@ -59,7 +59,16 @@ export interface RunEvent {
   detail: string;
 }
 
+/** Something Smith said, in the order it said it. */
+export interface RunMessage {
+  text: string;
+  options?: string[];
+  diffSummary?: string;
+}
+
 export interface BlueprintRun {
+  /** Smith's own words — it decides what to do, and says so. */
+  messages: RunMessage[];
   /** Every event, in order. The engine's own account of the run. */
   events: RunEvent[];
   /** Ordered as the orchestrator planned them, not as they finish. */
@@ -77,6 +86,7 @@ export interface BlueprintRun {
 }
 
 const EMPTY: BlueprintRun = {
+  messages: [],
   events: [],
   nodes: [],
   nodesDone: 0,
@@ -133,19 +143,19 @@ export function useBlueprintRun(projectId: string | null) {
       let res: Response;
       try {
         res = await fetch(
-          `${API_BASE}/api/projects/${projectId}/generate/blueprint`,
+          // SMITH DECIDES, NOT THIS HOOK. The routing — first build, consult
+          // the architect, does a verdict start the graph — used to live in
+          // the panel, where a second client would have to reimplement it.
+          // §6 puts it in Smith; this reads one stream and renders it.
+          `${API_BASE}/api/projects/${projectId}/smith/chat`,
           {
             method: "POST",
             headers,
             credentials: "include",
             signal: ctrl.signal,
             body: JSON.stringify({
-              description: opts.description,
-              domain: opts.domain ?? "",
-              evidence: opts.evidence ?? [],
+              message: opts.description,
               approved: opts.approved ?? false,
-              define_only: opts.defineOnly ?? false,
-              fresh: opts.fresh ?? false,
             }),
           },
         );
@@ -241,6 +251,18 @@ export function reduce(
   switch (event) {
     case "started":
       return { ...prev, status: "running" };
+
+    case "message":
+      // What Smith is doing, in its words. `asked` turns arrive this way too,
+      // carrying the options §16 wants offered instead of a guess.
+      return {
+        ...prev,
+        messages: [...prev.messages, {
+          text: String(data.text ?? ""),
+          options: (data.options as string[]) ?? undefined,
+          diffSummary: (data.diffSummary as string) || undefined,
+        }].filter((m) => m.text),
+      };
 
     case "plan": {
       const keys = (data.nodes as string[]) ?? [];

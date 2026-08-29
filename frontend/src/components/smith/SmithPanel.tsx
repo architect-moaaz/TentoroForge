@@ -67,8 +67,6 @@ const STAGE_LABEL: Record<string, string> = {
 
 const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
-
 interface Message {
   role: "user" | "smith";
   text: string;
@@ -85,44 +83,6 @@ interface ArchitectTurn {
   diffSummary: string;
   touchedPaths: string[];
   intent: string | null;
-}
-
-/**
- * One turn with the architect (§6).
- *
- * `handle_chat_v2` decides a turn and returns it — an answer, a question, or a
- * no-op — so this is a request/response, not a stream. The stream belongs to
- * the generation run, which has its own.
- */
-async function askArchitect(
-  projectId: string,
-  message: string,
-): Promise<ArchitectTurn> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const res = await fetch(
-    `${API_BASE}/api/projects/${projectId}/smith/chat`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ message }),
-    },
-  );
-  // A redirect is not an answer: an expired session returns the login page
-  // with status 200, and `res.json()` would throw on HTML.
-  if (res.redirected) throw new Error("Not signed in.");
-  if (!res.ok) {
-    throw new Error(
-      res.status === 503
-        ? "The architect stack is disabled on the server."
-        : `Smith could not answer (HTTP ${res.status}).`,
-    );
-  }
-  return (await res.json()) as ArchitectTurn;
 }
 
 export interface SmithPanelProps {
@@ -149,7 +109,6 @@ export function SmithPanel({
   const { run, start, stop } = useBlueprintRun(projectId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
-  const [thinking, setThinking] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
 
@@ -169,7 +128,7 @@ export function SmithPanel({
     });
   }, [messages.length, run.nodesDone]);
 
-  const busy = run.status === "running" || thinking;
+  const busy = run.status === "running";
 
   // Discovery already asked "what would you like to build?", so the workspace
   // does not ask again — it carries that answer in as the first turn. Guarded
@@ -192,96 +151,22 @@ export function SmithPanel({
    * unreachable: "Add approval for expenses above ₹50,000" is a modification
    * of an existing Blueprint, not a request to build a new app.
    */
-  const send = async () => {
+  /**
+   * Hand the message to Smith. That is the whole of it.
+   *
+   * This function used to decide: is there a Blueprint, should the architect
+   * be consulted, does a `handoff` mean run the graph. §6 makes Smith the
+   * Engineering Manager and that routing belongs to it — here it meant a
+   * second client would have to reimplement the rules, and they would drift.
+   * Smith now streams `message` for what it is doing and the graph's own
+   * events when it runs one; this sends and renders.
+   */
+  const send = () => {
     const text = draft.trim();
     if (!text || busy || !projectId) return;
     setDraft("");
     setMessages((m) => [...m, { role: "user", text }]);
-
-    // NOTHING TO CHANGE YET, SO NOTHING TO ASK. With no Blueprint this is a
-    // first build, and `handle_chat_v2` routes those to bootstrap — whose
-    // seams are unwired on purpose, because the DAG behind this panel already
-    // builds new applications. Asking anyway spent a call to be told so, and
-    // answered a request for a survey form with an apology about a planner.
-    //
-    // The architect is asked once there is an application to reason about,
-    // which is when it has something to say.
-    const firstBuild = !blueprint || !(blueprint.pages as unknown[])?.length;
-    if (firstBuild) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "smith",
-          text: "Let me define that first — I'll show you what I understood before building anything.",
-        },
-      ]);
-      void start({ description: text, evidence, approved: false, defineOnly: true });
-      return;
-    }
-
-    setThinking(true);
-
-    let turn: ArchitectTurn;
-    try {
-      turn = await askArchitect(projectId, text);
-    } catch (e) {
-      setThinking(false);
-      setMessages((m) => [
-        ...m,
-        { role: "smith", text: (e as Error).message },
-      ]);
-      return;
-    }
-    setThinking(false);
-
-    // A `not_enabled` answer names its own unwired seams — "bootstrap requires
-    // discovery_fn + planner_fn + generator_fn". True, and addressed to whoever
-    // maintains this backend, not to someone asking for a survey form. Shown as
-    // written it read as two replies to one message, the first of them
-    // gibberish. The handoff line below says the same thing in the user's terms.
-    if (turn.answer && turn.status !== "not_enabled") {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "smith",
-          text: turn.answer,
-          options: turn.options,
-          diffSummary: turn.diffSummary,
-        },
-      ]);
-    }
-
-    // `handoff` is the architect saying this needs the generator: there is no
-    // application yet, or the change is broad enough to rebuild. §25 — hold at
-    // the definition either way, so the plan is seen before the dozen calls
-    // behind it are spent.
-    // `not_enabled` is the architect saying its own bootstrap seams —
-    // discovery_fn, planner_fn, generator_fn — are not wired on this backend
-    // (Migration Step 4). It is not a refusal and not an answer: the request
-    // was understood and the conversational path cannot serve it yet.
-    //
-    // Treated as a handoff so the deterministic DAG still builds the
-    // application. Leaving it as a plain reply would strand the user on a
-    // sentence about seams, with a working generator one call away and no way
-    // to reach it. The reply above still says what happened, so this is a
-    // bridge over a known gap rather than a gap papered over.
-    if (
-      turn.status === "handoff" ||
-      turn.status === "no_op" ||
-      turn.status === "not_enabled"
-    ) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "smith",
-          text:
-            turn.status === "not_enabled"
-              ? "My conversational planner isn't wired on this backend yet, so I'll go straight to the build engine: defining this first, then building once you approve."
-              : "I'll define this first, then build it once you approve.",
-        },
-      ]);
-      void start({ description: text, evidence, approved: false, defineOnly: true });
-    }
+    void start({ description: text, evidence });
   };
 
   const approve = () => {
@@ -322,7 +207,15 @@ export function SmithPanel({
           </div>
         )}
 
-        {messages.map((m, i) => (
+        {[
+          ...messages,
+          ...run.messages.map((m) => ({
+            role: "smith" as const,
+            text: m.text,
+            options: m.options,
+            diffSummary: m.diffSummary,
+          })),
+        ].map((m, i) => (
           <div
             key={i}
             className={cn(
@@ -359,12 +252,6 @@ export function SmithPanel({
           </div>
         ))}
 
-        {thinking && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Smith is reading the Blueprint…
-          </div>
-        )}
 
         {run.status !== "idle" && (
           <StageList run={run} onApprove={approve} definition={blueprint} />
