@@ -26,6 +26,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+from services.smith.move_dispatcher import move_dispatcher
 from services.smith.understand_ask import understand_ask
 from typing import Any, Callable
 
@@ -131,7 +132,10 @@ def _build_session(
         # and never fired. An override still wins, which is what keeps the
         # handler testable without a model.
         understand_ask_fn=overrides.get("understand_ask_fn") or understand_ask,
-        iteration_move_fn=overrides.get("iteration_move_fn"),
+        # The move writes, so `run_iteration` verifies it against git rather
+        # than believing it. Wired here; overrides still win, which is how the
+        # handler stays testable without touching a filesystem.
+        iteration_move_fn=overrides.get("iteration_move_fn") or move_dispatcher,
     )
 
 
