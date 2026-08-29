@@ -1,0 +1,282 @@
+"use client";
+
+/**
+ * The Blueprint engine's run, as React state.
+ *
+ * `POST /api/projects/{id}/generate/blueprint` has streamed a complete SDLC
+ * feed since it was written — `started`, `plan`, `node:start`, `node:done`,
+ * `forecast`, `usage`, `done`, `error` — and nothing has ever consumed it. The
+ * product UI drives `routers/generate.py`, which does not import
+ * `services.blueprint` at all, so the 20-node DAG, its verification edges and
+ * its projections were unreachable from anything a user touches (§1, §115).
+ * This hook is the reader that closes that gap.
+ *
+ * Two units, never conflated. `nodesDone/nodesTotal` is progress through the
+ * graph; `callsDone` counts executor calls, which a fan-out node multiplies —
+ * `page_layouts` alone makes one call per page. Reporting calls as nodes is
+ * what made an earlier progress bar read "44 of 22" and keep climbing.
+ */
+
+import { useCallback, useRef, useState } from "react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
+
+/** What the orchestrator says about one node, as the run unfolds. */
+export type NodeState = "waiting" | "running" | "done";
+
+export interface RunNode {
+  key: string;
+  state: NodeState;
+  /** Fan-out nodes report the subject they are working on (a page id). */
+  subject?: string;
+  /** Executor calls attributed to this node — >1 only for fan-out. */
+  calls: number;
+}
+
+export interface RunForecast {
+  requirements?: number;
+  pages?: number;
+  entities?: number;
+  workflows?: number;
+  businessRules?: number;
+  apis?: number;
+  expectedTests?: number;
+  [k: string]: number | undefined;
+}
+
+export interface RunUsage {
+  nodes?: number;
+  tokens?: number;
+  cost_usd?: number;
+  elapsed_s?: number;
+  [k: string]: unknown;
+}
+
+export interface BlueprintRun {
+  /** Ordered as the orchestrator planned them, not as they finish. */
+  nodes: RunNode[];
+  nodesDone: number;
+  nodesTotal: number;
+  callsDone: number;
+  /** Nodes the orchestrator skipped because they were already complete (§72). */
+  alreadyComplete: string[];
+  awaitingApproval: boolean;
+  forecast: RunForecast | null;
+  usage: RunUsage | null;
+  status: "idle" | "running" | "complete" | "error";
+  error: string | null;
+}
+
+const EMPTY: BlueprintRun = {
+  nodes: [],
+  nodesDone: 0,
+  nodesTotal: 0,
+  callsDone: 0,
+  alreadyComplete: [],
+  awaitingApproval: false,
+  forecast: null,
+  usage: null,
+  status: "idle",
+  error: null,
+};
+
+export interface StartOptions {
+  description: string;
+  domain?: string;
+  /** §25 — false stops after the definition and waits to be accepted. */
+  approved?: boolean;
+  defineOnly?: boolean;
+  /** Start over rather than resuming an existing Blueprint. */
+  fresh?: boolean;
+}
+
+export function useBlueprintRun(projectId: string | null) {
+  const [run, setRun] = useState<BlueprintRun>(EMPTY);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
+  const start = useCallback(
+    async (opts: StartOptions) => {
+      if (!projectId) {
+        setRun({ ...EMPTY, status: "error", error: "No project selected." });
+        return;
+      }
+      stop();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setRun({ ...EMPTY, status: "running" });
+
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      let res: Response;
+      try {
+        res = await fetch(
+          `${API_BASE}/api/projects/${projectId}/generate/blueprint`,
+          {
+            method: "POST",
+            headers,
+            credentials: "include",
+            signal: ctrl.signal,
+            body: JSON.stringify({
+              description: opts.description,
+              domain: opts.domain ?? "",
+              approved: opts.approved ?? false,
+              define_only: opts.defineOnly ?? false,
+              fresh: opts.fresh ?? false,
+            }),
+          },
+        );
+      } catch (e) {
+        if (ctrl.signal.aborted) return;
+        setRun((r) => ({ ...r, status: "error", error: String(e) }));
+        return;
+      }
+
+      // A redirect is not a result. An expired session answers 307 to /login
+      // and `fetch` follows it, so `res.ok` is true and the body is HTML —
+      // which parses as zero events and looks exactly like a run that did
+      // nothing. The same blindness cost a generated app its form submits.
+      if (res.redirected || !res.ok || !res.body) {
+        setRun((r) => ({
+          ...r,
+          status: "error",
+          error: res.redirected
+            ? `Not signed in — the request was redirected to ${res.url}.`
+            : `The engine refused the run (HTTP ${res.status}).`,
+        }));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      const apply = (event: string, data: Record<string, unknown>) => {
+        setRun((prev) => reduce(prev, event, data));
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (line.startsWith(":")) continue;
+            if (line.startsWith("event:")) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith("data:") && currentEvent) {
+              try {
+                apply(currentEvent, JSON.parse(line.slice(5).trim()));
+              } catch {
+                /* a partial frame — the next chunk completes it */
+              }
+              currentEvent = "";
+            }
+          }
+        }
+      } catch (e) {
+        if (!ctrl.signal.aborted) {
+          setRun((r) => ({ ...r, status: "error", error: String(e) }));
+        }
+        return;
+      }
+
+      // The stream ended without a terminal event: the connection dropped
+      // mid-run. Say so rather than leaving a spinner that never resolves.
+      setRun((r) =>
+        r.status === "running"
+          ? { ...r, status: "error", error: "The run ended unexpectedly." }
+          : r,
+      );
+    },
+    [projectId, stop],
+  );
+
+  return { run, start, stop };
+}
+
+/** One event → the next run state. Pure, so the reducer is testable alone. */
+export function reduce(
+  prev: BlueprintRun,
+  event: string,
+  data: Record<string, unknown>,
+): BlueprintRun {
+  switch (event) {
+    case "started":
+      return { ...prev, status: "running" };
+
+    case "plan": {
+      const keys = (data.nodes as string[]) ?? [];
+      return {
+        ...prev,
+        nodes: keys.map((key) => ({ key, state: "waiting", calls: 0 })),
+        nodesTotal: (data.total as number) ?? keys.length,
+        alreadyComplete: (data.alreadyComplete as string[]) ?? [],
+        awaitingApproval: Boolean(data.awaitingApproval),
+      };
+    }
+
+    case "node:start":
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n) =>
+          n.key === data.node
+            ? { ...n, state: "running", subject: data.subject as string }
+            : n,
+        ),
+      };
+
+    case "node:done":
+      return {
+        ...prev,
+        // A fan-out node emits `node:done` once per subject, so it is only
+        // finished when the orchestrator's own nodesDone says so. Marking it
+        // done on the first subject showed `page_layouts` complete while four
+        // more pages were still composing.
+        nodes: prev.nodes.map((n) =>
+          n.key === data.node
+            ? { ...n, state: "done", subject: undefined, calls: n.calls + 1 }
+            : n,
+        ),
+        nodesDone: (data.nodesDone as number) ?? prev.nodesDone,
+        nodesTotal: (data.nodesTotal as number) ?? prev.nodesTotal,
+        callsDone: (data.callsDone as number) ?? prev.callsDone,
+      };
+
+    case "forecast":
+      return { ...prev, forecast: data as RunForecast };
+
+    case "usage":
+      return { ...prev, usage: data as RunUsage };
+
+    case "done":
+      return {
+        ...prev,
+        status: "complete",
+        awaitingApproval: Boolean(data.awaitingApproval),
+      };
+
+    case "error":
+      return {
+        ...prev,
+        status: "error",
+        error: (data.message as string) ?? "The run failed.",
+      };
+
+    default:
+      return prev;
+  }
+}

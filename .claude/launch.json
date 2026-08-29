@@ -47,6 +47,17 @@
       "port": 3220,
       "cwd": "output/6vaj13oh/app",
       "autoPort": true
+    },
+    {
+      "name": "forge-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "cwd": "frontend",
+      "port": 3300,
+      "autoPort": true
     }
   ]
 }
