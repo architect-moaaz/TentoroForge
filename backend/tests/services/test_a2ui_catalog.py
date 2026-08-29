@@ -250,3 +250,22 @@ def test_requiring_data_does_not_disturb_the_charts_own_props():
     """`chartType` and `series` are required by the Zod contract itself; the
     compose contract adds to that list rather than replacing it."""
     assert {"chartType", "series"} <= _required("Chart")
+
+
+def test_a_button_must_declare_how_it_acts():
+    """Four optional ways to act meant a button could declare none, and a
+    composer reading that invents the prop the schema seems to be missing —
+    `Button.action`, which is neither ours nor A2UI's. It cost a whole page."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    body = build_a2ui_catalog()["components"]["Button"]["allOf"][2]
+    assert {tuple(a["required"]) for a in body["anyOf"]} == {
+        ("workflow",), ("navigate",), ("submit",), ("onClick",)}
+    # Still not required outright — which of the four is the composer's call.
+    assert "workflow" not in (body.get("required") or [])
+
+
+def test_components_with_one_obvious_action_are_left_alone():
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    assert "anyOf" not in build_a2ui_catalog()["components"]["Text"]["allOf"][2]

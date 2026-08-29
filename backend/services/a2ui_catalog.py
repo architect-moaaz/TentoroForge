@@ -205,6 +205,16 @@ def load_contracts(path: Path | str | None = None) -> dict:
 #: about composition, not a fact about the component, and the generated file
 #: describes the component. `Chart.series` needs no entry: the contract already
 #: marks it required, for the same reason.
+#: Components that must declare at least one of a set — the prop is not fixed,
+#: but having none of them is meaningless. Emitted as `anyOf`, so the schema
+#: names the alternatives instead of only refusing what is not on the list.
+_COMPOSE_ONE_OF: dict[str, tuple[str, ...]] = {
+    # A button that neither runs a workflow, nor navigates, nor submits its
+    # form, nor handles a click, is a label with a border.
+    "Button": ("workflow", "navigate", "submit", "onClick"),
+}
+
+
 _COMPOSE_REQUIRED: dict[str, frozenset[str]] = {
     "List": frozenset({"items"}),
     # A chart with no data is the falsity the closing rule warns about, drawn
@@ -366,6 +376,23 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
         "properties": props,
         "required": required,
     }
+    # ONE OF THESE, NOT NONE OF THEM. A Button offers four ways to act —
+    # workflow, navigate, onClick, submit — and, with all four optional, the
+    # contract never said a button has to do anything. A composer reading that
+    # invents the prop the schema seems to be missing: every failing page
+    # carried `Button.action`, which is not ours and not A2UI's either.
+    # `additionalProperties: false` rejected it without ever saying what to
+    # write instead, so the retry guessed again and PAGE-003 died having
+    # guessed three times.
+    #
+    # Stated as a constraint rather than repaired by an alias: the alias table
+    # in a2ui_to_forge says of itself that it is a stopgap for a thin contract,
+    # and this is the contract being thin.
+    choices = _COMPOSE_ONE_OF.get(name)
+    if choices:
+        present = [c for c in choices if c in props]
+        if present:
+            body["anyOf"] = [{"required": [c]} for c in present]
     summary = (entry.get("summary") or "").strip()
     if summary:
         body["description"] = summary[:300]
