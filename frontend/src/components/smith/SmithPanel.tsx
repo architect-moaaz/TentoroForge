@@ -209,7 +209,12 @@ export function SmithPanel({
     }
     setThinking(false);
 
-    if (turn.answer) {
+    // A `not_enabled` answer names its own unwired seams — "bootstrap requires
+    // discovery_fn + planner_fn + generator_fn". True, and addressed to whoever
+    // maintains this backend, not to someone asking for a survey form. Shown as
+    // written it read as two replies to one message, the first of them
+    // gibberish. The handoff line below says the same thing in the user's terms.
+    if (turn.answer && turn.status !== "not_enabled") {
       setMessages((m) => [
         ...m,
         {
