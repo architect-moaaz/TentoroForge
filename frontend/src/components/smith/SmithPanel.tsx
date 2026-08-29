@@ -366,7 +366,7 @@ export function SmithPanel({
           </div>
         )}
 
-        {run.nodes.length > 0 && (
+        {run.status !== "idle" && (
           <StageList run={run} onApprove={approve} definition={blueprint} />
         )}
 
@@ -445,16 +445,28 @@ function StageList({
                 : "Ready"}
         </span>
         <span className="text-xs tabular-nums text-muted-foreground">
-          {run.nodesDone}/{run.nodesTotal}
+          {run.nodesTotal > 0 && `${run.nodesDone}/${run.nodesTotal}`}
           {run.callsDone > run.nodesDone && ` · ${run.callsDone} calls`}
         </span>
       </div>
 
-      <ul className="space-y-1">
-        {run.nodes.map((n) => (
-          <StageRow key={n.key} node={n} />
-        ))}
-      </ul>
+      {run.nodes.length === 0 && run.status === "complete" ? (
+        // A RESUMED RUN WITH NOTHING TO DO. §72 continues rather than redoes,
+        // so a definition that already exists produces an empty plan and a
+        // run that finishes in milliseconds. The card was gated on there
+        // being stages, so this rendered as silence — indistinguishable from
+        // a request that never left the browser, and the approval gate below
+        // never appeared for a definition sitting right there.
+        <p className="text-xs text-muted-foreground">
+          I had already worked this out — nothing needed redoing.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {run.nodes.map((n) => (
+            <StageRow key={n.key} node={n} />
+          ))}
+        </ul>
+      )}
 
       {run.alreadyComplete.length > 0 && (
         // §72 — a resumed run continues rather than redoing. Saying which
