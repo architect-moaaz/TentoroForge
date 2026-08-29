@@ -5874,7 +5874,8 @@ async def chat_with_project(
             # ([APPROVE_PLAN]) still falls through to the existing pipeline
             # below — that's the load-bearing build step we don't touch.
             # ────────────────────────────────────────────────────────────────
-            from services.smith_chat_v2 import architect_flag_enabled as _arch_on
+            def _arch_on() -> bool:
+                return os.environ.get("FORGE_SMITH_ARCHITECT", "1") != "0"
             _use_architect_bootstrap = (
                 _arch_on()
                 and not project_has_code
@@ -8215,7 +8216,8 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # orchestrator returns an OrchestratorResult; downstream code below
     # expects the classic `run_smith_agent` shape, so we adapt.
     try:
-        from services.smith_chat_v2 import architect_flag_enabled as _arch_on_iter
+        def _arch_on_iter() -> bool:
+            return os.environ.get("FORGE_SMITH_ARCHITECT", "1") != "0"
         if _arch_on_iter():
             # New Smith-as-architect path (Migration Step 3 wire-up):
             # SmithSession → real seams → TurnResult verified against

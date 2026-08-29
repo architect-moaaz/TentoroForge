@@ -2,7 +2,7 @@
 
 Bridges the running backend to the new Smith-as-architect stack.
 `_handle_smith_turn` in ``routers/generate.py`` invokes
-``run_iteration_via_architect`` behind the ``FORGE_SMITH_ARCHITECT``
+``run_iteration_via_architect``, once behind the ``FORGE_SMITH_ARCHITECT``
 flag. This module supplies the real seams the SmithSession needs at
 runtime:
 

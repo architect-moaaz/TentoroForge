@@ -375,7 +375,7 @@ async def smith_chat(
 
     `handle_chat_v2` has existed, complete, with no production caller: the only
     references to it outside its own module are in its tests. `generate.py`
-    imports `architect_flag_enabled` and never calls the handler behind it, so
+    imported the flag that gated it and never called the handler, so
     every chat message in the product went to the tactical path — an LLM agent
     that edits files, which is what §118 forbids. This is the endpoint it was
     written for.
@@ -387,15 +387,7 @@ async def smith_chat(
     """
     project = await get_project_with_auth(project_id, user, db)
 
-    from services.smith_chat_v2 import (
-        ChatV2Request, architect_flag_enabled, handle_chat_v2,
-    )
-
-    if not architect_flag_enabled():
-        raise HTTPException(
-            status_code=503,
-            detail="The architect stack is disabled (FORGE_SMITH_ARCHITECT=0).",
-        )
+    from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
     try:
         output_dir = _output_dir(project)

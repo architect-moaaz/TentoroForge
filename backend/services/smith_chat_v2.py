@@ -1,7 +1,7 @@
 """Chat-v2 handler — Migration Step 3.
 
 The new single-entry point for the Smith-as-architect rewrite.
-Behind the ``FORGE_SMITH_ARCHITECT=1`` flag; when the flag is off
+The architect is the path, not an option behind a flag; what used to be off
 (the default) the handler returns a clear "not enabled" response
 so no traffic accidentally routes here.
 
@@ -39,15 +39,6 @@ logger = logging.getLogger(__name__)
 # Flag
 # --------------------------------------------------------------------------- #
 
-def architect_flag_enabled() -> bool:
-    """Truthy unless ``FORGE_SMITH_ARCHITECT=0`` explicitly disables it.
-
-    Default is ON — the architect stack is the primary path. Set
-    ``FORGE_SMITH_ARCHITECT=0`` to force-fall-back to the tactical
-    Smith while the architect stack is still being hardened."""
-    return os.environ.get("FORGE_SMITH_ARCHITECT", "1").strip() != "0"
-
-
 # --------------------------------------------------------------------------- #
 # Request / response shapes
 # --------------------------------------------------------------------------- #
@@ -81,14 +72,6 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
     """The single handler. Pure function of the request + env; every
     downstream boundary is either injected or resolved from the
     process env."""
-    if not architect_flag_enabled():
-        return ChatV2Response(
-            status="not_enabled",
-            answer=(
-                "Smith-as-architect handler is not enabled on this backend. "
-                "Set `FORGE_SMITH_ARCHITECT=1` to route through the new flow."
-            ),
-        )
 
     blueprint = Blueprint.load(
         project_id=req.project_id, output_dir=req.output_dir,
