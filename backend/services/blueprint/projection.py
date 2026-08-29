@@ -72,6 +72,12 @@ def _var_name(entity: dict) -> str:
     return parts[0] + "".join(p.title() for p in parts[1:])
 
 
+#: Timestamps the application sets for itself. Imported from the planner so
+#: "do not ask a person for this" and "the database must fill this" cannot
+#: disagree about which columns they are.
+from services.blueprint.page_planner import DERIVED_ON_CREATE
+
+
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
     builder = _TYPES.get(str(field.get("type") or "").lower(), _DEFAULT_TYPE)
@@ -85,7 +91,17 @@ def drizzle_column(field: dict) -> tuple[str, str]:
         line += ".notNull()"
     if field.get("unique"):
         line += ".unique()"
-    if field.get("defaultNow"):
+    # A NOT NULL timestamp nobody can supply must default, or the row cannot be
+    # written at all. `created_at` was `.notNull()` with no default, and
+    # `form_fields_for` correctly refuses to ask a person for it — so every
+    # insert this app could make failed with "null value in column created_at
+    # violates not-null constraint", after the workflow had run every node
+    # green. The two rules are one fact seen from both ends: DERIVED_ON_CREATE
+    # says nothing will supply this column, and a column nothing supplies needs
+    # the database to fill it.
+    derived_now = (builder == "timestamp"
+                   and str(field.get("name") or "").lower() in DERIVED_ON_CREATE)
+    if field.get("defaultNow") or derived_now:
         line += ".defaultNow()"
     default = field.get("default")
     if default is not None:
