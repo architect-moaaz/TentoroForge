@@ -322,3 +322,71 @@ async def read_blueprint(
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
     return svc.doc
+
+
+class SmithChatRequest(BaseModel):
+    """One turn of conversation with the architect."""
+
+    message: str = Field(..., min_length=1)
+    source: str = "user"
+
+
+@router.post("/api/projects/{project_id}/smith/chat")
+async def smith_chat(
+    project_id: uuid.UUID,
+    req: SmithChatRequest,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """§6/§114 — talk to the architect, not to a file-editing agent.
+
+    `handle_chat_v2` has existed, complete, with no production caller: the only
+    references to it outside its own module are in its tests. `generate.py`
+    imports `architect_flag_enabled` and never calls the handler behind it, so
+    every chat message in the product went to the tactical path — an LLM agent
+    that edits files, which is what §118 forbids. This is the endpoint it was
+    written for.
+
+    Synchronous on purpose. `handle_chat_v2` returns a decided turn — an
+    answer, a question, or a no-op — rather than a token stream, and wrapping a
+    completed result in SSE to look busy would be theatre. The generation run
+    is where the stream belongs, and that endpoint already has one.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+
+    from services.smith_chat_v2 import (
+        ChatV2Request, architect_flag_enabled, handle_chat_v2,
+    )
+
+    if not architect_flag_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="The architect stack is disabled (FORGE_SMITH_ARCHITECT=0).",
+        )
+
+    try:
+        output_dir = _output_dir(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def work():
+        return handle_chat_v2(ChatV2Request(
+            project_id=str(project_id),
+            output_dir=str(output_dir),
+            message=req.message,
+            source=req.source,
+        ))
+
+    # The architect reads the Blueprint and may write to it — filesystem and
+    # model work, both blocking. Off the event loop, or one turn stalls every
+    # other request on the process.
+    result = await asyncio.get_running_loop().run_in_executor(None, work)
+
+    return {
+        "status": result.status,
+        "answer": result.answer,
+        "options": result.options,
+        "diffSummary": result.diff_summary,
+        "touchedPaths": result.touched_paths,
+        "intent": result.intent,
+    }

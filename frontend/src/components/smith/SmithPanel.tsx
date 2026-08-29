@@ -61,9 +61,62 @@ const STAGE_LABEL: Record<string, string> = {
 
 const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
+
 interface Message {
   role: "user" | "smith";
   text: string;
+  /** §16 — the architect asks rather than assumes; these are its choices. */
+  options?: string[];
+  /** What the turn changed in the Blueprint, if anything. */
+  diffSummary?: string;
+}
+
+interface ArchitectTurn {
+  status: string;
+  answer: string;
+  options: string[];
+  diffSummary: string;
+  touchedPaths: string[];
+  intent: string | null;
+}
+
+/**
+ * One turn with the architect (§6).
+ *
+ * `handle_chat_v2` decides a turn and returns it — an answer, a question, or a
+ * no-op — so this is a request/response, not a stream. The stream belongs to
+ * the generation run, which has its own.
+ */
+async function askArchitect(
+  projectId: string,
+  message: string,
+): Promise<ArchitectTurn> {
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const res = await fetch(
+    `${API_BASE}/api/projects/${projectId}/smith/chat`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ message }),
+    },
+  );
+  // A redirect is not an answer: an expired session returns the login page
+  // with status 200, and `res.json()` would throw on HTML.
+  if (res.redirected) throw new Error("Not signed in.");
+  if (!res.ok) {
+    throw new Error(
+      res.status === 503
+        ? "The architect stack is disabled on the server."
+        : `Smith could not answer (HTTP ${res.status}).`,
+    );
+  }
+  return (await res.json()) as ArchitectTurn;
 }
 
 export interface SmithPanelProps {
@@ -81,6 +134,7 @@ export function SmithPanel({
   const { run, start, stop } = useBlueprintRun(projectId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
+  const [thinking, setThinking] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
 
@@ -100,23 +154,64 @@ export function SmithPanel({
     });
   }, [messages.length, run.nodesDone]);
 
-  const busy = run.status === "running";
+  const busy = run.status === "running" || thinking;
 
-  const send = () => {
+  /**
+   * A turn goes to the architect first (§6, §114).
+   *
+   * Smith decides what the message means — a question to answer, a change to
+   * make, or a new application to define — and only the last of those starts
+   * the DAG. Sending every message straight to `generate` would make the
+   * conversation a build button with a text field, and §114's Prompt-to-Change
+   * unreachable: "Add approval for expenses above ₹50,000" is a modification
+   * of an existing Blueprint, not a request to build a new app.
+   */
+  const send = async () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text || busy || !projectId) return;
     setDraft("");
-    setMessages((m) => [
-      ...m,
-      { role: "user", text },
-      {
-        role: "smith",
-        // §25 — the definition is two calls and what follows is a dozen more,
-        // so the run stops for approval before it spends the rest.
-        text: "Reading that into the Blueprint. I'll stop at the definition so you can check it before I build.",
-      },
-    ]);
-    void start({ description: text, approved: false, defineOnly: true });
+    setMessages((m) => [...m, { role: "user", text }]);
+    setThinking(true);
+
+    let turn: ArchitectTurn;
+    try {
+      turn = await askArchitect(projectId, text);
+    } catch (e) {
+      setThinking(false);
+      setMessages((m) => [
+        ...m,
+        { role: "smith", text: (e as Error).message },
+      ]);
+      return;
+    }
+    setThinking(false);
+
+    if (turn.answer) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "smith",
+          text: turn.answer,
+          options: turn.options,
+          diffSummary: turn.diffSummary,
+        },
+      ]);
+    }
+
+    // `handoff` is the architect saying this needs the generator: there is no
+    // application yet, or the change is broad enough to rebuild. §25 — hold at
+    // the definition either way, so the plan is seen before the dozen calls
+    // behind it are spent.
+    if (turn.status === "handoff" || turn.status === "no_op") {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "smith",
+          text: "I'll define this first, then build it once you approve.",
+        },
+      ]);
+      void start({ description: text, approved: false, defineOnly: true });
+    }
   };
 
   const approve = () => {
@@ -167,9 +262,39 @@ export function SmithPanel({
                 : "bg-muted",
             )}
           >
-            {m.text}
+            <p>{m.text}</p>
+
+            {m.diffSummary && (
+              // §71 — what the change touched, before it is believed.
+              <p className="mt-1 border-t border-current/15 pt-1 text-xs opacity-80">
+                {m.diffSummary}
+              </p>
+            )}
+
+            {m.options && m.options.length > 0 && (
+              // §16 — the architect asks rather than assumes. Answering is
+              // just another turn, so these send their own label.
+              <div className="mt-2 flex flex-wrap gap-1">
+                {m.options.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => setDraft(opt)}
+                    className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
+
+        {thinking && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Smith is reading the Blueprint…
+          </div>
+        )}
 
         {run.nodes.length > 0 && (
           <StageList run={run} onApprove={approve} />
@@ -191,7 +316,7 @@ export function SmithPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                send();
+                void send();
               }
             }}
             rows={2}
@@ -202,7 +327,7 @@ export function SmithPanel({
             className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
           <button
-            onClick={send}
+            onClick={() => void send()}
             disabled={busy || !draft.trim()}
             className="rounded-md bg-primary p-2 text-primary-foreground disabled:opacity-40"
             aria-label="Send"
