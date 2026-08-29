@@ -404,9 +404,18 @@ function StageList({
     <div className="rounded-lg border bg-card p-3">
       <div className="mb-2 flex items-baseline justify-between">
         <span className="text-xs font-medium">
-          {run.status === "complete"
-            ? "Application built"
-            : "Building your application"}
+          {/*
+            A define-only run stops after understanding (§25), and calling that
+            "Application built" over six zeros told three different stories in
+            one card. What happened is that Smith read the request; say so.
+          */}
+          {run.awaitingApproval
+            ? "Here's what I understood"
+            : run.status === "complete"
+              ? "Application built"
+              : run.status === "running"
+                ? "Working on it"
+                : "Ready"}
         </span>
         <span className="text-xs tabular-nums text-muted-foreground">
           {run.nodesDone}/{run.nodesTotal}
@@ -430,7 +439,7 @@ function StageList({
         </p>
       )}
 
-      {run.forecast && (
+      {run.forecast && Object.values(run.forecast).some((v) => (v ?? 0) > 0) && (
         <dl className="mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-xs">
           {(
             [
@@ -442,7 +451,10 @@ function StageList({
               ["expectedTests", "Tests"],
             ] as const
           ).map(([key, label]) =>
-            run.forecast?.[key] === undefined ? null : (
+            // Zero here means "not planned yet", not "none" — during the
+            // definition nothing downstream has run. Showing 0 reads as a
+            // failed build to anyone who did not write the pipeline.
+            !run.forecast?.[key] ? null : (
               <div key={key}>
                 <dt className="text-muted-foreground">{label}</dt>
                 <dd className="font-medium tabular-nums">
@@ -461,9 +473,8 @@ function StageList({
           {run.usage.cost_usd !== undefined &&
             `$${run.usage.cost_usd.toFixed(2)}`}
           {run.usage.elapsed_s !== undefined &&
-            ` · ${Math.round(run.usage.elapsed_s)}s`}
-          {run.usage.tokens !== undefined &&
-            ` · ${run.usage.tokens.toLocaleString()} tokens`}
+            ` · ${_duration(run.usage.elapsed_s)}`}
+
         </p>
       )}
 
@@ -474,7 +485,9 @@ function StageList({
         // holding; nothing further is spent until this is answered.
         <div className="mt-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
-            The definition is ready. Review it, then build.
+            I&apos;ve read your request and written it down. Approving builds
+            the application — the pages, the data and the workflows — which
+            takes a few minutes.
           </p>
           <button
             onClick={onApprove}
@@ -525,6 +538,12 @@ function EventLog({ events }: { events: RunEventT[] }) {
       )}
     </div>
   );
+}
+
+/** "1m 33s", not "93s" — seconds past a minute stop being readable. */
+function _duration(secs: number): string {
+  const s = Math.round(secs);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 function StageRow({ node }: { node: RunNode }) {
