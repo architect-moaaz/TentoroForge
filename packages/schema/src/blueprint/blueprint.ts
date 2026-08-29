@@ -837,6 +837,24 @@ export const Runtime = z.object({
   language: z.literal("typescript").default("typescript"),
   packageManager: z.string().default("npm"),
   nodeVersion: z.string().default(">=20.19"),
+  /**
+   * What happened the last time the application was assembled — the install
+   * and build exit codes and a verdict (§70).
+   *
+   * The `preview` projection has written this since it was built and the
+   * contract did not declare it, so `additionalProperties: false` rejected
+   * every Blueprint the engine produced. The document was written by the
+   * engine and refused by the engine: the next `save()` raised, which made a
+   * generated application permanently unmodifiable — Smith's move died before
+   * it started, on every project.
+   */
+  build: z
+    .object({
+      install: z.number().optional(),
+      build: z.number().optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const Database = z.object({

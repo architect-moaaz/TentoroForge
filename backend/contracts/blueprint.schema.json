@@ -1951,6 +1951,21 @@
         "nodeVersion": {
           "type": "string",
           "default": ">=20.19"
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "install": {
+              "type": "number"
+            },
+            "build": {
+              "type": "number"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
