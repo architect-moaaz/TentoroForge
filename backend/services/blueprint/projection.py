@@ -728,7 +728,17 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
         nodes = [_wf_node("trigger", "trigger", 0, {"type": trigger}, "Start")]
         chain = ["trigger"]
-        for i, step in enumerate(wf.get("steps") or [], start=1):
+        # `start` and `end` are the Blueprint's own boundary markers, and this
+        # function emits a `trigger` node and an `end` node for every workflow
+        # regardless. Passing them through turned each into an action node with
+        # no action — `_STEP_NODE_TYPE` has no entry for either, so both fell to
+        # the "action" default, and `_STEP_ACTION` has none either, so both got
+        # actionType "noop". Every workflow whose first step was `start` failed
+        # on its first node with "Unregistered workflow actionType noop", which
+        # is every workflow this planner writes.
+        steps = [st for st in (wf.get("steps") or [])
+                 if st.get("type") not in ("start", "end")]
+        for i, step in enumerate(steps, start=1):
             step_id = f"s{i}"
             entity = entities.get(step.get("entity")) or {}
             config: dict[str, Any] = {
@@ -736,6 +746,30 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             }
             if entity.get("table"):
                 config["table"] = entity["table"]
+                # WHAT TO WRITE, not just where. `db_insert` resolves
+                # `config.values` — a column→expression map — and the node
+                # carried none, so the insert named a table and supplied
+                # nothing: "null value in column \"name\" of relation
+                # \"plants\" violates not-null constraint". The workflow ran
+                # every node and still wrote nothing.
+                #
+                # Referenced bare — `{{name}}`, not `{{input.name}}`.
+                # `triggerWorkflow` passes the posted payload as ctx.variables
+                # itself, so the column name IS the variable name. Same columns
+                # the create form
+                # asks for, by the same rule (`_asked_of_a_person`), so the
+                # two cannot drift into asking for one set and storing another.
+                if config["actionType"] in ("db_insert", "db_update"):
+                    from services.blueprint.page_planner import form_fields_for
+
+                    creating = config["actionType"] == "db_insert"
+                    values = {
+                        f["name"]: f"{{{{{f['name']}}}}}"
+                        for f in form_fields_for(entity, creating=creating)
+                        if f.get("name")
+                    }
+                    if values:
+                        config["values"] = values
             if step.get("condition"):
                 config["condition"] = step["condition"]
             nodes.append(_wf_node(
