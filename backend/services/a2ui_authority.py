@@ -269,6 +269,10 @@ def registry_for_binder(root: Path) -> dict:
 
 def build_requirement(root: Path, kind: str = "dashboard",
                       route: str = "/", shared_context: str = "") -> str:
+    # `shared_context` is accepted and ignored — it belongs to
+    # `build_domain_context` now. See the note there; in short, this string is
+    # the one the A2UI server scans for feature keywords, and a design system
+    # pasted into it reads as a list of demands.
     """What to ask for — a JOB, not a parts list.
 
     This used to hand over the maquette with "the content has already been
@@ -296,25 +300,6 @@ def build_requirement(root: Path, kind: str = "dashboard",
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
-    if shared_context:
-        # The rest of the application, so this screen is composed as part of a
-        # set rather than alone. §35 gives A2UI navigation presentation and
-        # information density, and neither is decidable one page at a time: a
-        # bike shop composed page-by-page rendered its heading twice, put its
-        # primary action in white on white, and wrote its empty states in
-        # three different voices.
-        #
-        # Placed before the job's own guidance, and framed as context rather
-        # than instruction — this is the same mistake the maquette made, and
-        # sending the sibling pages as a spec would make A2UI a renderer of
-        # decisions already taken.
-        parts.append(
-            "\nTHE REST OF THIS APPLICATION — compose this screen so it "
-            "belongs beside them. Reuse a pattern already established rather "
-            "than inventing a second one for the same job, and keep the "
-            "density and the voice consistent with what is here:\n"
-            + shared_context
-        )
     guidance = build_composition_guidance(root, _family_of(kind))
     if guidance:
         parts.append("\n" + guidance)
@@ -408,7 +393,7 @@ def build_composition_guidance(root: Path,
 
 
 def build_domain_context(root: Path, registry: dict | None = None,
-                         page_id: str = "") -> str:
+                         page_id: str = "", shared_context: str = "") -> str:
     """The entities, columns and workflows a composition may bind to.
 
     Came back empty for every Blueprint-pipeline page — it read plan.json
@@ -444,7 +429,7 @@ def build_domain_context(root: Path, registry: dict | None = None,
     mine = [w for w in flows
             if page_id and page_id in (w.get("launchedFrom") or [])
             and w.get("trigger") == "manual"]
-    if not lines and not mine:
+    if not lines and not mine and not shared_context:
         return ""
 
     parts = []
@@ -453,6 +438,29 @@ def build_domain_context(root: Path, registry: dict | None = None,
             "The application's real entities and columns. Every number and "
             "every row on this screen comes from these — do not invent "
             "fields:\n" + "\n".join(lines)
+        )
+    if shared_context:
+        # THE DESIGN SYSTEM IS CONTEXT, NOT A REQUEST. This used to ride in
+        # the requirement, which is the one string the A2UI server scans for
+        # capability keywords (checks.coverage_findings, called on
+        # `requirement` alone). A design system carries `typography`, and
+        # `radius: {badge, pill}` — so every page was held to have asked for a
+        # chart and a status pill, and every payload without them was
+        # rejected. Whole-word matching fixed `graph` inside `typography`;
+        # `badge` and `pill` are whole words and it could not.
+        #
+        # The fix is structural rather than another keyword: design tokens are
+        # not feature requests, and the field that gets parsed as requests is
+        # not where they belong. The model still sees all of it — the server
+        # emits `DOMAIN CONTEXT:` as its own block (generator.py) — and §35's
+        # reason for sending it is unchanged: navigation presentation and
+        # density are properties of a set, not of one page.
+        parts.append(
+            "\nTHE REST OF THIS APPLICATION — compose this screen so it "
+            "belongs beside them. Reuse a pattern already established rather "
+            "than inventing a second one for the same job, and keep the "
+            "density and the voice consistent with what is here:\n"
+            + shared_context
         )
     if mine:
         parts.append(
@@ -648,7 +656,8 @@ def compose_page_via_a2ui(
         payload = surface_provider(build_requirement(root, kind, route,
                                                      shared_context),
                                    build_domain_context(root, registry,
-                                                        page_id))
+                                                        page_id,
+                                                        shared_context))
     except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
         logger.warning("[a2ui] %s composition failed: %s", route, exc)
         return {"applied": False, "route": route, "kind": kind,

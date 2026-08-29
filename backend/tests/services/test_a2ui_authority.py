@@ -577,17 +577,33 @@ def test_an_app_with_no_dashboard_attempts_nothing_by_default(tmp_path, monkeypa
 # --- §35: a screen is composed as part of a set -----------------------------
 
 
-def test_the_requirement_carries_the_rest_of_the_application(tmp_path):
+def test_the_domain_context_carries_the_rest_of_the_application(tmp_path):
     """Navigation presentation and density are properties of a set. Composed
     alone, a bike shop rendered its heading twice and wrote its empty states
-    in three voices."""
+    in three voices.
+
+    Carried by the domain context rather than the requirement: the A2UI server
+    scans the requirement alone for capability keywords, and a design system
+    carries `typography` and `radius: {badge, pill}`, so every page was held
+    to have asked for a chart and a status pill.
+    """
+    from services.a2ui_authority import build_domain_context
+
+    ctx = build_domain_context(
+        tmp_path, {"entities": {}},
+        shared_context='{"pages": ["/articles/[id]"]}')
+    assert "/articles/[id]" in ctx
+    assert "belongs beside them" in ctx
+
+
+def test_the_requirement_does_not_carry_the_design_system(tmp_path):
+    """The requirement is the string that gets parsed as a list of demands."""
     from services.a2ui_authority import build_requirement
 
     root = _app(tmp_path)
     req = build_requirement(root, "entity_list", "/articles",
-                            shared_context='{"pages": ["/articles/[id]"]}')
-    assert "/articles/[id]" in req
-    assert "belongs beside them" in req
+                            shared_context='{"radius": {"badge": "999px"}}')
+    assert "badge" not in req
 
 
 def test_without_a_shared_context_the_requirement_is_unchanged(tmp_path):
@@ -603,13 +619,12 @@ def test_the_sibling_pages_are_context_not_a_specification(tmp_path):
     """The maquette was sent as "render exactly these" and A2UI obeyed,
     which constrained away the second opinion the step exists for. The page
     set must not repeat that mistake."""
-    from services.a2ui_authority import build_requirement
+    from services.a2ui_authority import build_domain_context
 
-    root = _app(tmp_path)
-    req = build_requirement(root, "entity_list", "/articles",
-                            shared_context='{"pages": ["/x"]}')
-    assert "Reuse a pattern already established" in req
-    assert "render exactly" not in req
+    ctx = build_domain_context(tmp_path, {"entities": {}},
+                               shared_context='{"pages": ["/x"]}')
+    assert "Reuse a pattern already established" in ctx
+    assert "render exactly" not in ctx
 
 
 # --- §34: compose before projection, return the surface ---------------------
