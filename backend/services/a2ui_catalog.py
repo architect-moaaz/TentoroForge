@@ -222,7 +222,11 @@ _STRUCTURAL_SUMMARIES: dict[str, str] = {
               "column primitive; there is no 'Column' component. Use "
               "`direction: horizontal` to lay out in a row instead."),
     "Row": ("Horizontal layout — children flow left to right. The vertical "
-            "counterpart is Stack."),
+            "counterpart is Stack. ONE row of fixed content, not one row per "
+            "record: a Row copied per record cannot bind per-record data, "
+            "because a layout node has no notion of a current item. To render "
+            "many records, bind Table.rows or List.items and let the component "
+            "iterate."),
     "Grid": ("Two-dimensional layout — children flow into `columns` tracks "
              "and wrap. For a single column use Stack, for a single row Row."),
     "Container": ("Page-width wrapper — centres its children and applies the "

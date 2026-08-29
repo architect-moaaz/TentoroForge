@@ -283,3 +283,16 @@ def test_the_layout_primitives_say_which_way_they_go():
     assert "Vertical" in stack
     assert "Column" in stack        # names the thing it keeps reaching for
     assert "counterpart is Stack" in comps["Row"]["allOf"][2]["description"]
+
+
+def test_row_says_repeated_records_belong_to_the_list_components():
+    """`repeat` is a closed enum over page-contract lists (actions), and the
+    only item references are $item.label/value/id — there is no per-row repeat
+    over entity data. A2UI hand-built a row per plant and pointed each Badge at
+    {"path": "statusVariant"}, which has nothing to resolve against; the page
+    failed the enum and did not ship."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    row = build_a2ui_catalog()["components"]["Row"]["allOf"][2]["description"]
+    assert "not one row per record" in row
+    assert "Table.rows" in row and "List.items" in row
