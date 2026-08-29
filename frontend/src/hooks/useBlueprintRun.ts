@@ -52,7 +52,16 @@ export interface RunUsage {
   [k: string]: unknown;
 }
 
+/** One event as it arrived, so nothing the engine says is invisible. */
+export interface RunEvent {
+  seq: number;
+  event: string;
+  detail: string;
+}
+
 export interface BlueprintRun {
+  /** Every event, in order. The engine's own account of the run. */
+  events: RunEvent[];
   /** Ordered as the orchestrator planned them, not as they finish. */
   nodes: RunNode[];
   nodesDone: number;
@@ -68,6 +77,7 @@ export interface BlueprintRun {
 }
 
 const EMPTY: BlueprintRun = {
+  events: [],
   nodes: [],
   nodesDone: 0,
   nodesTotal: 0,
@@ -214,6 +224,17 @@ export function reduce(
   event: string,
   data: Record<string, unknown>,
 ): BlueprintRun {
+  // Recorded FIRST and unconditionally. A reducer that only keeps what it
+  // understands makes an unrecognised event indistinguishable from one that
+  // never arrived — and the engine is free to emit more than this file knows.
+  prev = {
+    ...prev,
+    events: [
+      ...prev.events,
+      { seq: prev.events.length, event, detail: describe(event, data) },
+    ],
+  };
+
   switch (event) {
     case "started":
       return { ...prev, status: "running" };
@@ -278,5 +299,40 @@ export function reduce(
 
     default:
       return prev;
+  }
+}
+
+
+/** One line a person can read, per event. */
+function describe(event: string, data: Record<string, unknown>): string {
+  switch (event) {
+    case "started":
+      return "Run started";
+    case "plan": {
+      const n = (data.nodes as string[])?.length ?? 0;
+      const skipped = (data.alreadyComplete as string[])?.length ?? 0;
+      return `Planned ${n} stage${n === 1 ? "" : "s"}` +
+        (skipped ? ` · ${skipped} already complete` : "");
+    }
+    case "node:start":
+      return `${data.node}${data.subject ? ` · ${data.subject}` : ""} started`;
+    case "node:done":
+      return `${data.node}${data.subject ? ` · ${data.subject}` : ""} done` +
+        ` (${data.nodesDone}/${data.nodesTotal})`;
+    case "forecast":
+      return "Forecast received";
+    case "usage": {
+      const cost = data.cost_usd as number | undefined;
+      const secs = data.elapsed_s as number | undefined;
+      return `Usage: ${cost !== undefined ? `$${cost.toFixed(2)}` : "?"}` +
+        (secs !== undefined ? ` · ${Math.round(secs)}s` : "");
+    }
+    case "done":
+      return data.awaitingApproval ? "Definition ready" : "Run complete";
+    case "error":
+      return `Error: ${data.message ?? "unknown"}`;
+    default:
+      // An event this file does not model still gets a line.
+      return `${event}: ${JSON.stringify(data).slice(0, 120)}`;
   }
 }

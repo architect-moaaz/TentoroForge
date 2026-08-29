@@ -31,9 +31,15 @@ import {
   AlertCircle,
   Send,
   SkipForward,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useBlueprintRun, type RunNode } from "@/hooks/useBlueprintRun";
+import {
+  useBlueprintRun,
+  type RunNode,
+  type RunEvent as RunEventT,
+} from "@/hooks/useBlueprintRun";
 
 /** DAG node keys → the stage names §111 shows a person. */
 const STAGE_LABEL: Record<string, string> = {
@@ -423,6 +429,21 @@ function StageList({
         </dl>
       )}
 
+      {run.usage && (
+        // Captured since the first version of this panel and rendered nowhere.
+        // What a run cost is the single number a person asks for afterwards.
+        <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+          {run.usage.cost_usd !== undefined &&
+            `$${run.usage.cost_usd.toFixed(2)}`}
+          {run.usage.elapsed_s !== undefined &&
+            ` · ${Math.round(run.usage.elapsed_s)}s`}
+          {run.usage.tokens !== undefined &&
+            ` · ${run.usage.tokens.toLocaleString()} tokens`}
+        </p>
+      )}
+
+      {run.events.length > 0 && <EventLog events={run.events} />}
+
       {run.awaitingApproval && run.status === "complete" && (
         // §25 — the approval gate. The definition is done and the run is
         // holding; nothing further is spent until this is answered.
@@ -437,6 +458,45 @@ function StageList({
             Approve and build
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Every event the engine sent, in order.
+ *
+ * The stage list is a summary and summaries drop things: an event this build
+ * does not model would otherwise be indistinguishable from one that never
+ * arrived. Collapsed by default — §111 wants observable status, not a firehose
+ * — and it carries no model reasoning, only what the orchestrator announced.
+ */
+function EventLog({ events }: { events: RunEventT[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 border-t pt-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        Activity ({events.length})
+      </button>
+      {open && (
+        <ol className="mt-1 max-h-48 space-y-0.5 overflow-y-auto font-mono text-[11px] leading-relaxed">
+          {events.map((e) => (
+            <li key={e.seq} className="flex gap-2">
+              <span className="shrink-0 text-muted-foreground/60">
+                {String(e.seq).padStart(2, "0")}
+              </span>
+              <span className="text-muted-foreground">{e.detail}</span>
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );
