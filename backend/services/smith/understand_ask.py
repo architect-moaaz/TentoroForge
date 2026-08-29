@@ -31,8 +31,12 @@ Return ONLY a JSON object with exactly these keys:
   "target_file": the route or schema path the change belongs to, or "" if you
       are asking. Use a value that appears in the Blueprint below — do not
       invent a path.
-  "element_label": the visible text of the thing to change (a button's label,
-      a heading, a column name), or "" if you are asking.
+  "element_label": the visible text of the thing to change AS IT IS NOW (a
+      button's current label, the current heading), or "" if you are asking.
+  "new_value": what it should say or become instead, or "" if the request is
+      not a replacement — a removal, or a question, has no new value. Give the
+      literal text to write, not a description of it: for "call it New plant"
+      the value is "New plant", not "a clearer label".
 
 Do not explain. Do not wrap the JSON in prose or code fences.
 
@@ -55,7 +59,7 @@ def understand_ask(
     *,
     provider: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
-    """(message, blueprint_ctx) -> {clarification_needed, target_file, element_label}.
+    """(message, ctx) -> {clarification_needed, target_file, element_label, new_value}.
 
     Never raises. An unreachable or unparseable model becomes a clarification
     request, because the alternative — returning a blank understanding — reads
@@ -65,7 +69,7 @@ def understand_ask(
     ask = (user_message or "").strip()
     if not ask:
         return {"clarification_needed": "What would you like to change?",
-                "target_file": "", "element_label": ""}
+                "target_file": "", "element_label": "", "new_value": ""}
 
     call = provider or _default_provider
     try:
@@ -75,20 +79,25 @@ def understand_ask(
         return {"clarification_needed":
                 "I could not reach my reasoning service just then — say that "
                 "again and I will try once more.",
-                "target_file": "", "element_label": ""}
+                "target_file": "", "element_label": "", "new_value": ""}
 
     data = _parse(raw)
     if data is None:
         return {"clarification_needed":
                 "I did not follow that. Which screen should I change, and "
                 "what on it?",
-                "target_file": "", "element_label": ""}
+                "target_file": "", "element_label": "", "new_value": ""}
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
     return {
         "clarification_needed": str(data.get("clarification_needed") or "").strip(),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),
+        # What to write, not a description of it. `move_dispatcher` needs a
+        # literal — "a clearer label" is a note to a person, not an edit — and
+        # a removal or a question legitimately has none, so "" is a real value
+        # here rather than a missing one.
+        "new_value": str(data.get("new_value") or "").strip(),
     }
 
 

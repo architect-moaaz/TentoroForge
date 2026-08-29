@@ -66,7 +66,44 @@ def test_an_empty_message_asks_without_calling_the_model():
 
 
 def test_missing_keys_normalise_to_strings():
-    """`run_iteration` calls .strip() on all three."""
+    """`run_iteration` calls .strip() on these."""
     out = understand_ask("x", CTX, provider=_says('{"target_file":"/plants"}'))
     assert out == {"clarification_needed": "", "target_file": "/plants",
-                   "element_label": ""}
+                   "element_label": "", "new_value": ""}
+
+
+def test_a_replacement_carries_the_value_to_write():
+    """`move_dispatcher` needs a literal. target_file and element_label say
+    where and what; without new_value they do not say what to write."""
+    out = understand_ask(
+        "Rename the Add plant button to New plant", CTX,
+        provider=_says('{"clarification_needed":"","target_file":"/plants",'
+                       '"element_label":"Add plant","new_value":"New plant"}'),
+    )
+    assert out["new_value"] == "New plant"
+
+
+def test_a_request_with_nothing_to_write_has_an_empty_new_value():
+    """A removal is a real move and has no replacement text."""
+    out = understand_ask(
+        "Remove the export button", CTX,
+        provider=_says('{"clarification_needed":"","target_file":"/plants",'
+                       '"element_label":"Export","new_value":""}'),
+    )
+    assert out["new_value"] == ""
+    assert out["element_label"] == "Export"
+
+
+def test_every_early_return_carries_the_full_shape():
+    """A partial dict would make a caller's .get("new_value") return None on
+    exactly the paths that already went wrong."""
+    def boom(_prompt):
+        raise RuntimeError("no network")
+
+    for out in (
+        understand_ask("", CTX, provider=boom),
+        understand_ask("x", CTX, provider=boom),
+        understand_ask("x", CTX, provider=_says("not json")),
+    ):
+        assert set(out) == {"clarification_needed", "target_file",
+                            "element_label", "new_value"}
