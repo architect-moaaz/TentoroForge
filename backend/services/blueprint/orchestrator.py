@@ -1108,6 +1108,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.page_planner import PlanError
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
+        project_public_resources,
         project_nav_flow, project_root_route,
     )
 
@@ -1128,6 +1129,8 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_nav_flow(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
+    # The data route needs the same list the matcher was built from.
+    project_public_resources(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
 

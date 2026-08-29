@@ -1143,6 +1143,38 @@ def public_apis(doc: dict) -> list[str]:
     return out
 
 
+def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/public-resources.ts`` — the entities a public page reads.
+
+    The middleware honours a page's access declaration, so `/plants` rendered
+    for anyone; the data route then asked for a session regardless and answered
+    401 to every fetch that page made. The plant was in the database and the
+    page allowed to show it could not read it.
+
+    Reads only. A public page writes through its workflows, and those routes
+    the middleware already opens — `/api/data` POST/PATCH/DELETE build their
+    context from `session.user` and stay gated.
+    """
+    slugs = sorted(a.split("/", 2)[2] for a in public_apis(doc)
+                   if a.startswith("api/data/"))
+    body = ",\n".join(f'  "{s}"' for s in slugs)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// Entities behind a public page's own bindings. Read access only —",
+        "// writes go through the workflow routes.",
+        "",
+        "export const PUBLIC_RESOURCES: string[] = [",
+        body,
+        "];",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "public-resources.ts").write_text("\n".join(lines), "utf-8")
+    return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
+
+
 def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/middleware.ts`` from what the pages declare.
 
