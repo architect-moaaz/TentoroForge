@@ -346,8 +346,13 @@ def _prop_schema(name: str, spec: dict) -> dict:
     # `Textarea.rows` is how many lines to show and `Grid.columns` is how many
     # tracks to lay out, both integers. Describing those as "data for this
     # component" invited a binding where a number belongs.
-    if name in _BINDING_PROPS and str(spec.get("type") or "").lower() in (
-        "", "array", "object",
+    # Excluded by type, not selected by it. `Table.rows` is declared a string
+    # because a Mustache binding IS a string, so an allow-list of array/object
+    # dropped the very props this branch exists for. What must not be a
+    # binding is a number: `Textarea.rows` is how many lines to show and
+    # `Grid.columns` how many tracks to lay out.
+    if name in _BINDING_PROPS and str(spec.get("type") or "").lower() not in (
+        "number", "integer", "boolean",
     ):
         return {"description": f"{name} — data for this component."}
     raw = str(spec.get("type") or "").lower()
