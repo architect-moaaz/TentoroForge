@@ -64,7 +64,6 @@ def shared_context(doc: dict) -> str:
             "visualPersonality", "colors", "typography", "spacing", "radius",
             "informationDensity", "navigationApproach", "elevation",
         ) if design.get(k)},
-        "uiRegistry": doc.get("uiRegistry") or [],
     }, indent=2, sort_keys=True)
 
 

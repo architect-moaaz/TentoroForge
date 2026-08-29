@@ -74,7 +74,7 @@ VALID_STATUSES = (
 #: artifacts. They carry no ``id`` and no ``status``, so they are written by
 #: merge rather than by allocate-and-append.
 SINGLETON_SECTIONS: frozenset[str] = frozenset({
-    "product", "navigation", "designSystem", "uiRegistry", "security",
+    "product", "navigation", "designSystem", "security",
     "runtime", "database", "deployment", "completeness",
 })
 
@@ -83,9 +83,6 @@ SINGLETON_SECTIONS: frozenset[str] = frozenset({
 #: it a synthetic id would let the same edge be declared twice.
 KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     "codeMap": ("artifact",),
-    # One template per pattern — re-authoring `entity_list` replaces it rather
-    # than accumulating a second structure for the same pattern.
-    "patternTemplates": ("pattern",),
     # One tree per page — re-authoring a page replaces its layout rather than
     # accumulating a second one for the same page.
     "pageLayouts": ("page",),

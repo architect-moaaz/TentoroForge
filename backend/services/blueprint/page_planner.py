@@ -987,10 +987,12 @@ def plan_page(doc: dict, page: dict, template: dict,
 def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, Any]:
     """Plan every page that has a pattern and a template. Reports what it skipped."""
     catalog = catalog or load_catalog()
-    templates = {t.get("pattern"): t for t in _live(doc.get("patternTemplates"))}
-    # An individually authored tree wins over the pattern template for that
-    # page. Both may exist: the pattern is the fallback for pages nobody
-    # authored, so switching a single page to bespoke does not strand the rest.
+    # One composed tree per page, and no second source. There used to be a
+    # per-pattern template to fall back on, authored by its own agent; a page
+    # nobody composed was stubbed from the template for its pattern. That made
+    # "this page was designed" and "this page got the generic shape for its
+    # kind" indistinguishable in the output — §76's silent divergence, arrived
+    # at by fallback. A page nothing composed is now reported as such.
     authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
 
     planned: dict[str, dict] = {}
@@ -998,11 +1000,10 @@ def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, A
     failed: list[dict] = []
     for page in _live(doc.get("pages")):
         pattern = page.get("pattern")
-        layout = authored.get(page.get("id"))
-        template = layout or templates.get(pattern)
+        template = authored.get(page.get("id"))
         if not template:
             skipped.append({"page": page.get("id"), "pattern": pattern,
-                            "reason": "no template for this pattern"})
+                            "reason": "nothing composed a tree for this page"})
             continue
         try:
             planned[page.get("id")] = plan_page(doc, page, template, catalog)
@@ -1010,7 +1011,7 @@ def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, A
             failed.append({"page": page.get("id"), "pattern": pattern,
                            "reason": str(exc)})
     return {"planned": planned, "skipped": skipped, "failed": failed,
-            "templates": sorted(templates)}
+            "templates": sorted(authored)}
 
 
 # ---------------------------------------------------------------------------

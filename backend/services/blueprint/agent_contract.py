@@ -49,9 +49,9 @@ ASK_USER = 0.40
 WRITABLE_SECTIONS: frozenset[str] = frozenset(
     set(ARTIFACT_SECTIONS)
     | {"data.entities", "data.relationships", "data.constraints",
-       "navigation", "designSystem", "uiRegistry", "security",
+       "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "patternTemplates", "pageLayouts", "completeness"}
+       "pageLayouts", "completeness"}
 )
 
 
@@ -123,7 +123,7 @@ _READS: dict[str, set[str]] = {
     "data_model": {"requirements"},
 
     # Design language: the product and what the UI already uses.
-    "accessibility": {"requirements", "pages", "uiRegistry"},
+    "accessibility": {"requirements", "pages"},
     "figma_intelligence": {"requirements", "pages"},
 
     # §30 verbatim — page design may compose pages and select patterns, and may
@@ -177,34 +177,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "components", "widgets", "uiRegistry", "navigation"},
+        {"pages", "widgets", "navigation"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "ui_registry:write", "mcp:a2ui"},
-    ),
-    # §34 — A2UI as the composition authority, narrowed to one job. It authors
-    # the *structure* of each pattern the app uses, against the real component
-    # catalog; the planner instantiates that structure per page with no model
-    # call. Composing every page with a model is what made the old platform's
-    # page schemas expensive and inconsistent, and forced the component library
-    # to loosen its own prop schemas to absorb the misses.
-    "a2ui_patterns": _cap(
-        "a2ui_patterns",
-        {"patternTemplates"},
-        # Narrow on purpose. This agent authors structure per pattern, so it
-        # needs the page contracts and the design language and nothing else —
-        # not entities, not endpoints, not workflows. Handing it the whole
-        # Blueprint costs ~80k tokens a call for context it cannot use, and
-        # §101 scopes context precisely so an agent cannot reach past its job.
-        # Widened deliberately. Scoped to structure alone, this agent designed
-        # pages without ever seeing what the user asked for — it could read the
-        # page contracts but not the requirements behind them, and not the
-        # entities whose fields its forms and tables are made of. Designing
-        # completely means seeing the intent, not just the outline.
-        reads={"requirements", "pages", "data", "widgets", "roles",
-               "permissions", "designSystem", "uiRegistry", "navigation",
-               "modules"},
-        tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "component_catalog:read", "mcp:a2ui"},
+               "mcp:a2ui"},
     ),
     # §20 + §23. Derived by deterministic code rather than authored, but it
     # still needs a declared owner: §74 routes a repair task to whoever may
@@ -216,14 +191,14 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         reads={"*"},
         tools={"blueprint:read"},
     ),
-    # §34 — the same authority as a2ui_patterns, aimed at one page at a time.
-    # Kept as a separate agent rather than a mode of the other so the §30
-    # boundary stays legible: this one writes page trees and nothing else.
+    # §34 — A2UI as the composition authority, one page at a time. It composes
+    # against the real component catalog, so what it authors is renderable by
+    # construction rather than by a repair pass.
     "a2ui_pages": _cap(
         "a2ui_pages",
         {"pageLayouts"},
         reads={"requirements", "pages", "data", "widgets", "roles",
-               "permissions", "designSystem", "uiRegistry", "navigation",
+               "permissions", "designSystem", "navigation",
                "modules", "workflows", "apis"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
@@ -265,10 +240,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     #   apis             derived from entities + workflows + widgets by
     #                    api_derivation; anything authored here is overwritten
     #                    on the next derivation, so writing it is a lie.
-    #   patternTemplates validated against the real component catalog, which is
-    #                    injected into the a2ui_patterns prompt and not into
+    #   pageLayouts      validated against the real component catalog, which is
+    #                    injected into the a2ui_pages prompt and not into
     #                    Smith's. Authoring blind would fail
-    #                    check_pattern_templates anyway.
+    #                    check_page_layout anyway.
     #   codeMap          projection output. A model asked for file paths
     #                    produces plausible ones, and Blueprint↔Implementation
     #                    then goes green against files nobody wrote.
@@ -282,14 +257,14 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
          "pages", "components", "widgets", "data.entities",
          "data.relationships", "data.constraints", "workflows",
          "businessRules", "integrations", "roles", "permissions", "security",
-         "uiRegistry", "designSystem"},
+         "designSystem"},
         tools={"blueprint:read", "blueprint:write"},
     ),
     # §31/§34 — the Figma Intelligence Agent contributes evidence, not design
     # decisions; it may not author pages.
     "figma_intelligence": _cap(
         "figma_intelligence",
-        {"requirements", "designSystem", "uiRegistry"},
+        {"requirements", "designSystem"},
         tools={"mcp:figma", "design:extract", "blueprint:evidence"},
     ),
 }
@@ -408,8 +383,7 @@ def check_pattern_templates(result: AgentResult) -> None:
     does not exist, or breaks a container's positional contract, is rejected
     here so the agent is asked again rather than the schema loosened.
     """
-    proposals = [p for p in result.proposals
-                 if p.section in ("patternTemplates", "pageLayouts")]
+    proposals = [p for p in result.proposals if p.section == "pageLayouts"]
     if not proposals:
         return
 

@@ -870,13 +870,10 @@ def test_the_prompt_redirects_rationale_to_assumptions(svc):
 #: than a data one, so an unexplained gap is a bug and an explained one is a
 #: design decision.
 _DELIBERATE_BLIND_SPOTS: dict[tuple[str, str], str] = {
-    ("page_layouts", "patternTemplates"):
-        "A per-page author designs bespoke; it depends on `patterns` so that "
-        "pages nobody authors individually still have a template to fall back "
-        "on, which is an ordering constraint rather than an input.",
-    ("patterns", "components"):
-        "A2UI composes from the 165-component catalog, not from Blueprint "
-        "components; it depends on page_designs for ordering, not for data.",
+    ("page_layouts", "components"):
+        "A2UI composes from the component catalog, not from Blueprint "
+        "`components` — which the frontend projection derives from the trees "
+        "A2UI composed, so reading it here would be circular.",
 }
 
 

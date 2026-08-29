@@ -51,7 +51,7 @@ def test_all_ten_section_75_edges_are_implemented():
     from services.blueprint.migration_ledger import new_edges_required
     assert set(CHECKS) == set(EDGES)
     prd_ten = set(EDGES) - {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
-                            "Page↔PatternTemplate"}
+                            "Page↔Layout"}
     assert len(prd_ten) == 10
     assert new_edges_required() <= set(EDGES)
 
@@ -80,6 +80,14 @@ def test_a_coherent_blueprint_produces_no_findings():
         tests=[{"id": "TEST-001", "name": "create candidate", "kind": "api",
                 "verifies": ["REQ-001"]}],
         codeMap=[{"artifact": "PAGE-001", "frontend": ["src/app/candidates/page.tsx"]}],
+        # A page is coherent only if something composed a tree for it (§34)
+        # and there is a design language it was composed against (§37).
+        pageLayouts=[{"page": "PAGE-001",
+                      "root": {"type": "Stack", "props": {}, "children": []}}],
+        designSystem={"colors": {"primary": "#125E8A"},
+                      "spacing": {"unit": "4px"},
+                      "typography": {"baseSize": "16px"},
+                      "radius": {"md": "10px"}},
     )
     report = verify(d)
     assert report.passed, [str(f) for f in report.findings]
@@ -173,11 +181,20 @@ def test_workflow_launched_from_a_missing_page_is_caught():
     assert any("PAGE-404" in h.detail for h in hits)
 
 
-def test_component_outside_the_ui_registry_is_caught():
-    d = doc(components=[{"id": "CMP-001", "name": "Fancy", "registryKey": "FancyThing"}],
-            uiRegistry={"components": ["EntityTable"]})
+def test_a_design_system_too_thin_to_compose_against_is_caught():
+    """This checked `components` against `uiRegistry` — one LLM section
+    against another, both authored by a node that no longer exists. The
+    failure it never covered is the one that shipped: a design system so thin
+    that `project_design_tokens` emits almost nothing and every page comes out
+    unstyled, with no error anywhere, because a missing token is only absence.
+    """
+    d = doc(designSystem={"colors": {"primary": "#125E8A"}})
     hits = verify(d, edges=("Design↔DesignSystem",)).findings
-    assert len(hits) == 1 and "FancyThing" in hits[0].detail
+    assert {h.artifact_id for h in hits} == {"spacing", "typography", "radius"}
+
+    d = doc(designSystem={})
+    hits = verify(d, edges=("Design↔DesignSystem",)).findings
+    assert len(hits) == 1 and "does not exist" in hits[0].detail
 
 
 def test_approved_requirement_nothing_claims_is_caught():
@@ -215,11 +232,12 @@ def test_deprecated_artifacts_are_not_held_to_account():
 def test_findings_route_to_the_responsible_agent():
     d = doc(
         apis=[{"id": "API-001", "method": "DELETE", "path": "/x"}],
-        components=[{"id": "CMP-001", "name": "C", "registryKey": "Nope"}],
+        pages=[{"id": "PAGE-001", "name": "C", "route": "/c",
+                "purpose": "x"}],
     )
     tasks = verify(d).repair_tasks()
     assert tasks["api"][0].artifact_id == "API-001"
-    assert tasks["page_design"][0].artifact_id == "CMP-001"
+    assert "PAGE-001" in {t.artifact_id for t in tasks["page_design"]}
 
 
 def test_requirement_verdict_matches_the_section_74_shape():

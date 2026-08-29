@@ -193,18 +193,26 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
     _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",)),
-    _n("page_designs", "page_design", ("page_contracts",), ("components", "uiRegistry")),
-    # §34 — one template per pattern the pages actually use, so the model call
-    # count follows the pattern vocabulary rather than the page count.
-    _n("patterns", "a2ui_patterns", ("page_contracts", "page_designs", "design_system"),
-       ("patternTemplates",),
-       note="§34; structure per pattern, instantiated per page by the planner"),
-    # One call per page. Runs after `patterns` so a page that nobody authors
-    # individually still has a template to fall back on — the two coexist, and
-    # the projection prefers the authored tree where one exists.
-    _n("page_layouts", "a2ui_pages", ("patterns",), ("pageLayouts",),
+    # §34 — one composed tree per page. There were two nodes ahead of this one
+    # and both were residue from the pipeline A2UI replaced.
+    #
+    # `page_designs` authored `components` and `uiRegistry`: two LLM sections
+    # naming components that were never code. `uiRegistry` reached exactly two
+    # consumers — pasted into this node's own prompt, and cross-checked against
+    # the components the `frontend` projection derives. Neither is worth a
+    # model call, and a page composed against invented component names is
+    # composed against nothing.
+    #
+    # `patterns` authored one template per pattern, back when the planner
+    # instantiated those templates per page with no model call. That was the
+    # primary path; A2UI composing each page made it the fallback, and a full
+    # LLM node maintaining a fallback for the exception is the wrong trade.
+    # A page nobody composes is now skipped and reported, not silently stubbed
+    # from a template that never saw it (§76).
+    _n("page_layouts", "a2ui_pages", ("page_contracts", "design_system"),
+       ("pageLayouts",),
        fanout="pages",
-       note="§34; one authored tree per page, gated on the same catalog"),
+       note="§34; one composed tree per page, gated on the component catalog"),
     _n("frontend", "frontend", ("page_layouts",), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
@@ -429,7 +437,7 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 #: any of them.
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
-    "patternTemplates", "data.entities", "data.relationships",
+    "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
 })
@@ -439,9 +447,9 @@ def is_foundational(node: DagNode) -> bool:
     """True when re-running this node would re-author the application's frame.
 
     Derived from what the node produces rather than listed by name, so a node
-    added to the DAG later classifies itself. ``patternTemplates`` counts as
-    incremental — §72 says "components", and a pattern template is a
-    composition of them.
+    added to the DAG later classifies itself. ``pageLayouts`` counts as
+    incremental — §72 says "components", and a composed page is a composition
+    of them.
 
     Only meaningful for agent nodes; service and projection nodes are
     deterministic and cheap, and a projection that does not run leaves the

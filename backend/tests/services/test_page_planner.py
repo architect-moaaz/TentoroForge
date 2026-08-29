@@ -55,7 +55,7 @@ def doc(entity):
                             "aggregation": "count"}},
         ],
         "pages": [],
-        "patternTemplates": [],
+        "pageLayouts": [],
     }
 
 
@@ -251,7 +251,7 @@ def test_planning_is_deterministic(doc, page, catalog):
 def test_pages_without_a_template_are_reported_not_silently_dropped(
         doc, page, catalog):
     doc["pages"] = [page]
-    doc["patternTemplates"] = []
+    doc["pageLayouts"] = []
     result = pp.plan_pages(doc, catalog)
     assert result["planned"] == {}
     assert result["skipped"][0]["page"] == "PAGE-001"
@@ -259,7 +259,7 @@ def test_pages_without_a_template_are_reported_not_silently_dropped(
 
 def test_plan_pages_covers_every_page_with_a_template(doc, page, catalog):
     doc["pages"] = [page]
-    doc["patternTemplates"] = [list_template()]
+    doc["pageLayouts"] = [dict(list_template(), page="PAGE-001")]
     result = pp.plan_pages(doc, catalog)
     assert list(result["planned"]) == ["PAGE-001"]
     assert result["failed"] == [] and result["skipped"] == []
@@ -383,10 +383,9 @@ def test_the_digest_marks_required_props_and_bounds(catalog):
 
 # --- per-page authoring ----------------------------------------------------
 
-def test_an_authored_page_overrides_its_pattern(doc, page, catalog):
-    """Switching one page to bespoke must not strand the rest on nothing."""
+def test_an_authored_page_is_what_gets_planned(doc, page, catalog):
+    """The composed tree is the only source; nothing generic sits behind it."""
     doc["pages"] = [page]
-    doc["patternTemplates"] = [list_template()]
     doc["pageLayouts"] = [{
         "page": "PAGE-001",
         "root": {"type": "Stack", "props": {}, "children": [
@@ -397,17 +396,21 @@ def test_an_authored_page_overrides_its_pattern(doc, page, catalog):
     assert root["children"][0]["props"]["content"] == "Bespoke"
 
 
-def test_pages_nobody_authored_still_fall_back_to_the_pattern(doc, page, catalog):
+def test_a_page_nobody_composed_is_reported_not_stubbed(doc, page, catalog):
+    """There used to be a per-pattern template behind every page, so a page
+    nobody composed was planned from the generic shape for its kind. That made
+    "designed" and "defaulted" indistinguishable in the output — §76 silent
+    divergence, reached by fallback rather than by drift."""
     second = dict(page, id="PAGE-002", route="/other", name="Other")
     doc["pages"] = [page, second]
-    doc["patternTemplates"] = [list_template()]
     doc["pageLayouts"] = [{
         "page": "PAGE-001",
         "root": {"type": "Stack", "props": {}, "children": []},
     }]
     result = pp.plan_pages(doc, catalog)
-    assert set(result["planned"]) == {"PAGE-001", "PAGE-002"}
-    assert result["skipped"] == [] and result["failed"] == []
+    assert set(result["planned"]) == {"PAGE-001"}
+    assert [s["page"] for s in result["skipped"]] == ["PAGE-002"]
+    assert "nothing composed" in result["skipped"][0]["reason"]
 
 
 def test_an_authored_page_is_held_to_the_same_catalog(doc, page, catalog):

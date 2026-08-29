@@ -83,15 +83,14 @@ def test_figma_intelligence_is_registered_from_section_101():
     other. Registering it is deliberate, not an off-by-one."""
     extra = set(AGENT_REGISTRY) - set(SECTION_27_AGENTS)
     # Beyond §27's eighteen: figma_intelligence (§101), two the rebuild added —
-    # a2ui_patterns (§34) and memory (§20/§23, a derivation service that owns
+    # a2ui_pages (§34) and memory (§20/§23, a derivation service that owns
     # sections rather than an agent that is ever prompted) — and smith itself.
     #
     # Smith is not a specialist; §6 makes it the architect the specialists
     # answer to. It is in the registry anyway so that its writes go through the
     # same check_capability as theirs. A coordinator exempt from the boundary
     # check is how §28's "uncontrolled swarm" gets in wearing a badge.
-    assert extra == {"figma_intelligence", "a2ui_patterns", "a2ui_pages",
-                     "memory", "smith"}
+    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
@@ -425,15 +424,15 @@ def test_nested_non_reference_text_is_left_alone(svc):
 
 
 # ---------------------------------------------------------------------------
-# §34 — A2UI authors pattern templates, and they must compose
+# §34 — A2UI composes page trees, and they must render
 # ---------------------------------------------------------------------------
 
 def _template_result(root: dict, pattern: str = "entity_list") -> AgentResult:
     return AgentResult(
-        task_id="t", agent="a2ui_patterns", status="completed",
+        task_id="t", agent="a2ui_pages", status="completed",
         proposals=[ArtifactProposal(
-            section="patternTemplates", natural_key=pattern,
-            body={"pattern": pattern, "root": root})],
+            section="pageLayouts", natural_key="PAGE-001",
+            body={"page": "PAGE-001", "pattern": pattern, "root": root})],
     )
 
 
@@ -481,12 +480,9 @@ def test_a2ui_is_scoped_but_can_see_the_intent_it_designs_for():
     certified a real gap as correct: it was designing pages without ever
     seeing the requirements behind them or the entities its forms are made of.
     Scoped still, but scoped to the job rather than below it."""
-    for agent in ("a2ui_patterns", "a2ui_pages"):
-        cap = AGENT_REGISTRY[agent]
-        assert "*" not in cap.reads, agent
-        assert {"requirements", "pages", "data"} <= cap.reads, agent
-    # Still not everything: it composes UI, it does not reason about endpoints.
-    assert "apis" not in AGENT_REGISTRY["a2ui_patterns"].reads
+    cap = AGENT_REGISTRY["a2ui_pages"]
+    assert "*" not in cap.reads
+    assert {"requirements", "pages", "data"} <= cap.reads
 
 
 # ---------------------------------------------------------------------------

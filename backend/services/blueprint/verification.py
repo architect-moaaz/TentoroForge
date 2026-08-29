@@ -53,7 +53,7 @@ EDGES: tuple[str, ...] = (
     "Navigation↔Page",
     "Page↔Workflow",
     "Widget↔DataSource",
-    "Page↔PatternTemplate",
+    "Page↔Layout",
 )
 
 #: What this module does *not* establish, so nobody mistakes a green report for
@@ -72,9 +72,8 @@ SECTION_OWNER: dict[str, str] = {
     "modules": "solution_architecture",
     "navigation": "solution_architecture",
     "pages": "page_design",
-    "components": "page_design",
+    "components": "frontend",
     "widgets": "page_design",
-    "uiRegistry": "page_design",
     "designSystem": "accessibility",
     "data.entities": "data_model",
     "data.relationships": "data_model",
@@ -260,39 +259,40 @@ def check_page_permission(doc: dict) -> list[Finding]:
     return out
 
 
-def check_page_pattern_template(doc: dict) -> list[Finding]:
-    """A page can only be rendered if its pattern has a template behind it.
+def check_page_layout(doc: dict) -> list[Finding]:
+    """A page can only be rendered if something composed a tree for it.
 
-    Two ways this breaks, and both are silent without the edge. A page declares
-    a pattern nobody authored a template for, so the frontend projection emits
-    nothing for it — and eleven pages out of eighteen looks exactly like
-    success. Or a template names a component the registry does not have, which
-    only surfaces when something tries to render it.
+    Two ways this breaks, and both are silent without the edge. A page that
+    nothing composed projects to nothing — and eleven pages out of eighteen
+    looks exactly like success. Or a composed tree names a component the
+    registry does not have, which only surfaces when something tries to
+    render it.
+
+    Used to read `patternTemplates`, one template per pattern, and ask whether
+    each page's pattern had one. Both the section and the agent that authored
+    it are gone: A2UI composes per page, so the question is now asked of the
+    page itself.
     """
     from services.blueprint.page_planner import load_catalog, validate_template
 
-    templates = {t.get("pattern"): t for t in _live(doc.get("patternTemplates"))}
+    authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
     out: list[Finding] = []
 
     for page in _live(doc.get("pages")):
-        pattern = page.get("pattern")
-        if not pattern:
-            continue
-        if pattern not in templates:
+        if page.get("id") not in authored:
             out.append(Finding(
-                "Page↔PatternTemplate", section="pages",
+                "Page↔Layout", section="pages",
                 artifact_id=page.get("id"),
-                detail=f"pattern {pattern!r} has no template, so the page "
-                       f"cannot be projected",
+                detail="no composed tree, so the page cannot be projected",
             ))
 
-    if templates:
+    if authored:
         catalog = load_catalog()
-        for pattern, template in sorted(templates.items()):
-            for error in validate_template(template, catalog):
+        for page_id, layout in sorted(authored.items()):
+            for error in validate_template(layout, catalog):
                 out.append(Finding(
-                    "Page↔PatternTemplate", section="patternTemplates",
-                    artifact_id=pattern, detail=error,
+                    "Page↔Layout", section="pageLayouts",
+                    artifact_id=page_id, detail=error,
                 ))
     return out
 
@@ -367,13 +367,36 @@ def check_workflow_api(doc: dict) -> list[Finding]:
 
 
 def check_design_system(doc: dict) -> list[Finding]:
-    """§38 — components should come from the registry, not be invented."""
-    registry = set(doc.get("uiRegistry", {}).get("components") or [])
+    """§38 — the design language every page is composed against must exist.
+
+    Was a registry check: `components` carried a `registryKey` and `uiRegistry`
+    listed the keys, so a component could be caught naming a key nobody
+    declared. Both sections were authored by `page_designs`, which is gone —
+    the registry was a list of names that were never code, and the edge was
+    checking one LLM section against another.
+
+    The failure worth catching is upstream of that and was never covered: a
+    `designSystem` too thin to compose against. One run produced 174 bytes of
+    it, `project_design_tokens` emitted almost no variables, every page was
+    composed against a palette that wasn't there, and the app came out
+    unstyled. Nothing reported it, because a missing token is not an error
+    anywhere downstream — it is just absence.
+    """
+    design = doc.get("designSystem") or {}
+    if not design:
+        return [Finding("Design↔DesignSystem", section="designSystem",
+                        detail="no design system, so every page is composed "
+                               "against a language that does not exist")]
+
+    # The groups `project_design_tokens` reads. A group that is missing does
+    # not fail the projection; it silently emits fewer variables.
     return [
-        Finding("Design↔DesignSystem", section="components", artifact_id=c.get("id"),
-                detail=f"registryKey {c['registryKey']!r} is not in the UI registry")
-        for c in _live(doc.get("components"))
-        if c.get("registryKey") and c["registryKey"] not in registry
+        Finding("Design↔DesignSystem", section="designSystem",
+                artifact_id=group,
+                detail=f"{group!r} is missing, so nothing projects into "
+                       f"tokens.css for it")
+        for group in ("colors", "spacing", "typography", "radius")
+        if not (design.get(group) or {})
     ]
 
 
@@ -604,7 +627,7 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Blueprint↔Implementation": check_blueprint_implementation,
     "Navigation↔Page": check_navigation_page,
     "Page↔Workflow": check_page_workflow,
-    "Page↔PatternTemplate": check_page_pattern_template,
+    "Page↔Layout": check_page_layout,
     "Widget↔DataSource": check_widget_datasource,
 }
 

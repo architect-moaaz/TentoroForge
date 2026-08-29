@@ -16,7 +16,6 @@ DOC = {
     "designSystem": {"colors": {"primary": "#125E8A"},
                      "informationDensity": "comfortable",
                      "navigationApproach": "sidebar"},
-    "uiRegistry": ["EntityTable", "MetricCard"],
 }
 
 
@@ -54,7 +53,9 @@ def test_every_call_carries_the_page_set_so_pages_know_their_siblings():
     ctx = shared_context(DOC)
     assert "/articles/[id]" in ctx          # the set
     assert "informationDensity" in ctx      # §37
-    assert "EntityTable" in ctx             # §38's registry to reuse
+    # `uiRegistry` used to ride along here — names for components that were
+    # never code, authored by a node that no longer exists.
+    assert "uiRegistry" not in ctx
 
 
 def test_a_page_below_the_floor_costs_that_page_only():

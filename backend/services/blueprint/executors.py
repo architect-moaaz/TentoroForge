@@ -661,7 +661,7 @@ def context_for(doc: dict, agent: str) -> dict:
 
     if "*" in cap.reads:
         readable |= set(ARTIFACT_SECTIONS) | {
-            "data", "navigation", "designSystem", "uiRegistry", "security",
+            "data", "navigation", "designSystem", "security",
             "runtime", "database", "deployment", "codeMap",
         }
     else:
@@ -763,22 +763,6 @@ NODE_TASKS: dict[str, str] = {
         "pipeline all day and a customer buying once a year want different "
         "densities and different levels of visual quiet. Say why each choice "
         "follows from the product, not from taste."
-    ),
-    "patterns": (
-        "Author one pattern template for each distinct `pattern` value used by "
-        "the pages in this Blueprint — no more. A template is the structure of "
-        "that kind of page, not any particular page: it uses placeholders where "
-        "a page's own entity, columns, actions and widgets belong, and the "
-        "planner fills them in deterministically for every page that shares the "
-        "pattern.\n\n"
-        "Compose only from the component catalog below. Composition is "
-        "positional `children` — there are no named slots. Where a component "
-        "declares a childContract, honour it exactly.\n\n"
-        "Do not include application chrome (AppShell, sidebar, top bar): that "
-        "belongs to the layout, and a template describes the page body.\n\n"
-        "Make it good. Each template is authored once and every page of that "
-        "pattern inherits it, so structure, hierarchy and rhythm are worth the "
-        "effort here in a way they never are per page."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
@@ -1069,22 +1053,6 @@ def build_prompt(
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
 
-    if spec.agent == "a2ui_patterns":
-        # The catalog is the whole point of this agent: it authors structure
-        # against what exists, not against what it remembers existing. The
-        # digest keeps the prompt affordable; validation still runs against the
-        # complete schemas.
-        from services.blueprint.page_planner import (
-            catalog_digest, load_catalog, pattern_page_facts, patterns_in_use,
-        )
-
-        system += CATALOG_ADDENDUM.format(
-            catalog=catalog_digest(load_catalog()),
-            patterns=", ".join(patterns_in_use(doc)) or "(none declared)",
-            page_facts=pattern_page_facts(doc) or "(no pages declare a pattern)",
-            placeholders=", ".join(PLACEHOLDER_VOCABULARY),
-            repeats=", ".join(REPEAT_SOURCES),
-        )
     if inline_schema:
         system += SCHEMA_ADDENDUM.format(
             schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
@@ -1256,8 +1224,6 @@ EFFORT_BY_NODE: dict[str, str] = {
     # Structure over work already decided; the shape is tightly constrained.
     "ux_architecture": "medium",
     "design_system": "medium",
-    "page_designs": "medium",
-    "patterns": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     "testing": "medium",
     # A short list of named third parties.

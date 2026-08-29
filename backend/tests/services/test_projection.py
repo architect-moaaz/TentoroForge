@@ -201,7 +201,8 @@ def _frontend_doc():
             "actions": ["create_candidate", "search_candidates"],
         }],
         "widgets": [],
-        "patternTemplates": [{
+        "pageLayouts": [{
+            "page": "PAGE-001",
             "pattern": "entity_list", "requires": {"primaryEntity": True},
             "root": {"type": "Stack", "props": {}, "children": [
                 {"type": "Heading", "props": {"content": "$entity.plural"},
@@ -285,8 +286,8 @@ def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):
     project_frontend(doc, tmp_path / "app")
     assert (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
 
-    # The pattern's template is withdrawn; the page can no longer be planned.
-    doc["patternTemplates"] = []
+    # The composed tree is withdrawn; the page can no longer be planned.
+    doc["pageLayouts"] = []
     result = project_frontend(doc, tmp_path / "app")
     assert result["pages"] == 0
     assert result["removed"] == ["candidates.json"]

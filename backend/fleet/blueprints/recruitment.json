@@ -114,52 +114,6 @@
       ]
     }
   ],
-  "patternTemplates": [
-    {
-      "pattern": "entity_list",
-      "rationale": "A named collection with its create action and a sortable table.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [],
-            "props": {
-              "content": "$entity.plural",
-              "level": 1
-            },
-            "type": "Heading"
-          },
-          {
-            "children": [
-              {
-                "children": [],
-                "props": {
-                  "label": "$item.label"
-                },
-                "repeat": "primaryActions",
-                "type": "Button"
-              }
-            ],
-            "props": {},
-            "type": "Cluster"
-          },
-          {
-            "children": [],
-            "props": {
-              "columns": "$columns",
-              "rows": "{{rows}}"
-            },
-            "type": "TableSortable"
-          }
-        ],
-        "props": {},
-        "type": "Stack"
-      },
-      "status": "APPROVED"
-    }
-  ],
   "permissions": [
     {
       "action": "create",
@@ -237,5 +191,64 @@
         "kind": "manual"
       }
     }
-  ]
+  ],
+  "pageLayouts": [
+    {
+      "page": "PAGE-001",
+      "root": {
+        "children": [
+          {
+            "children": [],
+            "props": {
+              "content": "$entity.plural",
+              "level": 1
+            },
+            "type": "Heading"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "props": {
+                  "label": "$item.label"
+                },
+                "repeat": "primaryActions",
+                "type": "Button"
+              }
+            ],
+            "props": {},
+            "type": "Cluster"
+          },
+          {
+            "children": [],
+            "props": {
+              "columns": "$columns",
+              "rows": "{{rows}}"
+            },
+            "type": "TableSortable"
+          }
+        ],
+        "props": {},
+        "type": "Stack"
+      }
+    }
+  ],
+  "designSystem": {
+    "colors": {
+      "primary": "#125E8A",
+      "surface": "#FFFFFF",
+      "textPrimary": "#1A1A1A"
+    },
+    "spacing": {
+      "unit": "4px",
+      "md": "12px"
+    },
+    "typography": {
+      "baseSize": "16px",
+      "weightRegular": "400"
+    },
+    "radius": {
+      "md": "10px"
+    }
+  }
 }

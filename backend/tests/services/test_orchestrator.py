@@ -253,10 +253,10 @@ def test_a_node_with_unmet_dependencies_is_skipped_not_attempted(svc):
             raise RuntimeError("page agent is down")
         return page_agent_result(spec)
 
-    report = run(svc, executor, plan=["page_contracts", "page_designs"], max_attempts=1)
+    report = run(svc, executor, plan=["page_contracts", "page_layouts"], max_attempts=1)
     assert "page_contracts" in report.failed
-    assert "page_designs" in report.skipped
-    assert "page_designs" not in attempted
+    assert "page_layouts" in report.skipped
+    assert "page_layouts" not in attempted
 
 
 def test_failed_tasks_are_retried(svc):
@@ -289,9 +289,9 @@ def test_low_confidence_blocks_the_node_and_its_dependents(svc):
         r.confidence = 0.2
         return r
 
-    report = run(svc, unsure, plan=["page_contracts", "page_designs"])
+    report = run(svc, unsure, plan=["page_contracts", "page_layouts"])
     assert "page_contracts" in report.blocked
-    assert "page_designs" in report.skipped
+    assert "page_layouts" in report.skipped
     assert svc.doc.get("pages", []) == []
 
 
@@ -459,7 +459,7 @@ def test_a_rejected_proposal_is_re_asked_with_the_reason(svc):
 
     report = RunReport()
     _run_agent_subject(
-        svc, executor, "patterns", DAG["patterns"], "",
+        svc, executor, "page_layouts", DAG["page_layouts"], "",
         max_attempts=2, commit=False, user_request="", report=report,
     )
     assert len(seen) == 2, "the subject must actually be retried"
@@ -545,7 +545,7 @@ def test_dropping_a_frame_node_does_not_hide_what_sits_behind_it(ats):
     that are dropped."""
     plan = incremental_plan(ats, ["PAGE-009"])
     assert "design_system" not in plan
-    assert "patterns" in plan
+    assert "page_layouts" in plan
 
 
 def test_the_plan_still_reaches_the_implementation(ats):
@@ -617,9 +617,15 @@ def test_a_plan_is_seeded_by_what_changed_not_by_what_it_touches(ats):
 
 
 def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
-    """A component change still has to reach composition and the projections."""
-    plan = incremental_plan(ats, ["CMP-033"])
-    for required in ("patterns", "frontend", "integration", "verification", "preview"):
+    """A page change still has to reach composition and the projections.
+
+    Anchored on a component before: `components` was authored by `page_designs`
+    and read by the composer. Nothing authors it now — the frontend projection
+    derives it from the trees A2UI composed — so a component id is no longer a
+    change anything upstream can respond to.
+    """
+    plan = incremental_plan(ats, ["PAGE-009"])
+    for required in ("page_layouts", "frontend", "integration", "verification", "preview"):
         assert required in plan, required
 
 
@@ -635,11 +641,11 @@ def test_a_skipped_node_records_which_dependency_stopped_it(svc):
     def fails(spec):
         raise RuntimeError("no")
 
-    report = run(svc, fails, plan=["page_contracts", "page_designs"],
+    report = run(svc, fails, plan=["page_contracts", "page_layouts"],
                  max_attempts=1)
     # `skipped` stays node keys, so membership tests keep working.
-    assert report.skipped == ["page_designs"]
-    assert report.skipped_because["page_designs"] == "page_contracts"
+    assert report.skipped == ["page_layouts"]
+    assert report.skipped_because["page_layouts"] == "page_contracts"
 
 
 def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
