@@ -319,12 +319,20 @@ def build_requirement(root: Path, kind: str = "dashboard",
     if guidance:
         parts.append("\n" + guidance)
     parts.append(
+        # "a trend" cost every page an attempt and a chart it did not need.
+        # The A2UI server reads the requirement for words that name a chart —
+        # chart, graph, trend, plot, over time — and rejects any payload
+        # without one (tools/a2ui-mcp/checks.py, _CAPABILITIES). The sentence
+        # forbidding invented trends was itself read as asking for a trend, so
+        # a two-entity plant tracker got a bar chart on all three pages,
+        # including its create form. "proportion" says the same thing and
+        # names no component.
         "\nEvery number, row and category you show must come from the "
         "entities and columns listed in the domain context, and every action "
-        "must name one of its workflows. Do not write a number, a trend or a "
-        "comparison as a literal — bind it, or leave it out. Do not give a "
-        "control an action the domain context does not list. Inventing either "
-        "produces a screen that looks finished and is false."
+        "must name one of its workflows. Do not write a number, a proportion "
+        "or a comparison as a literal — bind it, or leave it out. Do not give "
+        "a control an action the domain context does not list. Inventing "
+        "either produces a screen that looks finished and is false."
     )
     return "\n".join(parts)
 

@@ -207,6 +207,22 @@ def load_contracts(path: Path | str | None = None) -> dict:
 #: marks it required, for the same reason.
 _COMPOSE_REQUIRED: dict[str, frozenset[str]] = {
     "List": frozenset({"items"}),
+    # A chart with no data is the falsity the closing rule warns about, drawn
+    # instead of written. Three shipped on one run carrying chartType, series,
+    # xKey and showGrid and no `data` at all — describing a dataset's columns
+    # without ever naming a dataset.
+    #
+    # Nothing reported it, because ChartNode coerces a missing `data` to `[]`
+    # (packages/schema/src/nodes/charts.ts) so the chart renders empty rather
+    # than invalid. That coercion is the render contract's business — an empty
+    # chart while data loads is legitimate. What it cannot distinguish is "not
+    # loaded yet" from "never bound", so the compose contract has to say the
+    # prop must be there.
+    "Chart": frozenset({"data"}),
+    "Sparkline": frozenset({"data"}),
+    "Heatmap": frozenset({"data"}),
+    # Gauge reads a single number rather than a series.
+    "Gauge": frozenset({"value"}),
 }
 
 

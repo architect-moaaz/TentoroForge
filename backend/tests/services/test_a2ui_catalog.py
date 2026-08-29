@@ -220,3 +220,33 @@ def test_the_real_bindings_are_still_described_as_data():
             if "properties" in b][0]
     assert "description" in body["properties"]["data"]
     assert "items" not in body["properties"]["data"]
+
+
+# ---------------------------------------------------------------------------
+# A chart has to name its data.
+#
+# One run shipped three charts carrying chartType, series, xKey and showGrid
+# and no `data` at all — a dataset's columns described without ever naming a
+# dataset. ChartNode coerces a missing `data` to [] so the chart renders empty
+# rather than invalid, which is right for the renderer and blind for everyone
+# else: it cannot tell "still loading" from "never bound".
+# ---------------------------------------------------------------------------
+
+def _required(name: str) -> set:
+    from services.a2ui_catalog import build_a2ui_catalog
+    body = build_a2ui_catalog()["components"][name]["allOf"][2]
+    return set(body.get("required") or ())
+
+
+def test_every_chart_must_be_given_its_data():
+    assert "data" in _required("Chart")
+    assert "data" in _required("Sparkline")
+    assert "data" in _required("Heatmap")
+    # A gauge reads one number rather than a series.
+    assert "value" in _required("Gauge")
+
+
+def test_requiring_data_does_not_disturb_the_charts_own_props():
+    """`chartType` and `series` are required by the Zod contract itself; the
+    compose contract adds to that list rather than replacing it."""
+    assert {"chartType", "series"} <= _required("Chart")

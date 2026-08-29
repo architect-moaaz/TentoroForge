@@ -837,3 +837,19 @@ def test_the_closing_rule_scopes_actions_as_well_as_numbers(tmp_path):
 
     req = build_requirement(tmp_path, "entity_list", "/plants", "")
     assert "every action must name one of its workflows" in req
+
+
+def test_the_closing_rule_does_not_read_as_a_chart_request(tmp_path):
+    """The A2UI server rejects a payload with no chart when the requirement
+    names one (tools/a2ui-mcp/checks.py, _CAPABILITIES). "Do not write a
+    number, a trend or a comparison as a literal" was read as asking for a
+    trend, so a two-entity plant tracker got a bar chart on all three pages,
+    including its create form, and every page lost a retry to it.
+    """
+    import re
+    from services.a2ui_authority import build_requirement
+
+    req = build_requirement(tmp_path, "entity_list", "/plants", "").lower()
+    for word in ("chart", "graph", "trend", "distribution", "histogram",
+                 "funnel", "sparkline", "plot", "over time"):
+        assert not re.search(rf"\b{re.escape(word)}\b", req), word
