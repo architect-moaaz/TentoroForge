@@ -855,3 +855,41 @@ def test_a_layout_with_no_carried_sources_still_derives_them(doc, page, catalog)
     result = pp.plan_pages(doc, catalog)
     assert list(result["planned"]) == ["PAGE-001"]
     assert result["planned"]["PAGE-001"]["dataSources"]
+
+
+def test_a_carried_source_naming_an_entity_id_is_resolved_to_its_name(
+        doc, page, catalog):
+    """The engine resolves a source by entity NAME. The composer's binder
+    writes "Plant" because its registry is keyed by name; an authoring agent
+    writes "ENTITY-001" because that is how a page references an entity
+    everywhere else in the Blueprint. Carried through unnormalised, the second
+    shipped a page whose every source named ENTITY-001 — the engine resolved
+    nothing, returned [], and the page rendered its empty state over a
+    database with rows in it."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "dataSources": [{"name": "plants", "entity": "ENTITY-001",
+                         "op": "list"}],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []}]},
+    }]
+    planned = pp.plan_pages(doc, catalog)["planned"]["PAGE-001"]
+    assert planned["dataSources"][0]["entity"] == "JobRole"
+
+
+def test_a_carried_source_already_naming_the_entity_is_left_alone(
+        doc, page, catalog):
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "dataSources": [{"name": "plants", "entity": "JobRole", "op": "list"}],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []}]},
+    }]
+    planned = pp.plan_pages(doc, catalog)["planned"]["PAGE-001"]
+    assert planned["dataSources"][0]["entity"] == "JobRole"

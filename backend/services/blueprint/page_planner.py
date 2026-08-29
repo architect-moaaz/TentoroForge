@@ -973,8 +973,28 @@ def plan_page(doc: dict, page: dict, template: dict,
     # The composer's binder already resolved this tree's fetches, in the pass
     # that rewrote its pointers. Prefer them; derive only for a layout that
     # carries none. See `data_sources` for what re-deriving costs.
-    carried = [dict(x) for x in (template.get("dataSources") or [])
-               if isinstance(x, dict) and x.get("name")]
+    # ONE CANONICAL FORM FOR `entity`. The engine resolves a source by entity
+    # NAME (data-engine-bridge calls engine.query(entity, …)), and both forms
+    # legitimately arrive here: the composer's binder writes "Plant" because
+    # its registry is keyed by name, while an authoring agent writes
+    # "ENTITY-001" because that is how a page references an entity everywhere
+    # else in the Blueprint.
+    #
+    # Carrying them through unnormalised shipped a /plants whose every source
+    # named ENTITY-001. The engine resolved no such entity, returned [], and
+    # the page rendered its empty state over a database with rows in it — the
+    # conditionals were right, the data was wrong. Only reachable once carried
+    # sources became the default, which is the change that was meant to stop
+    # exactly this kind of divergence.
+    by_id = {e.get("id"): e.get("name") for e in _entities(doc).values()
+             if e.get("id") and e.get("name")}
+    carried = []
+    for x in (template.get("dataSources") or []):
+        if not isinstance(x, dict) or not x.get("name"):
+            continue
+        x = dict(x)
+        x["entity"] = by_id.get(x.get("entity"), x.get("entity"))
+        carried.append(x)
     sources = carried or (data_sources(doc, page, entity, root) if root else [])
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
     root = gate_states(root, primary) if root else root
