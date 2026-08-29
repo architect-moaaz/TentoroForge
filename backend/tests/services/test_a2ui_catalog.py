@@ -269,3 +269,17 @@ def test_components_with_one_obvious_action_are_left_alone():
     from services.a2ui_catalog import build_a2ui_catalog
 
     assert "anyOf" not in build_a2ui_catalog()["components"]["Text"]["allOf"][2]
+
+
+def test_the_layout_primitives_say_which_way_they_go():
+    """Stack and Row have no component file, so the summary extractor found no
+    doc comment and the manifest fell back to "Stack (layout)". A2UI could see
+    Row, needed the vertical counterpart, and wrote `Column` — on almost every
+    page of every run, costing an attempt each time."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    comps = build_a2ui_catalog()["components"]
+    stack = comps["Stack"]["allOf"][2]["description"]
+    assert "Vertical" in stack
+    assert "Column" in stack        # names the thing it keeps reaching for
+    assert "counterpart is Stack" in comps["Row"]["allOf"][2]["description"]

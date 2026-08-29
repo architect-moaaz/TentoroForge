@@ -208,6 +208,30 @@ def load_contracts(path: Path | str | None = None) -> dict:
 #: Components that must declare at least one of a set — the prop is not fixed,
 #: but having none of them is meaningless. Emitted as `anyOf`, so the schema
 #: names the alternatives instead of only refusing what is not on the list.
+#: Layout primitives have no component file, so `_extract_summary` finds no
+#: doc comment and the manifest falls back to "Stack (layout)" — a description
+#: that says nothing. Every page of every run then spent an attempt on
+#: `unknown component "Column"`: A2UI could see `Row`, needed the vertical
+#: counterpart, and wrote the obvious name for it. Nothing anywhere said Stack
+#: was that counterpart.
+#:
+#: The builder is the only place these can be described, because there is no
+#: file to put a doc comment in.
+_STRUCTURAL_SUMMARIES: dict[str, str] = {
+    "Stack": ("Vertical layout — children flow top to bottom. This is the "
+              "column primitive; there is no 'Column' component. Use "
+              "`direction: horizontal` to lay out in a row instead."),
+    "Row": ("Horizontal layout — children flow left to right. The vertical "
+            "counterpart is Stack."),
+    "Grid": ("Two-dimensional layout — children flow into `columns` tracks "
+             "and wrap. For a single column use Stack, for a single row Row."),
+    "Container": ("Page-width wrapper — centres its children and applies the "
+                  "page gutter. Holds one layout, usually a Stack."),
+    "Section": ("A titled region of a page — a heading and its content, as "
+                "one block. Holds one layout, usually a Stack."),
+}
+
+
 _COMPOSE_ONE_OF: dict[str, tuple[str, ...]] = {
     # A button that neither runs a workflow, nor navigates, nor submits its
     # form, nor handles a click, is a label with a border.
@@ -393,7 +417,8 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
         present = [c for c in choices if c in props]
         if present:
             body["anyOf"] = [{"required": [c]} for c in present]
-    summary = (entry.get("summary") or "").strip()
+    summary = (_STRUCTURAL_SUMMARIES.get(name)
+               or (entry.get("summary") or "")).strip()
     if summary:
         body["description"] = summary[:300]
 
