@@ -341,7 +341,14 @@ def _prop_schema(name: str, spec: dict) -> dict:
     String-ish props use DynamicString so the model can bind them to the data
     model; the binder rewrites those into Forge's `{{source.field}}` form.
     """
-    if name in _BINDING_PROPS:
+    # A binding prop by name AND by shape. `rows`, `columns` and `items` name
+    # data on a Table or a List and something else entirely elsewhere:
+    # `Textarea.rows` is how many lines to show and `Grid.columns` is how many
+    # tracks to lay out, both integers. Describing those as "data for this
+    # component" invited a binding where a number belongs.
+    if name in _BINDING_PROPS and str(spec.get("type") or "").lower() in (
+        "", "array", "object",
+    ):
         return {"description": f"{name} — data for this component."}
     raw = str(spec.get("type") or "").lower()
     # Enum members come from the contract, never from a list maintained here.
@@ -368,6 +375,25 @@ def _prop_schema(name: str, spec: dict) -> dict:
         return {"type": "boolean"}
     if raw in ("number", "integer"):
         return {"type": "number"}
+    if raw == "object":
+        # AN OBJECT IS NOT A STRING. Every branch below handled a scalar or an
+        # array and everything else fell through to DynamicString, so
+        # `Table.emptyAction` — {label, navigate?, workflow?} in Zod — was
+        # described to A2UI as text. A2UI wrote "New survey", exactly what the
+        # catalog asked for, and our own validator rejected it: the page did
+        # not ship and the application lost its list screen.
+        #
+        # The shape when the contract carries one, and a bare object when it
+        # does not. "An object, keys unspecified" is a smaller claim than the
+        # truth and a much smaller error than "a string".
+        shape = spec.get("properties")
+        if isinstance(shape, dict) and shape:
+            out: dict[str, Any] = {"type": "object", "properties": shape}
+            req = spec.get("required")
+            if isinstance(req, list) and req:
+                out["required"] = list(req)
+            return out
+        return {"type": "object"}
     if raw == "array":
         # The item shape when the merge supplied one, so a required nested
         # field reaches the composer instead of being discovered by our

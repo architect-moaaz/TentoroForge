@@ -296,3 +296,29 @@ def test_row_says_repeated_records_belong_to_the_list_components():
     row = build_a2ui_catalog()["components"]["Row"]["allOf"][2]["description"]
     assert "not one row per record" in row
     assert "Table.rows" in row and "List.items" in row
+
+
+def test_an_object_prop_is_described_as_an_object():
+    """`Table.emptyAction` is {label, navigate?, workflow?} in Zod. Every
+    branch of _prop_schema handled a scalar or an array and everything else
+    fell through to DynamicString, so the catalog told A2UI it was text. A2UI
+    wrote "New survey" — exactly what it was asked for — our own validator
+    rejected it, and the application lost its list screen."""
+    from services.a2ui_catalog import build_a2ui_catalog
+
+    spec = (build_a2ui_catalog()["components"]["Table"]["allOf"][2]
+            ["properties"]["emptyAction"])
+    assert spec.get("type") == "object"
+    assert "$ref" not in spec
+
+
+def test_an_object_with_a_known_shape_carries_it():
+    from services.a2ui_catalog import _prop_schema
+
+    out = _prop_schema("emptyAction", {
+        "type": "object",
+        "properties": {"label": {"type": "string"}},
+        "required": ["label"],
+    })
+    assert out["properties"] == {"label": {"type": "string"}}
+    assert out["required"] == ["label"]
