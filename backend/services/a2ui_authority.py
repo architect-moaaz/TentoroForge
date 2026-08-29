@@ -202,8 +202,18 @@ def registry_from_blueprint(doc: dict) -> dict:
                      "columns": cols}
     return {
         "entities": out,
-        "workflows": [w.get("name") for w in doc.get("workflows") or []
-                      if w.get("name")],
+        # Identity, not just a label. The generated route is
+        # `/api/workflows/{id}/execute` (api_derivation._workflow_path), so the
+        # id is what a Button or a Form has to carry; a name reaches nothing.
+        # `launchedFrom` is the workflow agent's own declaration of which pages
+        # start it, which is what scopes this list per page.
+        "workflows": [
+            {"id": w.get("id"), "name": w.get("name"),
+             "purpose": w.get("purpose") or "",
+             "trigger": (w.get("trigger") or {}).get("kind") or "",
+             "launchedFrom": list(w.get("launchedFrom") or [])}
+            for w in doc.get("workflows") or [] if w.get("id")
+        ],
     }
 
 
@@ -243,11 +253,16 @@ def registry_for_binder(root: Path) -> dict:
     # Workflow names, so the binder can tell a real submit target from an
     # invented one. Read from the same plan, for the same reason as the
     # entities: a second source of truth here is how names start to drift.
-    flows: list[str] = []
+    flows: list[dict] = []
     for w in plan.get("workflows") or []:
         nm = w.get("name") if isinstance(w, dict) else w
-        if nm:
-            flows.append(str(nm))
+        if not nm:
+            continue
+        wid = w.get("id") if isinstance(w, dict) else None
+        # The plan predates workflow ids; falling back to the name keeps this
+        # path validating exactly what it validated before.
+        flows.append({"id": str(wid or nm), "name": str(nm),
+                      "purpose": "", "trigger": "manual", "launchedFrom": []})
 
     return {"entities": out, "workflows": flows}
 
@@ -305,9 +320,11 @@ def build_requirement(root: Path, kind: str = "dashboard",
         parts.append("\n" + guidance)
     parts.append(
         "\nEvery number, row and category you show must come from the "
-        "entities and columns listed in the domain context. Do not write a "
-        "number, a trend or a comparison as a literal — bind it, or leave it "
-        "out. Inventing one produces a screen that looks finished and is false."
+        "entities and columns listed in the domain context, and every action "
+        "must name one of its workflows. Do not write a number, a trend or a "
+        "comparison as a literal — bind it, or leave it out. Do not give a "
+        "control an action the domain context does not list. Inventing either "
+        "produces a screen that looks finished and is false."
     )
     return "\n".join(parts)
 
@@ -382,13 +399,23 @@ def build_composition_guidance(root: Path,
     return "\n".join(lines)
 
 
-def build_domain_context(root: Path, registry: dict | None = None) -> str:
-    """The entities and columns a composition may bind to.
+def build_domain_context(root: Path, registry: dict | None = None,
+                         page_id: str = "") -> str:
+    """The entities, columns and workflows a composition may bind to.
 
     Came back empty for every Blueprint-pipeline page — it read plan.json
     through registry_for_binder, the same missing file that emptied the
     registry. A composer told to bind only what exists, and handed nothing,
     has nothing to bind.
+
+    Then it listed entities and columns and nothing else, which is nouns with
+    no verbs. A composed /plants came back with no button of any kind for an
+    app whose description says marking a plant watered is the only action —
+    correctly, on what it was given: the job asks for "what they do to a
+    record", the closing rule says do not invent, and `Record Watering Today`
+    was sitting in the registry one key over, unmentioned. A2UI knew the action
+    existed (the page purpose says so in prose) and had no id to put in
+    `Button.workflow`, so it left the button out.
     """
     reg = registry if registry is not None else registry_for_binder(root)
     lines = []
@@ -398,13 +425,39 @@ def build_domain_context(root: Path, registry: dict | None = None) -> str:
             for c in ent.get("columns") or []
         )
         lines.append(f"- {name}: {cols}")
-    if not lines:
+    flows = [w for w in (reg.get("workflows") or []) if isinstance(w, dict)]
+    # Scoped by two fields the workflow agent already declares: which pages
+    # launch it, and how it is triggered. `trigger.kind` is a required enum —
+    # manual | event | schedule | condition — and only `manual` is something a
+    # user starts. This app declares four workflows and all four name both
+    # pages in `launchedFrom`; listing them unfiltered offers a button for
+    # "Evaluate Plant Watering Status" (a derivation that runs on every read)
+    # and one for "Seed Plant Catalogue" (database initialisation).
+    mine = [w for w in flows
+            if page_id and page_id in (w.get("launchedFrom") or [])
+            and w.get("trigger") == "manual"]
+    if not lines and not mine:
         return ""
-    return (
-        "The application's real entities and columns. Every number and every "
-        "row on this screen comes from these — do not invent fields:\n"
-        + "\n".join(lines)
-    )
+
+    parts = []
+    if lines:
+        parts.append(
+            "The application's real entities and columns. Every number and "
+            "every row on this screen comes from these — do not invent "
+            "fields:\n" + "\n".join(lines)
+        )
+    if mine:
+        parts.append(
+            "\nThe workflows this screen launches. An action on this screen "
+            "runs one of these and nothing else — put the id in `workflow` on "
+            "the Button or Form that runs it:\n"
+            + "\n".join(
+                f"- {w['id']}: {w.get('name') or w['id']}"
+                + (f" — {w['purpose']}" if w.get("purpose") else "")
+                for w in mine
+            )
+        )
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------- MCP client
@@ -586,7 +639,8 @@ def compose_page_via_a2ui(
     try:
         payload = surface_provider(build_requirement(root, kind, route,
                                                      shared_context),
-                                   build_domain_context(root, registry))
+                                   build_domain_context(root, registry,
+                                                        page_id))
     except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
         logger.warning("[a2ui] %s composition failed: %s", route, exc)
         return {"applied": False, "route": route, "kind": kind,

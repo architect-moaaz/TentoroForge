@@ -209,7 +209,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # LLM node maintaining a fallback for the exception is the wrong trade.
     # A page nobody composes is now skipped and reported, not silently stubbed
     # from a template that never saw it (§76).
-    _n("page_layouts", "a2ui_pages", ("page_contracts", "design_system"),
+    # `workflows` is a dependency, not an ordering nicety: the composer is told
+    # which workflows this page launches so a button can name one, and a
+    # workflow that has not been authored yet is a button that cannot exist.
+    # Dropping the two nodes that used to sit in front of this one moved it two
+    # waves earlier, into the same wave as `workflows` — concurrent with the
+    # thing it reads.
+    _n("page_layouts", "a2ui_pages",
+       ("page_contracts", "design_system", "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),

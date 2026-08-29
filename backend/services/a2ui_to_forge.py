@@ -1041,8 +1041,15 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 resolved = _ENUM_SYNONYMS.get(k, {}).get(resolved, resolved)
             if resolved is not None:
                 props[aliases.get(k, k)] = resolved
-        if kind == "Form" and props.get("workflow"):
-            known = {str(w) for w in (binder.registry.get("workflows") or [])}
+        if kind in ("Form", "Button") and props.get("workflow"):
+            # By id, because `/api/workflows/{id}/execute` is what the renderer
+            # POSTs to. This compared against workflow *names*, so the only
+            # value that reaches a live route was the one it rejected.
+            #
+            # Buttons were never checked at all — the composer had no workflow
+            # vocabulary to get wrong, so nothing exercised it. It has one now.
+            known = {str(w.get("id")) if isinstance(w, dict) else str(w)
+                     for w in (binder.registry.get("workflows") or [])}
             if known and str(props["workflow"]) not in known:
                 # A submit pointed at a workflow that does not exist fails on
                 # click. Dropping it leaves the form for the existing post-gen
@@ -1050,7 +1057,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # already the authority on submit targets — better than this
                 # module inventing a second opinion.
                 binder.unresolved.append(
-                    f'{c.get("id")}: submit targets workflow '
+                    f'{c.get("id")}: {kind} targets workflow '
                     f'"{props["workflow"]}", which this app does not define. '
                     f"Cleared for the submit-authority pass to resolve.")
                 props.pop("workflow", None)

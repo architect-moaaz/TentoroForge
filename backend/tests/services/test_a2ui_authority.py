@@ -682,13 +682,16 @@ def test_the_registry_can_come_from_the_blueprint():
             {"name": "cadence", "type": "string",
              "enumValues": ["daily", "weekly"]},
         ]},
-    ]}, "workflows": [{"name": "Tick a habit off"}]}
+    ]}, "workflows": [{"id": "FLOW-001", "name": "Tick a habit off",
+                       "trigger": {"kind": "manual"}}]}
     reg = registry_from_blueprint(doc)
     habit = reg["entities"]["Habit"]
     assert habit["slug"] == "habits"
     assert {c["name"] for c in habit["columns"]} == {"id", "name", "cadence"}
     assert habit["columns"][2]["enum"] == ["daily", "weekly"]
-    assert reg["workflows"] == ["Tick a habit off"]
+    # Carried by id, because that is what the generated route resolves.
+    assert [w["id"] for w in reg["workflows"]] == ["FLOW-001"]
+    assert reg["workflows"][0]["name"] == "Tick a habit off"
 
 
 def test_an_entity_without_a_table_falls_back_to_its_name():
@@ -744,3 +747,93 @@ def test_the_domain_context_can_come_from_a_supplied_registry():
         {"name": "minutes", "type": "integer"}]}}}
     ctx = build_domain_context(None, reg)
     assert "Recipe" in ctx and "minutes" in ctx
+
+
+# ---------------------------------------------------------------------------
+# The domain context carries verbs, not only nouns.
+#
+# A composed /plants came back with no button of any kind, for an app whose
+# description says marking a plant watered is the only action. Correctly, on
+# what it was given: the job asks "what they do to a record", the closing rule
+# says do not invent, and the context listed entities and columns alone.
+# ---------------------------------------------------------------------------
+
+def _watering_doc():
+    return {
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Plant", "table": "plants",
+             "fields": [{"name": "id", "type": "uuid"},
+                        {"name": "name", "type": "varchar"}]},
+        ]},
+        "workflows": [
+            {"id": "FLOW-001", "name": "Record Watering Today",
+             "purpose": "Append one watering event dated today.",
+             "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-001", "PAGE-002"]},
+            {"id": "FLOW-002", "name": "Evaluate Plant Watering Status",
+             "purpose": "Derivation that runs on every read.",
+             "trigger": {"kind": "condition"},
+             "launchedFrom": ["PAGE-001", "PAGE-002"]},
+            {"id": "FLOW-004", "name": "Seed Plant Catalogue",
+             "purpose": "Database initialisation.",
+             "trigger": {"kind": "event"}, "launchedFrom": []},
+        ],
+    }
+
+
+def test_the_registry_carries_workflow_ids_not_only_names(tmp_path):
+    from services.a2ui_authority import registry_from_blueprint
+
+    flows = registry_from_blueprint(_watering_doc())["workflows"]
+    # The generated route is /api/workflows/{id}/execute, so the id is the only
+    # value a Button or Form can carry that reaches anything.
+    assert {w["id"] for w in flows} == {"FLOW-001", "FLOW-002", "FLOW-004"}
+    assert {w["trigger"] for w in flows} == {"manual", "condition", "event"}
+
+
+def test_the_page_is_told_the_workflows_it_launches(tmp_path):
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-001")
+    assert "FLOW-001" in ctx
+    assert "Record Watering Today" in ctx
+    assert "`workflow`" in ctx
+
+
+def test_only_workflows_a_user_can_start_are_offered(tmp_path):
+    """`trigger.kind` is a required enum — manual | event | schedule |
+    condition — and only `manual` is something a user starts. All three of this
+    app's page-launched workflows name the page in `launchedFrom`; offering
+    them unfiltered invites a button for a derivation that runs on every read.
+    """
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-001")
+    assert "FLOW-002" not in ctx
+    assert "FLOW-004" not in ctx
+
+
+def test_a_page_that_launches_nothing_is_told_about_no_workflows(tmp_path):
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-009")
+    assert "The workflows this screen launches" not in ctx
+    assert "Plant: id, name" in ctx
+
+
+def test_the_closing_rule_scopes_actions_as_well_as_numbers(tmp_path):
+    """Without this the context can list workflows and the requirement still
+    reads as entities-and-columns-only."""
+    from services.a2ui_authority import build_requirement
+
+    req = build_requirement(tmp_path, "entity_list", "/plants", "")
+    assert "every action must name one of its workflows" in req
