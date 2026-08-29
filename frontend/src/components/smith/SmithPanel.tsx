@@ -225,12 +225,29 @@ export function SmithPanel({
     // application yet, or the change is broad enough to rebuild. §25 — hold at
     // the definition either way, so the plan is seen before the dozen calls
     // behind it are spent.
-    if (turn.status === "handoff" || turn.status === "no_op") {
+    // `not_enabled` is the architect saying its own bootstrap seams —
+    // discovery_fn, planner_fn, generator_fn — are not wired on this backend
+    // (Migration Step 4). It is not a refusal and not an answer: the request
+    // was understood and the conversational path cannot serve it yet.
+    //
+    // Treated as a handoff so the deterministic DAG still builds the
+    // application. Leaving it as a plain reply would strand the user on a
+    // sentence about seams, with a working generator one call away and no way
+    // to reach it. The reply above still says what happened, so this is a
+    // bridge over a known gap rather than a gap papered over.
+    if (
+      turn.status === "handoff" ||
+      turn.status === "no_op" ||
+      turn.status === "not_enabled"
+    ) {
       setMessages((m) => [
         ...m,
         {
           role: "smith",
-          text: "I'll define this first, then build it once you approve.",
+          text:
+            turn.status === "not_enabled"
+              ? "My conversational planner isn't wired on this backend yet, so I'll go straight to the build engine: defining this first, then building once you approve."
+              : "I'll define this first, then build it once you approve.",
         },
       ]);
       void start({ description: text, evidence, approved: false, defineOnly: true });
