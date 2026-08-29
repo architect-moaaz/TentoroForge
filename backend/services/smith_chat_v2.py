@@ -25,6 +25,8 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+
+from services.smith.understand_ask import understand_ask
 from typing import Any, Callable
 
 from services.smith_blueprint import Blueprint
@@ -123,7 +125,12 @@ def _build_session(
         planner_fn=overrides.get("planner_fn"),
         generator_fn=overrides.get("generator_fn"),
         guards_fn=overrides.get("guards_fn"),
-        understand_ask_fn=overrides.get("understand_ask_fn"),
+        # Wired, where the other seams are still None. `run_iteration` has
+        # always handled a clarification — it short-circuits to
+        # status="asked" — and had nothing feeding it, so §16's gate existed
+        # and never fired. An override still wins, which is what keeps the
+        # handler testable without a model.
+        understand_ask_fn=overrides.get("understand_ask_fn") or understand_ask,
         iteration_move_fn=overrides.get("iteration_move_fn"),
     )
 
