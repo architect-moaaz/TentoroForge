@@ -197,6 +197,28 @@ export function SmithPanel({
     if (!text || busy || !projectId) return;
     setDraft("");
     setMessages((m) => [...m, { role: "user", text }]);
+
+    // NOTHING TO CHANGE YET, SO NOTHING TO ASK. With no Blueprint this is a
+    // first build, and `handle_chat_v2` routes those to bootstrap — whose
+    // seams are unwired on purpose, because the DAG behind this panel already
+    // builds new applications. Asking anyway spent a call to be told so, and
+    // answered a request for a survey form with an apology about a planner.
+    //
+    // The architect is asked once there is an application to reason about,
+    // which is when it has something to say.
+    const firstBuild = !blueprint || !(blueprint.pages as unknown[])?.length;
+    if (firstBuild) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "smith",
+          text: "Let me define that first — I'll show you what I understood before building anything.",
+        },
+      ]);
+      void start({ description: text, evidence, approved: false, defineOnly: true });
+      return;
+    }
+
     setThinking(true);
 
     let turn: ArchitectTurn;
