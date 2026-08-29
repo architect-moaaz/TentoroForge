@@ -1596,6 +1596,50 @@
           "root": {
             "$ref": "#/properties/patternTemplates/items/properties/root"
           },
+          "dataSources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "entity": {
+                  "type": "string"
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "get",
+                    "aggregate"
+                  ]
+                },
+                "filter": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "metrics": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "limit": {
+                  "type": "integer"
+                },
+                "orderBy": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "name",
+                "entity",
+                "op"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },

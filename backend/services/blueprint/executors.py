@@ -1328,6 +1328,16 @@ def make_executor(
                 section="pageLayouts",
                 natural_key=spec.subject,
                 body={"page": spec.subject, "root": _as_template(out["root"]),
+                      # CARRIED, NOT RE-DERIVED. The binder rewrote every
+                      # pointer into a {{name}} and emitted the source behind
+                      # it in the same pass; it is the only place the tree and
+                      # its fetches are known together. Dropping them here made
+                      # the projection rebuild the set by matching binding
+                      # names against entity names, which silently discarded
+                      # six of seven on a real page — four aggregate counts and
+                      # two extra lists — and shipped the tree that read them.
+                      "dataSources": list(out.get("schema", {})
+                                          .get("dataSources") or []),
                       "rationale": "composed by A2UI (§34)",
                       "requirements": list(page.get("requirements") or [])},
             )],

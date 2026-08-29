@@ -779,3 +779,79 @@ def test_an_unknown_node_stops_its_own_subtree(catalog):
             {"type": "AlsoFake", "props": {}}]}), catalog)
     assert any("Kanbam" in e for e in errs)
     assert not any("AlsoFake" in e for e in errs)
+
+
+# ---------------------------------------------------------------------------
+# The projection must not manufacture a divergence the composer already closed.
+#
+# A shipped /plants rendered the literal text "{{overdue.value}}" in four stat
+# tiles. The composer was clean: its schema declared all seven sources its tree
+# read, and its own dangling check found nothing. The projection then rebuilt
+# the set by matching binding names against entity names, kept the one that
+# happened to be an entity, and shipped the tree that read the other six.
+# ---------------------------------------------------------------------------
+
+def _counted(page_id="PAGE-001"):
+    return {
+        "page": page_id,
+        "dataSources": [
+            {"name": "plants", "entity": "Plant", "op": "list"},
+            {"name": "overdue", "entity": "Plant", "op": "aggregate",
+             "metrics": {"value": {"fn": "count"}}},
+        ],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "Stat", "props": {"label": "Overdue",
+                                       "value": "{{overdue.value}}"},
+             "children": []},
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []},
+        ]},
+    }
+
+
+def test_the_composers_data_sources_are_carried_not_rederived(doc, page, catalog):
+    """`overdue` is an aggregate over Plant, not an entity. Re-derivation drops
+    it; the binder resolved it in the pass that rewrote the pointer."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [_counted()]
+    result = pp.plan_pages(doc, catalog)
+    planned = result["planned"]["PAGE-001"]
+    assert {s["name"] for s in planned["dataSources"]} == {"plants", "overdue"}
+    assert next(s for s in planned["dataSources"]
+                if s["name"] == "overdue")["op"] == "aggregate"
+
+
+def test_a_binding_that_names_no_fetchable_data_stops_the_page(doc, page, catalog):
+    """Shipping it means the literal text "{{overdue.value}}" on screen.
+
+    Refused where the resolution actually fails — `data_sources` used to
+    `continue` past a name it could not match, so the tree kept the binding
+    and the page lost the fetch with nothing reporting either.
+    """
+    layout = _counted()
+    # No carried sources, so the projection derives — and `overdue` is an
+    # aggregate over Plant, not an entity, so derivation cannot reach it.
+    layout.pop("dataSources")
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [layout]
+
+    result = pp.plan_pages(doc, catalog)
+    assert result["planned"] == {}
+    assert result["failed"][0]["page"] == "PAGE-001"
+    assert "{{overdue}} names no data" in result["failed"][0]["reason"]
+
+
+def test_a_layout_with_no_carried_sources_still_derives_them(doc, page, catalog):
+    """Agent-authored trees carry none, and must keep projecting."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{rows}}"},
+             "children": []}]},
+    }]
+    result = pp.plan_pages(doc, catalog)
+    assert list(result["planned"]) == ["PAGE-001"]
+    assert result["planned"]["PAGE-001"]["dataSources"]

@@ -457,12 +457,35 @@ export const PatternTemplate = z.object({
  * `$columns` gets the entity's real columns rather than its recollection of
  * them, so the mechanical parts stay correct by construction even here.
  */
+/**
+ * One fetch this page's tree binds to.
+ *
+ * Carried on the layout rather than re-derived at projection time. The
+ * composer's binder rewrites each pointer into a `{{name}}` and emits the
+ * source behind it in the same pass, so it is the only place the tree and its
+ * fetches are known together. Re-deriving them from the tree meant matching
+ * binding names against entity names, which kept `plants` and silently dropped
+ * four aggregate counts and two further lists — and shipped the tree that read
+ * all seven, so a real page rendered the literal text "{{overdue.value}}".
+ */
+export const PageDataSource = z.object({
+  name: z.string(),
+  entity: z.string(),
+  op: z.enum(["list", "get", "aggregate"]),
+  filter: z.record(z.unknown()).optional(),
+  metrics: z.record(z.unknown()).optional(),
+  limit: z.number().int().optional(),
+  orderBy: z.record(z.unknown()).optional(),
+});
+
 export const PageLayout = z.object({
   /** Natural key — the page this tree renders. */
   page: PageId,
   /** Why this structure, for this page, in terms of what the user asked for. */
   rationale: z.string().default(""),
   root: TemplateNode,
+  /** The fetches `root` binds to, as the composer's binder resolved them. */
+  dataSources: z.array(PageDataSource).default([]),
   ...artifactBase,
 });
 

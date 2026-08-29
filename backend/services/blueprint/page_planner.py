@@ -790,6 +790,7 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
     detail = "[id]" in str(page.get("route") or "")
     out: list[dict] = []
 
+    unresolved: list[str] = []
     for name in sorted(used):
         # A binding that names an entity resolves to it; anything else falls
         # back to the page's own entity, which is what `rows`/`record` mean.
@@ -797,6 +798,13 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
             _lower_first(name.rstrip("s"))) or (
             entity if name in {ROWS, RECORD, "metrics"} else None)
         if not target:
+            # NOT `continue`. Skipping in silence is what put the literal text
+            # "{{overdue.value}}" on a shipped page: the tree kept the binding
+            # and the page lost the fetch, and neither half knew about the
+            # other. Four aggregate counts and two further lists went this way
+            # on one page — all six resolved correctly by the composer's
+            # binder, all six discarded here for not being entity names.
+            unresolved.append(name)
             continue
         if name == "metrics":
             out.append({"name": name, "entity": target.get("name"),
@@ -821,6 +829,13 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
             if default and default.get("filter"):
                 source["filter"] = dict(default["filter"])
         out.append(source)
+
+    if unresolved:
+        raise PlanError(
+            f"{page.get('id')}: " + ", ".join(
+                f"binding {{{{{n}}}}} names no data this page can fetch"
+                for n in unresolved)
+        )
     return out
 
 
@@ -955,7 +970,12 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
     root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
                           workflow_for_page(doc, page, entity))
-    sources = data_sources(doc, page, entity, root) if root else []
+    # The composer's binder already resolved this tree's fetches, in the pass
+    # that rewrote its pointers. Prefer them; derive only for a layout that
+    # carries none. See `data_sources` for what re-deriving costs.
+    carried = [dict(x) for x in (template.get("dataSources") or [])
+               if isinstance(x, dict) and x.get("name")]
+    sources = carried or (data_sources(doc, page, entity, root) if root else [])
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
     root = gate_states(root, primary) if root else root
     if root is not None:
@@ -975,12 +995,13 @@ def plan_page(doc: dict, page: dict, template: dict,
             "pattern": template.get("pattern"),
             "module": page.get("module"),
         },
-        "dataSources": data_sources(doc, page, entity, root),
+        "dataSources": sources,
         "root": root,
     }
     errors = validate_props(schema, catalog)
     if errors:
         raise PlanError(f"{page.get('id')}: " + "; ".join(errors[:4]))
+
     return schema
 
 
