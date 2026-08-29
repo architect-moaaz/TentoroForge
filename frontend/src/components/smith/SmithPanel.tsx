@@ -121,6 +121,8 @@ async function askArchitect(
 
 export interface SmithPanelProps {
   projectId: string | null;
+  /** What Discovery already collected — sent as the opening turn, once. */
+  initialBrief?: string;
   /** Told when a run finishes, so the preview pane can refresh itself. */
   onRunComplete?: () => void;
   className?: string;
@@ -128,6 +130,7 @@ export interface SmithPanelProps {
 
 export function SmithPanel({
   projectId,
+  initialBrief,
   onRunComplete,
   className,
 }: SmithPanelProps) {
@@ -155,6 +158,17 @@ export function SmithPanel({
   }, [messages.length, run.nodesDone]);
 
   const busy = run.status === "running" || thinking;
+
+  // Discovery already asked "what would you like to build?", so the workspace
+  // does not ask again — it carries that answer in as the first turn. Guarded
+  // by a ref rather than a dependency list: React 18 mounts effects twice in
+  // development, and without it the brief is sent to the architect twice.
+  const briefSent = useRef(false);
+  useEffect(() => {
+    if (!initialBrief || !projectId || briefSent.current) return;
+    briefSent.current = true;
+    setDraft(initialBrief);
+  }, [initialBrief, projectId]);
 
   /**
    * A turn goes to the architect first (§6, §114).

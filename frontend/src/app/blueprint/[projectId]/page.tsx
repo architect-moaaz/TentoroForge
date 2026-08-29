@@ -18,6 +18,7 @@
  */
 
 import { use, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronRight, ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SmithPanel } from "@/components/smith/SmithPanel";
@@ -69,6 +70,7 @@ export default function WorkspacePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const brief = useSearchParams().get("brief") ?? undefined;
   const [doc, setDoc] = useState<Blueprint | null>(null);
   const [missing, setMissing] = useState(false);
   const [route, setRoute] = useState<string | null>(null);
@@ -153,6 +155,7 @@ export default function WorkspacePage({
 
         <SmithPanel
           projectId={projectId}
+          initialBrief={brief}
           onRunComplete={onRunComplete}
           className="w-[380px] shrink-0"
         />
