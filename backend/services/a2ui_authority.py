@@ -778,24 +778,18 @@ def compose_page_via_a2ui(
 
     findings = _floor_findings(kind, route, schema, registry)
     pruned: list[str] = []
-    if findings:
-        # SALVAGE BEFORE DECLINE. All-or-nothing cost a real build a 95-node
-        # dashboard over 3 unreadable charts — the app shipped a 13-node stub
-        # titled "Dashboard Page" instead. Drop the widgets the floor named
-        # and re-judge; a dashboard missing one chart is still a dashboard.
-        candidate, pruned = _prune_failing_widgets(schema, findings)
-        if pruned:
-            still = _floor_findings(kind, route, candidate, registry)
-            if not still:
-                logger.info("[a2ui] %s salvaged — dropped %d widget(s) the "
-                            "floor rejected: %s", route, len(pruned),
-                            ", ".join(pruned))
-                schema, findings = candidate, []
-            else:
-                # Pruning did not clear it: what remains is structural, and
-                # shipping a page the floor still rejects would make the gate
-                # meaningless. Report both rounds so the cause is legible.
-                findings = still
+    # NO SALVAGE. This used to drop the widgets the floor named and re-judge,
+    # on the argument that a dashboard missing one chart beats no dashboard.
+    # What it could not tell was the difference between removing a widget and
+    # removing the page: strip everything and nothing fails the floor, so an
+    # empty tree passed and shipped as a success. /tickets rendered blank from
+    # a ten-component composition and no layer reported a problem.
+    #
+    # It was also a post-hoc repair — editing output the floor judged wrong
+    # until it passes, then presenting it as what the composer wrote. A
+    # refused page is refused, and the declining path is not a stub: the
+    # caller falls through to the LLM page author, which composes a real tree
+    # and now receives the reason this one was refused.
     if findings:
         return {"applied": False, "route": route, "kind": kind,
                 "reason": f"composed page failed the {_family_of(kind)} floor: "
@@ -979,9 +973,16 @@ def _reads(blob: str, ref: str) -> bool:
     its source. Matching only the first let `{{plantstracked.value}}` survive a
     prune that was supposed to remove it.
     """
+    # A VALUE, NOT A KEY. The bare-name clause exists for a prop that names
+    # its source — `"rows": "tickets"`. Written as `f'"{ref}"'` it also
+    # matched the *key* `"id"`, which every A2UI node carries as its own
+    # identity, so a finding naming a source called `id` marked every node in
+    # the tree as reading it. One finding pruned a ten-component page to an
+    # empty Stack, and the run reported success.
     return (f"{{{{{ref}}}}}" in blob
             or f"{{{{{ref}." in blob
-            or f'"{ref}"' in blob)
+            or f': "{ref}"' in blob
+            or f':"{ref}"' in blob)
 
 
 def _prune_failing_widgets(schema: dict,

@@ -1400,8 +1400,22 @@ def make_executor(
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
             return None
         if not out.get("applied") or not out.get("root"):
+            reason = str(out.get("reason") or "").strip()
             logger.info("[a2ui] %s declined (%s) — authoring agent runs",
-                        spec.subject, out.get("reason"))
+                        spec.subject, reason)
+            # THE NEXT AUTHOR SHOULD KNOW WHY THE LAST ONE WAS REFUSED. This
+            # reason was logged and dropped, so the LLM page author picked the
+            # page up with no idea what the floor had just rejected and was
+            # free to walk into the same wall. `feedback` exists for exactly
+            # this — its own comment says a retry told nothing reproduces the
+            # identical mistake — and nothing was filling it here.
+            if reason:
+                spec.feedback = (
+                    f"{spec.feedback}\n\n" if spec.feedback else ""
+                ) + (
+                    f"A2UI composed this page and it was refused: {reason}. "
+                    f"Compose it yourself, and do not reproduce that fault."
+                )
             return None
         return AgentResult(
             task_id=spec.task_id,
