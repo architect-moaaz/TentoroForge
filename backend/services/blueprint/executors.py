@@ -153,7 +153,16 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
                     },
                     "body": {
                         "type": "string",
-                        "description": "The artifact object, encoded as a JSON string.",
+                        "description": (
+                            "The artifact object, encoded as a JSON string. Omit "
+                            "`id`: identity is `natural_key` above, and the "
+                            "allocator mints the id from it. An `id` written here "
+                            "is claimed verbatim, so a guessed one either takes an "
+                            "identity that belongs to another artifact or fails the "
+                            "Blueprint contract — a module proposed as "
+                            "\"ENTITY-002\" cost a run every node downstream of "
+                            "ux_architecture."
+                        ),
                     },
                 },
             },
