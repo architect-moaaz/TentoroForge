@@ -227,6 +227,20 @@ class SmithSession:
         baseline = snapshot_baseline(self.output_dir, guards_fn=self._guards)
 
         understanding = self._understand(user_message, blueprint_ctx) or {}
+
+        # ANSWERED, SO NOTHING TO CHANGE. §8 gives Smith the Blueprint as a
+        # memory layer and `pick_relevant_slice` has already put the relevant
+        # part of it in front of the model. A question reaching here used to
+        # come back as a request to restate it as a change, which sends the
+        # user away to rephrase something Smith could already answer.
+        #
+        # `no_op` rather than a new status: the existing meaning — read,
+        # nothing needed changing — is exactly what answering is, and it does
+        # not hand off to the DAG, so a question no longer produces a run.
+        answered = (understanding.get("answer") or "").strip()
+        if answered:
+            return TurnResult(status="no_op", answer=answered)
+
         clarification = (understanding.get("clarification_needed") or "").strip()
         if clarification:
             return TurnResult(status="asked", answer=clarification)

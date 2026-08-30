@@ -24,6 +24,12 @@ they own, against the part of its Blueprint that seems relevant.
 
 Return ONLY a JSON object with exactly these keys:
 
+  "answer": if they are ASKING ABOUT the application rather than asking you to
+      change it — how something works, whether something is stored, what
+      happens when they do X — answer it from the Blueprint below, in two or
+      three plain sentences, and leave every other field "". Answer only what
+      the Blueprint actually says; if it does not say, reply that it does not
+      and name what you would need. "" when the request is a change.
   "clarification_needed": a question to ask them, or "" if the request is
       clear enough to act on. Ask when the request names no screen or element,
       when it could plausibly mean two different changes, or when acting on
@@ -68,7 +74,8 @@ def understand_ask(
     """
     ask = (user_message or "").strip()
     if not ask:
-        return {"clarification_needed": "What would you like to change?",
+        return {"answer": "",
+                "clarification_needed": "What would you like to change?",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     call = provider or _default_provider
@@ -79,17 +86,26 @@ def understand_ask(
         return {"clarification_needed":
                 "I could not reach my reasoning service just then — say that "
                 "again and I will try once more.",
-                "target_file": "", "element_label": "", "new_value": ""}
+                "answer": "", "target_file": "", "element_label": "", "new_value": ""}
 
     data = _parse(raw)
     if data is None:
         return {"clarification_needed":
                 "I did not follow that. Which screen should I change, and "
                 "what on it?",
-                "target_file": "", "element_label": "", "new_value": ""}
+                "answer": "", "target_file": "", "element_label": "", "new_value": ""}
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
     return {
+        # A QUESTION IS NOT AN UNDERSPECIFIED CHANGE. The contract already knew
+        # questions arrive here — `new_value` says a question has none — but
+        # gave the model nowhere to put one, so the only outcome left was
+        # `clarification_needed`. Asked whether the app stores data in a
+        # database, Smith replied "could you describe what you'd like to
+        # change", with the answer sitting in the Blueprint slice it had been
+        # handed. Naming the field is the whole fix; the material was already
+        # in the prompt.
+        "answer": str(data.get("answer") or "").strip(),
         "clarification_needed": str(data.get("clarification_needed") or "").strip(),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),

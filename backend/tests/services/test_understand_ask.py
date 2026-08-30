@@ -68,7 +68,7 @@ def test_an_empty_message_asks_without_calling_the_model():
 def test_missing_keys_normalise_to_strings():
     """`run_iteration` calls .strip() on these."""
     out = understand_ask("x", CTX, provider=_says('{"target_file":"/plants"}'))
-    assert out == {"clarification_needed": "", "target_file": "/plants",
+    assert out == {"answer": "", "clarification_needed": "", "target_file": "/plants",
                    "element_label": "", "new_value": ""}
 
 
@@ -105,5 +105,5 @@ def test_every_early_return_carries_the_full_shape():
         understand_ask("x", CTX, provider=boom),
         understand_ask("x", CTX, provider=_says("not json")),
     ):
-        assert set(out) == {"clarification_needed", "target_file",
+        assert set(out) == {"answer", "clarification_needed", "target_file",
                             "element_label", "new_value"}
