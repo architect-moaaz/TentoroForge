@@ -888,6 +888,21 @@ async def get_project_file(short_id: str, file_path: str):
     # Block path traversal
     if not str(full).startswith(str(base_dir.resolve())):
         raise HTTPException(403, "path traversal blocked")
+    # THE GENERATED APP IS A SUBDIRECTORY. The Blueprint's projections write to
+    # `<output_dir>/app/src/...` while this resolves `<output_dir>/src/...`, and
+    # both directories exist — the output root has its own `src`, so nothing
+    # looked obviously wrong. Every editor reads its content through here, so
+    # nav-flow.json, the schemas and the design spec all 404'd and each panel
+    # opened empty for an application whose files were one directory away.
+    #
+    # Tried second rather than instead: the output root legitimately holds
+    # app-model.json and navigation.json, and a caller asking for those must
+    # keep getting them. Only a miss falls through to the app.
+    if not full.exists():
+        nested = (base_dir / "app" / file_path).resolve()
+        if str(nested).startswith(str((base_dir / "app").resolve())) \
+                and nested.exists():
+            full = nested
     # Lazy fallback: the editor's Canvas hard-depends on nav-flow.json to list
     # pages, but apps generated before the plan-driven emitter (or a run where
     # that emit failed) don't have one. Synthesize it from the schemas on first
