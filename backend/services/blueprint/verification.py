@@ -55,6 +55,9 @@ EDGES: tuple[str, ...] = (
     "Page↔Workflow",
     "Widget↔DataSource",
     "Page↔Layout",
+    # §73 — every other edge asks whether the Blueprint is coherent. This asks
+    # whether what it describes would do anything.
+    "Page↔Function",
 )
 
 #: What this module does *not* establish, so nobody mistakes a green report for
@@ -370,6 +373,22 @@ def check_workflow_api(doc: dict) -> list[Finding]:
                     detail=f"step {step.get('key')!r} mutates {entity} with no write endpoint",
                 ))
     return out
+
+
+def check_page_function(doc: dict) -> list[Finding]:
+    """§73 — would this application actually work?
+
+    Controls that declare no action, actions naming workflows that do not
+    exist, bindings with no source, pages nothing composed. Each was found by
+    somebody using the generated app; none needed it running to find.
+    """
+    from services.blueprint.functional_completeness import functional_findings
+
+    return [
+        Finding("Page↔Function", section="pageLayouts",
+                artifact_id=f["page"], detail=f["detail"])
+        for f in functional_findings(doc)
+    ]
 
 
 def check_design_system(doc: dict) -> list[Finding]:
@@ -692,6 +711,7 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "API↔Permission": check_api_permission,
     "Workflow↔BusinessRule": check_workflow_rule,
     "Workflow↔API": check_workflow_api,
+    "Page↔Function": check_page_function,
     "Design↔DesignSystem": check_design_system,
     "Requirement↔Code": check_requirement_code,
     "Requirement↔Test": check_requirement_test,

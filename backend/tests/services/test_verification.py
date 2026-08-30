@@ -55,7 +55,7 @@ def test_all_ten_section_75_edges_are_implemented():
     # below keeps meaning "the PRD's ten are all still implemented" rather
     # than drifting into "however many edges there happen to be".
     added = {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
-             "Page↔Layout", "Page↔Precondition"}
+             "Page↔Layout", "Page↔Precondition", "Page↔Function"}
     prd_ten = set(EDGES) - added
     assert len(prd_ten) == 10
     assert new_edges_required() <= set(EDGES)
@@ -87,8 +87,15 @@ def test_a_coherent_blueprint_produces_no_findings():
         codeMap=[{"artifact": "PAGE-001", "frontend": ["src/app/candidates/page.tsx"]}],
         # A page is coherent only if something composed a tree for it (§34)
         # and there is a design language it was composed against (§37).
+        # Coherent now includes functional (§73): a page whose controls do
+        # nothing is not a coherent application, it is a broken one.
         pageLayouts=[{"page": "PAGE-001",
-                      "root": {"type": "Stack", "props": {}, "children": []}}],
+                      "dataSources": [{"name": "candidates",
+                                       "entity": "Candidate", "op": "list"}],
+                      "root": {"type": "Stack", "props": {}, "children": [
+                          {"type": "Table",
+                           "props": {"rows": "{{candidates}}"},
+                           "children": []}]}}],
         designSystem={"colors": {"primary": "#125E8A"},
                       "spacing": {"unit": "4px"},
                       "typography": {"baseSize": "16px"},
