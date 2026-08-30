@@ -856,6 +856,33 @@ class Smith:
             "briefs": {p: repair_brief(report, p) for p in flagged},
         }
 
+    def review_preview(self, critic: Any, *, base_url: str = "http://localhost:3000",
+                       app_root: str | None = None) -> dict[str, Any]:
+        """Photograph the running application and review it — capture, then §76.
+
+        The two halves are separate modules for good reasons — one needs a
+        browser and the other must not — and this is the one place they are
+        expected to meet, so it is worth them meeting somewhere rather than
+        leaving a caller to discover that ``Capture.rendered`` happens to be
+        ``shots_for``'s argument.
+
+        ``skipped`` is carried out to the caller intact. A review of eleven of
+        eighteen pages that reported "no findings" would be the most expensive
+        kind of green.
+        """
+        from services.blueprint.visual_verification import shots_for
+        from services.rendered_pages import capture_rendered
+
+        root = app_root or self.app_root
+        if not root:
+            return {"refused": "review needs an app_root — the projected "
+                               "application to photograph (§66)"}
+
+        capture = capture_rendered(self.doc, root, base_url=base_url)
+        result = self.review_rendering(shots_for(self.doc, capture.rendered), critic)
+        result["skipped"] = dict(capture.skipped)
+        return result
+
     def export(self, package_root: str | Path) -> Path:
         """§83 — put the Blueprint beside the generated source.
 
