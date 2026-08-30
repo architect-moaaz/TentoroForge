@@ -68,7 +68,7 @@ def test_list_projects_multiple(client):
 def test_list_pages_no_schemas_dir(client):
     tc, tmp = client
     (tmp / "demo").mkdir()
-    r = tc.get("/api/projects/demo/pages")
+    r = tc.get("/api/projects/demo/schemas")
     assert r.status_code == 200
     assert r.json() == {"paths": []}
 
@@ -81,7 +81,7 @@ def test_list_pages_with_schemas(client):
     products_dir = schemas / "products"
     products_dir.mkdir(parents=True, exist_ok=True)
     (products_dir / "list.json").write_text("{}")
-    r = tc.get("/api/projects/demo/pages")
+    r = tc.get("/api/projects/demo/schemas")
     assert r.status_code == 200
     paths = r.json()["paths"]
     assert "home" in paths
@@ -161,7 +161,7 @@ def test_save_round_trip_content(client):
 
 def test_path_traversal_dotdot(client):
     tc, tmp = client
-    r = tc.get("/api/projects/../etc/pages")
+    r = tc.get("/api/projects/../etc/schemas")
     # FastAPI will URL-decode and the path parameter may or may not reach the handler.
     # Either 400 (our validation) or 404 (route mismatch) is acceptable.
     assert r.status_code in (400, 404, 422)

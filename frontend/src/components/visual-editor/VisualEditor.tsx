@@ -89,7 +89,7 @@ export function VisualEditor({ projectId, initialRoute, onEditStructure }: Visua
   useEffect(() => {
     let cancelled = false;
     api
-      .get<PageInfo[] | { paths: string[] }>(`/api/projects/${projectId}/pages`)
+      .get<PageInfo[] | { paths: string[] }>(`/api/projects/${projectId}/schemas`)
       .then((data) => {
         if (cancelled) return;
         const normalized: PageInfo[] = Array.isArray(data)

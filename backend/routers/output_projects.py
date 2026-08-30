@@ -83,9 +83,22 @@ async def list_projects_endpoint():
 # Pages (schema discovery)
 # ---------------------------------------------------------------------------
 
-@router.get("/{project_id}/pages")
-async def list_pages(project_id: str):
-    """List all schema files for a project (paths relative to src/schemas, no extension)."""
+@router.get("/{project_id}/schemas")
+async def list_schemas(project_id: str):
+    """Schema files for a project — paths under src/schemas, no extension.
+
+    THIS WAS REGISTERED AS `/pages` AND SHADOWED THE REAL ONE. Both this
+    router and routers/pages.py claimed `/api/projects/{id}/pages`, and this
+    one is included first, so FastAPI matched it every time and the endpoint
+    backed by PageDefinition was unreachable for every project. Two callers
+    then wanted different things from one URL: the workflow node panel asks
+    for `PageDefinition[]` and got `{paths}` it cannot use, and the visual
+    editor grew a union type to accept whichever arrived.
+
+    Named for what it returns. A list of schema files is not a list of pages,
+    and `/schemas` was already being requested by the frontend — answering 404,
+    because the handler for it was sitting on the other name.
+    """
     root = await _resolve_root(project_id)
 
     schemas_dir = root / "src" / "schemas"
