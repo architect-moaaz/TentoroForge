@@ -164,6 +164,39 @@ def show_questions(smith: Smith) -> None:
     print("\n" + worded.render())
 
 
+def _print_domain(summary: dict) -> None:
+    """§107 step 8's gate — what Smith understood, in a shape a person reads.
+
+    Prose rather than counts, because this is the gate where the user is asked
+    whether Smith has the problem right, and "4 personas" is not something
+    anyone can agree or disagree with.
+    """
+    print("\n  --- what I understood (§107 step 8) ---")
+    if summary.get("application"):
+        print(f"  {summary['application']}")
+
+    for objective in summary.get("objectives") or []:
+        print(f"    · {objective}")
+
+    for person in summary.get("personas") or []:
+        line = person.get("name", "")
+        if person.get("description"):
+            line += f" — {person['description']}"
+        print(f"    who: {line}")
+
+    for term, meaning in (summary.get("terminology") or {}).items():
+        print(f"    word: {term} = {meaning}")
+
+    if summary.get("capabilities"):
+        print(f"    does: {', '.join(summary['capabilities'])}")
+
+    reqs, assumed = summary.get("requirements") or [], summary.get("assumed") or []
+    print(f"  {len(reqs)} requirements", end="")
+    # The assumptions are the reason to read the rest, so they are named rather
+    # than counted: a user can only correct a guess they can see.
+    print(f", {len(assumed)} I assumed — {', '.join(assumed)}" if assumed else "")
+
+
 def show_turn(smith: Smith, turn: Any) -> None:
     if not turn.ok:
         print(f"\n[rejected] {turn.rejected}")
@@ -186,6 +219,9 @@ def show_turn(smith: Smith, turn: Any) -> None:
         else:
             print(f"  {turn.command}: " + ", ".join(
                 f"{k}={v}" for k, v in result.items() if not isinstance(v, dict)))
+
+    if turn.domain_summary:
+        _print_domain(turn.domain_summary)
 
     if turn.plan_summary:
         print("\n  --- build plan (§26) ---")

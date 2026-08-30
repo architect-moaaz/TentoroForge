@@ -20,10 +20,14 @@ from services.blueprint.service import BlueprintService
 from services.smith.smith import (
     APPROVE_WALK,
     BUILD_WALK,
+    DEFINE_WALK,
+    GATES,
     TURN_TRANSITIONS,
     Smith,
     build_nodes,
     definition_nodes,
+    domain_nodes,
+    domain_summary,
 )
 from services.smith.turn import COMMANDS, TurnRejected, parse_turn, validate_turn
 
@@ -100,12 +104,36 @@ def test_every_declared_turn_transition_is_legal():
         assert can_transition(src, dst), (src, event, dst)
 
 
-def test_the_approve_walk_is_a_legal_path():
+def test_the_define_walk_is_a_legal_path():
     src = "CLARIFICATION"
+    for dst in DEFINE_WALK:
+        assert can_transition(src, dst), (src, dst)
+        src = dst
+    assert src == "BLUEPRINT_REVIEW", "defining parks at §107 step 8's gate"
+
+
+def test_the_approve_walk_is_a_legal_path():
+    src = "BLUEPRINT_REVIEW"
     for dst in APPROVE_WALK:
         assert can_transition(src, dst), (src, dst)
         src = dst
     assert src == "PLAN_REVIEW", "approval parks at §107 step 10's gate"
+
+
+def test_the_two_walks_join_end_to_end():
+    """§107 steps 6-10 as one path: the second walk starts where the first
+    stopped, so there is no state a user can be left in between the gates."""
+    assert DEFINE_WALK[-1] == "BLUEPRINT_REVIEW"
+    assert can_transition(DEFINE_WALK[-1], APPROVE_WALK[0])
+
+
+def test_every_gate_can_be_returned_to_from_its_own_back_edge():
+    """§107 step 8 and step 10 are 'accepts *or modifies*'. A gate whose
+    back-edge is one-way is a gate a correction cannot be made at twice."""
+    for gate in GATES:
+        back = TURN_TRANSITIONS[(gate, "change")]
+        assert can_transition(gate, back), (gate, back)
+        assert can_transition(back, gate), (back, gate)
 
 
 def test_the_build_walk_is_a_legal_path():
@@ -125,9 +153,26 @@ def test_the_build_walk_gates_on_nodes_that_run_in_that_phase():
             assert gate in build_nodes(), gate
 
 
-def test_definition_and_build_partition_the_dag():
-    assert set(definition_nodes()) | set(build_nodes()) == set(DAG)
-    assert not set(definition_nodes()) & set(build_nodes())
+def test_the_three_phases_partition_the_dag():
+    """Domain, definition and build. Every node runs in exactly one of them —
+    a node in two phases is a node paid for twice, and a node in none never
+    runs at all."""
+    phases = [set(domain_nodes()), set(definition_nodes()), set(build_nodes())]
+    assert set().union(*phases) == set(DAG)
+    for i, a in enumerate(phases):
+        for b in phases[i + 1:]:
+            assert not a & b, (a & b)
+
+
+def test_the_domain_phase_authors_what_everything_else_reads():
+    """The split is only worth making if the cheap half is the half the rest
+    of the DAG depends on."""
+    assert set(domain_nodes()) == {"requirements", "application_model"}
+    downstream = set(definition_nodes())
+    assert all(
+        DAG[k].depends_on <= set(domain_nodes()) | downstream | set(build_nodes())
+        for k in downstream
+    )
 
 
 def test_verification_belongs_to_the_build_not_the_definition():
@@ -182,19 +227,79 @@ def test_a_describe_that_writes_nothing_does_not_move_the_machine(smith):
     assert turn.state_after == "DISCOVERY" and not turn.moved
 
 
-def test_the_blueprint_is_authored_before_the_user_is_asked_to_accept_it(smith):
-    """§107 step 7 creates the Blueprint and step 8 accepts it. Run the
-    authoring after the build authorisation instead and §26's plan reports 18
-    pages as 0, and approval means accepting a blank document."""
+def test_defining_stops_at_the_domain_and_asks(smith):
+    """§107 step 6 then step 8's gate. The dozen nodes that read `product` do
+    not run until somebody has agreed `product` is right."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    turn = say(smith, plan_json(intent="command", command="define"))
+
+    assert turn.state_after == "BLUEPRINT_REVIEW"
+    assert smith.doc["requirements"]
+    assert not smith.doc.get("pages")
+    assert not (smith.doc.get("data") or {}).get("entities")
+
+
+def test_the_plan_gate_is_never_shown_a_blank_document(smith):
+    """The failure the old single gate existed to prevent, still prevented.
+    Run the authoring after the build authorisation and §26's plan reports 18
+    pages as 0, and authorising a build means authorising nothing."""
     say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
     say(smith, plan_json(intent="command", command="define"))
-    assert smith.state == "DEFINITION"
-    assert smith.doc["pages"] and smith.doc["data"]["entities"]
 
     turn = say(smith, plan_json(intent="command", command="approve"))
     assert turn.state_after == "PLAN_REVIEW"
     assert turn.plan_summary["pages"] > 0
     assert turn.plan_summary["entities"] > 0
+    assert smith.doc["pages"] and smith.doc["data"]["entities"]
+
+
+def test_approving_before_there_is_anything_to_approve_is_refused(smith):
+    """Approving from CLARIFICATION used to walk the machine to PLAN_REVIEW
+    over an empty document: legal by §94, and an acceptance of nothing."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    turn = say(smith, plan_json(intent="command", command="approve"))
+
+    assert "refused" in turn.command_result
+    assert "BLUEPRINT_REVIEW" in turn.command_result["refused"]
+    assert not turn.moved
+
+
+def test_the_domain_gate_shows_what_smith_understood_not_a_count(smith):
+    """"4 personas" is nothing a user can accept or correct."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    turn = say(smith, plan_json(intent="command", command="define"))
+
+    assert turn.plan_summary is None, "counts are the *other* gate"
+    summary = turn.domain_summary
+    assert summary is not None
+    assert [r["description"] for r in summary["requirements"]]
+    # §17 — what Smith supplied on the user's behalf, separated from what they
+    # said. This is the part of the gate worth reading.
+    assert set(summary["assumed"]) <= {r["id"] for r in summary["requirements"]}
+
+
+def test_a_modification_at_a_gate_returns_to_that_gate(smith):
+    """§107 step 8 is 'accepts *or modifies*'. A user who corrects the domain
+    description is still standing at the gate they corrected it from."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    say(smith, plan_json(intent="command", command="define"))
+    assert smith.state == "BLUEPRINT_REVIEW"
+
+    turn = say(smith, plan_json(intent="change", proposals=reqs("Close a role.")))
+    assert turn.change and turn.change.applied
+    assert turn.state_after == "BLUEPRINT_REVIEW"
+    assert len(smith.doc["requirements"]) > 1
+
+
+def test_a_modification_at_the_plan_gate_returns_to_the_plan_gate(smith):
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    say(smith, plan_json(intent="command", command="define"))
+    say(smith, plan_json(intent="command", command="approve"))
+    assert smith.state == "PLAN_REVIEW"
+
+    turn = say(smith, plan_json(intent="change", proposals=reqs("Close a role.")))
+    assert turn.change and turn.change.applied
+    assert turn.state_after == "PLAN_REVIEW"
 
 
 def test_the_plan_counts_derived_endpoints_nobody_authored(smith):
@@ -234,6 +339,9 @@ def test_a_build_runs_the_whole_dag_not_a_sub_plan(smith):
     smith.executor = watcher
     say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
     say(smith, plan_json(intent="command", command="define"))
+    assert set(ran) == set(domain_nodes()), "the domain gate runs the cheap half"
+
+    say(smith, plan_json(intent="command", command="approve"))
     assert set(ran) >= {"requirements", "data_model", "page_contracts", "testing"}
 
 
@@ -301,8 +409,20 @@ def test_describing_an_app_does_not_regenerate_one_that_does_not_exist(smith):
 def test_a_change_after_definition_does_regenerate(smith):
     say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
     say(smith, plan_json(intent="command", command="define"))
+    say(smith, plan_json(intent="command", command="approve"))
     turn = say(smith, plan_json(intent="change", proposals=reqs("Close a role.")))
     assert turn.change and turn.change.impact.plan
+
+
+def test_a_change_at_the_domain_gate_has_nothing_to_regenerate_yet(smith):
+    """§72 over a document with no pages or entities is an empty plan, and
+    that is the correct answer rather than a missed one — this is exactly what
+    the early gate buys: the correction lands before the fan-out, not after."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    say(smith, plan_json(intent="command", command="define"))
+    turn = say(smith, plan_json(intent="change", proposals=reqs("Close a role.")))
+    assert turn.change and turn.change.applied
+    assert turn.change.impact.plan == []
 
 
 def test_definedness_is_derived_not_read_off_the_state_label(ats, tmp_path):
