@@ -896,3 +896,22 @@ def test_no_job_text_names_a_component_the_checker_will_demand():
         hits = [k for k in keywords
                 if re.search(rf"\b{re.escape(k)}\b", text.lower())]
         assert not hits, f"{family}: {hits}"
+
+
+def test_every_composition_attempt_keeps_its_own_surface(tmp_path):
+    """A retry must not erase the surface of the attempt that shipped.
+
+    Keyed on the route alone, the artifact overwrote itself: one run made six
+    compositions and left four files, and a page stored a one-node tree while
+    the surface on disk replayed to nine. Every hypothesis about that collapse
+    was then tested against a payload from a different call, so each came back
+    "fine" while the page stayed broken.
+    """
+    root = _app(tmp_path)
+    for _ in range(3):
+        compose_page_via_a2ui(str(root), "/plants", "entity_list",
+                              surface_provider=GOOD, page_id="PAGE-001")
+
+    art = root / "src" / "contracts" / "a2ui-surfaces"
+    assert sorted(f.name for f in art.glob("plants.*.json")) == [
+        "plants.1.json", "plants.2.json", "plants.3.json"]

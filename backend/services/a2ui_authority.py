@@ -695,14 +695,41 @@ def compose_page_via_a2ui(
         return {"applied": False, "route": route, "kind": kind,
                 "reason": f"composition failed: {exc}"}
 
-    # Keep the raw surface per route, decline or not. When a composition ships
+    # Keep the raw surface per attempt, decline or not. When a composition ships
     # something wrong the first question is always what the composer actually
     # said, and without this the only way to answer it is another LLM call.
+    #
+    # ONE FILE PER ATTEMPT, NEVER OVERWRITTEN. Keyed on the route alone, a
+    # retry replaced the surface of the attempt that shipped: a run made six
+    # compositions and left four files, and /plants stored a one-node tree
+    # while the surface on disk replayed to nine. Every hypothesis about that
+    # collapse was tested against a payload from a different, healthier call,
+    # so each one came back "fine" and the page stayed broken. An artifact
+    # whose whole purpose is to say what the composer said must not be able to
+    # lose the attempt in question.
+    #
+    # `x` rather than a free-index probe: page_layouts fans out over pages, and
+    # exclusive create is decided by the filesystem rather than by a check that
+    # another thread can invalidate between the look and the write.
     try:
         art = root / "src" / "contracts" / "a2ui-surfaces"
         art.mkdir(parents=True, exist_ok=True)
-        (art / f"{_route_slug(route)}.json").write_text(
-            json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
+        slug = _route_slug(route)
+        body = json.dumps(payload, indent=1, ensure_ascii=False)
+        attempt = 1
+        while True:
+            try:
+                with open(art / f"{slug}.{attempt}.json", "x",
+                          encoding="utf-8") as fh:
+                    fh.write(body)
+                break
+            except FileExistsError:
+                attempt += 1
+        # The run log names the page; this names the file it composed from, so
+        # a stored layout can be traced back to the payload behind it without
+        # guessing which attempt won.
+        logger.info("[a2ui] %s attempt %d surface -> %s.%d.json",
+                    page_id or route, attempt, slug, attempt)
     except Exception as exc:  # noqa: BLE001 — debug artifact, never a blocker
         logger.warning("[a2ui] could not persist the %s surface: %s", route, exc)
 
