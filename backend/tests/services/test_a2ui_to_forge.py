@@ -1142,3 +1142,57 @@ def test_a_collection_page_still_reads_copy_from_the_sample():
                     page_id="P", kind="entity_list")
     ops = {s.get("op") for s in out["schema"].get("dataSources") or []}
     assert "get" not in ops, f"a list page minted a record source: {ops}"
+
+
+# --- args carry a binding the renderer can resolve -------------------------
+
+def _dispatch_surface():
+    return {"messages": [
+        {"updateDataModel": {"path": "/", "value": {
+            "ticket": {"id": "TCK-1042", "subject": "Cannot reset password"},
+        }}},
+        {"updateComponents": {"components": [
+            {"id": "root", "component": "Stack", "children": ["btn"]},
+            {"id": "btn", "component": "Button", "label": "Close ticket",
+             "workflow": "FLOW-002",
+             "args": {"ticketId": {"path": "/ticket/id"}}},
+        ]}},
+    ]}
+
+
+def test_args_bind_rather_than_shipping_a_pointer():
+    """`fallbackDispatch` posts args verbatim and `interpolateDeep` resolves
+    `{{...}}` strings only, so a raw {"path": ...} object reached the workflow
+    where an id belonged — the null-column failure args exists to prevent."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_dispatch_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    btn = json.dumps(out["schema"])
+    assert '"path"' not in btn, "a raw pointer reached the schema"
+    args = None
+    def walk(n):
+        nonlocal args
+        if isinstance(n, list):
+            for i in n: walk(i)
+        elif isinstance(n, dict):
+            if (n.get("props") or {}).get("workflow"):
+                args = n["props"].get("args")
+            for v in n.values():
+                if isinstance(v, (list, dict)): walk(v)
+    walk(out["schema"].get("root"))
+    assert args, "the dispatching button carries no args"
+    assert str(args.get("ticketId", "")).startswith("{{"), args
+    # and it must name a source the page actually declares
+    names = {s["name"] for s in out["schema"].get("dataSources") or []}
+    assert str(args["ticketId"]).strip("{}").split(".")[0] in names, (
+        f"{args} names no declared source among {names}")
+
+
+def test_args_never_carry_a_sample_value():
+    """Reading the pointer off the sample would send every click the same id."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_dispatch_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    assert "TCK-1042" not in json.dumps(out["schema"])

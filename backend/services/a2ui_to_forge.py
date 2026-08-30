@@ -1159,6 +1159,56 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"— rows the page did not read from anywhere.")
                     continue
                 resolved = resolve(val, c, k)
+            elif (isinstance(val, dict) and "path" not in val and val
+                  and any(isinstance(v, dict) and "path" in v
+                          for v in val.values())):
+                # A DICT OF POINTERS — `Button.args`, the inputs a dispatched
+                # workflow acts on. The branch below reads a prop that IS a
+                # pointer; this is a prop whose VALUES are, so it matched
+                # neither and the raw {"path": ...} dicts rode into the schema.
+                # `interpolateDeep` resolves `{{...}}` strings and nothing
+                # else, so the click posted {"ticketId": {"path": "/ticket/id"}}
+                # and the workflow received an object where an id belongs —
+                # the same null-column failure the args channel was opened to
+                # fix.
+                #
+                # A BINDING, NEVER A LITERAL. The copy branch may read a value
+                # out of the sample model, which is right for a heading and
+                # wrong here: baking "TCK-1042" into args sends every click the
+                # same id. The pointer names where the value lives, and that is
+                # what has to survive to dispatch time.
+                resolved = {}
+                for k2, v in val.items():
+                    if not (isinstance(v, dict) and "path" in v):
+                        resolved[k2] = v
+                        continue
+                    raw2 = str(v["path"])
+                    segs2 = [x for x in raw2.strip("/").split("/") if x]
+                    if (binder.is_record_page() and len(segs2) >= 2
+                            and binder.dominant
+                            and isinstance(at_path("/" + segs2[0]), dict)):
+                        # The record this page shows — the same rule the copy
+                        # branch uses, so args and the fields around it name
+                        # one source rather than two.
+                        src2 = binder.record_source(binder.dominant)
+                        resolved[k2] = f"{{{{{src2}.{segs2[-1]}}}}}"
+                    elif scope and segs2 and not raw2.startswith("/"):
+                        # Inside a repeat the row is bound under its `as` name,
+                        # so a row-relative pointer follows the row — which is
+                        # what a per-row action needs.
+                        resolved[k2] = f"{{{{{scope}.{segs2[-1]}}}}}"
+                    else:
+                        # No source and no row: any binding here would name
+                        # something nothing fetches. Dropped with a reason,
+                        # because a missing input fails at the workflow where
+                        # it can be read, and an unresolvable pointer fails
+                        # silently as an object.
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}.{k2}: "{raw2}" resolves to no '
+                            f"source on this page — dropped rather than sent "
+                            f"as a pointer the renderer cannot read.")
+                if not resolved:
+                    continue
             elif isinstance(val, dict) and "path" in val:
                 # A pointer on a non-data prop is COPY — a header title, a card
                 # heading. Reading it off the sample model is the one honest use
