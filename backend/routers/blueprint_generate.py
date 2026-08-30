@@ -507,6 +507,19 @@ async def smith_chat(
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
 
+            # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
+            # gate is answered by pressing the button, and the answer means
+            # build — there is nothing to clarify and nothing to ask back.
+            #
+            # Routing it through the architect made the gate unreachable once a
+            # definition existed: chat_v2 handles every message, hands off only
+            # on `handoff`/`not_enabled`, and a clarifying question ends the
+            # turn. So the definition was written, the gate was shown, and
+            # pressing approve started a conversation instead of a build.
+            if req.approved:
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=True, emit=emit)
+
             if not defined:
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
