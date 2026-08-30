@@ -59,7 +59,29 @@ router = APIRouter(tags=["workflows"])
 WORKFLOWS_DIR = "workflows"  # relative to project output_dir
 
 
+#: Where the Blueprint's `frontend` projection writes workflow definitions,
+#: relative to the generated app. Kept in step with projection.py's own
+#: `src/lib/workflows/definitions/{slug}.json`.
+PROJECTED_WORKFLOWS_DIR = "app/src/lib/workflows/definitions"
+
+
 def _workflows_path(output_dir: str) -> Path:
+    """Where this project's workflows actually are.
+
+    THE PROJECTION WRITES ONE PLACE AND THIS READ ANOTHER. A Blueprint-built
+    application emits `app/src/lib/workflows/definitions/*.json`; this looked
+    in `<output_dir>/workflows`, created it with the `mkdir` below, and
+    returned an empty directory. The endpoint answered `200 []`, so the
+    Workflows editor rendered nothing and nothing anywhere reported a problem
+    — a project with four workflows on disk looked like a project with none.
+
+    The projected directory wins when it exists. `<output_dir>/workflows`
+    stays the fallback for legacy projects, which is the only thing that ever
+    wrote there.
+    """
+    projected = Path(output_dir) / PROJECTED_WORKFLOWS_DIR
+    if projected.is_dir():
+        return projected
     p = Path(output_dir) / WORKFLOWS_DIR
     p.mkdir(exist_ok=True)
     return p
