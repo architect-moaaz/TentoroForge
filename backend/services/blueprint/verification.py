@@ -72,6 +72,11 @@ SECTION_OWNER: dict[str, str] = {
     "modules": "solution_architecture",
     "navigation": "solution_architecture",
     "pages": "page_design",
+    # §34 — A2UI is the composition authority, so a composed page that is
+    # wrong is its to author again. The section was already reachable as a
+    # finding's `section` through the Page↔Layout edge and had no owner, so
+    # every one of those repair tasks was addressed to "unassigned".
+    "pageLayouts": "a2ui_pages",
     "components": "frontend",
     "widgets": "page_design",
     "designSystem": "accessibility",

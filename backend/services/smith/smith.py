@@ -823,6 +823,39 @@ class Smith:
         self._walk(reached)
         return report
 
+    def review_rendering(self, shots: Sequence[Any], critic: Any) -> dict[str, Any]:
+        """§73-§76 against what was actually drawn — the sketch's self-verify loop.
+
+        The §75 matrix reads every edge off the Blueprint and says so: a page
+        can satisfy all fourteen and still render as a grey wall of defaults
+        that looks nothing like the design language a node was spent
+        establishing. This is the pass that looks.
+
+        Findings only. A failed page is flagged ``OUT_OF_SYNC`` with what the
+        critic said, and :func:`visual_verification.repair_brief` is what the
+        composing agent is told when it authors the page again — §103's point
+        that a retry told nothing reproduces the identical mistake. Nothing
+        here writes a layout, and the critique's ``patchOp`` is not read.
+
+        The state move is left to the caller. Whether a page that looks wrong
+        is worth reopening the build is the user's call at §94's PREVIEW gate,
+        not a conclusion this method should reach on their behalf — and the
+        route is already legal: PREVIEW → ITERATION → IMPLEMENTATION.
+        """
+        from services.blueprint.visual_verification import (
+            apply_visual_findings, repair_brief, verify_rendered,
+        )
+
+        report, verdicts = verify_rendered(shots, critic)
+        flagged = apply_visual_findings(self.blueprint, report, verdicts)
+        return {
+            "checked": len(verdicts),
+            "passed": sorted(p for p, ok in verdicts.items() if ok),
+            "flagged": flagged,
+            "findings": len(report.findings),
+            "briefs": {p: repair_brief(report, p) for p in flagged},
+        }
+
     def export(self, package_root: str | Path) -> Path:
         """§83 — put the Blueprint beside the generated source.
 
