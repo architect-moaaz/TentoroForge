@@ -890,7 +890,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # relative to the row becomes a relative binding, not a source.
                 clone[k] = f'{{{{item.{str(v["path"]).lstrip("/")}}}}}'
         comps[clone_id] = clone
-        inner = build(clone_id)
+        inner = build(clone_id, scope="item")
         if not inner:
             return None
         return {"type": "Repeat", "props": {"source": source, "as": "item"},
@@ -967,7 +967,15 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 out.append(node)
         return out
 
-    def build(cid: str) -> dict | None:
+    def build(cid: str, scope: str = "") -> dict | None:
+        """``scope`` is the name the current row is bound under, inside a
+        Repeat — "" when this node is not in one.
+
+        Threaded rather than inferred because only the caller knows: the same
+        component id is built as a standalone widget in one place and as a
+        Repeat's template in another, and a pointer means a different thing in
+        each.
+        """
         c = comps.get(cid)
         if not c:
             return None
@@ -1067,7 +1075,32 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
-                    if members and field not in members:
+                    if scope and field and not raw.startswith("/"):
+                        # THE ROW IS IN SCOPE, SO SAY SO. A relative pointer
+                        # means "this row's field", and inside a Repeat the
+                        # renderer can read exactly that: `Repeat` binds each
+                        # element into the render data under its `as` name, so
+                        # `{{item.statusVariant}}` resolves per row.
+                        #
+                        # `expand_records` has always emitted this for the
+                        # props it rewrites on the way into a Repeat; the
+                        # generic path could not, because it did not know
+                        # whether it was inside one. So the same pointer became
+                        # a bare field name — right for `Kanban.cardTitle`,
+                        # which names a field, and wrong for `Badge.variant`,
+                        # which takes one of five values and got the literal
+                        # "statusVariant".
+                        #
+                        # Safe on an enum prop: the A2UI catalog admits a
+                        # binding beside the members, and `validate_props`
+                        # defers a binding string because the renderer supplies
+                        # the value later.
+                        resolved = f"{{{{{scope}.{field}}}}}"
+                        binder.assumptions.append(
+                            f'{c.get("id")}.{k}: "{raw}" is row-relative and '
+                            f"this node is inside a repeat — bound to "
+                            f"{resolved!r}, so it follows the row.")
+                    elif members and field not in members:
                         # AN ENUM PROP TAKES A MEMBER, NOT A FIELD NAME. The
                         # rule below is right for `Kanban.cardTitle`, which
                         # names the field to read — but `Badge.variant` takes
@@ -1176,11 +1209,11 @@ def translate(payload: dict, registry: dict, route: str = "/",
         kids: list[dict] = []
         raw = c.get("children")
         if isinstance(raw, list):
-            kids = [n for n in (build(str(r)) for r in raw) if n]
+            kids = [n for n in (build(str(r), scope) for r in raw) if n]
         elif isinstance(raw, dict) and raw.get("componentId"):
             kids = expand_template(c, raw)
         elif isinstance(c.get("child"), str):
-            n = build(c["child"])
+            n = build(c["child"], scope)
             if n:
                 kids = [n]
         if kids:

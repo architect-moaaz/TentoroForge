@@ -931,6 +931,61 @@ def test_the_field_name_rule_still_applies_where_it_belongs():
     assert _enum_members("Kanban", "cardTitle") == set()
 
 
+def _row_with(**badge_props):
+    """A Badge nested one level under a Repeat's template, not the template."""
+    return [{"id": "root", "component": "Stack", "children": ["list"]},
+            {"id": "list", "component": "Stack",
+             "children": {"componentId": "row", "path": "/tasks/rows"}},
+            {"id": "row", "component": "Stack", "children": ["badge"]},
+            {"id": "badge", "component": "Badge", **badge_props}]
+
+
+def test_a_descendant_of_a_repeat_template_binds_to_the_row_too():
+    """`expand_records` rewrote the template's OWN props to `{{item.…}}` and
+    its children's were built with no idea they were inside a repeat — so the
+    same pointer that followed the row on the template became a bare field name
+    one level down."""
+    r = translate(payload(_row_with(content={"path": "title"}),
+                          {"tasks": {"rows": [{"title": "x"}]}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "{{item.title}}"
+
+
+def test_an_enum_prop_inside_a_repeat_follows_the_row():
+    """The colour the badge lost. `Repeat` binds each element under its `as`
+    name, so the renderer can read `statusVariant` per row — and the A2UI
+    catalog admits a binding beside the members, so this validates."""
+    r = translate(payload(_row_with(variant={"path": "statusVariant"}),
+                          {"tasks": {"rows": [{"statusVariant": "success"}]}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["variant"] == "{{item.statusVariant}}"
+    assert not r["warnings"], "nothing was lost, so nothing to warn about"
+
+
+def test_the_binding_is_recorded_as_an_assumption_not_a_silent_rewrite():
+    r = translate(payload(_row_with(variant={"path": "statusVariant"}),
+                          {"tasks": {"rows": [{"statusVariant": "success"}]}}), REG)
+    assert any("follows the row" in a for a in r["assumptions"])
+
+
+def test_an_enum_prop_outside_a_repeat_is_still_dropped():
+    """Nothing binds the row there, so `{{item.…}}` would resolve to nothing.
+    The drop and its warning stand."""
+    comps = [{"id": "root", "component": "Stack", "children": ["x"]},
+             {"id": "x", "component": "Badge",
+              "variant": {"path": "statusVariant"}}]
+    r = translate(payload(comps, {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"].get("variant") is None
+    assert any("dropped" in w for w in r["warnings"])
+
+
+def test_an_absolute_pointer_is_not_treated_as_row_relative():
+    """A leading slash means the model root, and it means that inside a repeat
+    too — reading it off the row would bind to the wrong thing."""
+    r = translate(payload(_row_with(content={"path": "/tasks/label"}),
+                          {"tasks": {"rows": [{"title": "x"}], "label": "All"}}),
+                  REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "All"
+
+
 def test_enum_members_come_from_the_contracts_not_a_list_here():
     """A second list would drift from the Zod components the way the A2UI
     catalog did."""
