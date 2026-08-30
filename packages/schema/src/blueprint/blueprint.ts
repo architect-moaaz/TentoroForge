@@ -163,6 +163,64 @@ export const PageContract = z.object({
   users: z.array(RoleId).default([]),
 
   /**
+   * Whether this page is where its audience arrives.
+   *
+   * An application has as many front doors as it has audiences, and `access`
+   * already says which audience a page serves — so the entry is per-access,
+   * not one global landing page. A survey tool has two: the author signs in
+   * and lands on a dashboard, while a respondent follows a link straight to
+   * `/survey/[slug]` and must never meet a login screen or an app shell for a
+   * product they cannot reach.
+   *
+   * Nothing recorded this, so every consumer guessed. `nav-flow.json` had no
+   * entry at all; the error page's "back to the application" link took the
+   * first route in the list and produced `/survey/[slug]` — a route PATTERN,
+   * which Next refuses as an href and which threw at runtime. That was fixed
+   * by refusing to link a pattern, which treated the symptom: the real fault
+   * is that the gated entry was never stated, and a gated entry is by
+   * definition a concrete URL.
+   */
+  entry: z
+    .boolean()
+    .default(false)
+    .describe("This page is where its audience (see `access`) arrives"),
+
+  /**
+   * The pages this page leads to — the arrows, not the list.
+   *
+   * `nav-flow.json` has carried a `transitions` field since it was written and
+   * the projection has always emitted `[]`, so navigation was an index of six
+   * pages with no statement of how anyone moves between them. A list of pages
+   * is not a flow: it cannot answer "where does Add Survey go", cannot render
+   * a breadcrumb, and gives §113's Blueprint↔Preview linking nothing to link
+   * along.
+   *
+   * Page ids rather than routes, so a route rename does not silently break
+   * every arrow pointing at it.
+   */
+  navigatesTo: z
+    .array(PageId)
+    .default([])
+    .describe("Pages reachable from this one, by id"),
+
+  /**
+   * How this page is shown when something opens it.
+   *
+   * A detail view is not always a route. "Click the row, see the record in a
+   * side panel" and "click the row, go to a page" are different applications,
+   * and the contract could only express the second — so every detail became a
+   * route with its own schema, its own URL and a full navigation away from the
+   * list the user was reading.
+   *
+   * `page` stays the default because a URL is shareable and a drawer is not;
+   * being modal has to be chosen.
+   */
+  presentation: z
+    .enum(["page", "drawer", "modal"])
+    .default("page")
+    .describe("page = its own route; drawer/modal = opened over the caller"),
+
+  /**
    * Saved views over this page's data — the same list, filtered differently.
    *
    * Without this a filtered variant has nowhere to live, so the only way to

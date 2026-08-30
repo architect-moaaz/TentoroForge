@@ -386,6 +386,29 @@
             },
             "default": []
           },
+          "entry": {
+            "type": "boolean",
+            "default": false,
+            "description": "This page is where its audience (see `access`) arrives"
+          },
+          "navigatesTo": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/modules/items/properties/pages/items"
+            },
+            "default": [],
+            "description": "Pages reachable from this one, by id"
+          },
+          "presentation": {
+            "type": "string",
+            "enum": [
+              "page",
+              "drawer",
+              "modal"
+            ],
+            "default": "page",
+            "description": "page = its own route; drawer/modal = opened over the caller"
+          },
           "views": {
             "type": "array",
             "items": {
