@@ -399,6 +399,31 @@
             "default": [],
             "description": "Pages reachable from this one, by id"
           },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "entity": {
+                "type": "string",
+                "pattern": "^ENTITY-\\d{3,}$",
+                "description": "The entity a record must exist of"
+              },
+              "state": {
+                "type": "string",
+                "description": "The value that record must hold — one of the entity's own enumValues, not a state invented here"
+              },
+              "producedBy": {
+                "type": "string",
+                "pattern": "^FLOW-\\d{3,}$",
+                "description": "The workflow that puts a record into that state, when one does. Without it the precondition can be checked and waited on but not satisfied."
+              }
+            },
+            "required": [
+              "entity",
+              "state"
+            ],
+            "additionalProperties": false,
+            "description": "A precondition this page needs before it shows anything (§107). Omit unless the page genuinely has one."
+          },
           "presentation": {
             "type": "string",
             "enum": [
@@ -441,8 +466,7 @@
             "default": []
           },
           "dispatches": {
-            "type": "string",
-            "pattern": "^FLOW-\\d{3,}$",
+            "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
             "description": "Stable FLOW identifier (§12)"
           },
           "primaryTasks": {
@@ -1071,7 +1095,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/properties/pages/items/properties/dispatches"
+            "$ref": "#/properties/pages/items/properties/requires/properties/producedBy"
           },
           "name": {
             "type": "string"

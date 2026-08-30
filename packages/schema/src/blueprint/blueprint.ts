@@ -204,6 +204,54 @@ export const PageContract = z.object({
     .describe("Pages reachable from this one, by id"),
 
   /**
+   * What must already be true for this page to mean anything.
+   *
+   * An approval screen is not a page you can look at; it is a page you can
+   * look at once something has been submitted. Against an empty or freshly
+   * seeded application it renders its empty state, and every reviewer of it —
+   * a person, a screenshot, a vision critique — sees a correct rendering of
+   * nothing and has no way to tell that from the page being broken.
+   *
+   * The contract had no way to say this. `states` is the render states
+   * (loading, empty, populated, error) and `dispatches` is the workflow this
+   * page *launches*, not one it waits on. So a page could not declare its own
+   * precondition, and anything wanting to satisfy one had to guess: run
+   * workflows until something looked right, or infer a state from a field
+   * being called `status`. Both are the guessing this architecture exists to
+   * refuse, and neither is checkable.
+   *
+   * Said here, it is checkable. Verification can ask whether the state is one
+   * the entity actually declares and whether `producedBy` is a workflow that
+   * exists; the preview sweep can open the page against a record in that state
+   * rather than whichever row came back first, and say precisely what is
+   * missing when there is none.
+   *
+   * Only for a page that genuinely has one. Most pages do not: a list is a
+   * list whether or not anything has happened yet, and declaring a
+   * precondition it does not have makes it unreviewable for no reason.
+   */
+  requires: z
+    .object({
+      entity: EntityId.describe("The entity a record must exist of"),
+      state: z
+        .string()
+        .describe(
+          "The value that record must hold — one of the entity's own " +
+            "enumValues, not a state invented here",
+        ),
+      producedBy: WorkflowId.optional().describe(
+        "The workflow that puts a record into that state, when one does. " +
+          "Without it the precondition can be checked and waited on but not " +
+          "satisfied.",
+      ),
+    })
+    .optional()
+    .describe(
+      "A precondition this page needs before it shows anything (§107). " +
+        "Omit unless the page genuinely has one.",
+    ),
+
+  /**
    * How this page is shown when something opens it.
    *
    * A detail view is not always a route. "Click the row, see the record in a

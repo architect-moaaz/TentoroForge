@@ -114,6 +114,12 @@ class Target:
     #: ENTITY id behind the page, when it has one. What a dynamic segment is
     #: resolved through.
     entity: str = ""
+    #: §107 — the state a record must be in for this page to mean anything,
+    #: as the page itself declares it. Empty when the page has no precondition,
+    #: which is most pages.
+    requires_state: str = ""
+    #: The workflow the page says produces that state, when it names one.
+    produced_by: str = ""
 
     @property
     def is_dynamic(self) -> bool:
@@ -153,6 +159,7 @@ def plan_routes(doc: dict) -> tuple[list[Target], dict[str, str]]:
             continue
         route = (page.get("route") or "").strip()
         page_id = page.get("id") or ""
+        needs = page.get("requires") if isinstance(page.get("requires"), dict) else {}
         if not route:
             if page_id:
                 skipped[page_id] = "the page declares no route"
@@ -171,6 +178,8 @@ def plan_routes(doc: dict) -> tuple[list[Target], dict[str, str]]:
                 access=page.get("access") or "authenticated",
                 users=tuple(page.get("users") or ()),
                 entity=((page.get("data") or {}).get("primaryEntity") or ""),
+                requires_state=str(needs.get("state") or ""),
+                produced_by=str(needs.get("producedBy") or ""),
             ))
 
     return targets, skipped
@@ -388,14 +397,42 @@ async def _resolve(
         return []
 
     field = state_field(doc, target.entity)
-    if field:
-        by_state = ids_by_state(body, field)
-        if by_state:
-            return [(fill_route(target.route, rid), state)
-                    for state, rid in sorted(by_state.items())]
+    by_state = ids_by_state(body, field) if field else {}
+
+    # A declared precondition is not a preference. The page says it means
+    # nothing except in this state, so opening it in another and critiquing
+    # the result is reviewing a page the Blueprint does not claim exists.
+    if target.requires_state:
+        wanted = by_state.get(target.requires_state)
+        if wanted:
+            return [(fill_route(target.route, wanted), target.requires_state)]
+        return []
+
+    if by_state:
+        return [(fill_route(target.route, rid), state)
+                for state, rid in sorted(by_state.items())]
 
     record_id = first_id(body)
     return [(fill_route(target.route, record_id), "")] if record_id else []
+
+
+def _why_nothing_to_open(target: Target) -> str:
+    """Why a page could not be opened, in terms of what it declared.
+
+    A page that requires a submitted record and a page that has no records at
+    all are the same silence to a sweep and different problems to a person:
+    one wants the workflow run, the other wants the seed looked at. Saying
+    which is the whole value of the page having declared a precondition.
+    """
+    if not target.requires_state:
+        return ("no seeded record to open it with — the page needs one, and "
+                "inventing an id would photograph a 404")
+    produced = (f"; the page says {target.produced_by} produces it, and "
+                "running a workflow to manufacture the state is not something "
+                "this does" if target.produced_by else
+                "; the page names no workflow that produces it")
+    return (f"no record in state {target.requires_state!r}, which the page "
+            f"declares it requires{produced}")
 
 
 async def _sweep(
@@ -406,10 +443,7 @@ async def _sweep(
         if target.is_dynamic:
             visits = await _resolve(page, base_url, target, doc)
             if not visits:
-                out.skipped[target.route] = (
-                    "no seeded record to open it with — the page needs one, "
-                    "and inventing an id would photograph a 404"
-                )
+                out.skipped[target.route] = _why_nothing_to_open(target)
                 continue
         else:
             visits = [(target.route, "")]

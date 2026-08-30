@@ -51,6 +51,7 @@ EDGES: tuple[str, ...] = (
     # Added by the migration ledger: each collapses a cluster of passes from
     # the old repair chain that the PRD's ten edges do not cover.
     "Navigation↔Page",
+    "Page↔Precondition",
     "Page↔Workflow",
     "Widget↔DataSource",
     "Page↔Layout",
@@ -619,6 +620,71 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
     return out
 
 
+def check_page_precondition(doc: dict) -> list[Finding]:
+    """§75 — a page that declares a precondition nothing can satisfy.
+
+    `requires` exists so an approval screen can say it needs a submitted
+    record rather than leave every reviewer looking at a correct rendering of
+    nothing. Said, it has to be true: a state the entity does not declare can
+    never be reached, and a `producedBy` naming a workflow that does not exist
+    is a promise the application cannot keep.
+
+    Checked here rather than in the preview sweep because it is a fact about
+    the document. A sweep would notice it as "no record in that state", which
+    is the same complaint whether the state is unreachable or merely
+    unseeded — and those want different fixes from different people.
+    """
+    from services.blueprint.page_planner import enum_values
+
+    out: list[Finding] = []
+    entities = {e.get("id"): e for e in _live(_entities(doc))}
+    flows = _ids(_live(doc.get("workflows")))
+
+    for page in _live(doc.get("pages")):
+        needs = page.get("requires")
+        if not isinstance(needs, dict):
+            continue
+        page_id = page.get("id")
+        entity_id = needs.get("entity")
+        state = str(needs.get("state") or "")
+
+        entity = entities.get(entity_id)
+        if entity is None:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires a record of {entity_id}, which is not an "
+                       "entity this application has",
+            ))
+            continue
+
+        declared = {v for f in (entity.get("fields") or [])
+                    if isinstance(f, dict) for v in enum_values(f)}
+        if declared and state not in declared:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires {entity.get('name') or entity_id} in state "
+                       f"{state!r}, which is not one of its declared values "
+                       f"({', '.join(sorted(declared))})",
+            ))
+        elif not declared:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires {entity.get('name') or entity_id} in state "
+                       f"{state!r}, but that entity declares no states at all "
+                       "— no field of it carries enumValues",
+            ))
+
+        produced_by = needs.get("producedBy")
+        if produced_by and produced_by not in flows:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"names {produced_by} as what produces that state, and "
+                       "no such workflow exists",
+            ))
+
+    return out
+
+
 CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Page↔API": check_page_api,
     "API↔Database": check_api_database,
@@ -631,6 +697,7 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Requirement↔Test": check_requirement_test,
     "Blueprint↔Implementation": check_blueprint_implementation,
     "Navigation↔Page": check_navigation_page,
+    "Page↔Precondition": check_page_precondition,
     "Page↔Workflow": check_page_workflow,
     "Page↔Layout": check_page_layout,
     "Widget↔DataSource": check_widget_datasource,

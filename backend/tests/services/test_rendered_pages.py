@@ -23,6 +23,7 @@ from services.rendered_pages import (
     landed,
     plan_routes,
     _render_tree,
+    _why_nothing_to_open,
 )
 
 
@@ -383,3 +384,42 @@ def test_rows_without_a_state_or_an_id_are_not_counted():
 def test_states_are_read_from_a_wrapped_list_too():
     assert ids_by_state({"data": [{"id": 9, "status": "open"}]}, "status") == {
         "open": "9"}
+
+
+# --- a declared precondition -------------------------------------------------
+
+def requiring(**over) -> dict:
+    needs = {"entity": "ENTITY-001", "state": "submitted"}
+    needs.update(over)
+    return page(route="/apps/[id]", data={"primaryEntity": "ENTITY-001"},
+                requires=needs)
+
+
+def test_a_page_carries_the_state_it_declares_it_needs():
+    target = plan_routes(doc(requiring(producedBy="FLOW-003")))[0][0]
+    assert target.requires_state == "submitted"
+    assert target.produced_by == "FLOW-003"
+
+
+def test_most_pages_declare_no_precondition():
+    """A list is a list whether or not anything has happened yet."""
+    target = plan_routes(doc(page()))[0][0]
+    assert target.requires_state == "" and target.produced_by == ""
+
+
+def test_a_missing_precondition_says_which_state_and_which_workflow():
+    """A page that requires a submitted record and a page with no records at
+    all are the same silence to a sweep and different problems to a person."""
+    target = plan_routes(doc(requiring(producedBy="FLOW-003")))[0][0]
+    why = _why_nothing_to_open(target)
+    assert "submitted" in why and "FLOW-003" in why
+
+
+def test_a_precondition_with_no_workflow_says_that_too():
+    target = plan_routes(doc(requiring()))[0][0]
+    assert "names no workflow" in _why_nothing_to_open(target)
+
+
+def test_a_page_with_no_precondition_gets_the_plain_reason():
+    target = plan_routes(doc(page(route="/apps/[id]")))[0][0]
+    assert "inventing an id" in _why_nothing_to_open(target)

@@ -50,8 +50,13 @@ def test_all_ten_section_75_edges_are_implemented():
     """The PRD's ten, plus the edges the migration ledger added."""
     from services.blueprint.migration_ledger import new_edges_required
     assert set(CHECKS) == set(EDGES)
-    prd_ten = set(EDGES) - {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
-                            "Page↔Layout"}
+    # Edges this platform added. `Page↔Precondition` is not one of §75's —
+    # it checks a field §75 predates, and it is listed here so the assertion
+    # below keeps meaning "the PRD's ten are all still implemented" rather
+    # than drifting into "however many edges there happen to be".
+    added = {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
+             "Page↔Layout", "Page↔Precondition"}
+    prd_ten = set(EDGES) - added
     assert len(prd_ten) == 10
     assert new_edges_required() <= set(EDGES)
 
@@ -455,3 +460,76 @@ def test_relationship_findings_route_to_the_data_model_agent():
     d = doc(data={"entities": [], "relationships": [
         {"from": "ENTITY-001", "to": "ENTITY-002", "kind": "one_to_many"}]})
     assert "data_model" in verify(d, edges=("API↔Database",)).repair_tasks()
+
+
+# --- §75 Page↔Precondition ---------------------------------------------------
+
+def _precondition_doc(**over):
+    needs = {"entity": "ENTITY-001", "state": "submitted"}
+    needs.update(over)
+    return {
+        "pages": [{"id": "PAGE-001", "name": "Approvals", "requires": needs}],
+        "data": {"entities": [{
+            "id": "ENTITY-001", "name": "Application",
+            "fields": [{"name": "status",
+                        "enumValues": ["draft", "submitted", "approved"]}],
+        }]},
+        "workflows": [{"id": "FLOW-001", "name": "Submit"}],
+    }
+
+
+def test_a_satisfiable_precondition_is_not_a_finding():
+    from services.blueprint.verification import verify
+
+    doc = _precondition_doc(producedBy="FLOW-001")
+    assert verify(doc, edges=("Page↔Precondition",)).findings == []
+
+
+def test_a_state_the_entity_never_declares_can_never_be_reached():
+    from services.blueprint.verification import verify
+
+    findings = verify(_precondition_doc(state="banana"),
+                      edges=("Page↔Precondition",)).findings
+    assert len(findings) == 1
+    assert "not one of its declared values" in findings[0].detail
+
+
+def test_a_precondition_on_an_entity_with_no_states_at_all():
+    from services.blueprint.verification import verify
+
+    doc = _precondition_doc()
+    doc["data"]["entities"][0]["fields"] = [{"name": "title", "type": "text"}]
+    findings = verify(doc, edges=("Page↔Precondition",)).findings
+    assert "declares no states at all" in findings[0].detail
+
+
+def test_a_precondition_on_an_entity_that_does_not_exist():
+    from services.blueprint.verification import verify
+
+    findings = verify(_precondition_doc(entity="ENTITY-404"),
+                      edges=("Page↔Precondition",)).findings
+    assert "not an entity this application has" in findings[0].detail
+
+
+def test_a_producer_that_is_not_a_workflow_is_a_promise_that_cannot_be_kept():
+    from services.blueprint.verification import verify
+
+    findings = verify(_precondition_doc(producedBy="FLOW-404"),
+                      edges=("Page↔Precondition",)).findings
+    assert any("no such workflow exists" in f.detail for f in findings)
+
+
+def test_a_page_without_a_precondition_is_not_asked_about_one():
+    from services.blueprint.verification import verify
+
+    doc = _precondition_doc()
+    doc["pages"][0].pop("requires")
+    assert verify(doc, edges=("Page↔Precondition",)).findings == []
+
+
+def test_the_precondition_repair_task_goes_to_whoever_writes_pages():
+    from services.blueprint.verification import SECTION_OWNER, verify
+
+    findings = verify(_precondition_doc(state="banana"),
+                      edges=("Page↔Precondition",)).findings
+    assert findings[0].responsible_agent == SECTION_OWNER["pages"]
