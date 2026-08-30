@@ -48,6 +48,7 @@ import {
   useBlueprintRun,
   type RunNode,
   type RunEvent as RunEventT,
+  type BlueprintRun,
 } from "@/hooks/useBlueprintRun";
 
 /** §107 step 1 — what Smith says before the user says anything. */
@@ -132,6 +133,18 @@ function notifyDone(awaitingApproval: boolean, ranAnything: boolean): void {
 interface Message {
   role: "user" | "smith";
   text: string;
+  /** When the turn arrived, so the transcript reads as a conversation.
+   *  Client-side: the server persists no turn, so there is no other clock. */
+  at?: number;
+  /**
+   * A finished run's plan, kept where it happened.
+   *
+   * `start()` resets the run to EMPTY, so the next message erased the last
+   * run's stages — and the approval gate with them. The run is a live thing
+   * and the transcript is the durable one, so a completed plan is folded in
+   * here rather than left in state that the following turn clears.
+   */
+  plan?: BlueprintRun;
   /** §16 — the architect asks rather than assumes; these are its choices. */
   options?: string[];
   /** What the turn changed in the Blueprint, if anything. */
@@ -179,6 +192,11 @@ export function SmithPanel({
   useEffect(() => {
     if (run.status === "complete" && !completedRef.current) {
       completedRef.current = true;
+      // Snapshotted before anything can start another run and reset it.
+      if (run.nodes.length > 0 || run.awaitingApproval) {
+        setMessages((m) => [...m, { role: "smith", text: "", at: Date.now(),
+                                    plan: run }]);
+      }
       onRunComplete?.();
       // A build runs for ten minutes or more, so nobody watches it finish.
       // Told where they actually are rather than only in a pane they have
@@ -302,6 +320,7 @@ export function SmithPanel({
         text: x.text,
         options: x.options,
         diffSummary: x.diffSummary,
+        at: Date.now(),
       })),
     ]);
   }, [run.messages]);
@@ -314,7 +333,7 @@ export function SmithPanel({
     // this message, and including the message in its own history would have
     // Smith read the question as its own answer.
     const prior = messages.map((m) => ({ role: m.role, text: m.text }));
-    setMessages((m) => [...m, { role: "user", text }]);
+    setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
     void start({ description: text, evidence, history: prior });
   };
 
@@ -323,7 +342,8 @@ export function SmithPanel({
     if (!brief) return;
     setMessages((m) => [
       ...m,
-      { role: "smith", text: "Approved — building the rest of the application." },
+      { role: "smith", text: "Approved — building the rest of the application.",
+        at: Date.now() },
     ]);
     void start({ description: brief.text, evidence, approved: true });
   };
@@ -377,13 +397,50 @@ export function SmithPanel({
         {messages.map((m, i) => (
           <div
             key={i}
-            className={cn(
-              "max-w-[90%] rounded-lg px-3 py-2 text-sm",
-              m.role === "user"
-                ? "ml-auto bg-primary text-primary-foreground"
-                : "bg-muted",
-            )}
+            className={cn("max-w-[90%]", m.role === "user" && "ml-auto")}
           >
+            {/*
+              WHO SAID IT AND WHEN. The transcript was bare bubbles, so a
+              returning reader could not tell Smith's turns from their own
+              except by which side they sat on, and had no idea whether an
+              exchange happened a minute or a day ago. Repeated speakers are
+              not relabelled — a run of Smith's turns reads as one voice.
+            */}
+            {!m.plan && (i === 0 || messages[i - 1].role !== m.role) && (
+              <div
+                className={cn(
+                  "mb-1 flex items-baseline gap-2 text-xs",
+                  m.role === "user" && "justify-end",
+                )}
+              >
+                <span className="font-medium">
+                  {m.role === "user" ? "You" : "Smith"}
+                </span>
+                {m.at && (
+                  <span className="tabular-nums text-muted-foreground">
+                    {new Date(m.at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                )}
+              </div>
+            )}
+            {m.plan ? (
+              <StageList
+                run={m.plan}
+                onApprove={approve}
+                definition={blueprint}
+              />
+            ) : (
+            <div
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm",
+                m.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted",
+              )}
+            >
             <p>{m.text}</p>
 
             {m.diffSummary && (
@@ -408,11 +465,16 @@ export function SmithPanel({
                 ))}
               </div>
             )}
+            </div>
+            )}
           </div>
         ))}
 
 
-        {run.status !== "idle" && (
+        {/* The live run. Completed ones live in the transcript above, so a
+            new turn no longer erases the last plan or its approval gate. */}
+        {(run.status === "running" ||
+          (run.status === "complete" && !completedRef.current)) && (
           <StageList run={run} onApprove={approve} definition={blueprint} />
         )}
 
