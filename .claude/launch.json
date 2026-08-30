@@ -20,11 +20,11 @@
         "uvicorn",
         "main:app",
         "--port",
-        "6577"
+        "6500"
       ],
       "cwd": "backend",
-      "port": 6577,
-      "autoPort": true
+      "port": 6500,
+      "autoPort": false
     },
     {
       "name": "generated-app",
