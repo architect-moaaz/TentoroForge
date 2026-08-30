@@ -793,9 +793,37 @@ _STEP_NODE_TYPE: dict[str, str] = {
 }
 
 #: Blueprint step type -> the db action a mutating step performs.
+#: The fallback when a step declares no operation. Only a system `action` is
+#: assumed to write, and it writes the ordinary thing.
+#:
+#: `human_task` and `approval` used to default to db_update, so a capture step
+#: — where a person fills a form, before anything is stored — updated every
+#: column of a row, and "Present the ordered queue" did too. A step that writes
+#: says which write it is; one that does not is where somebody acts, and the
+#: action step after it does the storing.
 _STEP_ACTION: dict[str, str] = {
-    "action": "db_insert", "human_task": "db_update", "approval": "db_update",
+    "action": "db_insert",
 }
+
+#: What the Blueprint's `config.operation` means to the workflow engine. The
+#: step type says a person or the system acts; the operation says WHICH act,
+#: and only the operation can tell a read from a write.
+_OPERATION_ACTION: dict[str, str] = {
+    "create": "db_insert",
+    "update": "db_update",
+    "delete": "db_delete",
+    "list": "db_query",
+    "read": "db_query",
+    "query": "db_query",
+}
+
+#: Values in `sets` the engine cannot evaluate. `now()` and CURRENT_DATE are
+#: SQL the Blueprint writes to mean "stamped by the system"; the engine writes
+#: a values map through Drizzle and would store them as the literal text.
+#: Dropped rather than mistranslated — the projected column already carries
+#: `defaultNow()` for exactly these, so the database supplies what the
+#: Blueprint intended.
+_DB_EVALUATED = {"now()", "current_date", "current_timestamp", "current_time"}
 
 
 def _wf_node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
@@ -841,8 +869,16 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         for i, step in enumerate(steps, start=1):
             step_id = f"s{i}"
             entity = entities.get(step.get("entity")) or {}
+            # THE OPERATION DECIDES, NOT THE STEP TYPE. Mapping on type alone
+            # made every `action` a db_insert, so "Set status Closed" inserted
+            # a second ticket, and "List tickets for the active view" and "Open
+            # the selected ticket" — both reads — inserted too. Three of one
+            # workflow's nodes wrote rows nobody asked for.
+            step_cfg = step.get("config") or {}
+            operation = str(step_cfg.get("operation") or "").strip().lower()
             config: dict[str, Any] = {
-                "actionType": _STEP_ACTION.get(step.get("type"), "noop"),
+                "actionType": (_OPERATION_ACTION.get(operation)
+                               or _STEP_ACTION.get(step.get("type"), "noop")),
             }
             if entity.get("table"):
                 config["table"] = entity["table"]
@@ -868,6 +904,19 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                         for f in form_fields_for(entity, creating=creating)
                         if f.get("name")
                     }
+                    # WHAT THE BLUEPRINT SAYS TO WRITE WINS OVER WHAT A FORM
+                    # ASKS FOR. `sets` is where a workflow states the values a
+                    # person never types: FLOW-001 says `status: "Open"` and
+                    # notes "Status and closedAt are never entered by the
+                    # agent". Deriving values from the form alone emitted
+                    # `status: "{{status}}"`, nothing supplied it, and the
+                    # insert failed on a not-null constraint — the design was
+                    # right and the projection overwrote it.
+                    for col, val in (step_cfg.get("sets") or {}).items():
+                        if isinstance(val, str) and val.strip().lower() in _DB_EVALUATED:
+                            values.pop(col, None)
+                            continue
+                        values[col] = val
                     if values:
                         config["values"] = values
             if step.get("condition"):
