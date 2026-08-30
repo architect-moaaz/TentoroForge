@@ -183,6 +183,23 @@ function ProjectWorkspace({
     queryFn: () => api.get<Project>(`/api/projects/${projectId}`),
   });
 
+  // §25/§109 — what Smith understood, so the approval gate can show it.
+  //
+  // SmithPanel renders the Application Definition from this prop and nothing
+  // else; without it the gate offered "Approve and build" above a stage list
+  // and a tick per node, so the one thing being approved was the one thing
+  // not on screen. `/blueprint/[projectId]` had always passed it and this
+  // call site — the chat tab people actually use — never did.
+  //
+  // A project with no Blueprint yet answers 404, which is the ordinary state
+  // before the first define run rather than an error worth surfacing.
+  const { data: blueprintDoc } = useQuery({
+    queryKey: ["project", projectId, "blueprint"],
+    queryFn: () =>
+      api.get<Record<string, unknown>>(`/api/projects/${projectId}/blueprint`),
+    retry: false,
+  });
+
   // Load conversation history
   const { data: history } = useQuery({
     queryKey: ["project", projectId, "conversations"],
@@ -371,6 +388,9 @@ function ProjectWorkspace({
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "navigation"] });
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "modules-layout"] });
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "app-model"] });
+    // The define run just wrote it — without this the gate would show the
+    // Blueprint as it stood before the run that produced it.
+    queryClient.invalidateQueries({ queryKey: ["project", projectId, "blueprint"] });
   };
 
   return (
@@ -485,6 +505,7 @@ function ProjectWorkspace({
         {activeTab === "chat" && (
           <SmithPanel
             projectId={projectId}
+            blueprint={blueprintDoc ?? null}
             onRunComplete={onGenerationComplete}
             className="h-full border-l-0"
           />
