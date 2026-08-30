@@ -743,6 +743,37 @@ def _enum_members(kind: str, prop: str) -> set[str]:
     return {str(m) for m in members} if isinstance(members, list) else set()
 
 
+#: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
+#: them among the props and the binder lifts them out afterwards, so they are
+#: not unknown — they are early.
+_NODE_SIBLINGS = frozenset({"style", "bind", "visibleIf", "id"})
+
+
+def _unknown_props(kind: str, props: dict) -> list[str]:
+    """Props `kind` does not accept, per the generated component contracts.
+
+    Reported, not dropped. The catalog is generated from the Zod components
+    and should be authoritative, but "should be" is the wrong footing on which
+    to delete a value a composer meant: if the catalog's entry for a component
+    is thin, dropping would silently strip props the renderer does accept.
+    Naming them puts the diagnosis in front of whoever reads the run, and the
+    prop still reaches the schema exactly as it did before.
+
+    An empty entry means the catalog knows nothing about this component, which
+    is a different problem — every prop would be "unknown" and the message
+    would say nothing.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+
+        known = set(props_for(kind, load_contracts()) or {})
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return []
+    if not known:
+        return []
+    return sorted(k for k in props if k not in known and k not in _NODE_SIBLINGS)
+
+
 def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
     """Every `workflow` under `node` naming something outside `known`.
 
@@ -1173,6 +1204,20 @@ def translate(payload: dict, registry: dict, route: str = "/",
         for req, default in _REQUIRED_DEFAULTS.get(kind, {}).items():
             props.setdefault(req, default)
         props.update(binder.extra_props.get(str(c.get("id")), {}))
+
+        # AFTER THE ALIASES AND THE BINDER'S OWN PROPS, so `Badge.label` is
+        # already `content` and nothing this module attaches is reported as
+        # the composer's invention.
+        #
+        # A prop no component accepts does not fail here — it rides into
+        # `props` and meets a `.strict()` field downstream, where the whole
+        # page fails to parse and the message names a schema path rather than
+        # the component that carried it. This says which component and which
+        # prop, at the point where that is still cheap to know.
+        for bad in _unknown_props(kind, props):
+            binder.warnings.append(
+                f'{c.get("id")}.{bad}: {kind} does not accept a {bad!r} prop. '
+                f"Passed through unchanged — it may be rejected downstream.")
 
         # AFTER EVERY PROP IS ON. This walk ran above the `extra_props` merge,
         # so it inspected a dict that did not yet hold the props the binder

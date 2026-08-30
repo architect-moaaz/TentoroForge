@@ -994,3 +994,67 @@ def test_enum_members_come_from_the_contracts_not_a_list_here():
     assert _enum_members("Badge", "variant") == {
         "neutral", "primary", "success", "danger", "warning"}
     assert _enum_members("NoSuchComponent", "variant") == set()
+
+
+# ──────────────────────────────── a prop no component accepts
+#
+# It did not fail here. It rode into `props` and met a `.strict()` field
+# downstream, where the whole page failed to parse and the message named a
+# schema path rather than the component that carried it.
+
+def _badge(**props):
+    return [{"id": "root", "component": "Stack", "children": ["x"]},
+            {"id": "x", "component": "Badge", **props}]
+
+
+def _warned(r, prop):
+    return any(f".{prop}:" in w for w in r["warnings"])
+
+
+def test_a_prop_no_component_accepts_is_named():
+    r = translate(payload(_badge(content="Live", sparkle="yes"),
+                          {"tasks": {"rows": []}}), REG)
+    assert _warned(r, "sparkle")
+    assert "Badge" in " ".join(r["warnings"])
+
+
+def test_it_is_reported_not_dropped():
+    """The catalog should be authoritative, but "should be" is the wrong
+    footing on which to delete a value a composer meant: a thin catalog entry
+    would silently strip props the renderer does accept."""
+    r = translate(payload(_badge(content="Live", sparkle="yes"),
+                          {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["sparkle"] == "yes"
+
+
+def test_an_aliased_prop_is_not_an_unknown_one():
+    """`Badge.label` is `content` by the time this looks. Reporting it would
+    be reporting a rename this module performed itself."""
+    r = translate(payload(_badge(label="Live"), {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "Live"
+    assert not _warned(r, "label")
+
+
+def test_a_node_sibling_is_not_an_unknown_prop():
+    """`style` sits beside `props` in NodeV2. A2UI emits it among the props and
+    the binder lifts it out — not unknown, early."""
+    r = translate(payload(_badge(content="Live", style={"maxWidth": "8rem"}),
+                          {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "style")
+
+
+def test_a_component_the_catalog_does_not_know_reports_nothing():
+    """Every prop would be "unknown" and the message would say nothing. That
+    the component itself is unrecognised is a different problem."""
+    comps = [{"id": "root", "component": "Stack", "children": ["x"]},
+             {"id": "x", "component": "NoSuchComponent", "whatever": 1}]
+    r = translate(payload(comps, {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "whatever")
+
+
+def test_a_real_composition_is_not_flooded():
+    """A warning on every prop of every node is a warning nobody reads."""
+    board = {"id": "b", "component": "Kanban", "cardTitle": {"path": "title"},
+             "data": {"path": "/tasks/rows"}}
+    r = translate(payload(_root([board]), {"tasks": {"rows": []}}), REG)
+    assert not r["warnings"]
