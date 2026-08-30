@@ -820,20 +820,53 @@ def dangling_bindings(schema: dict) -> list[str]:
     declared = {s.get("name") for s in (schema.get("dataSources") or [])}
     found: set[str] = set()
 
-    def walk(node: Any) -> None:
+    def _row_scope(node: dict) -> bool:
+        """Whether this node renders once per item of a declared collection.
+
+        A ROW IS NOT THE PAGE. Inside one, `{{id}}` means this row's id and the
+        renderer resolves it against the row — there is no page-level source
+        called `id`, and there should not be. Read as a page binding it looked
+        dangling, and /tickets was refused over `rowHref: "/tickets/{{id}}"`
+        on a Table whose `rows` was bound to a declared source.
+
+        Decided structurally, from what the node binds rather than from what
+        it is called: a collection prop carrying a binding to a source the page
+        declares. `repeat` is the planner's own form of the same thing.
+        """
+        if node.get("repeat"):
+            return True
+        props = node.get("props")
+        props = props if isinstance(props, dict) else {}
+        for prop in ("rows", "items", "data"):
+            value = props.get(prop)
+            if not isinstance(value, str):
+                continue
+            names = [m.split(".")[0].strip()
+                     for m in re.findall(r"\{\{([^}]+)\}\}", value)]
+            if any(n in declared for n in names):
+                return True
+        return False
+
+    def walk(node: Any, in_row: bool = False) -> None:
         if isinstance(node, list):
             for n in node:
-                walk(n)
+                walk(n, in_row)
             return
         if not isinstance(node, dict):
             return
+        # The collection binding itself is page-level — it is what opens the
+        # row scope — so the node is judged before the scope is entered.
+        row = in_row or _row_scope(node)
         for value in node.values():
             if isinstance(value, str):
                 # `{{plants}}` and `{{record.title}}` both name `plants`/`record`.
-                found.update(m.split(".")[0].strip()
-                             for m in re.findall(r"\{\{([^}]+)\}\}", value))
+                names = [m.split(".")[0].strip()
+                         for m in re.findall(r"\{\{([^}]+)\}\}", value)]
+                # Within a row, only a name the page actually declares is a
+                # page binding; anything else is a field of the row.
+                found.update(n for n in names if not row or n in declared)
             else:
-                walk(value)
+                walk(value, row)
 
     walk(schema.get("root"))
     return sorted(n for n in found if n and n not in declared)

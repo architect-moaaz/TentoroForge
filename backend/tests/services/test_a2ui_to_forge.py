@@ -22,7 +22,7 @@ full of convincing fiction that never touch Postgres.
 
 import pytest
 
-from services.a2ui_to_forge import translate
+from services.a2ui_to_forge import dangling_bindings, translate
 
 REG = {
     "entities": {
@@ -1058,3 +1058,43 @@ def test_a_real_composition_is_not_flooded():
              "data": {"path": "/tasks/rows"}}
     r = translate(payload(_root([board]), {"tasks": {"rows": []}}), REG)
     assert not r["warnings"]
+
+
+# --- row-relative bindings are not page bindings ---------------------------
+
+def test_a_row_relative_binding_is_not_dangling():
+    """`{{id}}` inside a Table means this row's id, not a missing source.
+
+    /tickets was refused over `rowHref: "/tickets/{{id}}"` on a Table whose
+    `rows` was bound to a declared source. Read as a page-level binding it
+    looked dangling; the renderer resolves it against the row.
+    """
+    schema = {
+        "dataSources": [{"name": "tickets"}],
+        "root": {"type": "Table",
+                 "props": {"rows": "{{tickets}}", "rowHref": "/tickets/{{id}}"}},
+    }
+    assert dangling_bindings(schema) == []
+
+
+def test_a_phantom_source_outside_a_row_is_still_dangling():
+    """The case the rule exists for. A composed /plants shipped four tiles
+    reading invented sources against one declared `plants`, and rendered four
+    blanks."""
+    schema = {
+        "dataSources": [{"name": "plants"}],
+        "root": {"type": "Stack", "children": [
+            {"type": "MetricTile", "props": {"value": "{{overdue.value}}"}}]},
+    }
+    assert dangling_bindings(schema) == ["overdue"]
+
+
+def test_a_row_over_an_undeclared_source_opens_no_scope():
+    """Otherwise the exemption would launder a phantom: bind rows to something
+    that does not exist and everything under it stops being checked."""
+    schema = {
+        "dataSources": [{"name": "plants"}],
+        "root": {"type": "Table",
+                 "props": {"rows": "{{ghosts}}", "rowHref": "/x/{{id}}"}},
+    }
+    assert dangling_bindings(schema) == ["ghosts", "id"]
