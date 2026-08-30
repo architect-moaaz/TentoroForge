@@ -29,7 +29,10 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { ChatPanel } from "@/components/chat/ChatPanel";
+// §112 — Smith is the conversation in this workspace. `ChatPanel` drives
+// routers/generate.py, which never imports services.blueprint, so the chat
+// people actually used could not reach the Blueprint engine at all.
+import { SmithPanel } from "@/components/smith/SmithPanel";
 import { PreviewFrame } from "@/components/preview/PreviewFrame";
 import { CodePanel } from "@/components/code/CodePanel";
 import { HistoryPanel } from "@/components/deploy/HistoryPanel";
@@ -480,10 +483,10 @@ function ProjectWorkspace({
       {/* Main content area */}
       <div className="flex-1 overflow-hidden pt-[70px] bg-background">
         {activeTab === "chat" && (
-          <ChatPanel
+          <SmithPanel
             projectId={projectId}
-            project={project || null}
-            onGenerationComplete={onGenerationComplete}
+            onRunComplete={onGenerationComplete}
+            className="h-full border-l-0"
           />
         )}
         {activeTab === "preview" && (

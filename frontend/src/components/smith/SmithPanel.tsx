@@ -67,6 +67,37 @@ const STAGE_LABEL: Record<string, string> = {
 
 const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
+const _BASE_TITLE =
+  typeof document !== "undefined" ? document.title : "Tentoro Forge";
+
+/**
+ * Say the run has finished, to someone who is probably elsewhere.
+ *
+ * Permission is never requested unprompted — a permission prompt on page load
+ * is the thing everyone denies, and a denial is permanent. Asked only after a
+ * run has actually completed, which is the moment the value is obvious.
+ */
+function notifyDone(awaitingApproval: boolean): void {
+  if (typeof window === "undefined") return;
+
+  const text = awaitingApproval
+    ? "Your definition is ready to review."
+    : "Your application is built.";
+
+  // The tab title works with no permission at all and is what most people
+  // will actually see.
+  if (document.hidden) document.title = `✓ ${text} — ${_BASE_TITLE}`;
+
+  if (!("Notification" in window)) return;
+  const show = () => new Notification("Smith", { body: text });
+  if (Notification.permission === "granted") show();
+  else if (Notification.permission === "default") {
+    void Notification.requestPermission().then(
+      (p) => p === "granted" && show(),
+    );
+  }
+}
+
 interface Message {
   role: "user" | "smith";
   text: string;
@@ -117,9 +148,23 @@ export function SmithPanel({
     if (run.status === "complete" && !completedRef.current) {
       completedRef.current = true;
       onRunComplete?.();
+      // A build runs for ten minutes or more, so nobody watches it finish.
+      // Told where they actually are rather than only in a pane they have
+      // left: the tab title carries it back, and a notification reaches them
+      // outside the browser when they have already allowed one.
+      notifyDone(run.awaitingApproval);
     }
     if (run.status === "running") completedRef.current = false;
-  }, [run.status, onRunComplete]);
+  }, [run.status, run.awaitingApproval, onRunComplete]);
+
+  // Clear the title marker as soon as they look.
+  useEffect(() => {
+    const restore = () => {
+      if (!document.hidden) document.title = _BASE_TITLE;
+    };
+    document.addEventListener("visibilitychange", restore);
+    return () => document.removeEventListener("visibilitychange", restore);
+  }, []);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({
