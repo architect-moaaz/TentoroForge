@@ -291,17 +291,35 @@ export function BusinessRulesPanel({ projectId }: BusinessRulesPanelProps) {
                     cfg.table?.hitPolicy ?? "U"
                   }`
                 : `${rule.model_name ? `${rule.model_name}: ` : ""}${cfg.whenFeel || "true"}`;
+              // OWNED BY THE BLUEPRINT. Opening the editor for one of these
+              // collects an edit with nowhere to land — no project_rules row
+              // exists, so saving 409s. Not offered rather than offered and
+              // refused.
+              const owned = Boolean(
+                (rule.config as { blueprintId?: string } | null)?.blueprintId,
+              );
               return (
                 <button
                   key={rule.id}
-                  onClick={() =>
-                    setDraft(
-                      isTable
-                        ? { kind: "decision_table", dt: toTableDraft(rule) }
-                        : { kind: "condition_action", ca: toConditionDraft(rule) },
-                    )
+                  disabled={owned}
+                  onClick={
+                    owned
+                      ? undefined
+                      : () =>
+                          setDraft(
+                            isTable
+                              ? { kind: "decision_table", dt: toTableDraft(rule) }
+                              : {
+                                  kind: "condition_action",
+                                  ca: toConditionDraft(rule),
+                                },
+                          )
                   }
-                  className="flex w-full items-center justify-between rounded-md border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                  className={
+                    owned
+                      ? "flex w-full items-center justify-between rounded-md border bg-card px-3 py-2.5 text-left"
+                      : "flex w-full items-center justify-between rounded-md border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                  }
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -314,6 +332,15 @@ export function BusinessRulesPanel({ projectId }: BusinessRulesPanelProps) {
                       {!rule.is_active && (
                         <Badge variant="secondary" className="text-[10px]">
                           inactive
+                        </Badge>
+                      )}
+                      {owned && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] font-normal"
+                          title="Defined in the Blueprint — ask Smith to change it"
+                        >
+                          Blueprint
                         </Badge>
                       )}
                     </div>

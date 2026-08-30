@@ -31,13 +31,20 @@ Nine editor families ship today, and they are substantial:
 `/app-model` is the single most-called endpoint (6 call sites), and it is the
 data-model editor's only source.
 
-**None of these read the Blueprint.** They read three other things: legacy DB
-tables (`project_rules`, `page_definitions`), files on disk via
-`_debug/project-file`, and `app-model.json`. The Blueprint engine writes the
-last of those and neither of the first two.
+**Almost none of these read the Blueprint.** They read legacy DB tables
+(`project_rules`, `page_definitions`) and files on disk via
+`_debug/project-file`. The engine writes neither table.
 
-That is why the panels open empty on a Blueprint-built application. It is not
-a rendering problem and never was.
+The exception is `/app-model`, and it matters. `app-model.json` is written
+during the run by `services/app_model_builder.py` from the same material the
+Blueprint holds — a projection, not a parallel store — so the data-model
+editor is already reading the truth, one hop removed. Verified on a
+Blueprint-built project: one table with typed columns, three pages, four
+workflows, all present.
+
+That distinction is the whole diagnosis. A projection regenerates when the
+Blueprint changes; a table nothing writes never fills. The panels that open
+empty are the ones backed by the second kind.
 
 ### 1.1 The reads fixed today, and what they prove
 
@@ -120,15 +127,19 @@ Each phase ships something usable and is independently revertible.
 
 ### Phase 1 — Read from the Blueprint
 
-Extend `services/blueprint_to_editor.py` (written, unwired) to cover all five
-families, and point the existing endpoints at it: Blueprint first, DB rows as
-fallback for hand-authored records.
+Extend `services/blueprint_to_editor.py` (written, unwired) and point the
+existing endpoints at it: Blueprint first, DB rows as fallback for
+hand-authored records.
 
-- `/rules` ← `businessRules` *(adapter written)*
-- `/pages` ← `pages` + `pageLayouts` *(adapter written)*
-- `/workflows` ← `workflows` (currently reads projected files; the Blueprint is
-  the better source and carries `launchedFrom`, `trigger`, `requirements`)
-- `/app-model` ← `data.entities`, `apis`, `pages` — highest value, most callers
+- `/rules` ← `businessRules` — **the real gap: 0 rows against 13 rules**
+  *(adapter written)*
+- `/pages` ← `pages` + `pageLayouts` — rows exist only where a legacy run
+  happened to fire `_sync_pages_from_app_model` *(adapter written)*
+- `/workflows` ← `workflows`. Reads projected files today and works; the
+  Blueprint additionally carries `launchedFrom`, `trigger` and `requirements`,
+  so this is an enrichment rather than a repair
+- ~~`/app-model`~~ — **no work needed.** Already Blueprint-derived through
+  `app_model_builder`; measured populated on a real project
 - nav ← `nav-flow.json`'s projection inputs: `transitions`, `entries`,
   `gatedEntry`, `initialPage`
 
@@ -187,6 +198,13 @@ projects holding hand-authored rows.
 
 ## 6. First step
 
-Phase 1 for `/app-model`. It has six call sites and is the data-model editor's
-only source, so it converts the most surface for one adapter — and it is a pure
-read, so it cannot break a write path that does not exist yet.
+Phase 1 for `/rules`, with phase 2 for the same panels in the same change.
+
+It is the only endpoint measured actually empty against a populated Blueprint —
+zero rows against thirteen rules — and its adapter is already written. Rules
+also have no layout consequences, which makes them the safest family to take
+writes on first in phase 3.
+
+`/app-model` was the original candidate here, chosen on call-site count. It
+turned out not to be broken, which is the argument for measuring an endpoint
+before planning work on it: reach is not the same as brokenness.
