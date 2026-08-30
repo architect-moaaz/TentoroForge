@@ -241,6 +241,42 @@ export function SmithPanel({
    * Smith now streams `message` for what it is doing and the graph's own
    * events when it runs one; this sends and renders.
    */
+  /**
+   * ONE TRANSCRIPT, IN ARRIVAL ORDER.
+   *
+   * Smith's turns arrived over SSE in `run.messages` and were rendered by
+   * concatenating the two lists — `[...messages, ...run.messages]` — which
+   * groups every user turn above every Smith turn rather than interleaving
+   * them. With one exchange that is indistinguishable from correct; from the
+   * second turn on it is not. Asking a follow-up put the question above the
+   * reply to the previous message, so the conversation read as though Smith
+   * had answered something nobody asked.
+   *
+   * Neither list could be sorted against the other: local turns have no
+   * sequence and `run.messages` restarts at zero every run. So they are not
+   * merged at render time at all — Smith's turns are copied into the same
+   * list the user's turns go into, as they arrive, and order is simply the
+   * order things happened.
+   */
+  const copiedRef = useRef(0);
+  useEffect(() => {
+    // A new run empties `run.messages`; what was already copied stays in the
+    // transcript, so the counter restarts alongside it.
+    if (run.messages.length < copiedRef.current) copiedRef.current = 0;
+    if (run.messages.length === copiedRef.current) return;
+    const fresh = run.messages.slice(copiedRef.current);
+    copiedRef.current = run.messages.length;
+    setMessages((m) => [
+      ...m,
+      ...fresh.map((x) => ({
+        role: "smith" as const,
+        text: x.text,
+        options: x.options,
+        diffSummary: x.diffSummary,
+      })),
+    ]);
+  }, [run.messages]);
+
   const send = () => {
     const text = draft.trim();
     if (!text || busy || !projectId) return;
@@ -305,15 +341,7 @@ export function SmithPanel({
           </div>
         )}
 
-        {[
-          ...messages,
-          ...run.messages.map((m) => ({
-            role: "smith" as const,
-            text: m.text,
-            options: m.options,
-            diffSummary: m.diffSummary,
-          })),
-        ].map((m, i) => (
+        {messages.map((m, i) => (
           <div
             key={i}
             className={cn(
