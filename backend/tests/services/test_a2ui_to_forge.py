@@ -20,6 +20,8 @@ carries an invented ``updateDataModel``, and importing it would produce pages
 full of convincing fiction that never touch Postgres.
 """
 
+import json
+
 import pytest
 
 from services.a2ui_to_forge import dangling_bindings, translate
@@ -1098,3 +1100,45 @@ def test_a_row_over_an_undeclared_source_opens_no_scope():
                  "props": {"rows": "{{ghosts}}", "rowHref": "/x/{{id}}"}},
     }
     assert dangling_bindings(schema) == ["ghosts", "id"]
+
+
+# --- a record page binds its record, it does not copy a sample -------------
+
+def _record_surface():
+    """A detail surface: fields pointing into one record object."""
+    return {"messages": [
+        {"updateDataModel": {"path": "/", "value": {
+            "ticket": {"id": "TCK-1042", "subject": "Cannot reset password"},
+        }}},
+        {"updateComponents": {"components": [
+            {"id": "root", "component": "Stack", "children": ["subj"]},
+            {"id": "subj", "component": "Text",
+             "content": {"path": "/ticket/subject"}},
+        ]}},
+    ]}
+
+
+def test_a_record_page_binds_its_fields_rather_than_baking_the_sample():
+    """/tickets/[id] shipped the sample ticket's text and rendered it for
+    every ticket. The pointer names where the value lives; that has to
+    survive to render time."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_record_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    blob = json.dumps(out["schema"])
+    assert "Cannot reset password" not in blob, "sample copy reached the page"
+    assert "{{" in blob, "nothing was bound"
+    ops = {s["name"]: s.get("op") for s in out["schema"].get("dataSources") or []}
+    assert "get" in ops.values(), f"no record source: {ops}"
+
+
+def test_a_collection_page_still_reads_copy_from_the_sample():
+    """The branch exists for headings and captions, and those are still read
+    off the sample — only a record page's own fields change meaning."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_record_surface(), reg, route="/tickets",
+                    page_id="P", kind="entity_list")
+    ops = {s.get("op") for s in out["schema"].get("dataSources") or []}
+    assert "get" not in ops, f"a list page minted a record source: {ops}"

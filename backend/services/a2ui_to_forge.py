@@ -462,6 +462,38 @@ class _Binder:
         self._by_path[key] = binding
         return binding
 
+    def is_record_page(self) -> bool:
+        """Whether this page is about one record.
+
+        `_family_of` rather than `page_family` directly: page_family knows
+        nothing about `record_workspace` and answers None, and the authority's
+        map is the one covering every declared kind.
+        """
+        try:
+            from services.a2ui_authority import _family_of
+            return _family_of(getattr(self, "page_kind", "")) == "record"
+        except Exception:  # noqa: BLE001 — a lookup must not fail a binding
+            return False
+
+    def record_source(self, entity: str) -> str:
+        """The page's single `get` source for `entity`, created once.
+
+        One source, however many fields read from it — a detail page that
+        minted a source per field would fetch the same record six times and
+        bind each field to a different name.
+
+        `get` is the runtime's own word: data-engine-bridge resolves the URL id
+        and calls findById for any source that is not a list, so this needs no
+        URL template and no key.
+        """
+        existing = getattr(self, "_record_src", None)
+        if existing:
+            return str(existing)
+        name = self._unique(_slug_for(entity, self.registry))
+        self.sources.append({"name": name, "entity": entity, "op": "get"})
+        self._record_src = name
+        return name
+
     def measure_from_label(self, comp: dict, prop: str) -> str | None:
         """A measured value that arrived as a bare LITERAL → a real aggregate.
 
@@ -1135,7 +1167,32 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # where a `.strict()` string field rejects it and the whole page
                 # fails to parse.
                 raw = str(val["path"])
-                resolved = at_path(raw)
+                # A RECORD'S FIELDS ARE NOT COPY. This branch reads a pointer
+                # off the sample data model, which is right for a card heading
+                # and ruinous for the record the page exists to show: every
+                # `/ticket/subject` became the sample string, so /tickets/[id]
+                # shipped one hardcoded fictional ticket and rendered it
+                # whichever ticket you opened. Nothing reported it, because a
+                # page full of plausible text looks exactly like a page that
+                # works.
+                #
+                # Bound when the page is about one record AND the pointer
+                # names a field of an object in the sample — `/ticket/subject`
+                # yes, `/ticketDetails` (a list) no, `/heading` no. The
+                # resulting string passes the literal check below untouched,
+                # so the repair chain stays for the cases it was written for.
+                segs = [seg for seg in raw.strip("/").split("/") if seg]
+                if (binder.is_record_page() and len(segs) >= 2
+                        and binder.dominant
+                        and isinstance(at_path("/" + segs[0]), dict)):
+                    src = binder.record_source(binder.dominant)
+                    resolved = f"{{{{{src}.{segs[-1]}}}}}"
+                    binder.assumptions.append(
+                        f'{c.get("id")}.{k}: "{raw}" names a field of the '
+                        f"record this page shows — bound to {resolved!r} "
+                        f"rather than read out of the sample.")
+                else:
+                    resolved = at_path(raw)
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
