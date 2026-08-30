@@ -629,3 +629,75 @@ def test_the_matcher_excludes_the_apis_a_public_page_needs(tmp_path):
     assert "api/workflows/FLOW-001" in written
     assert "api/workflows/FLOW-009" not in written
     assert result["publicApis"]
+
+
+# ---------------------------------------------------------------------------
+# nav-flow is a graph, not an index.
+# ---------------------------------------------------------------------------
+
+def _nav_doc():
+    return {"pages": [
+        {"id": "PAGE-001", "name": "Dashboard", "route": "/",
+         "access": "authenticated", "entry": True, "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "name": "Surveys", "route": "/surveys",
+         "access": "authenticated", "navigatesTo": ["PAGE-003"]},
+        {"id": "PAGE-003", "name": "Survey", "route": "/surveys/[id]",
+         "access": "authenticated", "presentation": "drawer"},
+        {"id": "PAGE-004", "name": "Fill", "route": "/survey/[slug]",
+         "access": "public", "entry": True},
+    ]}
+
+
+def _nav(tmp_path):
+    import json
+    from services.blueprint.projection import project_nav_flow
+
+    project_nav_flow(_nav_doc(), tmp_path / "app")
+    return json.loads(
+        (tmp_path / "app" / "src" / "contracts" / "nav-flow.json").read_text())
+
+
+def test_each_audience_gets_its_own_entry(tmp_path):
+    """An application has as many front doors as it has audiences. A survey
+    author signs in and lands on a dashboard; a respondent opens a link."""
+    nav = _nav(tmp_path)
+    assert nav["entries"] == {"authenticated": "/", "public": "/survey/[slug]"}
+
+
+def test_the_initial_page_is_the_gated_one(tmp_path):
+    """It is what a login redirect and a "back to the application" link need,
+    and it is always a concrete URL — a public entry is often a pattern, which
+    is why guessing "the first route" produced an href Next refuses."""
+    assert _nav(tmp_path)["initialPage"] == "/"
+
+
+def test_public_and_gated_routes_are_disjoint(tmp_path):
+    """Both keys were written from the same list, so one route was at once
+    reachable without a session and requiring one — and the middleware read
+    that contradiction."""
+    nav = _nav(tmp_path)
+    assert nav["public_routes"] == ["/survey/[slug]"]
+    assert "/survey/[slug]" not in nav["auth_routes"]
+    assert set(nav["auth_routes"]) == {"/", "/surveys", "/surveys/[id]"}
+
+
+def test_the_arrows_come_from_the_pages(tmp_path):
+    """`transitions` shipped as [] on every application ever generated: it read
+    a `navigation` section nobody authors. Pages are authored."""
+    edges = {(t["from"], t["to"]) for t in _nav(tmp_path)["transitions"]}
+    assert edges == {("/", "/surveys"), ("/surveys", "/surveys/[id]")}
+
+
+def test_a_public_page_renders_without_the_app_shell(tmp_path):
+    """Navigation into a product the visitor cannot reach is worse than none."""
+    pages = {p["route"]: p for p in _nav(tmp_path)["pages"]}
+    assert pages["/survey/[slug]"]["shell"] is False
+    assert pages["/"]["shell"] is True
+
+
+def test_presentation_survives_into_the_contract(tmp_path):
+    """A detail opened beside its list is a different application from one that
+    navigates away, and only the second could be expressed."""
+    pages = {p["route"]: p for p in _nav(tmp_path)["pages"]}
+    assert pages["/surveys/[id]"]["presentation"] == "drawer"
+    assert pages["/"]["presentation"] == "page"

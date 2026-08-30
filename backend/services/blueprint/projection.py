@@ -523,18 +523,40 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     pages = [p for p in (doc.get("pages") or []) if p.get("status") != "DEPRECATED"]
     roles = {r.get("id"): r for r in (doc.get("roles") or [])}
 
-    entries, auth_routes = [], []
+    # Two lists, because they are two facts. Both keys were written from the
+    # same set, so `/survey/[slug]` was simultaneously reachable without a
+    # session and requiring one — a contradiction the middleware then read.
+    public_routes: list[str] = []
+    gated_routes: list[str] = []
+    entries: list[dict] = []
     guards: dict[str, Any] = {}
+    by_id = {p.get("id"): p for p in pages if p.get("id")}
+    # An app has as many front doors as it has audiences (§108, §112).
+    entry_by_access: dict[str, str] = {}
+
     for page in pages:
         route = page.get("route") or "/"
         slug = slugify_route(route)
+        access = page.get("access") or "authenticated"
+        # A public page renders without the app shell: navigation into a
+        # product the visitor cannot reach is worse than no navigation.
         entries.append({
             "id": slug,
             "route": route,
             "title": page.get("name") or slug,
             "schemaFile": f"src/schemas/{slug}.json",
-            "shell": True,
+            "shell": access != "public",
+            "access": access,
+            "presentation": page.get("presentation") or "page",
+            # By route, because that is what a router follows — resolved from
+            # the page ids the contract carries, so a rename cannot break it.
+            "navigatesTo": sorted({
+                str(by_id[t].get("route")) for t in (page.get("navigatesTo") or [])
+                if t in by_id and by_id[t].get("route")
+            }),
         })
+        if page.get("entry") and access not in entry_by_access:
+            entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
         named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles]
@@ -543,16 +565,29 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Read from the contract, not guessed from the route name. A page
         # called /login in an app with no auth is not an auth route, and a
         # public /pricing is not gated however it is spelled.
-        if (page.get("access") or "authenticated") == "public":
-            auth_routes.append(route)
+        (public_routes if access == "public" else gated_routes).append(route)
 
     # Transitions come from declared navigation, not from guessing which page
     # links to which.
+    # Declared navigation first; a page's own `navigatesTo` fills the rest.
+    # `transitions` shipped as [] on every application ever generated, because
+    # the `navigation` section carries edges nobody authors — so the arrows now
+    # come from the pages, which are authored per page and cannot go stale
+    # against them.
     transitions = []
+    seen: set[tuple[str, str]] = set()
     for edge in (doc.get("navigation") or {}).get("transitions") or []:
         if edge.get("from") and edge.get("to"):
             transitions.append({"from": edge["from"], "to": edge["to"],
                                 "trigger": edge.get("trigger", "")})
+            seen.add((edge["from"], edge["to"]))
+    for page in pages:
+        src = page.get("route")
+        for target in (page.get("navigatesTo") or []):
+            dst = (by_id.get(target) or {}).get("route")
+            if src and dst and (src, dst) not in seen:
+                seen.add((src, dst))
+                transitions.append({"from": src, "to": dst, "trigger": ""})
 
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
@@ -560,14 +595,22 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "version": "1.0",
         "pages": entries,
         # The guards read this as "reachable without a session".
-        "public_routes": sorted(set(auth_routes)),
-        "auth_routes": sorted(set(auth_routes)),
+        "public_routes": sorted(set(public_routes)),
+        "auth_routes": sorted(set(gated_routes)),
         "transitions": transitions,
         "guards": guards,
+        # Where each audience arrives. `initialPage` is the gated one because
+        # that is what a login redirect and a "back to the application" link
+        # need, and it is always a concrete URL — a public entry is often a
+        # pattern (`/survey/[slug]`), which is why guessing "the first route"
+        # produced an href Next refuses.
+        "entries": entry_by_access,
+        "initialPage": entry_by_access.get("authenticated"),
     }, indent=2, sort_keys=True) + "\n", "utf-8")
 
     return {"files": ["src/contracts/nav-flow.json"], "pages": len(entries),
-            "guarded": len(guards), "authRoutes": sorted(set(auth_routes))}
+            "guarded": len(guards), "authRoutes": sorted(set(gated_routes)),
+            "transitions": len(transitions), "entries": entry_by_access}
 
 
 # ---------------------------------------------------------------------------
