@@ -31,10 +31,31 @@ detail page needs a real record to be a detail page, and inventing an id would
 screenshot the empty-state-that-is-really-a-404 and score it as a design
 failure belonging to the fixture. So the id is read back from the running app:
 ``page.data.primaryEntity`` names the entity, ``apis`` names the collection
-endpoint for it, and the first seeded row's id is what the route is visited
-with. Derived from the document, and reproducible because ``project_seed``
-writes derived rather than random rows for exactly this reason. A route whose
-id cannot be read back is skipped and says so.
+endpoint for it, and a seeded row's id is what the route is visited with.
+Derived from the document, and reproducible because ``project_seed`` writes
+derived rather than random rows for exactly this reason.
+
+States, and the honest limit
+----------------------------
+A page that only means something once something has been submitted looks
+different in each state, and reviewing one of them is reviewing one of them.
+When the entity declares exactly one field of ``enumValues``, the page is
+opened once per state that is actually present in the data — ``project_seed``
+spreads a field's values across its rows, so three states and three rows
+leaves one record in each.
+
+That is the whole of what this can honestly do, and it is worth being exact
+about why. **Nothing in the Blueprint says which state a page requires.**
+``page.states`` is the render states (loading, empty, populated, error);
+``page.dispatches`` is the workflow a page *launches*, not one it waits on. So
+an approval screen cannot be driven into existence — the platform cannot be
+told that it needs a submitted record, because there is no field in which to
+say it. What it can do is review the page against every state the seed did
+produce, and say which those were.
+
+Two enum fields on an entity is a real ambiguity about which is the state the
+page turns on. Picking the first would be right about as often as wrong, so the
+page is reviewed once, as before.
 
 Everything skipped is *reported*. A capture that silently visited eleven of a
 Blueprint's eighteen pages and returned a clean bill would be the most
@@ -200,6 +221,71 @@ def collection_endpoint(doc: dict, entity: str) -> str:
     return ""
 
 
+def state_field(doc: dict, entity: str) -> str:
+    """The one field whose declared values are this entity's states, or "".
+
+    Declared, not inferred. An entity field carries ``enumValues`` in the
+    contract, and a field with a closed set of values is what a workflow moves
+    a record through — ``draft``, ``submitted``, ``approved``. Nothing is
+    guessed from a field being *called* status.
+
+    Exactly one, or none. Two enum fields on an entity is a genuine ambiguity
+    about which of them is the state a page turns on, and picking the first
+    would be right about as often as it was wrong. The caller reports it and
+    reviews the page once, which is what it did before.
+    """
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if not isinstance(e, dict) or e.get("id") != entity:
+            continue
+        from services.blueprint.page_planner import enum_values
+
+        named = [f.get("name") for f in (e.get("fields") or [])
+                 if isinstance(f, dict) and enum_values(f) and f.get("name")]
+        return named[0] if len(named) == 1 else ""
+    return ""
+
+
+def ids_by_state(body: Any, field: str) -> dict[str, str]:
+    """One record id per distinct state present, keyed by the state.
+
+    Which states exist is read off the data the app returned, not off the
+    entity's declared values: a state the seed did not produce has no record
+    to open the page with, and reporting it as reviewed would be a lie about a
+    screenshot nobody took.
+    """
+    rows = _rows(body)
+    out: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        state = row.get(field)
+        if not isinstance(state, (str, int)) or not str(state).strip():
+            continue
+        record_id = _id_of(row)
+        if record_id and str(state) not in out:
+            out[str(state)] = record_id
+    return out
+
+
+def _rows(body: Any) -> list:
+    """The list inside whatever shape a generated API returned."""
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict):
+        for key in ("data", "items", "results", "rows", "records"):
+            if isinstance(body.get(key), list):
+                return body[key]
+    return []
+
+
+def _id_of(row: dict) -> str:
+    for key in ("id", "uuid", "slug"):
+        value = row.get(key)
+        if isinstance(value, (str, int)) and str(value).strip():
+            return str(value)
+    return ""
+
+
 def first_id(body: Any) -> str:
     """The id of the first record in a list response, or "".
 
@@ -209,24 +295,10 @@ def first_id(body: Any) -> str:
     with a reason, rather than reaching for the first string that looks like an
     id.
     """
-    rows = body
-    if isinstance(body, dict):
-        for key in ("data", "items", "results", "rows", "records"):
-            if isinstance(body.get(key), list):
-                rows = body[key]
-                break
-        else:
-            rows = None
-    if not isinstance(rows, list) or not rows:
+    rows = _rows(body)
+    if not rows or not isinstance(rows[0], dict):
         return ""
-    first = rows[0]
-    if not isinstance(first, dict):
-        return ""
-    for key in ("id", "uuid", "slug"):
-        value = first.get(key)
-        if isinstance(value, (str, int)) and str(value).strip():
-            return str(value)
-    return ""
+    return _id_of(rows[0])
 
 
 def fill_route(route: str, record_id: str) -> str:
@@ -285,29 +357,45 @@ async def _shoot(
     return out
 
 
-async def _resolve(page: Any, base_url: str, target: Target, doc: dict) -> str:
-    """The route with its dynamic segments filled in, or "" with a reason set.
+async def _resolve(
+    page: Any, base_url: str, target: Target, doc: dict,
+) -> list[tuple[str, str]]:
+    """[(route, state)] for this target — one per state there is a record for.
 
     Fetched through the *browser*, not a bare HTTP client, so the request
     carries the same session cookie the page visit will. An endpoint that is
-    itself gated would otherwise answer the sweep with a redirect to login and
-    no rows, and the detail page would be reported as having no records when
-    what it had was no session.
+    itself gated would otherwise answer the sweep with a redirect and no rows,
+    and the detail page would be reported as having no records when what it
+    had was no session.
+
+    A page whose entity declares one enum field is opened once per state
+    present in the data. That is the whole of what "review the workflow-state
+    pages" can honestly mean here: the states come from records the seed
+    produced, not from driving a workflow to manufacture one. Nothing in the
+    Blueprint says which state a page requires — see the module docstring.
     """
     import json as _json
 
     if not target.entity:
-        return ""
+        return []
     path = collection_endpoint(doc, target.entity)
     if not path:
-        return ""
+        return []
     try:
         response = await page.request.get(base_url.rstrip("/") + path)
         body = _json.loads(await response.text())
     except Exception:  # noqa: BLE001 — a route, never the run
-        return ""
+        return []
+
+    field = state_field(doc, target.entity)
+    if field:
+        by_state = ids_by_state(body, field)
+        if by_state:
+            return [(fill_route(target.route, rid), state)
+                    for state, rid in sorted(by_state.items())]
+
     record_id = first_id(body)
-    return fill_route(target.route, record_id) if record_id else ""
+    return [(fill_route(target.route, record_id), "")] if record_id else []
 
 
 async def _sweep(
@@ -315,36 +403,40 @@ async def _sweep(
     out: Capture, *, timeout_ms: int,
 ) -> None:
     for target in targets:
-        route = target.route
         if target.is_dynamic:
-            route = await _resolve(page, base_url, target, doc)
-            if not route:
+            visits = await _resolve(page, base_url, target, doc)
+            if not visits:
                 out.skipped[target.route] = (
                     "no seeded record to open it with — the page needs one, "
                     "and inventing an id would photograph a 404"
                 )
                 continue
+        else:
+            visits = [(target.route, "")]
 
-        try:
-            await page.goto(base_url.rstrip("/") + route, timeout=timeout_ms,
-                            wait_until="networkidle")
-        except Exception as exc:  # noqa: BLE001 — one route, not the run
-            out.skipped[target.route] = f"did not load: {exc}"
-            continue
+        for route, state in visits:
+            where = f"{target.route} ({state})" if state else target.route
+            try:
+                await page.goto(base_url.rstrip("/") + route,
+                                timeout=timeout_ms, wait_until="networkidle")
+            except Exception as exc:  # noqa: BLE001 — one route, not the run
+                out.skipped[where] = f"did not load: {exc}"
+                continue
 
-        moved = landed(route, page.url)
-        if moved:
-            out.skipped[target.route] = moved
-            continue
+            moved = landed(route, page.url)
+            if moved:
+                out.skipped[where] = moved
+                continue
 
-        png = await page.screenshot(full_page=True)
-        # The tree is what the critique reads for structure it cannot see — a
-        # heading that is only bold, a button that is a div.
-        snapshot = await page.accessibility.snapshot()
-        # Reported under the route the Blueprint declares, not the one that was
-        # visited: `shots_for` binds back by route, and `/candidates/c-1` is
-        # not a page any Blueprint claims.
-        out.rendered.append((target.route, png, _render_tree(snapshot)))
+            png = await page.screenshot(full_page=True)
+            # The tree is what the critique reads for structure it cannot see
+            # — a heading that is only bold, a button that is a div.
+            snapshot = await page.accessibility.snapshot()
+            # Reported under the route the Blueprint declares, not the one that
+            # was visited: `shots_for` binds back by route, and
+            # `/candidates/c-1` is not a page any Blueprint claims.
+            out.rendered.append(
+                (target.route, png, _render_tree(snapshot), state))
 
 
 def _render_tree(node: Any, depth: int = 0) -> str:

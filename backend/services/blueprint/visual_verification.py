@@ -80,6 +80,15 @@ class Shot:
     route: str
     png: bytes
     a11y_tree: str = ""
+    #: Which state of the page this is — "submitted", "approved". A page that
+    #: only means something once something has been submitted looks different
+    #: in each, and reviewing one of them is reviewing one of them. Empty when
+    #: the page has only one state to be in.
+    variant: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.page_id} ({self.variant})" if self.variant else self.page_id
 
 
 #: What a critic must be: a shot in, a `vision_evaluator.Critique` out.
@@ -110,8 +119,9 @@ def findings_for(shot: Shot, critique: Any) -> list[Finding]:
     ``patchOp`` is not read. See the module docstring: the critique says what
     is wrong, and the agent that owns the artifact decides what to do about it.
     """
+    prefix = f"in {shot.variant}: " if shot.variant else ""
     return [
-        Finding(edge=EDGE, detail=_issue_detail(issue),
+        Finding(edge=EDGE, detail=prefix + _issue_detail(issue),
                 artifact_id=shot.page_id, section=SECTION)
         for issue in (getattr(critique, "topIssues", None) or [])
     ]
@@ -147,9 +157,12 @@ def verify_rendered(
             ))
             continue
         findings.extend(findings_for(shot, critique))
-        verdicts[shot.page_id] = bool(
-            getattr(critique, "pass_", getattr(critique, "pass", False))
-        )
+        passed = bool(getattr(critique, "pass_", getattr(critique, "pass", False)))
+        # A page reviewed in three states passes when it passes in all three.
+        # Taking the last verdict would let an approval screen that is broken
+        # while something is pending be reported as fine because it looks
+        # right once approved.
+        verdicts[shot.page_id] = verdicts.get(shot.page_id, True) and passed
 
     return VerificationReport(findings=findings, checked_edges=(EDGE,)), verdicts
 
@@ -247,7 +260,7 @@ def anthropic_critic(
     return critic
 
 
-def shots_for(doc: dict, rendered: Sequence[tuple[str, bytes, str]]) -> list[Shot]:
+def shots_for(doc: dict, rendered: Sequence[tuple]) -> list[Shot]:
     """Bind rendered routes to the pages they came from.
 
     A render knows its route; the Blueprint knows which artifact that route is.
@@ -259,8 +272,11 @@ def shots_for(doc: dict, rendered: Sequence[tuple[str, bytes, str]]) -> list[Sho
         for p in (doc.get("pages") or []) if isinstance(p, dict)
     }
     out: list[Shot] = []
-    for route, png, tree in rendered:
+    for item in rendered:
+        route, png, tree = item[0], item[1], item[2]
+        variant = item[3] if len(item) > 3 else ""
         page_id = by_route.get((route or "").strip(), "")
         if page_id:
-            out.append(Shot(page_id=page_id, route=route, png=png, a11y_tree=tree))
+            out.append(Shot(page_id=page_id, route=route, png=png,
+                            a11y_tree=tree, variant=variant))
     return out

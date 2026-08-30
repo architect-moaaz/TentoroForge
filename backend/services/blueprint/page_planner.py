@@ -223,6 +223,27 @@ def _asked_of_a_person(field: dict, *, creating: bool) -> bool:
                 and name.startswith("is"))
 
 
+def enum_values(field: dict) -> list[str]:
+    """The values this field is allowed to hold, as the contract spells them.
+
+    The contract's name is ``enumValues`` and its field object is
+    ``additionalProperties: false``, so ``values`` and ``enum`` — which two
+    readers here were looking for — cannot appear on a valid Blueprint at all.
+    Both branches were dead: a status field seeded as "Status 1" rather than
+    as one of its own states, and every select in every generated form
+    degraded to a free-text box because it found no options.
+
+    The other two spellings are still accepted. This is also called with
+    field-shaped dicts that did not come from the Blueprint, and one name for
+    one thing is worth more than being strict about the two nobody writes.
+    """
+    for key in ("enumValues", "values", "enum"):
+        got = field.get(key)
+        if isinstance(got, (list, tuple)) and got:
+            return [str(v) for v in got]
+    return []
+
+
 def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
     """Form ``fields`` — this is what an app-specific ``*-form`` component was."""
     out: list[dict] = []
@@ -242,7 +263,7 @@ def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
         if kind == "select":
             field["options"] = [
                 {"value": str(v), "label": _humanise(str(v))}
-                for v in (f.get("values") or f.get("enum") or [])
+                for v in enum_values(f)
             ]
             # A select with no options cannot be filled; degrade to text rather
             # than emit a dead control.

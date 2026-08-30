@@ -709,3 +709,34 @@ def test_presentation_survives_into_the_contract(tmp_path):
     pages = {p["route"]: p for p in _nav(tmp_path)["pages"]}
     assert pages["/surveys/[id]"]["presentation"] == "drawer"
     assert pages["/"]["presentation"] == "page"
+
+
+def test_a_status_field_is_seeded_with_its_own_states():
+    """The contract's name is `enumValues` and the field object is
+    `additionalProperties: false`, so the `values`/`enum` this used to look for
+    could not appear on a valid Blueprint. A status field seeded as "Status 1"
+    is a value the app's own enum does not allow — and it is what stopped a
+    page that only means something once something is submitted from ever having
+    a record to show."""
+    from services.blueprint.projection import _seed_value
+
+    field = {"name": "status", "type": "text",
+             "enumValues": ["draft", "submitted", "approved"]}
+    seeded = [_seed_value(field, "Application", row) for row in (1, 2, 3)]
+    assert seeded == ["draft", "submitted", "approved"]
+
+
+def test_a_select_offers_the_values_the_entity_declares():
+    """The same wrong key degraded every enum field in every generated form to
+    a free-text box, because a select with no options cannot be filled."""
+    from services.blueprint.page_planner import form_fields_for
+
+    fields = form_fields_for({
+        "name": "Application",
+        "fields": [{"name": "status", "type": "enum",
+                    "enumValues": ["draft", "submitted"]}],
+    }, creating=True)
+    status = next((f for f in fields if f.get("name") == "status"), None)
+    assert status is not None
+    assert [o["value"] for o in status.get("options") or []] == [
+        "draft", "submitted"]

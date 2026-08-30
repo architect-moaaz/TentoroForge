@@ -18,6 +18,8 @@ from services.rendered_pages import (
     collection_endpoint,
     fill_route,
     first_id,
+    ids_by_state,
+    state_field,
     landed,
     plan_routes,
     _render_tree,
@@ -322,3 +324,62 @@ def test_a_role_restricted_page_naming_no_role_falls_back_to_any_session():
     """A defect in the document, and not one to fix by refusing to look."""
     targets, _ = plan_routes(doc(page(access="role_restricted", users=[])))
     assert targets[0].role == ""
+
+
+# --- the states a page can be reviewed in -----------------------------------
+
+def entity(*fields) -> dict:
+    return {"data": {"entities": [{"id": "ENTITY-001", "fields": list(fields)}]}}
+
+
+def test_the_state_field_is_the_one_with_declared_values():
+    """Declared, not inferred. Nothing is guessed from a field being *called*
+    status."""
+    doc = entity({"name": "status", "enumValues": ["draft", "submitted"]},
+                 {"name": "title", "type": "text"})
+    assert state_field(doc, "ENTITY-001") == "status"
+
+
+def test_a_field_named_status_with_no_declared_values_is_not_a_state():
+    doc = entity({"name": "status", "type": "text"})
+    assert state_field(doc, "ENTITY-001") == ""
+
+
+def test_two_enum_fields_is_an_ambiguity_not_a_first_one_wins():
+    """Picking the first would be right about as often as it was wrong."""
+    doc = entity({"name": "status", "enumValues": ["a", "b"]},
+                 {"name": "priority", "enumValues": ["high", "low"]})
+    assert state_field(doc, "ENTITY-001") == ""
+
+
+def test_an_entity_that_is_not_there_has_no_state_field():
+    assert state_field(entity(), "ENTITY-999") == ""
+
+
+def test_one_record_per_state_present_in_the_data():
+    rows = [{"id": 1, "status": "draft"}, {"id": 2, "status": "submitted"},
+            {"id": 3, "status": "approved"}]
+    assert ids_by_state(rows, "status") == {
+        "draft": "1", "submitted": "2", "approved": "3"}
+
+
+def test_a_state_with_several_records_is_reviewed_once():
+    rows = [{"id": 1, "status": "draft"}, {"id": 2, "status": "draft"}]
+    assert ids_by_state(rows, "status") == {"draft": "1"}
+
+
+def test_a_state_the_seed_did_not_produce_is_not_claimed():
+    """Reporting it as reviewed would be a lie about a screenshot nobody
+    took."""
+    rows = [{"id": 1, "status": "draft"}]
+    assert set(ids_by_state(rows, "status")) == {"draft"}
+
+
+def test_rows_without_a_state_or_an_id_are_not_counted():
+    rows = [{"id": 1}, {"status": "draft"}, {"id": 2, "status": ""}]
+    assert ids_by_state(rows, "status") == {}
+
+
+def test_states_are_read_from_a_wrapped_list_too():
+    assert ids_by_state({"data": [{"id": 9, "status": "open"}]}, "status") == {
+        "open": "9"}

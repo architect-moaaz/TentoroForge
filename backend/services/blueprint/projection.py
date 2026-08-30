@@ -905,10 +905,15 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _seed_value(field: dict, entity_name: str, row: int) -> Any:
+    from services.blueprint.page_planner import enum_values
+
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
-    if field.get("values") or field.get("enum"):
-        options = field.get("values") or field.get("enum")
+    # Spread across rows on purpose: with three rows and three states, the
+    # seeded data holds one record in each, which is what lets a page that only
+    # means something once something is submitted be reviewed at all.
+    options = enum_values(field)
+    if options:
         return options[(row - 1) % len(options)]
     if kind in ("int", "integer", "number"):
         return row
