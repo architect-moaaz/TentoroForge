@@ -143,17 +143,43 @@ correct outcome of step 2 failing, for a visual edit as much as a chat message.
 
 ### Phase 0 — Decide the schema for what has no table
 
-The database holds six rule types — validation 1952, access 1552, trigger 921,
-business 564, state_machine 380, computed 247. The Blueprint's `businessRules`
-represents one of them, which is why the adapter written in phase 1 flattens
-every Blueprint rule to `business`.
+**Rule taxonomy: answered.** Measured against a Blueprint and one row of each
+type. The Blueprint models two and a half of the six.
 
-Under DB-primary that flattening runs the wrong way and stops being acceptable:
-the table's taxonomy is the richer one and the Blueprint document must be able
-to express all of it. Same question for the sections with no table at all —
-requirements, pages, workflows, apis, pageLayouts, nav.
+| Table type | Config | Blueprint home | Verdict |
+|---|---|---|---|
+| `access` 1552 | `{roles, can_edit, can_view}` | `permissions[]` `{subject, action, condition}`, `security.rbac`, `roles` | covered, different vocabulary |
+| `business` 564 | `{expression, trigger}` | `businessRules[]` `{statement, expression, appliesTo}` | covered except `trigger` |
+| `trigger` 921 | `{event: on_create, action: <workflow>}` | `workflows[].trigger` `{kind, detail}`, `launchedFrom` | partial — `kind` is `manual`; entity lifecycle events unexpressed |
+| `validation` 1952 | `{expression, errorMessage}` on a field | field carries `required`, `type`, `enumValues` | **gap** — no cross-field expression, no message |
+| `state_machine` 380 | `{states, transitions[{from,to,requires}]}` | field `enumValues` gives the states | **gap** — no transitions, no `requires` |
+| `computed` 247 | `{expression}` on a field | nothing | **gap** |
 
-Nothing else can start until this is answered.
+**2,579 rows have no Blueprint representation**, and the three gaps are all one
+thing: *field-level behaviour*. `enumValues` already proves the Blueprint
+reaches into a field to say which values are legal. It stops short of saying
+how they may change (`transitions`), what must hold across fields
+(`validation.expression`), and what is derived rather than stored (`computed`).
+
+So the schema change is one addition in the place the constrained thing already
+lives — a `constraints` block on the entity field — not three new top-level
+sections, and not widening `businessRules` to six types. `businessRules` stays
+a statement about the product rather than becoming a home for field mechanics.
+
+Two smaller changes fall out:
+
+- `businessRules[]` gains `trigger`, to hold what the table's `business` rows
+  carry.
+- `workflows[].trigger.kind` admits entity lifecycle events (`on_create`,
+  `on_update`) beside `manual`.
+
+**Caveat on the evidence.** This reads one Blueprint — the Reading List, a
+small app with `rbac: false` and no authentication. A richer application's
+`security` and `permissions` may cover `access` better or worse than this
+suggests. Confirm against a larger project before the schema change is written.
+
+**Still open in phase 0:** the sections with no table at all — requirements,
+pages, workflows, apis, pageLayouts, nav. See decision 2.
 
 ### Phase 1 — Engine writes to the database
 
@@ -190,9 +216,10 @@ and the 409 must not be allowed to become load-bearing anywhere.
 
 ## 5. Decisions still open
 
-1. **Rule taxonomy** (phase 0, blocking). Does the Blueprint document widen to
-   the table's six types, or does the table narrow? The 5,052 rows that are not
-   `business` are the stake.
+1. ~~**Rule taxonomy**~~ — answered in phase 0. Neither: three types are
+   already covered, and the three that are not are field-level behaviour and
+   belong on the entity field as a `constraints` block. Confirm against a
+   larger, authenticated project first.
 2. **Sections with no table.** Requirements, pages, workflows, apis,
    pageLayouts, nav all need one, or a documents table holding them as JSONB —
    which buys transactions and cross-project queries without a column per field.
