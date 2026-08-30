@@ -96,8 +96,20 @@ const _BASE_TITLE =
  * is the thing everyone denies, and a denial is permanent. Asked only after a
  * run has actually completed, which is the moment the value is obvious.
  */
-function notifyDone(awaitingApproval: boolean): void {
+function notifyDone(awaitingApproval: boolean, ranAnything: boolean): void {
   if (typeof window === "undefined") return;
+
+  // NOTHING RAN, SO THERE IS NOTHING TO ANNOUNCE. A turn that plans zero
+  // nodes still completes, and this told everyone their application had been
+  // built — after a question that was answered without touching it. The tab
+  // title said "✓ Your application is built" for a run that did nothing at
+  // all, which is the one claim a completion notice must never make falsely:
+  // its whole purpose is to be believed by someone who was not watching.
+  //
+  // A definition already waiting is different and still worth saying: the
+  // work was done earlier, and the thing being announced is that it is ready
+  // to look at.
+  if (!ranAnything && !awaitingApproval) return;
 
   const text = awaitingApproval
     ? "Your definition is ready to review."
@@ -172,7 +184,7 @@ export function SmithPanel({
       // Told where they actually are rather than only in a pane they have
       // left: the tab title carries it back, and a notification reaches them
       // outside the browser when they have already allowed one.
-      notifyDone(run.awaitingApproval);
+      notifyDone(run.awaitingApproval, run.nodesTotal > 0);
     }
     if (run.status === "running") completedRef.current = false;
   }, [run.status, run.awaitingApproval, onRunComplete]);
@@ -469,7 +481,13 @@ function StageList({
           {run.awaitingApproval
             ? "Here's what I understood"
             : run.status === "complete"
-              ? "Application built"
+              ? // A turn can complete having planned nothing — a question
+                // answered from the Blueprint, or a §72 resume with nothing
+                // left to do. The body below already says nothing needed
+                // redoing; the heading used to contradict it.
+                run.nodesTotal > 0
+                ? "Application built"
+                : "Nothing needed doing"
               : run.status === "running"
                 ? "Working on it"
                 : "Ready"}
