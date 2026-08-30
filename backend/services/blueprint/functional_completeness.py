@@ -37,6 +37,19 @@ _ACTIONABLE = ("Button", "Form")
 _BINDING = re.compile(r"\{\{([^}]+)\}\}")
 
 
+def _dangling(schema: dict) -> list[str]:
+    """`dangling_bindings`, or nothing if it cannot be reached.
+
+    A verification edge must not fail the run over an import, and a check that
+    cannot run is better silent than wrong.
+    """
+    try:
+        from services.a2ui_to_forge import dangling_bindings
+        return dangling_bindings(schema)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _planner_placeholders() -> set[str]:
     """Names the planner substitutes, which are not bindings yet.
 
@@ -180,8 +193,17 @@ def functional_findings(doc: dict) -> list[dict]:
                                           f"define"})
 
         # A binding with no source behind it renders its own template text.
-        unresolved = (_bindings(layout.get("root"))
-                      - declared - _planner_placeholders())
+        #
+        # ASKED OF THE BINDER, NOT RE-DERIVED HERE. `dangling_bindings` answers
+        # the same question and knows one thing this walker did not: inside a
+        # Table or a Repeat, `{{id}}` means this row's id and the renderer
+        # resolves it against the row. Reading it as a page-level source
+        # refused /tickets twice over `rowHref: "/tickets/{{id}}"` — after the
+        # floor had already been taught otherwise, because the rule lived in
+        # two places and only one of them learned.
+        unresolved = set(_dangling(
+            {"dataSources": layout.get("dataSources") or [],
+             "root": layout.get("root")})) - _planner_placeholders()
         for name in sorted(unresolved):
             out.append({"rule": "binding-without-source", "page": pid,
                         "detail": f"{route}: binds {{{{{name}}}}}, which no "
