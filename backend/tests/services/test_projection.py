@@ -664,11 +664,19 @@ def test_each_audience_gets_its_own_entry(tmp_path):
     assert nav["entries"] == {"authenticated": "/", "public": "/survey/[slug]"}
 
 
-def test_the_initial_page_is_the_gated_one(tmp_path):
-    """It is what a login redirect and a "back to the application" link need,
-    and it is always a concrete URL — a public entry is often a pattern, which
-    is why guessing "the first route" produced an href Next refuses."""
-    assert _nav(tmp_path)["initialPage"] == "/"
+def test_the_gated_entry_is_named_for_what_it_is(tmp_path):
+    """Calling it `initialPage` claimed a neutrality it does not have: it is
+    the gated entry, chosen because a login redirect and a "back to the
+    application" link both need one and both need a concrete URL."""
+    assert _nav(tmp_path)["gatedEntry"] == "/"
+
+
+def test_initial_page_stays_a_page_id_for_the_editor(tmp_path):
+    """VisualEditorWorkspace reads `initialPage` and falls back to
+    `pages[0].id`, so it wants an id. A route there is something it cannot
+    look up — and the field was carrying one."""
+    nav = _nav(tmp_path)
+    assert nav["initialPage"] in {p["id"] for p in nav["pages"]}
 
 
 def test_public_and_gated_routes_are_disjoint(tmp_path):

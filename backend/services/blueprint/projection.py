@@ -599,13 +599,23 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "auth_routes": sorted(set(gated_routes)),
         "transitions": transitions,
         "guards": guards,
-        # Where each audience arrives. `initialPage` is the gated one because
-        # that is what a login redirect and a "back to the application" link
-        # need, and it is always a concrete URL — a public entry is often a
-        # pattern (`/survey/[slug]`), which is why guessing "the first route"
-        # produced an href Next refuses.
+        # Where each audience arrives.
         "entries": entry_by_access,
-        "initialPage": entry_by_access.get("authenticated"),
+        # NAMED FOR WHAT IT IS. Calling this `initialPage` claimed a neutrality
+        # it does not have: it is the GATED entry, chosen because a login
+        # redirect and a "back to the application" link both need one and both
+        # need a concrete URL — a public entry is often a pattern
+        # (`/survey/[slug]`), which is why guessing "the first route" produced
+        # an href Next refuses. For an app that is mostly public that choice is
+        # arguable, so the name should carry the assumption rather than hide it.
+        #
+        # `initialPage` also stays, and stays a page ID, because that is what
+        # the visual editor reads (VisualEditorWorkspace falls back to
+        # `pages[0].id`). Writing a route into it would have handed that reader
+        # something it cannot look up.
+        "gatedEntry": entry_by_access.get("authenticated"),
+        "initialPage": slugify_route(entry_by_access["authenticated"])
+        if entry_by_access.get("authenticated") else None,
     }, indent=2, sort_keys=True) + "\n", "utf-8")
 
     return {"files": ["src/contracts/nav-flow.json"], "pages": len(entries),
