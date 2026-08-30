@@ -1116,15 +1116,6 @@ def translate(payload: dict, registry: dict, route: str = "/",
         # found" on click. Six sibling bindings on the same page were correct
         # FLOW ids; this one was invented, and the check that exists to catch
         # exactly that only looked at the top level.
-        known_ids = {str(w.get("id")) if isinstance(w, dict) else str(w)
-                     for w in (binder.registry.get("workflows") or [])}
-        if known_ids:
-            for where, bad in _dangling_workflows(props, known_ids):
-                binder.unresolved.append(
-                    f'{c.get("id")}: {where} targets workflow "{bad}", which '
-                    f"this app does not define. Cleared for the "
-                    f"submit-authority pass to resolve.")
-
         if kind in ("Form", "Button") and props.get("workflow"):
             # By id, because `/api/workflows/{id}/execute` is what the renderer
             # POSTs to. This compared against workflow *names*, so the only
@@ -1149,6 +1140,21 @@ def translate(payload: dict, registry: dict, route: str = "/",
         for req, default in _REQUIRED_DEFAULTS.get(kind, {}).items():
             props.setdefault(req, default)
         props.update(binder.extra_props.get(str(c.get("id")), {}))
+
+        # AFTER EVERY PROP IS ON. This walk ran above the `extra_props` merge,
+        # so it inspected a dict that did not yet hold the props the binder
+        # attaches — `Table.rowActions` among them, which is where three
+        # invented ids shipped on one run while the check passed its own tests.
+        # Correct helper, wrong position: it was looking for something that
+        # arrived a few lines later.
+        known_ids = {str(w.get("id")) if isinstance(w, dict) else str(w)
+                     for w in (binder.registry.get("workflows") or [])}
+        if known_ids:
+            for where, bad in _dangling_workflows(props, known_ids):
+                binder.unresolved.append(
+                    f'{c.get("id")}: {where} targets workflow "{bad}", which '
+                    f"this app does not define. Cleared for the "
+                    f"submit-authority pass to resolve.")
 
         node: dict[str, Any] = {"type": kind, "props": props}
         # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
