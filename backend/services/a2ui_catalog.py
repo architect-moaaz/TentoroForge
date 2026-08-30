@@ -180,8 +180,17 @@ _PRIMITIVE_PROPS: dict[str, dict[str, dict]] = {
 
 # Props the composer must never author: identity, layout plumbing, or things a
 # later pass owns.
+#
+# `args` WAS ON THIS LIST AND IS NOT PLUMBING. It is the only channel a control
+# has for telling a workflow what to act on: Button/Link/IconButton pass it to
+# `fallbackDispatch(workflow, args)`, which posts `{input: args ?? {}}`. Filed
+# next to `className` and `style` it was never authorable, so it was never
+# authored, so every dispatch left `input` empty — a "Mark as watered" button
+# reached a db_insert whose config reads `{"plantId": "{{plantId}}"}` and
+# inserted a null plant_id. The workflow was right, the button was right, and
+# the one prop connecting them had been classified as decoration.
 _SKIP_PROPS = frozenset({
-    "id", "component", "children", "style", "className", "args",
+    "id", "component", "children", "style", "className",
     "dataJourney", "aria-label", "key",
 })
 
@@ -348,6 +357,25 @@ def _prop_schema(name: str, spec: dict) -> dict:
     String-ish props use DynamicString so the model can bind them to the data
     model; the binder rewrites those into Forge's `{{source.field}}` form.
     """
+    # WHAT THE WORKFLOW ACTS ON. The contract types `args` as a bare object,
+    # which is true and says nothing — a composer reading `{"type": "object"}`
+    # has no reason to write one, and a dispatch with no inputs is not visibly
+    # wrong until a row lands with a null column.
+    #
+    # Bindings are legitimate here and are the usual case: `renderNode` runs
+    # `interpolateDeep` over every prop before the click handler sees it
+    # (renderer/src/runtime/dispatch.tsx), so a nested `{{plant.id}}` resolves
+    # against the row the control sits in.
+    if name == "args":
+        return {
+            "type": "object",
+            "description": (
+                "Inputs for the dispatched workflow, keyed by the parameter "
+                "names the workflow uses. Values may be bindings, and usually "
+                "are: {\"plantId\": \"{{plant.id}}\"}. A workflow that names a "
+                "parameter receives nothing for it unless this supplies it."
+            ),
+        }
     # A binding prop by name AND by shape. `rows`, `columns` and `items` name
     # data on a Table or a List and something else entirely elsewhere:
     # `Textarea.rows` is how many lines to show and `Grid.columns` is how many

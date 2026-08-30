@@ -135,7 +135,26 @@ def test_identity_and_styling_props_are_never_authorable(catalog):
     belong to the binder, the design layer and the renderer."""
     for name in catalog["components"]:
         props = set(body(catalog, name)["properties"])
-        assert not (props & {"id", "style", "className", "args", "dataJourney"}), name
+        assert not (props & {"id", "style", "className", "dataJourney"}), name
+
+
+def test_dispatch_args_are_authorable(catalog):
+    """`args` is the only channel a control has for saying what to act on.
+
+    It sat in the skip list beside `className` for as long as this test pinned
+    it there, so no composed control ever carried one and every workflow was
+    dispatched with `{input: {}}` — which is how a "Mark as watered" button
+    inserted a row with a null plant_id. It is not styling and not identity:
+    Button/Link/IconButton hand it to `fallbackDispatch(workflow, args)`.
+    """
+    for name in ("Button", "Link", "IconButton"):
+        if name not in catalog["components"]:
+            continue
+        spec = body(catalog, name)["properties"].get("args")
+        assert spec, f"{name} cannot say what its workflow acts on"
+        # Described, not merely present. `{"type": "object"}` is true and
+        # tells a composer nothing about when to write one.
+        assert "workflow" in spec.get("description", "").lower(), name
 
 
 def test_catalog_serialises(catalog):
