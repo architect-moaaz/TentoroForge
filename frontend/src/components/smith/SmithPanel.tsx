@@ -62,6 +62,43 @@ type Greeting = {
 };
 
 /** DAG node keys → the stage names §111 shows a person. */
+/**
+ * What Smith is doing, as an action rather than a noun.
+ *
+ * A build runs for ten minutes behind a row of stage names that do not move.
+ * A present participle says the machine is working on something specific,
+ * which is the difference between waiting and wondering whether it hung.
+ */
+const STAGE_VERB: Record<string, string> = {
+  requirements: "Reading what you asked for",
+  application_model: "Modelling the product",
+  ux_architecture: "Arranging the application",
+  design_system: "Choosing the design language",
+  page_contracts: "Writing the page contracts",
+  data_model: "Shaping the data",
+  database: "Laying out the database",
+  workflows: "Working out the workflows",
+  business_rules: "Writing the rules down",
+  apis: "Designing the endpoints",
+  page_layouts: "Composing the screens",
+  backend: "Generating the backend",
+  frontend: "Generating the frontend",
+  integration: "Wiring it together",
+  testing: "Writing the tests",
+  security: "Checking who may do what",
+  verification: "Checking its own work",
+  preview: "Starting the preview",
+  memory: "Remembering the decisions",
+  integrations: "Noting the third parties",
+};
+
+/** `4m 12s`, or `48s` — a duration a person reads at a glance. */
+function human(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+                 : `${s}s`;
+}
+
 const STAGE_LABEL: Record<string, string> = {
   requirements: "Requirements",
   application_model: "Product Model",
@@ -535,6 +572,21 @@ function StageList({
   onApprove: () => void;
   definition?: Record<string, unknown> | null;
 }) {
+  // WHEN THIS RUN BEGAN, and a clock that moves. Elapsed time read from a
+  // static render would freeze at whatever it was when a node last landed —
+  // which is exactly the moment a watcher starts wondering if it hung.
+  const startedAt = useRef<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  if (run.status === "running" && startedAt.current === null) {
+    startedAt.current = Date.now();
+  }
+  useEffect(() => {
+    if (run.status !== "running") return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [run.status]);
+  const started = startedAt.current;
+
   return (
     <div className="rounded-lg border bg-card p-3">
       <div className="mb-2 flex items-baseline justify-between">
@@ -563,6 +615,54 @@ function StageList({
           {run.callsDone > run.nodesDone && ` · ${run.callsDone} calls`}
         </span>
       </div>
+
+      {/*
+        HOW FAR, HOW LONG, AND WHAT IT IS DOING. A ten-minute build showed a
+        static list of stage names, so there was no way to tell progress from
+        a hang.
+
+        The estimate comes from THIS run's own pace — elapsed divided by
+        stages finished, times stages left — rather than from a stored average.
+        Nothing persists a previous run's timing yet, and a remaining-time
+        figure derived from the run you are watching cannot be wrong about
+        which application it is describing. It settles quickly and is honest
+        about being an estimate.
+      */}
+      {run.status === "running" && run.nodesTotal > 0 && (
+        <div className="mb-2">
+          <div className="h-1 overflow-hidden rounded bg-muted">
+            <div
+              className="h-full bg-primary transition-all duration-500"
+              style={{
+                width: `${Math.round((run.nodesDone / run.nodesTotal) * 100)}%`,
+              }}
+            />
+          </div>
+          <div className="mt-1 flex items-baseline justify-between text-xs text-muted-foreground">
+            <span>
+              {(() => {
+                const busyNode = run.nodes.find((n) => n.state === "running");
+                const verb = busyNode
+                  ? STAGE_VERB[busyNode.key] ?? labelFor(busyNode.key)
+                  : "Thinking it through";
+                return busyNode?.subject
+                  ? `${verb} · ${busyNode.subject}`
+                  : verb;
+              })()}
+            </span>
+            <span className="tabular-nums">
+              {Math.round((run.nodesDone / run.nodesTotal) * 100)}%
+              {started && ` · ${human(now - started)}`}
+              {started && run.nodesDone > 0 &&
+                run.nodesDone < run.nodesTotal &&
+                ` · ~${human(
+                  ((now - started) / run.nodesDone) *
+                    (run.nodesTotal - run.nodesDone),
+                )} left`}
+            </span>
+          </div>
+        </div>
+      )}
 
       {run.nodes.length === 0 && run.status === "complete" ? (
         // A RESUMED RUN WITH NOTHING TO DO. §72 continues rather than redoes,
