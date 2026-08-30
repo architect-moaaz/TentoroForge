@@ -478,6 +478,47 @@ async def get_preview_data(short_id: str):
         except json.JSONDecodeError:
             pass
 
+    # THE BLUEPRINT, WHEN THE LEGACY CONTRACTS ARE NOT THERE.
+    #
+    # registry.json, app-model.json and design-spec.json are written by
+    # routers/generate.py. `services/blueprint/` writes none of the three, so
+    # a Blueprint-generated application arrived here with no entities and the
+    # visual editors showed an empty project — the schemas were on disk at
+    # app/src/schemas/*.json the whole time, and the manifest the editor looks
+    # for was simply never produced.
+    #
+    # An adapter rather than a fourth contract file: the Blueprint stays
+    # authoritative and the editor reads a projection of it, so the two cannot
+    # drift. Emitting registry.json from the Blueprint pipeline would have been
+    # a third copy of facts the Blueprint already holds, and every copy drifts.
+    if not entities:
+        blueprint_path = proj / ".forge" / "blueprint" / "current.json"
+        if blueprint_path.is_file():
+            try:
+                doc = json.loads(blueprint_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                doc = {}
+            app = doc.get("application") or {}
+            app_model_name = app_model_name or app.get("name", "") or ""
+            app_model_description = (
+                app_model_description or app.get("description", "") or ""
+            )
+            if domain == "general":
+                domain = (app.get("domain") or "general").lower()
+            for ent in ((doc.get("data") or {}).get("entities") or []):
+                name = ent.get("name")
+                if not name or ent.get("status") == "SUPERSEDED":
+                    continue
+                # The registry shape: a field list per entity, which is what
+                # the fixture generator reads to invent plausible rows.
+                entities[str(name)] = {
+                    "fields": [
+                        {"name": f.get("name"), "type": f.get("type") or "text"}
+                        for f in (ent.get("fields") or [])
+                        if isinstance(f, dict) and f.get("name")
+                    ],
+                }
+
     if not entities:
         return {}
 
