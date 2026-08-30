@@ -460,16 +460,29 @@ async def smith_chat(
 
         def work() -> dict:
             existing = output_dir / ".forge" / "blueprint" / "current.json"
-            built = False
+            defined = False
             if existing.is_file():
                 svc = BlueprintService.load(output_dir=str(output_dir))
-                built = bool(svc.doc.get("pages"))
+                # WHETHER THERE IS ANYTHING TO REASON OVER, which is not the
+                # same as whether anything is built. This asked for `pages`,
+                # so between the define run and approval — the window where
+                # §25 is explicitly inviting the user to talk — every message
+                # bypassed the architect and was treated as a fresh brief.
+                #
+                # Asking "is it going to store the data into a database?" at
+                # the approval gate re-ran define, reported "2 stages already
+                # complete", and showed the gate again. The answer was sitting
+                # in the requirements the run had just written; Smith was
+                # never given the chance to read them.
+                #
+                # A definition is enough to reason over. The DAG stays the
+                # only thing that builds: an intent chat_v2 will not serve
+                # comes back `handoff` or `not_enabled` and falls through to
+                # it below, which is exactly what used to happen immediately.
+                defined = bool(svc.doc.get("requirements")
+                               or svc.doc.get("pages"))
 
-            # WHAT KIND OF MESSAGE IS THIS. Nothing built yet means there is
-            # nothing to change and nothing to reason over, so the architect is
-            # not consulted — its bootstrap flow is unwired on purpose, because
-            # the DAG below already builds new applications.
-            if not built:
+            if not defined:
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
                             "understood before building anything.",
