@@ -310,8 +310,12 @@ export function SmithPanel({
     const text = draft.trim();
     if (!text || busy || !projectId) return;
     setDraft("");
+    // Taken BEFORE the new turn is appended: the history is what came before
+    // this message, and including the message in its own history would have
+    // Smith read the question as its own answer.
+    const prior = messages.map((m) => ({ role: m.role, text: m.text }));
     setMessages((m) => [...m, { role: "user", text }]);
-    void start({ description: text, evidence });
+    void start({ description: text, evidence, history: prior });
   };
 
   const approve = () => {

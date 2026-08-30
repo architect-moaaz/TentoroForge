@@ -46,6 +46,14 @@ Return ONLY a JSON object with exactly these keys:
 
 Do not explain. Do not wrap the JSON in prose or code fences.
 
+A REPLY IS PART OF AN EXCHANGE. When the conversation below ends with a
+question of yours, read the request as its answer: "yes" confirms what you
+just proposed, and you should act on that proposal rather than ask what it
+meant. Do not ask a question the conversation has already answered.
+
+CONVERSATION SO FAR (oldest first, may be empty):
+{history}
+
 BLUEPRINT (the relevant part):
 {ctx}
 
@@ -59,10 +67,30 @@ def _default_provider(prompt: str) -> str:
     return complete(content=prompt, max_tokens=600)
 
 
+def _render_history(history: list | None) -> str:
+    """The exchange as plain lines, oldest first.
+
+    Bounded to the last few turns: a clarifying question and its answer are
+    adjacent, so the window only has to be long enough to hold the pair, and a
+    whole transcript would crowd out the Blueprint slice beside it.
+    """
+    turns = [t for t in (history or []) if t]
+    if not turns:
+        return "(nothing yet — this is the first turn)"
+    lines = []
+    for t in turns[-6:]:
+        role, text = (t if isinstance(t, (tuple, list)) and len(t) == 2
+                      else ("user", t))
+        who = "Smith" if str(role).lower() in ("smith", "assistant") else "They"
+        lines.append(f"{who}: {str(text).strip()}")
+    return "\n".join(lines)
+
+
 def understand_ask(
     user_message: str,
     blueprint_ctx: str,
     *,
+    history: list | None = None,
     provider: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     """(message, ctx) -> {clarification_needed, target_file, element_label, new_value}.
@@ -81,6 +109,7 @@ def understand_ask(
     call = provider or _default_provider
     try:
         raw = call(_PROMPT.format(ctx=blueprint_ctx or "(nothing yet)",
+                                  history=_render_history(history),
                                   message=ask))
     except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
         return {"clarification_needed":

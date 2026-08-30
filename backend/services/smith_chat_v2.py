@@ -51,6 +51,10 @@ class ChatV2Request:
     project_id: str
     output_dir: str
     message: str
+    #: Earlier turns as (role, text), oldest first. Empty is a first turn, not
+    #: an error — and a caller that has no transcript (self-heal, cron) simply
+    #: has none.
+    history: list[tuple[str, str]] = field(default_factory=list)
     source: str = "user"
     # For tests + gradual wiring: caller can override any SmithSession
     # seam. Prod passes {} and the handler wires the real defaults.
@@ -100,7 +104,9 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
 
     # kind == "iteration"
     try:
-        result = session.run_iteration(user_message=intent.message)
+        result = session.run_iteration(
+        user_message=intent.message, history=req.history,
+    )
     except AssertionError as exc:
         return _seams_missing("iteration", str(exc))
     return _to_response(result, intent="iteration")

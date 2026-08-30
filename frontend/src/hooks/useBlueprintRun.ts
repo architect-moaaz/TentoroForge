@@ -102,6 +102,8 @@ const EMPTY: BlueprintRun = {
 
 export interface StartOptions {
   description: string;
+  /** Earlier turns, oldest first — what Smith asked and what was answered. */
+  history?: Array<{ role: "user" | "smith"; text: string }>;
   domain?: string;
   /** §14 — text of documents the user supplied rather than typed. */
   evidence?: string[];
@@ -155,6 +157,12 @@ export function useBlueprintRun(projectId: string | null) {
             signal: ctrl.signal,
             body: JSON.stringify({
               message: opts.description,
+              // §8 layer 1. Smith asks "is that right?" and the next request
+              // used to arrive as the bare word "yes" — nothing for it to be
+              // a yes to, so it asked what the message meant. The server
+              // persists no turn, so the transcript this client is already
+              // holding is the only place the exchange exists.
+              history: opts.history ?? [],
               approved: opts.approved ?? false,
             }),
           },

@@ -202,7 +202,8 @@ class SmithSession:
 
     # ---- Iteration flow (§5.2 / §7 / §11) -------------------------------
 
-    def run_iteration(self, user_message: str) -> TurnResult:
+    def run_iteration(self, user_message: str,
+                      history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
 
         Contract:
@@ -226,7 +227,18 @@ class SmithSession:
 
         baseline = snapshot_baseline(self.output_dir, guards_fn=self._guards)
 
-        understanding = self._understand(user_message, blueprint_ctx) or {}
+        # THE EXCHANGE, NOT JUST THE LATEST LINE. Smith asks "is that right?"
+        # and the reply is the word "yes", which means nothing without the
+        # question above it. Default None keeps every existing caller — and
+        # every test — working unchanged.
+        try:
+            understanding = self._understand(
+                user_message, blueprint_ctx, history=history or [],
+            ) or {}
+        except TypeError:
+            # A seam that predates the history argument. Degrades to the old
+            # single-turn behaviour rather than failing the turn.
+            understanding = self._understand(user_message, blueprint_ctx) or {}
 
         # ANSWERED, SO NOTHING TO CHANGE. §8 gives Smith the Blueprint as a
         # memory layer and `pick_relevant_slice` has already put the relevant

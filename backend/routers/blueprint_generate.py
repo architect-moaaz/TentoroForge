@@ -397,10 +397,35 @@ async def read_blueprint(
     return svc.doc
 
 
+class SmithChatTurn(BaseModel):
+    """One earlier turn, as the client has it."""
+
+    role: str = "user"
+    text: str = ""
+
+
 class SmithChatRequest(BaseModel):
-    """One turn of conversation with the architect."""
+    """One turn of conversation, and the conversation it belongs to.
+
+    IT USED TO BE ONE TURN AND NOTHING ELSE, and the docstring said so. §16
+    has Smith ask rather than assume, so it asks "you want priority removed
+    entirely — is that right?", and the next request arrives carrying the word
+    "yes" and no question for it to be a yes to. Smith answered "your message
+    just says yes, could you let me know what you'd like to change", which is
+    the only honest reply available to a turn with no past.
+
+    §8 makes conversation the first of Smith's four memory layers and nothing
+    reads it — `smith_chat` persists no turn, so the server cannot recover
+    what it asked a moment ago. The client has the transcript, so it sends it.
+    That is transport, not storage: persisting turns server-side stays the
+    right fix, and this stops clarifying questions being useless in the
+    meantime.
+    """
 
     message: str = Field(..., min_length=1)
+    #: Recent turns, oldest first. Bounded by the client; a clarifying
+    #: question and its answer are adjacent, so a short window is enough.
+    history: list[SmithChatTurn] = Field(default_factory=list)
     source: str = "user"
     #: §25 — the definition has been seen and accepted, so build the rest.
     approved: bool = False
@@ -494,6 +519,7 @@ async def smith_chat(
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
                 message=req.message,
+                history=[(t.role, t.text) for t in req.history if t.text],
             ))
             emit("message", {
                 "text": turn_result.answer,
