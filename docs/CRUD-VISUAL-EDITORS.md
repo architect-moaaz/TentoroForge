@@ -60,30 +60,47 @@ separate instances of this shape were found in one day.
 
 ---
 
-## 2. Target
+## 2. Target — the database is the record
 
-One writer, one identity scheme, one change ledger.
+**Decided: the platform database is the primary source of truth. The Blueprint
+is derived from it.**
+
+This was settled after measuring what each store actually is. The Blueprint has
+no table at all — it lives as `current.json` at a filesystem path, while the
+platform DB has 38 tables holding 5,616 rules and 96 page definitions, scoped
+by `project_id`, queryable across projects and transactional.
+
+The four reader bugs fixed on 2026-08-30 are the argument in miniature. Every
+one was path resolution — a reader at `<out>/src` while the writer used
+`<out>/app/src`, a directory created empty by its own `mkdir`, a route shadowed
+by another, schemas one level down. **A foreign key cannot point one directory
+away.** Those are failure modes a file-backed record has and a table does not.
+
+So the flow inverts from what this plan first proposed:
 
 ```
    visual editor ─┐
-                  ├─→ BlueprintService.upsert() ─→ Blueprint ─→ projections ─→ code
-   Smith ─────────┘                                    │
-                                                  changeHistory
+                  ├─→ platform DB (record) ─→ Blueprint document ─→ projections ─→ code
+   Smith / agents ┘         │
+                       change ledger
 ```
 
-A visual edit and an agent edit are the same operation. `upsert(section,
-artifact, natural_key)` already allocates ids through `IdAllocator`, already
-refuses an id that belongs to another artifact, and is what every agent node
-uses. Nothing new is needed for the write itself.
+The Blueprint keeps its whole meaning as the living document of what the
+application *is* — it is what agents reason over, what §110's tree renders,
+what §113 links against, and what the projections consume. What changes is
+where it is kept: emitted from the database rather than being the thing edited.
 
-**Editing the Blueprint is not editing the app.** The generated code changes
-when the projections that depend on the edited section re-run. The orchestrator
-already does this for Smith: `sections_of` → seeds → `descendants`. A visual
-edit must seed that same graph. Writing files directly from an editor puts the
-Blueprint and the code out of step, which is what §76 forbids and what a living
-document cannot survive.
+**What this buys.** The editors already do CRUD against these tables, so the
+visual-editing problem is largely solved and the work moves to the engine. A
+rule someone types and a rule an agent proposes land in the same rows, under
+the same constraints, in one transaction. Cross-project questions become
+queries. Identity is a primary key rather than an id allocator over a JSON file.
 
----
+**What it costs.** The engine currently writes `current.json` and nothing else,
+so every agent write path has to be redirected. Blueprint sections that have no
+table need one — and `IdAllocator`'s stable `RULE-001` identifiers must survive
+the move, since the generated code, `codeMap` and `changeHistory` all reference
+them.
 
 ## 3. The Smith edit protocol
 
@@ -98,10 +115,11 @@ Blueprint, then act.** In that order, and the order is the point.
                 - do its references still resolve — entities, workflows,
                   pages, requirements?
                 - do the §75 verification edges still hold?
-3. WRITE     upsert into the Blueprint; supersede rather than delete;
-             record the change in changeHistory
-4. ACT       seed the incremental DAG with the touched sections and let
-             the projections re-emit
+3. WRITE     upsert into the database; supersede rather than delete;
+             record the change in the ledger
+4. ACT       re-emit the Blueprint document from the rows, then seed the
+             incremental DAG with the touched sections so the projections
+             re-run
 ```
 
 Step 2 is the one that does not exist today and matters most. Smith currently
@@ -123,88 +141,80 @@ correct outcome of step 2 failing, for a visual edit as much as a chat message.
 
 ## 4. Phases
 
-Each phase ships something usable and is independently revertible.
+### Phase 0 — Decide the schema for what has no table
 
-### Phase 1 — Read from the Blueprint
+The database holds six rule types — validation 1952, access 1552, trigger 921,
+business 564, state_machine 380, computed 247. The Blueprint's `businessRules`
+represents one of them, which is why the adapter written in phase 1 flattens
+every Blueprint rule to `business`.
 
-Extend `services/blueprint_to_editor.py` (written, unwired) and point the
-existing endpoints at it: Blueprint first, DB rows as fallback for
-hand-authored records.
+Under DB-primary that flattening runs the wrong way and stops being acceptable:
+the table's taxonomy is the richer one and the Blueprint document must be able
+to express all of it. Same question for the sections with no table at all —
+requirements, pages, workflows, apis, pageLayouts, nav.
 
-- `/rules` ← `businessRules` — **the real gap: 0 rows against 13 rules**
-  *(adapter written)*
-- `/pages` ← `pages` + `pageLayouts` — rows exist only where a legacy run
-  happened to fire `_sync_pages_from_app_model` *(adapter written)*
-- `/workflows` ← `workflows`. Reads projected files today and works; the
-  Blueprint additionally carries `launchedFrom`, `trigger` and `requirements`,
-  so this is an enrichment rather than a repair
-- ~~`/app-model`~~ — **no work needed.** Already Blueprint-derived through
-  `app_model_builder`; measured populated on a real project
-- nav ← `nav-flow.json`'s projection inputs: `transitions`, `entries`,
-  `gatedEntry`, `initialPage`
+Nothing else can start until this is answered.
 
-Every panel shows the truth after this phase. Nothing is writable yet.
+### Phase 1 — Engine writes to the database
 
-### Phase 2 — Be honest about what cannot be saved
+Redirect `BlueprintService.upsert` to write rows, keeping `IdAllocator`'s
+identifiers as a column so `RULE-001` still means what it means in `codeMap`,
+`changeHistory` and every generated file.
 
-A Blueprint-derived record must not look editable while it is not. `config
-.blueprintId` and `data_bindings.blueprintId` are already in the adapter for
-exactly this: they key "this came from the Blueprint" without a second request.
+`current.json` continues to be written — emitted from the rows after each
+upsert — so the projections and every existing reader keep working unchanged
+throughout. Nothing downstream notices this phase.
 
-Disable edit and delete for those records in `RulesPanel`,
-`BusinessRulesPanel`, `RuleFormDialog` and the workflow and data-model panels.
+### Phase 2 — Editors write directly
 
-**This phase is not optional and must not be deferred.** Phase 1 without it
-produces rows that 404 on save — a silent failure, the exact defect class this
-whole plan exists to remove.
+Largely already true: the panels do CRUD against these tables today. What they
+need is for a save to re-emit the Blueprint and seed the incremental DAG, so an
+edit reaches the generated application instead of stopping at the row.
 
-### Phase 3 — Writes, one family at a time
+### Phase 3 — Retire `current.json` as a record
 
-Order chosen by blast radius:
+It becomes a build artifact: emitted, consumed by projections, never edited.
+At that point "two stores that nothing synchronises" is gone — the condition
+that produced every empty panel in this document.
 
-1. **Rules** — no layout consequences; a changed rule re-emits validators
-2. **Data model** — entity changes cascade to migrations, APIs, forms
-3. **Workflows** — steps and references; validation matters most here
-4. **Pages and nav** — last, because editing these re-composes UI
+### Superseded — the Blueprint-first work already committed
 
-Each: route POST/PUT/DELETE through the §3 protocol, then seed the incremental
-DAG. Retire the corresponding legacy table once its family is migrated.
+`dfcb7c2` made `/rules` read the Blueprint ahead of the table and refuse edits
+to Blueprint-owned rules with a 409. That was phase 1 and 2 of the earlier,
+Blueprint-primary plan and it is **backwards under this decision**: those rules
+belong in the table and must be editable.
 
-### Phase 4 — Retire the second stores
-
-`project_rules` and `page_definitions` go, along with
-`_sync_pages_from_app_model` — a legacy bridge reachable only from
-`routers/generate.py` that no Blueprint path calls. Needs a migration for
-projects holding hand-authored rows.
-
----
+It is not urgent to revert — it makes 13 otherwise-invisible rules visible and
+refuses writes that would genuinely fail today — but it must go before phase 2,
+and the 409 must not be allowed to become load-bearing anywhere.
 
 ## 5. Decisions still open
 
-1. **Synchronous or handed to Smith?** Does a visual edit re-run projections
-   immediately, or become a change request Smith executes? §114's modification
-   model suggests the latter, and it gives every edit one audit trail. It also
-   makes edits slower and less direct.
-2. **Conflict handling.** Two editors, or an editor and a running DAG, touching
-   one artifact. `IdAllocator` refuses identity collisions; it says nothing
-   about concurrent field edits.
-3. **Confidence and status on hand-authored artifacts.** An agent-written rule
-   carries `confidence` and `status: PROPOSED`. What does a human-authored one
-   carry — and does approving it in a panel mean the same as approving it at the
-   §25 gate?
-4. **Migration for existing projects** with rows in the legacy tables.
-
----
+1. **Rule taxonomy** (phase 0, blocking). Does the Blueprint document widen to
+   the table's six types, or does the table narrow? The 5,052 rows that are not
+   `business` are the stake.
+2. **Sections with no table.** Requirements, pages, workflows, apis,
+   pageLayouts, nav all need one, or a documents table holding them as JSONB —
+   which buys transactions and cross-project queries without a column per field.
+3. **Synchronous or handed to Smith?** Does a visual edit re-run projections
+   immediately, or become a change request Smith executes? §114 suggests the
+   latter, and it gives every edit one audit trail.
+4. **Concurrency.** Two editors, or an editor and a running DAG, touching one
+   artifact. A row-level constraint answers this far better than a JSON file
+   could, which is a point in favour of the decision.
+5. **Migration.** 5,616 rules and 96 page definitions predate this and were
+   written by the legacy pipeline. They stay; the question is whether they are
+   backfilled into Blueprint identifiers or left without them.
 
 ## 6. First step
 
-Phase 1 for `/rules`, with phase 2 for the same panels in the same change.
+Phase 0, decision 1: the rule taxonomy. It is the smallest question that blocks
+everything and it is answerable by inspection — read what the six types
+actually contain in the 5,616 rows, and check whether the Blueprint already
+models them elsewhere (`security` for access, entity field constraints for
+validation, workflow steps for triggers).
 
-It is the only endpoint measured actually empty against a populated Blueprint —
-zero rows against thirteen rules — and its adapter is already written. Rules
-also have no layout consequences, which makes them the safest family to take
-writes on first in phase 3.
-
-`/app-model` was the original candidate here, chosen on call-site count. It
-turned out not to be broken, which is the argument for measuring an endpoint
-before planning work on it: reach is not the same as brokenness.
+Two earlier candidates were chosen without measuring and both were wrong.
+`/app-model` was picked on call-site count and turned out not to be broken.
+The Blueprint-first direction was picked before anyone checked that the
+Blueprint has no table and the "legacy" one holds 5,616 rows. Measure first.
