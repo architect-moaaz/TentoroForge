@@ -783,15 +783,21 @@ NODE_TASKS: dict[str, str] = {
         "colour roles, type scale, spacing and radius, elevation, how "
         "navigation is approached, how dense the information should be, and "
         "the accessibility and interaction conventions that hold everywhere.\n\n"
-        "Unless the description names colours, choose them from the domain by "
-        "colour theory rather than defaulting to blue. Pick a hue the domain "
-        "earns — a workshop is not a clinic is not a reading app — then build "
-        "the rest as a considered scheme around it: an accent that is a true "
-        "complement or a near-triad rather than a second blue, subtle and "
-        "hover variants derived from the primary's own hue, and status colours "
-        "that stay distinguishable for the 8% of men with a red-green "
-        "deficiency. State the reasoning in `visualPersonality`, so a later "
-        "change can argue with it.\n\n"
+        "Colour comes from one of three places and they have an order. If the "
+        "description names colours, use those — the user has already decided. "
+        "Otherwise, if you were shown a reference, read the palette off it: "
+        "that is what it was attached for, and inventing a scheme beside a "
+        "picture of the one they want is the whole of what they were trying "
+        "to avoid. Only with neither should you choose from the domain by "
+        "colour theory rather than defaulting to blue.\n\n"
+        "Whichever it is, pick a hue the domain earns — a workshop is not a "
+        "clinic is not a reading app — then build the rest as a considered "
+        "scheme around it: an accent that is a true complement or a near-triad "
+        "rather than a second blue, subtle and hover variants derived from the "
+        "primary's own hue, and status colours that stay distinguishable for "
+        "the 8% of men with a red-green deficiency. Say in "
+        "`visualPersonality` which of the three this came from and why, so a "
+        "later change can argue with it.\n\n"
         "Decide from the domain and who uses it. A recruiter working a "
         "pipeline all day and a customer buying once a year want different "
         "densities and different levels of visual quiet. Say why each choice "
@@ -1039,7 +1045,7 @@ def build_prompt(
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
-    system += reference_addendum(references)
+    system += reference_addendum(references, node)
     if spec.agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,

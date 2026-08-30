@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from services.blueprint import references
 from services.blueprint.ids import IdAllocator, InvalidArtifactId, natural_key_for
 from services.blueprint.orchestrator import (
     ALLOWED_TRANSITIONS,
@@ -225,6 +226,36 @@ def domain_summary(doc: dict) -> dict[str, Any]:
     }
 
 
+def design_summary(doc: dict, references: Sequence[Path] = ()) -> dict[str, Any]:
+    """§26's plan gate, for the half of it that is not a count.
+
+    §107 step 9 shows the user what will be built, and the colour scheme
+    belongs among it — it is the one decision at this gate a person can judge
+    at a glance, and the first thing they will notice is wrong. Eight counts
+    and no colour is a plan review that hides the most visible thing in the
+    plan.
+
+    Kept out of :func:`build_plan_summary` rather than folded into it. That
+    function returns a map of section to count and several callers read it as
+    exactly that; a palette is not a count, and widening the return type to
+    carry one would make every caller handle a value that is not what the
+    function is for.
+
+    ``references`` is reported as what was *shown*, not as what was used. The
+    agent saw them; whether the palette came off them is a claim only
+    ``visualPersonality`` can make, and it is asked to.
+    """
+    ds = doc.get("designSystem") or {}
+    return {
+        "personality": ds.get("visualPersonality", ""),
+        "colors": dict(ds.get("colors") or {}),
+        "typography": dict(ds.get("typography") or {}),
+        "density": ds.get("informationDensity", ""),
+        "navigation": ds.get("navigationApproach", ""),
+        "referencesShown": [p.name for p in references],
+    }
+
+
 def build_nodes() -> list[str]:
     """Nodes that turn an accepted definition into a running app (§107 12-21)."""
     order = [k for lvl in levels() for k in lvl]
@@ -392,6 +423,8 @@ class Turn:
     plan_summary: dict[str, int] | None = None
     #: §107 step 8's gate — what Smith understood, when the turn authored it.
     domain_summary: dict[str, Any] | None = None
+    #: §26's plan gate, for the half of the plan that is not a count.
+    design_summary: dict[str, Any] | None = None
     #: What a command turn did. ``refused`` carries the reason when a command
     #: is recognised but deliberately not executed.
     command: str = ""
@@ -858,6 +891,8 @@ class Smith:
                 return
             turn.run = self.approve()
             turn.plan_summary = build_plan_summary(self.doc)
+            turn.design_summary = design_summary(
+                self.doc, references.paths(self.blueprint.output_dir))
             turn.command_result = {
                 "approved": True, "state": self.state,
                 "completed": len(turn.run.completed),

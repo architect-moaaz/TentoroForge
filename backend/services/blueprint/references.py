@@ -45,14 +45,49 @@ REFERENCE_DIR = Path(".forge") / "references"
 #: transport rather than about the executor.
 SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 
-#: The nodes whose work a visual reference can actually change.
+#: What each node is being shown references *for*.
 #:
-#: ``design_system`` is deliberately absent for now. It is the node that most
-#: obviously wants one — a palette read off the reference rather than invented
-#: from the domain — but its prompt currently instructs it to choose colours by
-#: colour theory from the description, and handing it an image without changing
-#: that instruction gives it two sources of truth and no rule for which wins.
-SEES_REFERENCES: frozenset[str] = frozenset({"requirements", "application_model"})
+#: An image is not self-explanatory and it is not equally relevant to everyone.
+#: The same screenshot is a statement about scope to the requirements agent and
+#: a statement about colour to the design agent, and a single instruction
+#: covering both ends up telling one of them to ignore the thing it was shown
+#: the picture for — the first version told every node "do not transcribe a
+#: layout", which is sound advice for requirements and a refusal of the job for
+#: `design_system`.
+#:
+#: An image costs tokens on every call, so a node absent from this table is not
+#: shown one: a node that cannot act on what it shows is paying for a picture it
+#: must ignore.
+READ_FOR: dict[str, str] = {
+    "requirements": (
+        "Read them for what they say about the problem — what the system does "
+        "today, which screens exist, what a user can act on. Each requirement "
+        "you take from an image is still one testable statement of something a "
+        "user can do. Do not transcribe a layout: what a page looks like is "
+        "not decided at this stage and not by you."
+    ),
+    "application_model": (
+        "Read them for the domain — the vocabulary as it appears on screen, "
+        "the labels this business actually uses for its own things, who the "
+        "screens are addressed to, what the product is evidently for. A word "
+        "on a real screen outranks a synonym you would have chosen: the "
+        "generated app should speak the language its users already do."
+    ),
+    "design_system": (
+        "Read them for the design language, which is the one thing here you "
+        "are meant to take from a picture: the palette and which colour is "
+        "doing which job, the type scale and its weights, how much air the "
+        "layout leaves, corner radius, how heavy the borders and shadows are. "
+        "Name the colours you read as hex in `colors`, and say in "
+        "`visualPersonality` that they came from the reference and what you "
+        "read them from. Do not reproduce a specific screen — you are "
+        "establishing the language every page inherits, not composing one."
+    ),
+}
+
+#: Derived, so a node cannot be shown a reference without being told what to
+#: read it for. A set maintained beside the table is a set that drifts from it.
+SEES_REFERENCES: frozenset[str] = frozenset(READ_FOR)
 
 
 def directory(output_dir: str | Path) -> Path:
@@ -183,10 +218,7 @@ before the text above. They are REFERENCE, not specification: the user is \
 showing you something to convey what they mean, and what they mean is stated \
 in their words. Where the two disagree, the words win.
 
-Read them for what they tell you about the problem — the domain's vocabulary \
-as it appears on screen, the entities and their fields, who the screens are \
-addressed to, the scope of what exists today. Do not transcribe a layout: \
-what a page looks like is not decided at this stage and not by you.
+{read_for}
 
 Anything you take from an image belongs in that artifact's `evidence` as \
 `{{"type": "screenshot", "source": "<the file name>"}}`, so a reader can tell \
@@ -195,13 +227,21 @@ from an image and did not cite is one nobody can check.
 """
 
 
-def addendum(references: Sequence[Path]) -> str:
-    """:data:`ADDENDUM` for these references, or "" when there are none."""
-    if not references:
+def addendum(references: Sequence[Path], node: str = "") -> str:
+    """:data:`ADDENDUM` for these references, or "" when there are none.
+
+    Returns "" for a node with no entry in :data:`READ_FOR` even when
+    references are passed. Showing a node an image and then having nothing to
+    tell it about why is the case this module exists to prevent, and silently
+    falling back to generic advice would hide it.
+    """
+    read_for = READ_FOR.get(node, "")
+    if not references or not read_for:
         return ""
     return ADDENDUM.format(
         count=len(references),
         plural="" if len(references) == 1 else "s",
         names="(" + ", ".join(p.name for p in references) + ")",
         verb="was" if len(references) == 1 else "were",
+        read_for=read_for,
     )

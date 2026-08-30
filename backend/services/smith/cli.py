@@ -197,6 +197,32 @@ def _print_domain(summary: dict) -> None:
     print(f", {len(assumed)} I assumed — {', '.join(assumed)}" if assumed else "")
 
 
+def _print_design(summary: dict) -> None:
+    """The half of §26's plan that is not a count.
+
+    The palette is the one thing at this gate a person judges at a glance, and
+    the first thing they notice is wrong. Printed as the swatch names beside
+    their values, because "primary" and "#0f766e" mean something together and
+    neither means much alone.
+    """
+    if not any(summary.get(k) for k in
+               ("personality", "colors", "density", "navigation")):
+        return
+
+    print("\n  --- design language ---")
+    if summary.get("personality"):
+        print(f"  {summary['personality']}")
+    for role, value in (summary.get("colors") or {}).items():
+        print(f"    {role:14} {value}")
+    for label, key in (("density", "density"), ("navigation", "navigation")):
+        if summary.get(key):
+            print(f"    {label:14} {summary[key]}")
+    if summary.get("referencesShown"):
+        # Shown, not used. Whether the palette came off them is a claim only
+        # `visualPersonality` can make.
+        print(f"    shown          {', '.join(summary['referencesShown'])}")
+
+
 def show_turn(smith: Smith, turn: Any) -> None:
     if not turn.ok:
         print(f"\n[rejected] {turn.rejected}")
@@ -227,6 +253,9 @@ def show_turn(smith: Smith, turn: Any) -> None:
         print("\n  --- build plan (§26) ---")
         for key, count in turn.plan_summary.items():
             print(f"  {count:5}  {key}")
+
+    if turn.design_summary:
+        _print_design(turn.design_summary)
 
     if turn.run and not turn.command_result.get("refused"):
         r = turn.run

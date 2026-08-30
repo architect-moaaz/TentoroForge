@@ -26,6 +26,7 @@ from services.smith.smith import (
     Smith,
     build_nodes,
     definition_nodes,
+    design_summary,
     domain_nodes,
     domain_summary,
 )
@@ -289,6 +290,40 @@ def test_a_modification_at_a_gate_returns_to_that_gate(smith):
     assert turn.change and turn.change.applied
     assert turn.state_after == "BLUEPRINT_REVIEW"
     assert len(smith.doc["requirements"]) > 1
+
+
+def test_the_plan_gate_shows_the_colour_scheme(smith):
+    """§107 step 9 shows what will be built, and the palette is the one
+    decision here a person judges at a glance — eight counts and no colour is
+    a plan review that hides the most visible thing in the plan."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    say(smith, plan_json(intent="command", command="define"))
+    turn = say(smith, plan_json(intent="command", command="approve"))
+
+    assert turn.plan_summary is not None, "the counts are still there"
+    assert turn.design_summary is not None
+    assert set(turn.design_summary) >= {
+        "personality", "colors", "density", "referencesShown"}
+
+
+def test_the_counts_stay_a_map_of_counts(smith):
+    """`build_plan_summary` has callers that read it as exactly that; a
+    palette is not a count, and widening it would make every caller handle a
+    value the function is not for."""
+    say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
+    say(smith, plan_json(intent="command", command="define"))
+    turn = say(smith, plan_json(intent="command", command="approve"))
+
+    assert all(isinstance(v, int) for v in turn.plan_summary.values())
+
+
+def test_references_are_reported_as_shown_not_as_used(smith):
+    """The agent saw them. Whether the palette came off them is a claim only
+    `visualPersonality` can make, and it is asked to make it."""
+    summary = design_summary(
+        {"designSystem": {"colors": {"primary": "#0f766e"}}}, ())
+    assert summary["referencesShown"] == []
+    assert "used" not in summary
 
 
 def test_a_modification_at_the_plan_gate_returns_to_the_plan_gate(smith):

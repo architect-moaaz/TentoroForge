@@ -220,9 +220,47 @@ def test_a_transport_that_cannot_carry_an_image_is_never_handed_one(svc):
     assert "images" not in client.calls[0]
 
 
-def test_design_system_is_not_shown_references_yet(svc):
-    """Deliberate, and worth a test so the omission is a decision rather than
-    an oversight: its prompt tells it to choose colours from the domain by
-    colour theory, and an image without that instruction changed gives it two
-    sources of truth and no rule for which wins."""
-    assert "design_system" not in references.SEES_REFERENCES
+def test_the_design_agent_is_told_to_read_the_palette_off_the_picture(svc, tmp_path):
+    """The one node here that is *meant* to take something from an image.
+
+    The generic advice — do not transcribe a layout — is sound for
+    requirements and a refusal of the job for this node, which is why the
+    instruction is per-node rather than shared."""
+    shot = references.adopt_bytes(tmp_path, "brand.png", _PNG,
+                                  media_type="image/png")
+    system, _ = build_prompt(svc.doc, "design_system", references=[shot])
+
+    assert "read the palette off it" in system or "palette" in system
+    assert "brand.png" in system
+    assert "Do not transcribe a layout" not in system
+
+
+def test_requirements_is_still_told_not_to_transcribe_a_layout(svc, tmp_path):
+    shot = references.adopt_bytes(tmp_path, "old.png", _PNG,
+                                  media_type="image/png")
+    system, _ = build_prompt(svc.doc, "requirements", references=[shot])
+    assert "Do not transcribe a layout" in system
+
+
+def test_a_node_shown_references_is_always_told_what_to_read_them_for(svc):
+    """Derived rather than maintained beside the table, so this holds by
+    construction: showing a node an image with nothing to say about why is the
+    case this module exists to prevent."""
+    assert references.SEES_REFERENCES == frozenset(references.READ_FOR)
+    assert all(references.READ_FOR.values())
+
+
+def test_an_unknown_node_is_told_nothing_even_if_handed_images(tmp_path):
+    """Silently falling back to generic advice would hide the omission."""
+    shot = references.adopt_bytes(tmp_path, "a.png", _PNG,
+                                  media_type="image/png")
+    assert references.addendum([shot], "page_contracts") == ""
+
+
+def test_colour_has_a_stated_order_of_precedence(svc):
+    """Words, then the reference, then colour theory. Without an order the
+    agent has two sources of truth and no rule for which wins."""
+    system, _ = build_prompt(svc.doc, "design_system")
+    assert "the description names colours" in system
+    assert "shown a reference" in system
+    assert "with neither" in system
