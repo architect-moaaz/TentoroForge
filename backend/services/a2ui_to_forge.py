@@ -724,6 +724,32 @@ class _Binder:
 
 
 
+def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
+    """Every `workflow` under `node` naming something outside `known`.
+
+    Walks rather than reads one key, because a workflow reference is nested as
+    often as it is top-level: `Table.rowActions[]`, `emptyAction`, and whatever
+    action-bearing shape a component adds next. Clears each in place — a
+    binding that resolves to nothing renders as a working control and fails on
+    click, which is worse than the control not being there.
+    """
+    found: list[tuple[str, str]] = []
+    if isinstance(node, list):
+        for i, item in enumerate(node):
+            found += _dangling_workflows(item, known, f"{path}[{i}]")
+        return found
+    if not isinstance(node, dict):
+        return found
+    for key, value in list(node.items()):
+        if key == "workflow" and isinstance(value, str) and value:
+            if value not in known:
+                found.append((f"{path}.{key}", value))
+                node.pop(key, None)
+        elif isinstance(value, (dict, list)):
+            found += _dangling_workflows(value, known, f"{path}.{key}")
+    return found
+
+
 def dangling_bindings(schema: dict) -> list[str]:
     """`{{name}}` in the tree with no dataSource named `name`.
 
@@ -1041,6 +1067,23 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 resolved = _ENUM_SYNONYMS.get(k, {}).get(resolved, resolved)
             if resolved is not None:
                 props[aliases.get(k, k)] = resolved
+        # EVERY workflow reference, not the one on the component itself. A
+        # `workflow` also lives inside `Table.rowActions[]`, `emptyAction`, and
+        # any other action object a component accepts — and a composed /plants
+        # shipped rowActions[0].workflow = "markPlantWatered", an id no
+        # workflow has, which reached the browser and answered "Workflow not
+        # found" on click. Six sibling bindings on the same page were correct
+        # FLOW ids; this one was invented, and the check that exists to catch
+        # exactly that only looked at the top level.
+        known_ids = {str(w.get("id")) if isinstance(w, dict) else str(w)
+                     for w in (binder.registry.get("workflows") or [])}
+        if known_ids:
+            for where, bad in _dangling_workflows(props, known_ids):
+                binder.unresolved.append(
+                    f'{c.get("id")}: {where} targets workflow "{bad}", which '
+                    f"this app does not define. Cleared for the "
+                    f"submit-authority pass to resolve.")
+
         if kind in ("Form", "Button") and props.get("workflow"):
             # By id, because `/api/workflows/{id}/execute` is what the renderer
             # POSTs to. This compared against workflow *names*, so the only

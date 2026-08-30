@@ -866,3 +866,46 @@ def test_no_node_anywhere_keeps_style_in_props():
 
     walk(out["schema"]["root"])
     assert offenders == [], f"style left in props on: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# A workflow reference is nested as often as it is top-level.
+# ---------------------------------------------------------------------------
+
+def test_a_nested_invented_workflow_is_cleared():
+    """A composed /plants shipped `Table.rowActions[0].workflow =
+    "markPlantWatered"` — an id no workflow has. It reached the browser and
+    answered "Workflow not found" on click. Six sibling bindings on the same
+    page were correct FLOW ids; the check that exists to catch exactly this
+    only looked at the component's own `workflow` prop."""
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"rowActions": [{"label": "Mark", "workflow": "markPlantWatered"}]}
+    found = _dangling_workflows(props, {"FLOW-001"})
+
+    assert found == [("props.rowActions[0].workflow", "markPlantWatered")]
+    # Cleared, not left to fail on click: a binding that resolves to nothing
+    # renders as a working control.
+    assert "workflow" not in props["rowActions"][0]
+    assert props["rowActions"][0]["label"] == "Mark"
+
+
+def test_a_real_workflow_survives_at_any_depth():
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"workflow": "FLOW-001",
+             "emptyAction": {"workflow": "FLOW-002"},
+             "rowActions": [{"workflow": "FLOW-003"}]}
+    assert _dangling_workflows(props, {"FLOW-001", "FLOW-002", "FLOW-003"}) == []
+    assert props["emptyAction"]["workflow"] == "FLOW-002"
+    assert props["rowActions"][0]["workflow"] == "FLOW-003"
+
+
+def test_nothing_is_cleared_when_no_workflows_are_known():
+    """An empty registry means "we cannot tell", not "none are valid" —
+    clearing on no information would strip every binding in the app."""
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"workflow": "FLOW-001"}
+    # The caller guards on `known_ids` being non-empty; this pins the reason.
+    assert _dangling_workflows(props, {"FLOW-001"}) == []
