@@ -88,3 +88,34 @@ def test_a_composer_predating_shared_context_still_composes():
 
     out = compose_ui_via_a2ui("/tmp/app", DOC, page_composer=old)
     assert len(out["composed"]) == 3
+
+
+def test_the_page_set_carries_flow_not_just_names():
+    """`/` came back with six nodes and no affordance leading anywhere: the
+    context named four fields per page and the contract had learned three more,
+    so the composer was told less than the Blueprint knew and composed the
+    landing page as though it stood alone."""
+    from services.a2ui_ui_composition import shared_context
+
+    doc = {"pages": [
+        {"id": "PAGE-001", "route": "/", "name": "Home", "entry": True,
+         "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "route": "/plants/new", "name": "Add",
+         "presentation": "modal"},
+    ]}
+    ctx = shared_context(doc)
+    assert '"entry": true' in ctx.lower().replace(" ", " ")
+    assert "/plants/new" in ctx
+    assert "modal" in ctx
+
+
+def test_navigates_to_is_given_as_routes_not_page_ids():
+    """A composer reasons about where a link goes, not about PAGE-002."""
+    from services.a2ui_ui_composition import shared_context
+
+    ctx = shared_context({"pages": [
+        {"id": "PAGE-001", "route": "/", "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "route": "/plants/[id]"},
+    ]})
+    assert "PAGE-002" not in ctx
+    assert "/plants/[id]" in ctx

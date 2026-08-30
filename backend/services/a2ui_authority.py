@@ -282,7 +282,8 @@ def registry_for_binder(root: Path) -> dict:
 
 
 def build_requirement(root: Path, kind: str = "dashboard",
-                      route: str = "/", shared_context: str = "") -> str:
+                      route: str = "/", shared_context: str = "",
+                      presentation: str = "page") -> str:
     # `shared_context` is accepted and ignored — it belongs to
     # `build_domain_context` now. See the note there; in short, this string is
     # the one the A2UI server scans for feature keywords, and a design system
@@ -310,6 +311,21 @@ def build_requirement(root: Path, kind: str = "dashboard",
               if isinstance(a, dict)]
 
     parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind)]]
+
+    if presentation in ("drawer", "modal"):
+        # A page that opens OVER its caller is not a screen. Composed as one it
+        # arrives with a page container, a heading and a back link — chrome for
+        # a navigation that never happens, wrapped around the form somebody
+        # actually opened. The contract says which it is; without this the
+        # composer cannot know, and /plants/new came back as a full page and
+        # was then declared a modal by the same Blueprint.
+        parts.append(
+            f"\nThis opens as a {presentation} OVER the page that calls it — "
+            "it is not a screen of its own. Compose only what belongs inside "
+            "that surface: no page container, no back link, no heading that "
+            "repeats the title the dialog already shows. The caller stays "
+            "visible behind it and the reader has not gone anywhere."
+        )
     if purpose:
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
     if actors:
@@ -630,6 +646,7 @@ def compose_page_via_a2ui(
     shared_context: str = "",
     page_id: str = "",
     registry: dict | None = None,
+    presentation: str = "page",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -668,7 +685,8 @@ def compose_page_via_a2ui(
 
     try:
         payload = surface_provider(build_requirement(root, kind, route,
-                                                     shared_context),
+                                                     shared_context,
+                                                     presentation),
                                    build_domain_context(root, registry,
                                                         page_id,
                                                         shared_context))

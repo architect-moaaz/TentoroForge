@@ -45,7 +45,7 @@ import time
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Sequence
 
 from services.blueprint.agent_contract import (
     AgentResult,
@@ -53,7 +53,9 @@ from services.blueprint.agent_contract import (
     ChangeRequest,
     capability_for,
 )
+from services.blueprint import references
 from services.blueprint.orchestrator import DAG, TaskSpec
+from services.blueprint.references import addendum as reference_addendum
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
 #: Per the claude-api reference: use Claude Opus 5 unless the caller asks
@@ -198,8 +200,14 @@ class ModelClient(Protocol):
 
     enforces_schema: bool
 
+    #: Whether this transport can carry an image at all. Read with `getattr`
+    #: and a False default, so a client written before references existed is
+    #: never handed one it would reject.
+    accepts_images: bool
+
     def __call__(self, *, system: str, user: str, schema: dict[str, Any],
-                 image: str | Path | None = None) -> str: ...
+                 image: str | Path | None = None,
+                 images: Sequence[str | Path] = ()) -> str: ...
 
 
 #: Below this, a prefix is not worth a cache breakpoint. Opus will not cache a
@@ -272,6 +280,23 @@ def image_block(path: str | Path) -> dict[str, Any]:
     }
 
 
+def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
+    """Several references as one cache-tagged prefix.
+
+    Only the last block carries ``cache_control``. A breakpoint marks a prefix
+    boundary, not a block: everything ahead of it is cached by being ahead of
+    it, so tagging each image spends four of the request's breakpoints to buy
+    exactly what one buys. Anthropic allows four in total, and the catalog and
+    system prompt want them.
+    """
+    if not paths:
+        return []
+    blocks = [image_block(p) for p in paths]
+    for block in blocks[:-1]:
+        block.pop("cache_control", None)
+    return blocks
+
+
 @dataclass
 class AnthropicModel:
     """The real client. Uses the official SDK — see the claude-api reference.
@@ -286,6 +311,9 @@ class AnthropicModel:
     effort: str = "high"
     #: output_config.format is a hard constraint, not a request.
     enforces_schema: bool = True
+    #: The only transport here that carries images. The OpenAI-compatible and
+    #: Gemini clients take (system, user, schema) and would reject the keyword.
+    accepts_images: bool = True
     _client: Any = None
 
     #: Brotli is excluded deliberately. `anthropic` >= 1.x vendors `httpx2`,
@@ -315,14 +343,19 @@ class AnthropicModel:
             self.max_tokens = 64000
 
     def __call__(self, *, system: str, user: str, schema: dict[str, Any],
-                 image: str | Path | None = None) -> str:
+                 image: str | Path | None = None,
+                 images: Sequence[str | Path] = ()) -> str:
+        # `image` is the single-montage spelling this started as; `images` is
+        # the reference set. Both resolve to the same block list, and the
+        # images lead the text because they are the stable half of the prefix.
+        shown = list(images) or ([image] if image else [])
         kwargs: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
             system=_cacheable(system),
             messages=[{"role": "user", "content": (
-                [image_block(image), {"type": "text", "text": user}]
-                if image else user)}],
+                [*image_blocks(shown), {"type": "text", "text": user}]
+                if shown else user)}],
             output_config={
                 "effort": self.effort,
                 "format": {"type": "json_schema", "schema": schema},
@@ -978,7 +1011,7 @@ prose, no markdown fence, no commentary — the object and nothing else:
 
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
-    subject: str = "", feedback: str = "",
+    subject: str = "", feedback: str = "", references: Sequence[Path] = (),
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
 
@@ -986,6 +1019,12 @@ def build_prompt(
     the schema is stated in the prompt instead. It is a weaker guarantee — a
     statement rather than a constraint — which is why the validation below it
     is unchanged either way.
+
+    ``references`` are the images the caller is about to attach. They are named
+    in the system prompt rather than left to speak for themselves: an image is
+    ambiguous about its own status, and the expensive reading — a screenshot of
+    the system being replaced taken as a specification of the one being built —
+    is the one a model reaches for unprompted.
     """
     spec = DAG[node]
     cap = capability_for(spec.agent)
@@ -1000,6 +1039,7 @@ def build_prompt(
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
+    system += reference_addendum(references)
     if spec.agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
@@ -1328,6 +1368,7 @@ def make_executor(
                 shared_context=shared_context(svc.doc),
                 page_id=spec.subject,
                 registry=registry_from_blueprint(svc.doc),
+                presentation=page.get("presentation") or "page",
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
@@ -1369,10 +1410,21 @@ def make_executor(
             if isinstance(model, ModelRouter)
             else model
         )
+        # §5 — an application can be described by showing as well as by
+        # telling. Resolved per call rather than threaded through `run`,
+        # because the references belong to the application and `svc` is the
+        # application: nothing between here and the orchestrator has to learn
+        # about images for one to arrive.
+        shown = (
+            references.paths(svc.output_dir)
+            if spec.node in references.SEES_REFERENCES
+            and getattr(client, "accepts_images", False)
+            else []
+        )
         system, user = build_prompt(
             svc.doc, spec.node,
             inline_schema=not getattr(client, "enforces_schema", True),
-            subject=spec.subject, feedback=spec.feedback,
+            subject=spec.subject, feedback=spec.feedback, references=shown,
         )
         last: Exception | None = None
 
@@ -1384,7 +1436,12 @@ def make_executor(
                     "Return a corrected envelope. Do not explain the mistake."
                 )
             t0 = time.monotonic()
-            raw = client(system=system, user=prompt, schema=PROPOSAL_SCHEMA)
+            raw = (
+                client(system=system, user=prompt, schema=PROPOSAL_SCHEMA,
+                       images=shown)
+                if shown else
+                client(system=system, user=prompt, schema=PROPOSAL_SCHEMA)
+            )
             elapsed = time.monotonic() - t0
 
             # Clients may return a bare str (test fakes) or a ModelReply.

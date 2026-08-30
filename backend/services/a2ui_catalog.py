@@ -237,9 +237,16 @@ _STRUCTURAL_SUMMARIES: dict[str, str] = {
 
 
 _COMPOSE_ONE_OF: dict[str, tuple[str, ...]] = {
-    # A button that neither runs a workflow, nor navigates, nor submits its
-    # form, nor handles a click, is a label with a border.
-    "Button": ("workflow", "navigate", "submit", "onClick"),
+    # A button that does none of these is a label with a border.
+    #
+    # EVERY way the component can act, not the ones that came to mind. The
+    # first version listed four and the catalog offers six, so a Button written
+    # as {label: "Edit", opensDialog: "editDialog"} — correct, and exactly what
+    # a page whose create form is a modal needs — was refused for declaring an
+    # action that was not on the list. The constraint was right and the
+    # enumeration was mine.
+    "Button": ("workflow", "navigate", "submit", "onClick",
+               "opensDialog", "togglesSidebar"),
 }
 
 

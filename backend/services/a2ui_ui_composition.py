@@ -53,9 +53,25 @@ def shared_context(doc: dict) -> str:
     import json
 
     design = doc.get("designSystem") or {}
+    # Routes rather than page ids, because a composer reasons about where a
+    # link goes, not about the Blueprint's identifiers.
+    route_of = {p.get("id"): p.get("route") for p in doc.get("pages") or []
+                if p.get("id")}
     pages = [
         {"route": p.get("route"), "name": p.get("name"),
-         "pattern": p.get("pattern"), "purpose": p.get("purpose")}
+         "pattern": p.get("pattern"), "purpose": p.get("purpose"),
+         # THE THREE THE CONTRACT LEARNED AND THIS DID NOT PASS ON. A page
+         # composed without them is composed in isolation: `/` came back with
+         # six nodes and no affordance leading anywhere, because nothing said
+         # it was the landing page, nothing said it leads to a detail, and
+         # nothing said its create form opens as a dialog OVER it. The
+         # composer was not judging the page sparse — it was told less than
+         # the Blueprint knew.
+         "presentation": p.get("presentation") or "page",
+         "entry": bool(p.get("entry")),
+         "navigatesTo": [route_of[t] for t in (p.get("navigatesTo") or [])
+                         if t in route_of],
+        }
         for p in doc.get("pages") or []
     ]
     return json.dumps({

@@ -152,3 +152,23 @@ def test_every_contract_prop_reaches_the_catalog(catalog, contracts):
             if prop not in emitted:
                 missing.append(f"{name}.{prop}")
     assert not missing, "\n".join(missing)
+
+
+def test_a_one_of_list_names_every_way_the_component_can_act():
+    """The first Button list held four of the six action props the catalog
+    offers, so `{label: "Edit", opensDialog: "editDialog"}` — correct, and what
+    a page whose create form is a modal needs — was refused for declaring an
+    action that was not on the list. The constraint was right; the enumeration
+    was hand-written, and a hand-written enumeration of a generated set drifts.
+    """
+    from services.a2ui_catalog import _COMPOSE_ONE_OF, build_a2ui_catalog
+
+    comps = build_a2ui_catalog()["components"]
+    for name, choices in _COMPOSE_ONE_OF.items():
+        body = comps[name]["allOf"][2]
+        declared = {a["required"][0] for a in body.get("anyOf") or []}
+        assert declared == set(choices), f"{name}: anyOf lost a choice"
+        # Every choice must be a prop the component actually has, or the
+        # composer is offered an alternative it cannot satisfy.
+        missing = declared - set(body["properties"])
+        assert not missing, f"{name}: offers {sorted(missing)}, which do not exist"
