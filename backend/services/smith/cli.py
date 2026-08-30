@@ -130,6 +130,18 @@ def _open(
 # Rendering
 # ---------------------------------------------------------------------------
 
+def show_greeting(smith: Smith) -> None:
+    """§107 step 1. Printed before the first prompt, not on request."""
+    g = smith.greet()
+    print(f"\nSmith: {g.headline}")
+    if g.detail:
+        print(f"  {g.detail}")
+    for opener in g.openers:
+        print(f"    · {opener.kind} — {opener.example}")
+    if g.next_act:
+        print(f"  {g.next_act}")
+
+
 def show_status(smith: Smith) -> None:
     s = smith.status()
     print(f"\n{s['application']}  v{s['version']}  [{s['state']}]")
@@ -360,6 +372,9 @@ def handle(smith: Smith, line: str, *, run_agents: bool) -> None:
 
 
 def repl(smith: Smith, *, run_agents: bool) -> None:
+    # §107 step 1, before anything is asked of the user. A returning session
+    # opens on where the application actually is rather than on a prompt.
+    show_greeting(smith)
     print("\nType a request, or: status | ask | trace REQ-017 | explain <q>")
     print("Lifecycle (§107): describe it, then \"draft the blueprint\", "
           "\"looks good\", \"build it\".")

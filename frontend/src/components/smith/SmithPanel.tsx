@@ -41,6 +41,16 @@ import {
   type RunEvent as RunEventT,
 } from "@/hooks/useBlueprintRun";
 
+/** §107 step 1 — what Smith says before the user says anything. */
+type Greeting = {
+  state: string;
+  headline: string;
+  detail: string;
+  nextAct: string;
+  openers: { kind: string; example: string }[];
+  facts: Record<string, unknown>;
+};
+
 /** DAG node keys → the stage names §111 shows a person. */
 const STAGE_LABEL: Record<string, string> = {
   requirements: "Requirements",
@@ -139,6 +149,7 @@ export function SmithPanel({
 }: SmithPanelProps) {
   const { run, start, stop } = useBlueprintRun(projectId);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [greeting, setGreeting] = useState<Greeting | null>(null);
   const [draft, setDraft] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
@@ -156,6 +167,30 @@ export function SmithPanel({
     }
     if (run.status === "running") completedRef.current = false;
   }, [run.status, run.awaitingApproval, onRunComplete]);
+
+  /**
+   * §107 step 1 — Smith speaks first.
+   *
+   * The pane used to open on a fixed "What would you like to build?", which is
+   * the right question exactly once. §118 calls Smith the persistent architect,
+   * and a user returning to an application with eighteen pages parked at the
+   * build gate was being asked what they would like to build. The endpoint is
+   * deterministic and reads only the document and §94's state, so this is a
+   * cheap call on mount rather than a model turn.
+   */
+  useEffect(() => {
+    if (!projectId) return;
+    let live = true;
+    fetch(`/api/projects/${projectId}/smith/greeting`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g) => live && setGreeting(g))
+      // The fixed sentence below is the fallback, so a failure here costs the
+      // returning user their bearings and nobody else anything.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
 
   // Clear the title marker as soon as they look.
   useEffect(() => {
@@ -244,11 +279,29 @@ export function SmithPanel({
       <div ref={transcriptRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.length === 0 && !busy && (
           <div className="pt-8 text-center">
-            <p className="text-sm font-medium">What would you like to build?</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Describe the application. I&apos;ll define it first, then build it
-              once you approve.
+            <p className="text-sm font-medium">
+              {greeting?.headline ?? "What would you like to build?"}
             </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {greeting?.detail ??
+                "Describe the application. I'll define it first, then build it once you approve."}
+            </p>
+            {greeting?.nextAct && (
+              <p className="mt-2 text-xs font-medium">{greeting.nextAct}</p>
+            )}
+            {/* Only when there is nothing yet: a user with an application
+                does not need to be told what kinds of application exist. */}
+            {!!greeting?.openers?.length && (
+              <ul className="mx-auto mt-4 max-w-sm space-y-1 text-left">
+                {greeting.openers.map((o) => (
+                  <li key={o.kind} className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{o.kind}</span>
+                    {" — "}
+                    {o.example}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

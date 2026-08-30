@@ -339,6 +339,44 @@ async def generate_via_blueprint(
     return EventSourceResponse(stream())
 
 
+@router.get("/api/projects/{project_id}/smith/greeting")
+async def smith_greeting(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """§107 step 1 — what Smith says before the user says anything.
+
+    A project with no Blueprint yet is not an error here: "nothing yet" is one
+    of the two things a greeting has to be able to say, and 404 would push the
+    panel back onto the fixed sentence for exactly the case that sentence is
+    right for — while giving it nothing for the case it is wrong for.
+
+    Deterministic and cheap (§116): no model, no agents, no DAG. It reads the
+    document and §94's state, so it is safe to call on every panel mount.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith.greeting import greet
+    from services.smith.clarification import select
+
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+        doc = svc.doc
+    except (FileNotFoundError, ValueError):
+        doc = {}
+
+    g = greet(doc, open_questions=len(select(doc)) if doc else 0)
+    return {
+        "state": g.state,
+        "headline": g.headline,
+        "detail": g.detail,
+        "nextAct": g.next_act,
+        "openers": [{"kind": o.kind, "example": o.example} for o in g.openers],
+        "facts": g.facts,
+    }
+
+
 @router.get("/api/projects/{project_id}/blueprint")
 async def read_blueprint(
     project_id: uuid.UUID,

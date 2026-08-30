@@ -57,7 +57,7 @@ from services.blueprint.orchestrator import (
 )
 from services.blueprint.orchestrator import run as run_dag
 from services.blueprint.service import BlueprintService
-from services.smith import clarification, decisions as decision_log
+from services.smith import clarification, decisions as decision_log, greeting
 from services.smith.change import ChangeResult, PreviewContext, apply_change, resolve_preview
 from services.smith.code_intel import Trace, coverage, trace
 from services.smith.context import Context, resolve
@@ -529,6 +529,17 @@ class Smith:
     def trace(self, requirement_id: str) -> Trace:
         """§18 — has this requirement been implemented?"""
         return trace(self.doc, requirement_id)
+
+    def greet(self) -> "greeting.Greeting":
+        """§107 step 1 — what Smith says before the user says anything.
+
+        The only method here that does not need to be asked. `turn` is one
+        user message in, one turn out, which is right for everything except
+        the first thing a user sees: §118 calls Smith persistent, and a user
+        returning to an application parked at a gate should be told which gate
+        rather than asked what they would like to build.
+        """
+        return greeting.greet(self.doc, open_questions=len(self.open_questions()))
 
     # -- asking (§16) -------------------------------------------------------
 
