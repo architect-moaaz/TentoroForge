@@ -915,3 +915,52 @@ def test_every_composition_attempt_keeps_its_own_surface(tmp_path):
     art = root / "src" / "contracts" / "a2ui-surfaces"
     assert sorted(f.name for f in art.glob("plants.*.json")) == [
         "plants.1.json", "plants.2.json", "plants.3.json"]
+
+
+# --- a dropped call is not a refusal ---------------------------------------
+
+def test_an_empty_surface_is_retried(tmp_path):
+    """Two of three parallel calls came back empty on one run while the third
+    answered twice seconds apart. The composer had nothing against those pages
+    — the transport dropped them, and one shipped with no layout at all."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def flaky(req, ctx):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=flaky)
+    assert calls["n"] == 3, "the call was not retried"
+    assert res["applied"] is True, res.get("reason")
+
+
+def test_a_provider_that_never_answers_declines_with_a_reason(tmp_path):
+    """And says the composer returned nothing, rather than reporting whatever
+    the JSON parser said about an empty string."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def silent(req, ctx):
+        calls["n"] += 1
+        return {"messages": []}
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=silent)
+    assert calls["n"] == 3
+    assert res["applied"] is False
+    assert "returned nothing" in res["reason"], res["reason"]
+
+
+def test_a_healthy_provider_is_asked_once(tmp_path):
+    """Retry must cost a working composition nothing."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def fine(req, ctx):
+        calls["n"] += 1
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    compose_dashboard_via_a2ui(str(root), surface_provider=fine)
+    assert calls["n"] == 1

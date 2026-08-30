@@ -683,17 +683,46 @@ def compose_page_via_a2ui(
         return {"applied": False, "route": route, "kind": kind,
                 "reason": "no entities in the plan — every binding would be a guess"}
 
-    try:
-        payload = surface_provider(build_requirement(root, kind, route,
-                                                     shared_context,
-                                                     presentation),
-                                   build_domain_context(root, registry,
-                                                        page_id,
-                                                        shared_context))
-    except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
-        logger.warning("[a2ui] %s composition failed: %s", route, exc)
+    # NO ANSWER IS NOT A REFUSAL. Two of three parallel calls came back with an
+    # empty body on one run — `json.loads("")` raising "Expecting value: line 1
+    # column 1 (char 0)" — while the third answered twice, seconds apart. The
+    # composer had nothing against those pages; the transport dropped them. One
+    # was left with no layout at all and the run still finished.
+    #
+    # Retried, because the same call succeeding moments later is the definition
+    # of worth retrying. Bounded at three: a provider that is actually down
+    # says so three times quickly, and the failures here were instant rather
+    # than slow, so this costs a page nothing when the answer is real.
+    #
+    # A payload with no messages counts as no answer too. It reaches the same
+    # place as an exception — nothing to compose — and only one of the two
+    # shapes was being noticed.
+    payload = None
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            payload = surface_provider(build_requirement(root, kind, route,
+                                                         shared_context,
+                                                         presentation),
+                                       build_domain_context(root, registry,
+                                                            page_id,
+                                                            shared_context))
+        except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
+            last_exc, payload = exc, None
+        else:
+            if payload and (payload.get("messages") or []):
+                break
+            last_exc = None
+        if attempt < 3:
+            logger.info("[a2ui] %s attempt %d returned nothing (%s) — asking "
+                        "again", route, attempt,
+                        last_exc or "empty surface")
+    if not payload or not (payload.get("messages") or []):
+        why = (f"the composer returned nothing after 3 attempts"
+               + (f" ({last_exc})" if last_exc else ""))
+        logger.warning("[a2ui] %s composition failed: %s", route, why)
         return {"applied": False, "route": route, "kind": kind,
-                "reason": f"composition failed: {exc}"}
+                "reason": f"composition failed: {why}"}
 
     # Keep the raw surface per attempt, decline or not. When a composition ships
     # something wrong the first question is always what the composer actually
