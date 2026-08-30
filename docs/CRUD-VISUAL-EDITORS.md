@@ -155,8 +155,21 @@ type. The Blueprint models two and a half of the six.
 | `state_machine` 380 | `{states, transitions[{from,to,requires}]}` | field `enumValues` gives the states | **gap** — no transitions, no `requires` |
 | `computed` 247 | `{expression}` on a field | nothing | **gap** |
 
-**2,579 rows have no Blueprint representation**, and the three gaps are all one
-thing: *field-level behaviour*. `enumValues` already proves the Blueprint
+**The two stores have never met.** 222 projects: 16 have a Blueprint, 137 have
+rule rows, **0 have both**. Every access-heavy project — 54 rules, 27, 26 —
+has no Blueprint at all.
+
+So `project_rules` is not a parallel store diverging from the Blueprint. It is
+the record for a *different generation of projects*, written by a pipeline that
+no longer runs. The 16 Blueprint projects have no rule rows because the new
+engine has never written one. Nothing is out of sync; the two have simply never
+overlapped.
+
+That rewrites the argument below without changing its conclusion. The three
+gaps cannot be justified by "2,579 rows demand it" — those rows belong to
+projects the current engine will never touch, and the six-type taxonomy is the
+old generator's vocabulary, not a requirement inherited from anywhere. The
+gaps stand on what they are, not on their row counts: *field-level behaviour*. `enumValues` already proves the Blueprint
 reaches into a field to say which values are legal. It stops short of saying
 how they may change (`transitions`), what must hold across fields
 (`validation.expression`), and what is derived rather than stored (`computed`).
@@ -173,10 +186,15 @@ Two smaller changes fall out:
 - `workflows[].trigger.kind` admits entity lifecycle events (`on_create`,
   `on_update`) beside `manual`.
 
-**Caveat on the evidence.** This reads one Blueprint — the Reading List, a
-small app with `rbac: false` and no authentication. A richer application's
-`security` and `permissions` may cover `access` better or worse than this
-suggests. Confirm against a larger project before the schema change is written.
+**The caveat could not be discharged, and that is the finding.** The mapping
+above was read from one Blueprint — the Reading List, `rbac: false`, no
+authentication — and the plan was to confirm `access` against a larger,
+authenticated project. No such project exists: with zero overlap, there is no
+application that has both access rules and a Blueprint to compare them to.
+
+So the `access` row in the table is inference, not measurement, and it stays
+that way until a Blueprint application with real authentication is built. That
+is the thing to build before the schema change is written — not a query.
 
 **Still open in phase 0:** the sections with no table at all — requirements,
 pages, workflows, apis, pageLayouts, nav. See decision 2.
@@ -210,9 +228,15 @@ to Blueprint-owned rules with a 409. That was phase 1 and 2 of the earlier,
 Blueprint-primary plan and it is **backwards under this decision**: those rules
 belong in the table and must be editable.
 
-It is not urgent to revert — it makes 13 otherwise-invisible rules visible and
-refuses writes that would genuinely fail today — but it must go before phase 2,
-and the 409 must not be allowed to become load-bearing anywhere.
+**Revised.** With zero overlap between the stores, the two paths cannot
+collide: a Blueprint project has no rows, so the adapter is its only source of
+rules; a legacy project has no Blueprint, so the adapter falls through and the
+rows answer untouched. It is not backwards — it is the only thing serving those
+16 projects, and it is what makes their rules visible at all.
+
+What still has to go is the 409, once phase 1 gives Blueprint rules a row to
+write to. Until then it refuses a write that would genuinely fail, which is
+the honest answer rather than a placeholder.
 
 ## 5. Decisions still open
 
@@ -229,9 +253,11 @@ and the 409 must not be allowed to become load-bearing anywhere.
 4. **Concurrency.** Two editors, or an editor and a running DAG, touching one
    artifact. A row-level constraint answers this far better than a JSON file
    could, which is a point in favour of the decision.
-5. **Migration.** 5,616 rules and 96 page definitions predate this and were
-   written by the legacy pipeline. They stay; the question is whether they are
-   backfilled into Blueprint identifiers or left without them.
+5. ~~**Migration**~~ — mostly dissolved. With zero overlap there is nothing to
+   reconcile: the 5,616 rules belong to 137 legacy projects, and the 16
+   Blueprint projects have none. They stay where they are. What remains is
+   narrower — whether a legacy project can ever be adopted by the new engine,
+   and if so what happens to its rows then.
 
 ## 6. First step
 
