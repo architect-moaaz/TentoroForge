@@ -101,8 +101,19 @@ async def list_schemas(project_id: str):
     """
     root = await _resolve_root(project_id)
 
-    schemas_dir = root / "src" / "schemas"
-    if not schemas_dir.exists():
+    # THE GENERATED APP IS A SUBDIRECTORY, same as _debug/project-file next
+    # door. The Blueprint's projections write `app/src/schemas/*.json`; this
+    # looked in `<output_dir>/src/schemas`, which for a Blueprint-built project
+    # does not exist, and returned an empty list rather than saying so.
+    #
+    # The output root is tried first so legacy projects, which are the only
+    # thing that ever wrote there, keep resolving exactly as before.
+    schemas_dir = next(
+        (d for d in (root / "src" / "schemas", root / "app" / "src" / "schemas")
+         if d.is_dir()),
+        None,
+    )
+    if schemas_dir is None:
         return {"paths": []}
 
     paths: list[str] = []
