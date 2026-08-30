@@ -392,18 +392,13 @@ function StageList({
         </dl>
       )}
 
-      {run.usage && (
-        // Captured since the first version of this panel and rendered nowhere.
-        // What a run cost is the single number a person asks for afterwards.
-        <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-          {run.usage.cost_usd !== undefined &&
-            `$${run.usage.cost_usd.toFixed(2)}`}
-          {run.usage.elapsed_s !== undefined &&
-            ` · ${_duration(run.usage.elapsed_s)}`}
-
-        </p>
-      )}
-
+      {/*
+        No cost line. It was here because the number was captured and unshown,
+        and a build reading "$0.23" invites the reader to price their own
+        request rather than judge the application — §111 asks for observable
+        status, and money is not status. The figure is still in `usage` for
+        anyone who wants it in the Activity log.
+      */}
       {run.events.length > 0 && <EventLog events={run.events} />}
 
       {run.awaitingApproval && run.status === "complete" && (
