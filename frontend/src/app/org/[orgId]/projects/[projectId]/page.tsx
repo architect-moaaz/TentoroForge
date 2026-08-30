@@ -502,14 +502,27 @@ function ProjectWorkspace({
 
       {/* Main content area */}
       <div className="flex-1 overflow-hidden pt-[70px] bg-background">
-        {activeTab === "chat" && (
+        {/*
+          HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
+          rebuild from its query cache; the chat is not. Its transcript and its
+          run live in component state, so `activeTab === "chat" && <SmithPanel/>`
+          threw the conversation away on the way to Preview and brought back a
+          blank pane — and a build streaming over SSE lost its reader mid-run,
+          the one moment someone is most likely to go and look at the preview.
+
+          This keeps the tab switch cheap without making the panel own a cache
+          it has no way to fill: what survives a *navigation* away from the
+          project is a separate question, and needs the turns persisted
+          server-side rather than a different render here.
+        */}
+        <div className={activeTab === "chat" ? "h-full" : "hidden"}>
           <SmithPanel
             projectId={projectId}
             blueprint={blueprintDoc ?? null}
             onRunComplete={onGenerationComplete}
             className="h-full border-l-0"
           />
-        )}
+        </div>
         {activeTab === "preview" && (
           <PreviewFrame projectId={projectId} project={project || null} />
         )}
