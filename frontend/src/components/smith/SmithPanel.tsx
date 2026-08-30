@@ -24,6 +24,15 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+
+/**
+ * The engine's origin. The greeting fetch below was relative, so it resolved
+ * against the Next dev server on :6501 rather than the API on :6500, which
+ * has no such route and answers 401. Smith therefore opened on the fixed
+ * fallback sentence for everyone, and the greeting that knows the project
+ * — the whole point of §107 step 1 — was never once seen.
+ */
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 import {
   CheckCircle2,
   Loader2,
@@ -181,7 +190,15 @@ export function SmithPanel({
   useEffect(() => {
     if (!projectId) return;
     let live = true;
-    fetch(`/api/projects/${projectId}/smith/greeting`)
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const headers: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+    fetch(`${API_BASE}/api/projects/${projectId}/smith/greeting`, {
+      credentials: "include",
+      headers,
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((g) => live && setGreeting(g))
       // The fixed sentence below is the fallback, so a failure here costs the
