@@ -163,12 +163,14 @@ async def generate_via_blueprint(
     from services.blueprint.orchestrator import (
         DAG, completed_nodes, levels, run)
     from services.blueprint.service import BlueprintService
+    from services.smith.smith import domain_nodes
 
     try:
         output_dir = _output_dir(project)
     except ValueError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
+    _adopt_design_references(output_dir, str(project_id))
     # The application is projected beside the Blueprint it comes from, so a
     # later incremental change has somewhere to write. A projection with no
     # app root blocks, and takes every node that depends on it.
@@ -227,7 +229,7 @@ async def generate_via_blueprint(
 
             from services.blueprint.plan_forecast import forecast
 
-            definition = ["requirements", "application_model"]
+            definition = domain_nodes()
             plan = [k for lvl in levels() for k in lvl]
             awaiting = req.define_only or not req.approved
             if awaiting:
@@ -397,6 +399,7 @@ async def smith_chat(
     from services.blueprint.orchestrator import (
         DAG, completed_nodes, levels, run)
     from services.blueprint.service import BlueprintService
+    from services.smith.smith import domain_nodes
     from services.blueprint.plan_forecast import forecast
     from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
@@ -405,6 +408,7 @@ async def smith_chat(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
+    _adopt_design_references(output_dir, str(project_id))
     app_root = str(output_dir / "app")
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -479,6 +483,50 @@ async def smith_chat(
     return EventSourceResponse(stream())
 
 
+def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
+    """Copy the project's designated design references into the application.
+
+    §5 — an application can be described by showing as well as by telling, and
+    the designation already exists: `PUT /design-references` is how a user says
+    which of their uploads is direction rather than a bug report. It fed the
+    legacy brief author and stopped there, so the Blueprint agents never saw
+    what the user had pointed at.
+
+    Copied rather than read in place, because `services.blueprint` is
+    constructible from an output_dir and nothing else — that is what lets a
+    Blueprint load from a fixture or an export with no attachment store in the
+    process. Re-adopted on every run so a change of designation takes effect,
+    and best-effort throughout: a reference that cannot be read is a reference
+    the run proceeds without, not a failed generation.
+    """
+    from services import chat_attachments, design_reference
+    from services.blueprint import references
+
+    try:
+        root = chat_attachments.attachments_root()
+        ids = design_reference.read_design_references(root, project_id)
+    except Exception:                                    # noqa: BLE001
+        logger.info("[references] %s: no designation readable", project_id)
+        return []
+
+    references.clear(output_dir)
+    adopted: list[str] = []
+    for att_id in ids:
+        got = chat_attachments.read_attachment(root, project_id, att_id)
+        if got is None:
+            continue
+        data, media = got
+        rec = chat_attachments.describe(root, project_id, [att_id])
+        name = (rec[0].get("filename") if rec else "") or att_id
+        stored = references.adopt_bytes(
+            output_dir, name, data, media_type=media, fallback=att_id)
+        if stored is not None:
+            adopted.append(stored.name)
+    if adopted:
+        logger.info("[references] %s: %s", project_id, ", ".join(adopted))
+    return adopted
+
+
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit) -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116)."""
@@ -487,6 +535,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     from services.blueprint.orchestrator import completed_nodes, levels, run
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
+    from services.smith.smith import domain_nodes
 
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
@@ -503,7 +552,9 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     plan = [k for lvl in levels() for k in lvl]
     if not approved:
         # §25 — the definition is two calls, what follows is a dozen more.
-        plan = ["requirements", "application_model"]
+        # `domain_nodes` rather than a list spelled out here: the gate is one
+        # fact about the lifecycle, and three copies of it drift.
+        plan = domain_nodes()
     already = completed_nodes(svc.doc)
     plan = [k for k in plan if k not in already]
 

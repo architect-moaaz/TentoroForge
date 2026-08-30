@@ -62,13 +62,36 @@ def test_the_report_names_what_did_not_run():
 
 def test_define_only_stops_before_the_expensive_half():
     """§114 step 4 proposes before it regenerates; a first build deserves the
-    same courtesy, because the definition is cheap and the DAG is not."""
+    same courtesy, because the definition is cheap and the DAG is not.
+
+    Asserted against `domain_nodes` rather than the node names spelled out
+    here. The gate is one fact about the lifecycle and it was written down in
+    three places — this route, the Smith turn path, and `_run_dag` — which is
+    two more than can be kept in agreement. A test that greps for the literal
+    is a test that pins the duplication in place.
+    """
+    import inspect
+
+    from routers import blueprint_generate
+    from services.smith.smith import domain_nodes
+
+    src = inspect.getsource(blueprint_generate.generate_via_blueprint)
+    assert "define_only" in src and "domain_nodes()" in src
+    assert domain_nodes() == ["requirements", "application_model"]
+
+
+def test_every_path_into_the_dag_uses_the_same_definition_of_the_gate():
+    """`generate_via_blueprint` and `_run_dag` are two doors into §28's graph,
+    and both decide what "not approved yet" runs. They have to agree."""
     import inspect
 
     from routers import blueprint_generate
 
-    src = inspect.getsource(blueprint_generate.generate_via_blueprint)
-    assert "define_only" in src and '"application_model"' in src
+    for fn in (blueprint_generate.generate_via_blueprint,
+               blueprint_generate._run_dag):
+        src = inspect.getsource(fn)
+        assert "domain_nodes()" in src, fn.__name__
+        assert '"application_model"' not in src, fn.__name__
 
 
 def test_progress_events_cross_the_thread_boundary_safely():
