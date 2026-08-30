@@ -724,6 +724,25 @@ class _Binder:
 
 
 
+def _enum_members(kind: str, prop: str) -> set[str]:
+    """The values `kind.prop` accepts, or an empty set when it is not an enum.
+
+    Read from the generated component contracts, so this knows what the
+    renderer knows rather than restating it — a second list here would drift
+    from the Zod components the way the A2UI catalog did.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return set()
+    try:
+        spec = props_for(kind, load_contracts()).get(prop) or {}
+    except Exception:  # noqa: BLE001
+        return set()
+    members = spec.get("enum")
+    return {str(m) for m in members} if isinstance(members, list) else set()
+
+
 def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
     """Every `workflow` under `node` naming something outside `known`.
 
@@ -1046,12 +1065,34 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 raw = str(val["path"])
                 resolved = at_path(raw)
                 if not isinstance(resolved, (str, int, float, bool)):
-                    if not raw.startswith("/") and raw.strip("/"):
+                    field = raw.strip("/").split("/")[-1]
+                    members = _enum_members(kind, k)
+                    if members and field not in members:
+                        # AN ENUM PROP TAKES A MEMBER, NOT A FIELD NAME. The
+                        # rule below is right for `Kanban.cardTitle`, which
+                        # names the field to read — but `Badge.variant` takes
+                        # one of five fixed values, and A2UI's
+                        # `{"path": "statusVariant"}` became the literal
+                        # "statusVariant", which is not one of them. The page
+                        # failed validation and did not ship.
+                        #
+                        # Dropped, so the prop falls back to its default and
+                        # the badge renders in a neutral style. A row-relative
+                        # binding is a real intent this contract cannot express
+                        # — losing the colour is the small half of that, and
+                        # losing the page was the large one.
+                        resolved = None
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}: "{raw}" is row-relative and '
+                            f"{k!r} takes one of {sorted(members)} — dropped, "
+                            f"so the default applies rather than failing the "
+                            f"page.")
+                    elif not raw.startswith("/") and raw.strip("/"):
                         # A relative pointer is scoped to the row, so on a prop
                         # like Kanban's `cardTitle` it names a FIELD, and the
                         # field name is the literal Forge wants. Dropping it
                         # (as this did) left the cards with no title.
-                        resolved = raw.strip("/").split("/")[-1]
+                        resolved = field
                         binder.assumptions.append(
                             f'{c.get("id")}.{k}: "{raw}" is row-relative; read '
                             f"as the field name {resolved!r}.")

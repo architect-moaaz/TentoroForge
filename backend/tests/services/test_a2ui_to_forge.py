@@ -909,3 +909,33 @@ def test_nothing_is_cleared_when_no_workflows_are_known():
     props = {"workflow": "FLOW-001"}
     # The caller guards on `known_ids` being non-empty; this pins the reason.
     assert _dangling_workflows(props, {"FLOW-001"}) == []
+
+
+def test_a_row_relative_pointer_on_an_enum_prop_is_dropped():
+    """`Badge.variant` takes one of five fixed values. A2UI wrote
+    `{"path": "statusVariant"}` — row-relative — which the field-name rule
+    turned into the literal "statusVariant", and the page failed validation and
+    did not ship. Dropped, so the default applies and the badge renders neutral:
+    losing the colour is the small half, losing the page was the large one."""
+    from services.a2ui_to_forge import _enum_members
+
+    members = _enum_members("Badge", "variant")
+    assert members and "statusVariant" not in members
+
+
+def test_the_field_name_rule_still_applies_where_it_belongs():
+    """`Kanban.cardTitle` names the field to read, and dropping it left the
+    cards with no title. It is not an enum, so nothing changes for it."""
+    from services.a2ui_to_forge import _enum_members
+
+    assert _enum_members("Kanban", "cardTitle") == set()
+
+
+def test_enum_members_come_from_the_contracts_not_a_list_here():
+    """A second list would drift from the Zod components the way the A2UI
+    catalog did."""
+    from services.a2ui_to_forge import _enum_members
+
+    assert _enum_members("Badge", "variant") == {
+        "neutral", "primary", "success", "danger", "warning"}
+    assert _enum_members("NoSuchComponent", "variant") == set()
