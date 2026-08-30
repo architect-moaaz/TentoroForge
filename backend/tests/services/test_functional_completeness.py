@@ -77,3 +77,59 @@ def test_the_action_list_comes_from_the_composer_contract():
 
     assert {"workflow", "navigate", "submit", "onClick",
             "opensDialog", "togglesSidebar"} <= _action_props()
+
+
+# ---------------------------------------------------------------------------
+# The findings are rejections, not a report.
+# ---------------------------------------------------------------------------
+
+def _proposal(root):
+    from services.blueprint.executors import AgentResult, ArtifactProposal
+
+    return AgentResult(
+        task_id="t", agent="a2ui_pages", status="completed",
+        proposals=[ArtifactProposal(
+            section="pageLayouts", natural_key="PAGE-001",
+            body={"page": "PAGE-001", "root": root})],
+    )
+
+
+def test_a_dead_control_is_refused_so_the_composer_is_asked_again():
+    """§73 closes the loop: the orchestrator re-asks a node when its output is
+    refused, so a button with no action is a page composed wrongly rather than
+    a page to repair afterwards."""
+    import pytest
+
+    from services.blueprint.agent_contract import (
+        InvalidPatternTemplate, check_pattern_templates,
+    )
+
+    result = _proposal({"type": "Stack", "props": {}, "children": [
+        {"type": "Button", "props": {"label": "Cancel"}, "children": []}]})
+    doc = {"pages": [{"id": "PAGE-001", "route": "/plants"}], "workflows": []}
+
+    with pytest.raises(InvalidPatternTemplate) as exc:
+        check_pattern_templates(result, doc)
+    # The reason reaches the agent verbatim, so it can act on it.
+    assert "declares no action" in str(exc.value)
+
+
+def test_a_working_control_is_accepted():
+    from services.blueprint.agent_contract import check_pattern_templates
+
+    result = _proposal({"type": "Stack", "props": {}, "children": [
+        {"type": "Button", "props": {"label": "Water", "workflow": "FLOW-001"},
+         "children": []}]})
+    check_pattern_templates(result, {
+        "pages": [{"id": "PAGE-001", "route": "/plants"}],
+        "workflows": [{"id": "FLOW-001", "name": "Record Watering"}]})
+
+
+def test_without_a_doc_the_functional_check_is_skipped():
+    """A caller that cannot say which workflows exist would otherwise reject
+    every real binding as invented."""
+    from services.blueprint.agent_contract import check_pattern_templates
+
+    result = _proposal({"type": "Stack", "props": {}, "children": [
+        {"type": "Button", "props": {"label": "Cancel"}, "children": []}]})
+    check_pattern_templates(result)   # structure only — must not raise

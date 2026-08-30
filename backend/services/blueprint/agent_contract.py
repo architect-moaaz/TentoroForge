@@ -373,7 +373,8 @@ class InvalidPatternTemplate(ValueError):
     """A2UI proposed a template the component registry cannot render."""
 
 
-def check_pattern_templates(result: AgentResult) -> None:
+def check_pattern_templates(result: AgentResult,
+                            doc: dict | None = None) -> None:
     """Reject templates that do not compose against the real catalog.
 
     The alternative — accepting them and repairing later — is what produced the
@@ -403,6 +404,36 @@ def check_pattern_templates(result: AgentResult) -> None:
         if errors:
             pattern = proposal.body.get("pattern") or proposal.body.get("page", "?")
             problems.extend(f"{pattern}: {e}" for e in errors)
+    # WOULD IT DO ANYTHING. The checks above ask whether the tree renders; this
+    # asks whether it works. A Button with a label and no action renders
+    # perfectly and does nothing, an action naming a workflow that does not
+    # exist answers "Workflow not found" on click, and a binding with no source
+    # renders its own template text — all valid trees, all shipped, all found
+    # by somebody using the application.
+    #
+    # Raised here rather than reported later because this is the one place the
+    # composer can still be told. §73 exists to close the loop and the
+    # orchestrator already re-asks a node when its output is refused; a control
+    # with no action is a page composed wrongly, not a page to repair.
+    #
+    # Needs the doc for the workflow list, and is skipped without one — a
+    # caller that cannot say which workflows exist would otherwise reject every
+    # real binding as invented.
+    if doc is not None:
+        from services.blueprint.functional_completeness import (
+            functional_findings,
+        )
+
+        pages = {p.get("id"): p for p in (doc.get("pages") or [])}
+        for proposal in proposals:
+            page_id = proposal.body.get("page")
+            findings = functional_findings({
+                "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
+                "workflows": doc.get("workflows") or [],
+                "pageLayouts": [proposal.body],
+            })
+            problems.extend(f["detail"] for f in findings)
+
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))
 
@@ -430,7 +461,7 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
-    check_pattern_templates(result)
+    check_pattern_templates(result, svc.doc)
 
     if result.status != "completed":
         return AgentApplication(
