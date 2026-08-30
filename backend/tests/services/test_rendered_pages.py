@@ -6,10 +6,18 @@ was read as the application being fine.
 """
 import pytest
 
+#: A port nothing serves. `booted_app` reuses an app that is already
+#: listening, so a test that hardcoded :3000 would take a different path on
+#: a machine that happens to be running one.
+DEAD = "http://localhost:59999"
+
 from services.rendered_pages import (
     Capture,
     Target,
     capture_rendered,
+    collection_endpoint,
+    fill_route,
+    first_id,
     landed,
     plan_routes,
     _render_tree,
@@ -50,11 +58,14 @@ def test_a_drawer_is_skipped_for_the_same_reason():
     assert "/candidates" in skipped
 
 
-def test_a_detail_route_needs_a_record_that_does_not_exist_here():
-    """Substituting an id would be inventing data, and the 404 would be scored
-    as a design failure belonging to the fixture."""
-    _targets, skipped = plan_routes(doc(page(route="/candidates/[id]")))
-    assert "inventing data" in skipped["/candidates/[id]"]
+def test_a_detail_route_is_resolved_rather_than_skipped():
+    """It used to be dropped. A detail page is most of what an application is
+    for, and reviewing only the lists is reviewing half of it."""
+    targets, skipped = plan_routes(doc(page(route="/candidates/[id]",
+                                            data={"primaryEntity": "ENTITY-001"})))
+    assert [t.route for t in targets] == ["/candidates/[id]"]
+    assert targets[0].is_dynamic and targets[0].entity == "ENTITY-001"
+    assert skipped == {}
 
 
 def test_a_deprecated_page_is_history_not_an_obligation():
@@ -130,7 +141,8 @@ def test_a_capture_that_could_not_run_says_so_against_every_route(tmp_path, monk
 
     monkeypatch.setattr(builtins, "__import__", no_playwright)
 
-    cap = capture_rendered(doc(page(), page("PAGE-002", "/roles")), tmp_path)
+    cap = capture_rendered(doc(page(), page("PAGE-002", "/roles")), tmp_path,
+                           base_url=DEAD)
 
     assert cap.rendered == []
     assert set(cap.skipped) == {"/candidates", "/roles"}
@@ -138,9 +150,17 @@ def test_a_capture_that_could_not_run_says_so_against_every_route(tmp_path, monk
 
 
 def test_nothing_to_visit_is_not_an_error(tmp_path):
-    cap = capture_rendered(doc(page(route="/candidates/[id]")), tmp_path)
+    cap = capture_rendered(doc(page(presentation="modal")), tmp_path,
+                           base_url=DEAD)
     assert cap.rendered == []
-    assert "/candidates/[id]" in cap.skipped
+    assert "/candidates" in cap.skipped
+
+
+def test_an_app_that_will_not_boot_costs_every_route_a_reason(tmp_path):
+    """Coming back empty would look like agreement."""
+    cap = capture_rendered(doc(page()), tmp_path, base_url=DEAD)
+    assert cap.rendered == []
+    assert "/candidates" in cap.skipped
 
 
 def test_the_summary_always_states_what_was_left_out():
@@ -189,14 +209,14 @@ def test_smith_carries_the_skipped_routes_out_to_the_caller(tmp_path):
 
     svc = BlueprintService.create(
         output_dir=tmp_path, app_id="a", name="ATS", domain="ATS")
-    svc.doc["pages"] = [page("PAGE-001", "/candidates/[id]")]
+    svc.doc["pages"] = [page("PAGE-001", "/new", presentation="modal")]
     svc.save()
 
     smith = Smith(svc, app_root=str(tmp_path / "app"))
-    out = smith.review_preview(critic=lambda s: None)
+    out = smith.review_preview(critic=lambda s: None, base_url=DEAD)
 
     assert out["checked"] == 0
-    assert "/candidates/[id]" in out["skipped"]
+    assert "/new" in out["skipped"]
 
 
 def test_a_review_with_nowhere_to_look_is_refused_with_a_reason(tmp_path):
@@ -208,3 +228,97 @@ def test_a_review_with_nowhere_to_look_is_refused_with_a_reason(tmp_path):
     smith = Smith(svc)
 
     assert "refused" in smith.review_preview(critic=lambda s: None)
+
+
+# --- resolving a detail route -----------------------------------------------
+
+def test_the_listing_endpoint_comes_from_the_document():
+    """Pluralising an entity name into a URL by convention is a second, quieter
+    source of truth that is wrong the first time a resource is not named what
+    its table is."""
+    apis = {"apis": [
+        {"path": "/api/candidates", "method": "GET", "entity": "ENTITY-001"},
+        {"path": "/api/roles", "method": "GET", "entity": "ENTITY-002"},
+    ]}
+    assert collection_endpoint(apis, "ENTITY-001") == "/api/candidates"
+
+
+def test_the_item_endpoint_is_not_mistaken_for_the_collection():
+    """An item path carries the parameter this exists to fill in."""
+    apis = {"apis": [
+        {"path": "/api/candidates/[id]", "method": "GET", "entity": "ENTITY-001"},
+        {"path": "/api/candidates", "method": "GET", "entity": "ENTITY-001"},
+    ]}
+    assert collection_endpoint(apis, "ENTITY-001") == "/api/candidates"
+
+
+def test_a_write_endpoint_is_not_a_listing():
+    apis = {"apis": [{"path": "/api/candidates", "method": "POST",
+                      "entity": "ENTITY-001"}]}
+    assert collection_endpoint(apis, "ENTITY-001") == ""
+
+
+def test_a_deprecated_endpoint_is_not_offered():
+    apis = {"apis": [{"path": "/api/old", "method": "GET",
+                      "entity": "ENTITY-001", "status": "DEPRECATED"}]}
+    assert collection_endpoint(apis, "ENTITY-001") == ""
+
+
+def test_an_entity_nothing_lists_resolves_to_nothing():
+    assert collection_endpoint({"apis": []}, "ENTITY-001") == ""
+
+
+@pytest.mark.parametrize("body,expected", [
+    ([{"id": "c-1"}], "c-1"),
+    ({"data": [{"id": 7}]}, "7"),
+    ({"items": [{"uuid": "u-1"}]}, "u-1"),
+    ({"results": [{"slug": "abc"}]}, "abc"),
+])
+def test_an_id_is_read_from_the_shapes_a_generated_api_returns(body, expected):
+    assert first_id(body) == expected
+
+
+@pytest.mark.parametrize("body", [
+    [], {}, {"data": []}, {"count": 3}, [{"name": "no id here"}], ["not-a-dict"],
+])
+def test_nothing_that_is_not_an_id_is_treated_as_one(body):
+    """Reaching for the first string that looks like an id is how a route gets
+    visited with a display name."""
+    assert first_id(body) == ""
+
+
+def test_every_dynamic_segment_is_filled():
+    """A URL left holding a literal `[id]` is a 404 that would be critiqued as
+    a page."""
+    assert "[" not in fill_route("/orgs/[orgId]/people/[id]", "7")
+
+
+def test_a_catch_all_segment_is_filled_too():
+    assert fill_route("/docs/[...slug]", "x") == "/docs/x"
+
+
+# --- who visits which page --------------------------------------------------
+
+def test_a_role_restricted_page_is_visited_as_that_role():
+    targets, _ = plan_routes(doc(page(access="role_restricted",
+                                      users=["ROLE-001"])))
+    assert targets[0].role == "ROLE-001"
+
+
+def test_an_authenticated_page_is_for_whoever_is_signed_in():
+    """Sweeping it once per role would pay for the same screenshot as many
+    times as the application has roles."""
+    targets, _ = plan_routes(doc(page(access="authenticated",
+                                      users=["ROLE-001", "ROLE-002"])))
+    assert targets[0].role == ""
+
+
+def test_a_public_page_needs_nobody():
+    targets, _ = plan_routes(doc(page(access="public")))
+    assert targets[0].role == ""
+
+
+def test_a_role_restricted_page_naming_no_role_falls_back_to_any_session():
+    """A defect in the document, and not one to fix by refusing to look."""
+    targets, _ = plan_routes(doc(page(access="role_restricted", users=[])))
+    assert targets[0].role == ""
