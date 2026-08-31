@@ -80,7 +80,16 @@ export const Product = z.object({
    * Defaults to "en" because that is what every existing application is, and
    * a default of "unknown" would make each of them look like a question.
    */
-  locale: z.string().default("en"),
+  locale: z
+    .string()
+    .describe(
+      "BCP-47 tag for the language the INTERFACE is written in — 'ar', " +
+      "'ar-PS', 'fr'. Set it when the request says what language the UI " +
+      "should be in; every string a reader sees is then authored in it and " +
+      "the document is laid out right-to-left where the script requires. A " +
+      "country, currency or market is not a language. Defaults to 'en'.",
+    )
+    .default("en"),
 });
 
 // ===========================================================================

@@ -818,10 +818,15 @@ NODE_TASKS: dict[str, str] = {
         "from. Do not design the solution."
     ),
     "application_model": (
-        "Establish the product frame: objectives, personas, the domain vocabulary "
+        "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
+        "is in, set `locale` before anything else — a brief opening \"an "
+        "Arabic-first noticeboard, the interface must be in Arabic\" is asking "
+        "for `ar`, and leaving the default silently ships an English "
+        "application to somebody who asked twice for a different one.\n\n"
+        "Then the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
         "offer.\n\n"
-        "Set `locale` when the request says what language the INTERFACE is in — "
+        "On `locale` — set it when the request says what language the INTERFACE is in — "
         "\"Arabic-first\", \"the UI should be in French\", a brief written "
         "throughout in another language. A BCP-47 tag: `ar`, `ar-PS`, `fr`. "
         "Everything a reader sees is then authored in it, and the document is "
