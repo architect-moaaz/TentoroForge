@@ -362,6 +362,22 @@ def assemble(doc: dict, app_root: str | Path, *,
     for name in (".env", ".env.local"):
         (out / name).write_text(env_body, "utf-8")
 
+    # Last, after every writer above. A `{{token}}` surviving into a .tsx is a
+    # JSX expression, so it compiles, passes both gates, and dies at prerender
+    # — the guard reads the finished app and says so. It repairs nothing: a
+    # finding here means a substitution pass did not run, and the pass is what
+    # needs fixing.
+    #
+    # It existed already, validated over 8,612 emitted files, and its only
+    # caller was the legacy router — so the pipeline that builds today was the
+    # one flying blind. The report is written even when clean, so "no findings"
+    # and "never ran" stay distinguishable.
+    from services.residual_placeholder_guard import (
+        apply_residual_placeholder_guard,
+    )
+
+    placeholders = apply_residual_placeholder_guard(out)
+
     return {
         "scaffold": len(scaffold),
         "vendored": vendored,
@@ -370,6 +386,7 @@ def assemble(doc: dict, app_root: str | Path, *,
         "runtimeFiles": len(runtime.get("copied") or []),
         "runtimeErrors": runtime.get("errors") or [],
         "supersededRepairs": sorted(SUPERSEDED_REPAIRS),
+        "residualPlaceholders": placeholders.get("findings") or [],
     }
 
 

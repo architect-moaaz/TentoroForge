@@ -230,3 +230,51 @@ def test_remove_except_keeps_preserved_paths_and_clears_the_rest(tmp_path):
 
     assert (tmp_path / "src/lib/workflows/definitions/a.json").exists()
     assert not (tmp_path / "src/lib/workflows/engine.ts").exists()
+
+
+def test_assembly_reports_placeholders_that_survived_into_jsx(tmp_path):
+    """`{{app_name}}` in JSX text is an object literal, not inert text — it
+    compiles, passes both gates, and throws ReferenceError at prerender. The
+    guard that recognises it existed for a year with only a legacy-router
+    caller, so the pipeline that builds today never ran it.
+
+    Both directions matter. A clean app must still write the report, because
+    "found nothing" and "never ran" have to stay distinguishable.
+    """
+    app = tmp_path / "app"
+    doc = {"application": {"name": "T"}}
+
+    clean = assembly.assemble(doc, app, project_short_id="t")
+    assert clean["residualPlaceholders"] == []
+    assert (app / "contracts" / "placeholder-report.json").is_file()
+
+    planted = app / "src" / "app" / "planted.tsx"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(
+        "export default function P() {\n"
+        "  return <div style={{ height }}>Return to {{app_name}}</div>;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    dirty = assembly.assemble(doc, app, project_short_id="t")
+    hits = dirty["residualPlaceholders"]
+    assert [h["token"] for h in hits] == ["app_name"], hits
+    assert hits[0]["file"].endswith("planted.tsx")
+
+
+def test_assembly_substitutes_the_interface_language(tmp_path):
+    """§11 — an Arabic Blueprint has to reach <html lang/dir>. layout.tsx is a
+    plain .tsx, so the .tmpl copy step never reads it and the placeholder
+    would ship literally."""
+    app = tmp_path / "app"
+    assembly.assemble({"application": {"name": "T"},
+                       "product": {"locale": "ar"}}, app, project_short_id="t")
+    layout = (app / "src" / "app" / "layout.tsx").read_text()
+    assert '<html lang="ar" dir="rtl"' in layout
+    assert "__APP_" not in layout
+
+    other = tmp_path / "other"
+    assembly.assemble({"application": {"name": "T"}}, other, project_short_id="t")
+    assert '<html lang="en" dir="ltr"' in (
+        other / "src" / "app" / "layout.tsx").read_text()

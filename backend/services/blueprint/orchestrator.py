@@ -1156,8 +1156,9 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     """
     from services.blueprint.assembly import apply_assembly, verify_build
 
-    apply_assembly(svc, app_root,
-                   project_short_id=(svc.doc.get("application") or {}).get("id", "forge"))
+    assembled = apply_assembly(
+        svc, app_root,
+        project_short_id=(svc.doc.get("application") or {}).get("id", "forge"))
     # Assembly writes a tree; the build is what makes it an application. Kept
     # inside the node so a run that cannot compile fails here, where the reason
     # is a compiler error, rather than later when someone opens the directory.
@@ -1165,6 +1166,12 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     runtime = dict(svc.doc.get("runtime") or {})
     runtime["build"] = {"install": result["install"], "build": result["build"],
                         "status": "passed"}
+    # An unsubstituted placeholder does fail the build above — but as a
+    # prerender error in a file nobody edited, which reads as a compiler
+    # problem rather than as a substitution pass that did not run. Recorded
+    # here so the run names the cause. Always written, empty included: a
+    # missing key would mean the guard did not run, which is a different fact.
+    runtime["placeholders"] = assembled.get("residualPlaceholders") or []
     svc.doc["runtime"] = runtime
     svc.save()
 
