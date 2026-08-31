@@ -174,23 +174,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("application_model", "product_analysis", ("requirements",), ("product",)),
 
     # left branch — data
-    #
-    # ONE CALL PER MODULE, not one for the application. This authored every
-    # entity in a single reply, so its cost grew with the whole brief while its
-    # budget stayed at one response: a twelve-module legislative platform — 42
-    # requirements, twenty domain terms to model — never returned, twice, and
-    # took the build with it. There is no timeout on the model client and
-    # `_gather` waits for the whole wave, so the run simply stopped at 3/18
-    # with `data.entities` missing and no error anywhere.
-    #
-    # `data.entities` is an ID-bearing list keyed by natural_key (the entity's
-    # name), so an entity two modules both need is proposed twice and merges
-    # rather than duplicating. That is what makes the split safe.
-    #
-    # Now depends on `ux_architecture`: the subjects ARE the modules, so they
-    # have to exist before this node can fan out. It used to run beside it.
-    _n("data_model", "data_model", ("application_model", "ux_architecture"),
-       ("data.entities",), fanout="modules"),
+    _n("data_model", "data_model", ("application_model",), ("data.entities",)),
     _n("database", "data_model", ("data_model",), ("database",)),
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
@@ -278,10 +262,6 @@ FANOUT: dict[str, Any] = {
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
-    ],
-    "modules": lambda doc: [
-        m["id"] for m in (doc.get("modules") or [])
-        if m.get("id") and m.get("status") != "DEPRECATED"
     ],
 }
 
