@@ -389,9 +389,6 @@ export function SmithPanel({
         setMessages((m) => (m.length ? m : past));
       })
       .catch(() => undefined);
-    return () => {
-      live = false;
-    };
   }, [projectId]);
 
   /**
