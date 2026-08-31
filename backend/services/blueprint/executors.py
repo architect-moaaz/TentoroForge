@@ -820,7 +820,17 @@ NODE_TASKS: dict[str, str] = {
     "application_model": (
         "Establish the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
-        "offer."
+        "offer.\n\n"
+        "Set `locale` when the request says what language the INTERFACE is in — "
+        "\"Arabic-first\", \"the UI should be in French\", a brief written "
+        "throughout in another language. A BCP-47 tag: `ar`, `ar-PS`, `fr`. "
+        "Everything a reader sees is then authored in it, and the document is "
+        "laid out right-to-left where the script calls for it.\n\n"
+        "Where the request does not say, leave it. A country, a currency or a "
+        "market is not a language: an application for a Cairo hospital may well "
+        "be run in English, and choosing Arabic because the domain sounds Arabic "
+        "would rewrite an interface nobody asked to change. The default is "
+        "English, and defaulting is the right answer far more often than not."
     ),
     "data_model": (
         "Model the entities behind the requirements: fields with real types, which "
