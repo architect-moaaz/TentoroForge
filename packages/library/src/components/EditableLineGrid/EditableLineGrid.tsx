@@ -28,7 +28,7 @@ const INPUT_CLS =
 const SELECT_CLS = INPUT_CLS + " cursor-pointer";
 
 const ALIGN_TEXT: Record<"left" | "center" | "right", string> = {
-  left: "text-left", center: "text-center", right: "text-right",
+  left: "text-start", center: "text-center", right: "text-end",
 };
 
 function _coerceNumber(v: unknown): number {
@@ -189,7 +189,7 @@ export function EditableLineGrid({
             <SearchIcon
               size={16}
               aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
           )}
           <input
@@ -198,7 +198,7 @@ export function EditableLineGrid({
             onChange={(e) => setLookupQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitLookup(); } }}
             placeholder={lookupPlaceholder ?? "Add item — enter name, code, or barcode"}
-            className="w-full h-10 pl-9 pr-3 text-sm rounded-md border border-input bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-full h-10 ps-9 pe-3 text-sm rounded-md border border-input bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             data-line-grid-lookup=""
           />
         </div>
@@ -261,7 +261,7 @@ export function EditableLineGrid({
       </div>
 
       {resolved && (
-        <dl className="mt-4 ml-auto w-full max-w-xs space-y-1 text-sm">
+        <dl className="mt-4 ms-auto w-full max-w-xs space-y-1 text-sm">
           <div className="flex justify-between">
             <dt className="text-muted-foreground">Subtotal</dt>
             <dd className="tabular-nums">{_formatCurrency(resolved.subtotal, resolved.currency)}</dd>

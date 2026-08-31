@@ -32,7 +32,7 @@ export function Cascader({ options = [], style, onChange }: CascaderProps) {
   return (
     <div className="inline-flex rounded-md border border-border" data-cascader="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
       {columns.map((col, ci) => (
-        <ul key={ci} className="min-w-[140px] border-r border-border last:border-r-0 p-1">
+        <ul key={ci} className="min-w-[140px] border-e border-border last:border-e-0 p-1">
           {col.map((o) => {
             const active = path[ci] === o.value;
             return (

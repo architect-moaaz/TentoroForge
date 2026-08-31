@@ -46,7 +46,7 @@ export function Dialog({
 
   const maxW = SIZE_TO_MAXW[size] ?? SIZE_TO_MAXW.md;
   const contentClass = [
-    "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+    "fixed start-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
     "w-full mx-4",
     maxW,
     "bg-background rounded-lg shadow-xl",

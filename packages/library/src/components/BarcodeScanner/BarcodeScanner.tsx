@@ -201,7 +201,7 @@ export function BarcodeScanner({
           <button
             type="button"
             onClick={() => { setCode(""); setError(null); }}
-            className="ml-auto text-sm text-muted-foreground underline-offset-2 hover:underline"
+            className="ms-auto text-sm text-muted-foreground underline-offset-2 hover:underline"
           >
             Scan again
           </button>

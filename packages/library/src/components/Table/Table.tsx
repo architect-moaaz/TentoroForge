@@ -291,7 +291,7 @@ function Cell({ value, fmt }: { value: unknown; fmt: NonNullable<ColumnDef["form
 
 function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   return (
-    <span className="ml-1 inline-flex flex-col leading-none text-[8px]">
+    <span className="ms-1 inline-flex flex-col leading-none text-[8px]">
       <span className={dir === "asc" ? "text-foreground" : "text-muted-foreground/40"}>▲</span>
       <span className={dir === "desc" ? "text-foreground" : "text-muted-foreground/40"}>▼</span>
     </span>
@@ -546,7 +546,7 @@ export function Table(props: TableProps) {
             <thead className="bg-muted/40">
               <tr className="border-b border-border">
                 {Array.from({ length: colCount }).map((_, i) => (
-                  <th key={i} className={`${pad} text-left`}>
+                  <th key={i} className={`${pad} text-start`}>
                     <div className="h-3 w-24 animate-pulse rounded bg-muted" aria-hidden />
                   </th>
                 ))}
@@ -619,12 +619,12 @@ export function Table(props: TableProps) {
           </div>
           {searchable && (
             <div className="relative">
-              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+              <span className="pointer-events-none absolute start-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
               </span>
               <input
                 type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…"
-                className="h-8 w-48 rounded-md border border-input bg-background pl-8 pr-3 text-sm text-foreground outline-none transition focus:ring-2 focus:ring-ring"
+                className="h-8 w-48 rounded-md border border-input bg-background ps-8 pe-3 text-sm text-foreground outline-none transition focus:ring-2 focus:ring-ring"
               />
             </div>
           )}
@@ -633,7 +633,7 @@ export function Table(props: TableProps) {
 
       <div className={SCROLL_X} style={scrollEdgeStyle()}>
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
-          {caption && <caption className="px-4 py-2 text-left text-sm text-muted-foreground">{caption}</caption>}
+          {caption && <caption className="px-4 py-2 text-start text-sm text-muted-foreground">{caption}</caption>}
           <thead className={`bg-muted/40 ${headBg}`}>
             <tr className="border-b border-border">
               {selectable && (
@@ -654,7 +654,7 @@ export function Table(props: TableProps) {
                   </th>
                 );
               })}
-              {rowActions?.length ? <th className={`${pad} w-px text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`} /> : null}
+              {rowActions?.length ? <th className={`${pad} w-px text-end text-[11px] font-semibold uppercase tracking-wide text-muted-foreground`} /> : null}
             </tr>
           </thead>
           <tbody className={txt}>
@@ -768,7 +768,7 @@ export function Table(props: TableProps) {
                     );
                   })}
                   {rowActions?.length ? (
-                    <td className={`${pad} text-right`} onClick={(e) => e.stopPropagation()}>
+                    <td className={`${pad} text-end`} onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1">
                         {rowActions.map((a) => {
                           const actionKey = `${id}::${a.label}`;

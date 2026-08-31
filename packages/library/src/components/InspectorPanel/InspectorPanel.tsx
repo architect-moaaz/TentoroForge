@@ -37,7 +37,7 @@ export function InspectorPanel({
         aria-hidden="true"
       />
       <aside
-        className="fixed right-0 top-0 z-50 h-full bg-card border-l border-border shadow-2xl flex flex-col"
+        className="fixed end-0 top-0 z-50 h-full bg-card border-s border-border shadow-2xl flex flex-col"
         style={{ width: WIDTH_PX[width] }}
         role="complementary"
         aria-modal="true"

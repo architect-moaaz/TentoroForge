@@ -40,7 +40,7 @@ export function Tag({ label, variant = "default", removable, style, onRemove }: 
           type="button"
           aria-label="Remove"
           onClick={onRemove}
-          className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-black/10"
+          className="ms-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full hover:bg-black/10"
         >
           ×
         </button>
