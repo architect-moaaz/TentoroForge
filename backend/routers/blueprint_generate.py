@@ -432,19 +432,28 @@ class SmithChatRequest(BaseModel):
 
 
 def _remember(loop: Any, project_id: Any, role: str, content: str,
-              meta: dict | None = None) -> None:
+              meta: dict | None = None, lock: Any = None) -> None:
     """Append one turn to the project's conversation, best effort.
 
     Fire-and-forget on the event loop: the turn is already streaming and a
     write that is slow, or a database that is briefly unavailable, must not
     hold up what the user is reading. A conversation with a hole in it is a
     smaller loss than a chat that stalls.
+
+    ORDERED, THOUGH. `conversations` is read back by `seq`, a Postgres
+    sequence, so display order is insert order — and two fire-and-forget
+    writes race. A reloaded transcript showed "Let me define that first"
+    above the answer that prompted it, which reads as Smith replying before
+    it was asked. One lock per request restores the order without making the
+    stream wait for the database.
     """
     if not (content or "").strip():
         return
 
     async def _write() -> None:
         try:
+            if lock is not None:
+                await lock.acquire()
             from database import async_session
             from models.project import Conversation, MessageRole, MessageType
 
@@ -459,6 +468,9 @@ def _remember(loop: Any, project_id: Any, role: str, content: str,
                 await sess.commit()
         except Exception as exc:  # noqa: BLE001 — never fail a turn over memory
             logger.warning("[smith] could not remember a turn: %s", exc)
+        finally:
+            if lock is not None and lock.locked():
+                lock.release()
 
     try:
         loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_write()))
@@ -529,9 +541,13 @@ async def smith_chat(
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
                        if k in ("options", "diffSummary", "status", "intent")
-                       and v})
+                       and v},
+                      lock=memory_lock)
 
-    _remember(loop, project_id, "user", req.message)
+    # One per request: turns from this conversation queue behind each other
+    # and nothing else waits on them.
+    memory_lock = asyncio.Lock()
+    _remember(loop, project_id, "user", req.message, lock=memory_lock)
 
     async def turn() -> None:
 

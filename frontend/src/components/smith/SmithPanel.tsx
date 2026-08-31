@@ -42,6 +42,7 @@ import {
   SkipForward,
   ChevronDown,
   ChevronRight,
+  ListChecks,
   Paperclip,
   Mic,
   Image as ImageIcon,
@@ -402,6 +403,18 @@ export function SmithPanel({
    * application described by screenshot was, to every agent, an application
    * described by silence.
    */
+  /**
+   * Which plan the side panel is showing.
+   *
+   * Smith's work belongs beside the conversation, not inside it: a
+   * twenty-stage plan rendered as a chat bubble pushes the exchange off the
+   * screen, and the run you care about is rarely the last thing said. The
+   * transcript keeps a one-line marker per plan and this decides which one is
+   * open. `null` follows the live run, so a build in progress is what you see
+   * without having to ask for it.
+   */
+  const [openPlan, setOpenPlan] = useState<BlueprintRun | null>(null);
+
   const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
   const [listening, setListening] = useState(false);
 
@@ -529,8 +542,17 @@ export function SmithPanel({
     void start({ description: brief.text, evidence, approved: true });
   };
 
+  // What the side panel is showing: the run you picked, or the live one.
+  const sidePlan =
+    openPlan ??
+    (run.status === "running" ||
+    (run.status === "complete" && !completedRef.current)
+      ? run
+      : null);
+
   return (
-    <div className={cn("flex h-full flex-col border-l bg-background", className)}>
+    <div className={cn("flex h-full min-w-0", className)}>
+    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-background">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">Smith</h2>
@@ -608,11 +630,32 @@ export function SmithPanel({
               </div>
             )}
             {m.plan ? (
-              <StageList
-                run={m.plan}
-                onApprove={approve}
-                definition={blueprint}
-              />
+              // A MARKER, NOT THE PLAN ITSELF. Clicking it opens that run on
+              // the right, where there is room for it.
+              <button
+                type="button"
+                onClick={() => setOpenPlan(m.plan ?? null)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs hover:bg-muted",
+                  openPlan === m.plan && "border-primary bg-muted",
+                )}
+              >
+                <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="font-medium">
+                  {m.plan.awaitingApproval
+                    ? "Definition ready to review"
+                    : m.plan.nodesTotal > 0
+                      ? `Built in ${m.plan.nodesTotal} stages`
+                      : "Nothing needed doing"}
+                </span>
+                <span className="ml-auto text-muted-foreground">
+                  {m.at &&
+                    new Date(m.at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                </span>
+              </button>
             ) : (
             <div
               className={cn(
@@ -651,13 +694,6 @@ export function SmithPanel({
           </div>
         ))}
 
-
-        {/* The live run. Completed ones live in the transcript above, so a
-            new turn no longer erases the last plan or its approval gate. */}
-        {(run.status === "running" ||
-          (run.status === "complete" && !completedRef.current)) && (
-          <StageList run={run} onApprove={approve} definition={blueprint} />
-        )}
 
         {run.status === "error" && (
           <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -743,6 +779,46 @@ export function SmithPanel({
           </button>
         </div>
       </div>
+    </div>
+
+    {/*
+      SMITH'S WORK, BESIDE THE CONVERSATION.
+
+      A twenty-stage plan rendered as a chat bubble pushed the exchange off
+      the screen, and the run somebody cares about is rarely the last thing
+      said. So the transcript keeps a marker per plan and the plan itself
+      lives here, where there is room for its stages, its definition and its
+      approval gate.
+
+      Hidden below `lg` rather than made narrower: this panel also renders as
+      a 380px sidebar on the Blueprint page, and two columns in that is two
+      unreadable ones. There the plan opens in place, as it did before.
+    */}
+    <aside className="hidden w-[340px] shrink-0 flex-col overflow-y-auto border-l bg-muted/30 p-3 lg:flex">
+      {sidePlan ? (
+        <>
+          {openPlan && (
+            <button
+              type="button"
+              onClick={() => setOpenPlan(null)}
+              className="mb-2 self-start text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← Back to the current run
+            </button>
+          )}
+          <StageList
+            run={sidePlan}
+            onApprove={approve}
+            definition={blueprint}
+          />
+        </>
+      ) : (
+        <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
+          What Smith does appears here — the plan it follows, the stages as
+          they run, and the definition it asks you to approve.
+        </p>
+      )}
+    </aside>
     </div>
   );
 }
