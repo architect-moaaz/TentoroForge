@@ -83,12 +83,43 @@ class BlueprintGenerateRequest(BaseModel):
     approved: bool = False
 
 
-def _report_payload(report: Any) -> dict:
-    """The run outcome, including what did *not* run.
+def _unbuilt_pages(doc: dict | None) -> list[dict]:
+    """Declared pages that nothing composed — routes that will 404.
+
+    A page whose composition failed leaves no layout, so the projection writes
+    no schema and the route falls through to the catch-all. The run reports
+    success, the Blueprint keeps every other page, and nothing says a route is
+    missing until somebody opens it: /tickets 404'd in a generated app after
+    one API read timed out, and the only trace was a log line.
+
+    `functional_completeness` already decides this — its `page-not-composed`
+    rule is exactly the question — so this asks it rather than re-deriving,
+    and takes only that rule. The rest of what it finds is about pages that
+    exist; these are the ones that do not.
+    """
+    if not doc:
+        return []
+    try:
+        from services.blueprint.functional_completeness import functional_findings
+
+        return [{"page": f.get("page"), "detail": f.get("detail")}
+                for f in functional_findings(doc)
+                if f.get("rule") == "page-not-composed"]
+    except Exception:  # noqa: BLE001 — a report must not fail the run it reports
+        return []
+
+
+def _report_payload(report: Any, doc: dict | None = None) -> dict:
+    """The run outcome, including what did *not* run — and what did not build.
 
     Skipped and blocked nodes are named rather than counted. A plan that
     quietly drops nodes reads exactly like one that ran them and found nothing
     to do, and the Blueprint is left holding whatever it held before.
+
+    `unbuilt` is the same argument one step later. Every node can complete and
+    a page still have no layout, because composition is per-page and a page
+    that fails is a page the run carries on without. That is a 404 waiting for
+    a user, and it belonged in the outcome rather than in a log line.
     """
     return {
         "completed": list(report.completed),
@@ -102,6 +133,7 @@ def _report_payload(report: Any) -> dict:
              "why": getattr(report, "failed_because", {}).get(n, "")}
             for n in report.failed
         ],
+        "unbuilt": _unbuilt_pages(doc),
     }
 
 
@@ -310,7 +342,7 @@ async def generate_via_blueprint(
             return {"resumed": resumed,
                     "awaitingApproval": awaiting and not req.approved,
                     "forecast": counts,
-                    "report": _report_payload(report),
+                    "report": _report_payload(report, svc.doc),
                     "version": svc.doc.get("version"),
                     "blueprint": str(svc.current_path)}
 
@@ -767,4 +799,4 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     emit("forecast", counts)
     emit("usage", usage.summary())
     return {"awaitingApproval": not approved, "forecast": counts,
-            "report": _report_payload(report)}
+            "report": _report_payload(report, svc.doc)}

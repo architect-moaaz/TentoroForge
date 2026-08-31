@@ -945,6 +945,27 @@ function StageList({
         </div>
       )}
 
+      {/*
+        ROUTES THAT WILL 404, SAID OUT LOUD. A page whose composition failed
+        leaves no layout, so nothing is projected for it and the route falls
+        through to the catch-all — while every node completed and the run
+        reported success. /tickets was missing from a generated app for a day
+        before anyone opened it.
+      */}
+      {run.unbuilt.length > 0 && (
+        <div className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+          <p className="font-medium">
+            {run.unbuilt.length} page
+            {run.unbuilt.length === 1 ? "" : "s"} did not build
+          </p>
+          <ul className="mt-1 space-y-0.5 text-muted-foreground">
+            {run.unbuilt.map((u, i) => (
+              <li key={u.page ?? i}>{u.detail ?? u.page}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {run.nodes.length === 0 && run.status === "complete" ? (
         // A RESUMED RUN WITH NOTHING TO DO. §72 continues rather than redoes,
         // so a definition that already exists produces an empty plan and a

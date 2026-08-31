@@ -79,6 +79,15 @@ export interface BlueprintRun {
   /** Nodes the orchestrator skipped because they were already complete (§72). */
   alreadyComplete: string[];
   awaitingApproval: boolean;
+  /**
+   * Pages the run declared and never composed — routes that will 404.
+   *
+   * Every node can complete and a page still have no layout: composition is
+   * per-page, and a page that fails is one the run carries on without. The
+   * outcome said "built" and the route was simply absent until somebody
+   * opened it.
+   */
+  unbuilt: { page?: string; detail?: string }[];
   forecast: RunForecast | null;
   usage: RunUsage | null;
   status: "idle" | "running" | "complete" | "error";
@@ -94,6 +103,7 @@ const EMPTY: BlueprintRun = {
   callsDone: 0,
   alreadyComplete: [],
   awaitingApproval: false,
+  unbuilt: [],
   forecast: null,
   usage: null,
   status: "idle",
@@ -316,12 +326,15 @@ export function reduce(
     case "usage":
       return { ...prev, usage: data as RunUsage };
 
-    case "done":
+    case "done": {
+      const rep = (data.report ?? {}) as Record<string, unknown>;
       return {
         ...prev,
         status: "complete",
         awaitingApproval: Boolean(data.awaitingApproval),
+        unbuilt: (rep.unbuilt as BlueprintRun["unbuilt"]) ?? [],
       };
+    }
 
     case "error":
       return {
@@ -360,8 +373,14 @@ function describe(event: string, data: Record<string, unknown>): string {
       return `Usage: ${cost !== undefined ? `$${cost.toFixed(2)}` : "?"}` +
         (secs !== undefined ? ` · ${Math.round(secs)}s` : "");
     }
-    case "done":
-      return data.awaitingApproval ? "Definition ready" : "Run complete";
+    case "done": {
+      const missed =
+        ((data.report as { unbuilt?: unknown[] })?.unbuilt ?? []).length;
+      if (data.awaitingApproval) return "Definition ready";
+      return missed
+        ? `Run complete · ${missed} page${missed === 1 ? "" : "s"} not built`
+        : "Run complete";
+    }
     case "error":
       return `Error: ${data.message ?? "unknown"}`;
     default:
