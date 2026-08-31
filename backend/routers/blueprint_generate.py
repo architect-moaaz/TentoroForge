@@ -658,12 +658,18 @@ async def smith_chat(
                     from services.smith.clarify_brief import clarify_brief
 
                     asked = clarify_brief(req.message)
-                    if asked.get("question"):
-                        emit("message", {
-                            "text": asked["question"],
-                            "options": asked.get("options") or [],
-                            "status": "asked",
-                        })
+                    if asked:
+                        # One message per question, so each carries its own
+                        # options and the panel can offer them as answers. They
+                        # are answered in one reply — the exchange reaches the
+                        # next turn through `history`, and the reply is added to
+                        # the brief rather than replacing it.
+                        for item in asked:
+                            emit("message", {
+                                "text": item["question"],
+                                "options": item.get("options") or [],
+                                "status": "asked",
+                            })
                         return {"status": "asked"}
 
                 emit("message", {
