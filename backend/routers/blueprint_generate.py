@@ -776,7 +776,25 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     if existing.is_file():
         svc = BlueprintService.load(output_dir=output_dir)
         if description:
-            svc.doc.setdefault("application", {})["description"] = description
+            # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
+            # assigned, so a clarifying exchange destroyed the request that
+            # prompted it: Smith asked who may close a ticket, the reply
+            # "Any team member can close any ticket" became the whole of
+            # `application.description`, and a six-page application was
+            # defined from that one sentence with the ticket queue it was
+            # about nowhere in the document.
+            #
+            # Appended rather than merged cleverly. The agents read this as
+            # prose and a later sentence qualifying an earlier one is exactly
+            # how a person would have written it in the first place.
+            prior = str((svc.doc.get("application") or {}).get("description") or "")
+            if not prior:
+                merged = description
+            elif description in prior:
+                merged = prior          # said again, or resent — keep one copy
+            else:
+                merged = f"{prior}\n\n{description}"
+            svc.doc.setdefault("application", {})["description"] = merged
             svc.validate()
             svc.save()
     else:
