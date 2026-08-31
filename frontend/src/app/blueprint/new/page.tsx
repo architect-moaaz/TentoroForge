@@ -112,6 +112,12 @@ export default function NewApplicationPage() {
         the engine takes prose and the requirements agent reads prose — a
         server-side extractor would add a file-format dependency to the request
         path for no gain on the formats a specification is usually written in.
+
+        Images are named in the accept list but not read here: a screenshot is
+        not prose, and §5's showing route runs through attachments and design
+        designation, which needs a project to attach to. Discovery has none
+        yet — the project is created when Start is pressed — so pictures are
+        attached in the workspace, where Smith can already receive them.
       */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">
@@ -183,8 +189,8 @@ export default function NewApplicationPage() {
         happen. Listed as unbuilt rather than shown as broken.
       */}
       <p className="mt-10 text-center text-xs text-muted-foreground">
-        Figma, screenshot and import are not yet connected to the Blueprint
-        engine. Plain-text and Markdown requirements are.
+        Screenshots and designs are read by the engine — attach them to Smith
+        once the workspace opens. Figma and import are not yet connected.
       </p>
     </main>
   );

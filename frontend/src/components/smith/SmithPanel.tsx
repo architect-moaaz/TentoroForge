@@ -42,6 +42,9 @@ import {
   SkipForward,
   ChevronDown,
   ChevronRight,
+  Paperclip,
+  Mic,
+  Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -391,6 +394,101 @@ export function SmithPanel({
     };
   }, [projectId]);
 
+  /**
+   * §5 — an application can be described by SHOWING as well as by telling.
+   *
+   * The whole path already existed and had no door: an upload becomes an
+   * attachment, `PUT /design-references` designates it as direction rather
+   * than a bug report, `_adopt_design_references` copies it into
+   * `.forge/references/`, and the requirements and application-model agents
+   * read it as an image. Nothing in the product let anyone attach one, so an
+   * application described by screenshot was, to every agent, an application
+   * described by silence.
+   */
+  const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
+  const [listening, setListening] = useState(false);
+
+  const attach = async (files: File[]) => {
+    if (!projectId || files.length === 0) return;
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const headers: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+    const added: { id: string; name: string }[] = [];
+    for (const f of files) {
+      const body = new FormData();
+      body.append("file", f);
+      try {
+        const r = await fetch(
+          `${API_BASE}/api/projects/${projectId}/attachments`,
+          { method: "POST", headers, credentials: "include", body },
+        );
+        if (!r.ok) continue;
+        const rec = await r.json();
+        if (rec?.id) added.push({ id: String(rec.id), name: f.name });
+      } catch {
+        /* one attachment that will not upload is not a failed conversation */
+      }
+    }
+    if (added.length === 0) return;
+    const next = [...shown, ...added];
+    setShown(next);
+    // DESIGNATED, not merely uploaded. Most attachments are bug reports;
+    // designation is how someone says this one is direction, and it is what
+    // the generation reads.
+    try {
+      await fetch(`${API_BASE}/api/projects/${projectId}/design-references`, {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ attachment_ids: next.map((a) => a.id) }),
+      });
+    } catch {
+      /* the upload survived; the designation can be retried by re-attaching */
+    }
+  };
+
+  /**
+   * §5 again — speaking is a way of telling.
+   *
+   * Browser-native recognition rather than a service: it needs no key, no
+   * audio leaves the machine on Firefox-class engines, and a mic that works
+   * offline beats one that needs a round trip to say "hello". Absent support
+   * hides the button rather than offering one that does nothing.
+   */
+  const dictate = () => {
+    const w = window as unknown as {
+      SpeechRecognition?: new () => any;
+      webkitSpeechRecognition?: new () => any;
+    };
+    const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    // Appended to whatever is already typed, so dictation adds a sentence to
+    // a draft rather than replacing it.
+    const base = draft;
+    rec.onresult = (e: any) => {
+      let heard = "";
+      for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+      setDraft((base ? base.replace(/\s*$/, " ") : "") + heard);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    setListening(true);
+    rec.start();
+  };
+
+  const canDictate =
+    typeof window !== "undefined" &&
+    Boolean(
+      (window as unknown as Record<string, unknown>).SpeechRecognition ??
+        (window as unknown as Record<string, unknown>).webkitSpeechRecognition,
+    );
+
   const copiedRef = useRef(0);
   useEffect(() => {
     // A new run empties `run.messages`; what was already copied stays in the
@@ -573,7 +671,55 @@ export function SmithPanel({
       </div>
 
       <div className="border-t p-3">
+        {shown.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {shown.map((a) => (
+              <span
+                key={a.id}
+                className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
+                title="Read as design direction by the next generation"
+              >
+                <ImageIcon className="h-3 w-3" />
+                {a.name}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
+          <label
+            className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
+            title="Show Smith a screenshot or design"
+          >
+            <Paperclip className="h-4 w-4" />
+            <input
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                void attach(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {canDictate && (
+            <button
+              type="button"
+              onClick={dictate}
+              disabled={busy || listening}
+              aria-label="Dictate"
+              title="Speak instead of typing"
+              className={cn(
+                "rounded-md border p-2 hover:bg-muted",
+                listening
+                  ? "animate-pulse border-primary text-primary"
+                  : "text-muted-foreground",
+              )}
+            >
+              <Mic className="h-4 w-4" />
+            </button>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
