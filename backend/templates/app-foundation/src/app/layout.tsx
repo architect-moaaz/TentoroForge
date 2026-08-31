@@ -23,7 +23,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" style={tokenCssVars} suppressHydrationWarning>
+    <html
+      lang="__APP_LOCALE__"
+      dir="__APP_DIR__"
+      style={tokenCssVars}
+      suppressHydrationWarning
+    >
       <body suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>

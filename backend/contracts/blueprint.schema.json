@@ -164,6 +164,10 @@
             "additionalProperties": false
           },
           "default": []
+        },
+        "locale": {
+          "type": "string",
+          "default": "en"
         }
       },
       "additionalProperties": false,

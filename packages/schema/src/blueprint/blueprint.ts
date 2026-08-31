@@ -68,6 +68,19 @@ export const Product = z.object({
   /** Domain vocabulary. Drives generated copy so labels match the business. */
   terminology: z.record(z.string(), z.string()).default({}),
   capabilities: z.array(Capability).default([]),
+  /**
+   * The language this application is written in, as a BCP-47 tag.
+   *
+   * §11 has always listed language beside purpose and personas and nothing
+   * carried it: `<html lang="en">` is hardcoded in the scaffold, the composer
+   * is called with `locale=en`, and every generated label is English. A brief
+   * asking for an Arabic-first platform produced an English one and said
+   * nothing about it.
+   *
+   * Defaults to "en" because that is what every existing application is, and
+   * a default of "unknown" would make each of them look like a question.
+   */
+  locale: z.string().default("en"),
 });
 
 // ===========================================================================

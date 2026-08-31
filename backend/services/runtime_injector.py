@@ -2247,6 +2247,42 @@ def _resolve_app_name(output_path: Path, app_name: str | None, domain: str | Non
     return name
 
 
+#: Scripts written right-to-left. `dir` is derived from the language rather
+#: than declared beside it, because two fields that must agree eventually will
+#: not — and nobody writing a brief thinks to state a direction.
+_RTL_LANGUAGES = frozenset({
+    "ar", "arc", "ckb", "dv", "fa", "ha", "he", "khw", "ks", "ps", "sd",
+    "ug", "ur", "yi",
+})
+
+
+def _resolve_locale(output_path: Path) -> tuple[str, str]:
+    """`(lang, dir)` for this application, from the Blueprint that describes it.
+
+    §11 lists language beside purpose and personas, and until `product.locale`
+    existed nothing carried it: the scaffold hardcoded `<html lang="en">` with
+    no `dir` at all, so an Arabic-first brief produced an English left-to-right
+    application and said nothing about the difference.
+
+    `rtl_scope_guard` already rewrites the design agent's blanket
+    `direction: rtl` into `[dir="rtl"] …`, and noted that no artifact recorded
+    the locale to key that on. This is that artifact reaching the document.
+    """
+    import json
+
+    for candidate in (output_path.parent / ".forge" / "blueprint" / "current.json",
+                      output_path / ".forge" / "blueprint" / "current.json"):
+        try:
+            doc = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — a missing Blueprint is the legacy path
+            continue
+        tag = str((doc.get("product") or {}).get("locale") or "").strip()
+        if tag:
+            base = tag.replace("_", "-").split("-")[0].lower()
+            return tag, ("rtl" if base in _RTL_LANGUAGES else "ltr")
+    return "en", "ltr"
+
+
 def _substitute_app_name(output_path: Path, app_name: str | None,
                          domain: str | None = None) -> int:
     """Replace the literal __APP_NAME__ placeholder across the generated app's text
@@ -2258,6 +2294,7 @@ def _substitute_app_name(output_path: Path, app_name: str | None,
     # <meta name="description">. Prefer a design-spec tagline, else a clean
     # default built from the app name.
     description = _resolve_app_description(output_path, name, domain)
+    locale, direction = _resolve_locale(output_path)
     changed = 0
     src = output_path / "src"
     if not src.exists():
@@ -2269,8 +2306,12 @@ def _substitute_app_name(output_path: Path, app_name: str | None,
             text = f.read_text(encoding="utf-8")
         except Exception:
             continue
-        if "__APP_NAME__" in text or "__APP_DESCRIPTION__" in text:
-            new_text = text.replace("__APP_NAME__", name).replace("__APP_DESCRIPTION__", description)
+        if ("__APP_NAME__" in text or "__APP_DESCRIPTION__" in text
+                or "__APP_LOCALE__" in text or "__APP_DIR__" in text):
+            new_text = (text.replace("__APP_NAME__", name)
+                            .replace("__APP_DESCRIPTION__", description)
+                            .replace("__APP_LOCALE__", locale)
+                            .replace("__APP_DIR__", direction))
             if new_text != text:
                 f.write_text(new_text, encoding="utf-8")
                 changed += 1
