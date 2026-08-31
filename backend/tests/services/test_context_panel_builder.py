@@ -1,8 +1,15 @@
 """Tests for services.context_panel_builder — Spec B4 context side-rail.
 
-Deterministic post-generate pass that wraps single-primary-FK create/edit
-forms in a Split[2:1] layout with a Card+DescriptionList context panel on
-the right. Idempotent, flag-gated.
+Deterministic post-generate pass that wraps single-primary-FK EDIT forms in
+a Split[2:1] layout with a Card+DescriptionList context panel on the right.
+Idempotent, flag-gated.
+
+/edit only. The pass once covered /new as well and was narrowed because on a
+create form the FK is unpicked, so every `{{form.<col>}}` binding resolves to
+empty and the panel renders as a blank vertical band. These fixtures still
+said /new, so the wrap tests asserted behaviour that had been deliberately
+removed — and the skip tests, which assert `wrapped == 0`, were passing for
+the wrong reason on every route.
 """
 from __future__ import annotations
 
@@ -50,7 +57,7 @@ def _registry_with_lease() -> dict:
 
 def _form_page_with_lease_fk() -> dict:
     return {
-        "route": "/payments/new",
+        "route": "/payments/edit",
         "root": {"type": "Form", "props": {"workflow": "CreatePayment"}, "children": [
             {"type": "Stack", "children": [
                 {"type": "Select", "props": {
@@ -71,9 +78,18 @@ class TestFlagGate:
     def test_no_op_when_flag_off(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FORGE_FORM_CONTEXT_PANEL", "0")
         _write(tmp_path, "registry.json", _registry_with_lease())
-        _write(tmp_path, "src/schemas/payments/new.json", _form_page_with_lease_fk())
+        _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         res = inject_context_panels(str(tmp_path))
         assert res == {"wrapped": 0, "files": 0}
+
+    def test_create_forms_are_left_alone(self, tmp_path):
+        """/new is skipped by design: the FK is unpicked, so the panel would
+        bind to nothing and render as an empty right-hand column."""
+        _write(tmp_path, "registry.json", _registry_with_lease())
+        page = _form_page_with_lease_fk()
+        page["route"] = "/payments/new"
+        _write(tmp_path, "src/schemas/payments/new.json", page)
+        assert inject_context_panels(str(tmp_path)) == {"wrapped": 0, "files": 0}
 
     def test_missing_dir_safe(self, tmp_path):
         assert inject_context_panels(str(tmp_path)) == {"wrapped": 0, "files": 0}
@@ -86,7 +102,7 @@ class TestFlagGate:
 class TestWrap:
     def test_wraps_single_fk_form_in_split(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
-        page_path = _write(tmp_path, "src/schemas/payments/new.json", _form_page_with_lease_fk())
+        page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         res = inject_context_panels(str(tmp_path))
         assert res == {"wrapped": 1, "files": 1}
         after = json.loads(page_path.read_text())
@@ -98,7 +114,7 @@ class TestWrap:
 
     def test_panel_shows_target_entity_key_fields(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
-        page_path = _write(tmp_path, "src/schemas/payments/new.json", _form_page_with_lease_fk())
+        page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         inject_context_panels(str(tmp_path))
         after = json.loads(page_path.read_text())
         card = after["root"]["children"][1]
@@ -118,7 +134,7 @@ class TestWrap:
         can populate them when it fires — until then, the FK's own value
         at least renders."""
         _write(tmp_path, "registry.json", _registry_with_lease())
-        page_path = _write(tmp_path, "src/schemas/payments/new.json", _form_page_with_lease_fk())
+        page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         inject_context_panels(str(tmp_path))
         after = json.loads(page_path.read_text())
         dlist = after["root"]["children"][1]["children"][1]
@@ -134,18 +150,18 @@ class TestSkip:
     def test_skips_form_with_no_fk(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
         page = {
-            "route": "/notes/new",
+            "route": "/notes/edit",
             "root": {"type": "Form", "props": {"workflow": "CreateNote"}, "children": [
                 {"type": "Input", "props": {"name": "text", "label": "Note"}},
             ]},
         }
-        _write(tmp_path, "src/schemas/notes/new.json", page)
+        _write(tmp_path, "src/schemas/notes/edit.json", page)
         assert inject_context_panels(str(tmp_path))["wrapped"] == 0
 
     def test_skips_form_with_multiple_fks_unless_primary_flagged(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
         page = {
-            "route": "/x/new",
+            "route": "/x/edit",
             "root": {"type": "Form", "props": {"workflow": "X"}, "children": [
                 {"type": "Select", "props": {"name": "leaseId",
                     "optionsFrom": {"source": "Lease", "value": "id", "label": "unitNumber"}}},
@@ -153,13 +169,13 @@ class TestSkip:
                     "optionsFrom": {"source": "User", "value": "id", "label": "email"}}},
             ]},
         }
-        _write(tmp_path, "src/schemas/x/new.json", page)
+        _write(tmp_path, "src/schemas/x/edit.json", page)
         assert inject_context_panels(str(tmp_path))["wrapped"] == 0
 
     def test_uses_primary_flag_when_multiple_fks_and_one_marked(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
         page = {
-            "route": "/x/new",
+            "route": "/x/edit",
             "root": {"type": "Form", "props": {"workflow": "X"}, "children": [
                 {"type": "Select", "props": {"name": "leaseId", "_primary": True,
                     "optionsFrom": {"source": "Lease", "value": "id", "label": "unitNumber"}}},
@@ -167,7 +183,7 @@ class TestSkip:
                     "optionsFrom": {"source": "User", "value": "id", "label": "email"}}},
             ]},
         }
-        page_path = _write(tmp_path, "src/schemas/x/new.json", page)
+        page_path = _write(tmp_path, "src/schemas/x/edit.json", page)
         res = inject_context_panels(str(tmp_path))
         assert res["wrapped"] == 1
         after = json.loads(page_path.read_text())
@@ -192,6 +208,6 @@ class TestSkip:
 class TestIdempotent:
     def test_second_run_no_op(self, tmp_path):
         _write(tmp_path, "registry.json", _registry_with_lease())
-        _write(tmp_path, "src/schemas/payments/new.json", _form_page_with_lease_fk())
+        _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         assert inject_context_panels(str(tmp_path))["wrapped"] == 1
         assert inject_context_panels(str(tmp_path))["wrapped"] == 0

@@ -15,32 +15,31 @@ import pytest
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "services" / "schema_examples"
 
-# Registered v2 node types — must be kept in sync with NodeV2 union in
-# packages/schema/src/page.ts. This list is the source of truth for the test.
-REGISTERED_TYPES = {
-    # v2 strict types
-    "Custom",
-    "Hero", "Section", "MetricTile", "FeatureCard",
-    "Split", "Sidebar", "Cluster", "Tabs", "Accordion", "AccordionPanel",
-    "Avatar", "KeyValueList", "Skeleton",
-    "Input", "Select", "Textarea", "Checkbox", "DatePicker",
-    "FadeIn", "Stagger",
-    # v1-compat structural types
-    "Stack", "Row", "Grid", "Container", "Spacer",
-    "Box", "Text", "Image",
-    "Repeat", "Conditional", "DataBoundary", "Slot",
-    # Library components also in v1 NodeV2 fallback
-    "Form", "Heading", "Badge", "Button", "IconButton", "Link",
-    "Card", "EmptyState", "LoadingState", "Pagination",
-    "Table", "TableSortable",
-    "Alert", "ConfirmDialog",
-    "NavLink", "Breadcrumb",
-    "Divider",
-    # Device + input + feedback library components (registered in
-    # packages/schema/src/page.ts NodeV2 union; used by scan/visual_scan.json
-    # and other exemplars that wire the camera → agent-chat flow).
-    "CameraCapture", "FileUpload", "Spinner",
+# The registry is generated, so the test reads it rather than restating it.
+# This list used to be 53 names maintained by hand beside a comment saying it
+# "must be kept in sync with NodeV2" — it had drifted 113 components behind the
+# catalog, and every enterprise pattern failed against a vocabulary that was
+# only stale in the test.
+_CATALOG = (Path(__file__).parent.parent.parent
+            / "contracts" / "component-catalog.json")
+
+#: Node types that are NOT library components and so never appear in the
+#: catalog: control flow the renderer interprets itself, the escape hatch, and
+#: two components declared in the schema union without a registry entry.
+_NON_CATALOG_TYPES = {
+    "Repeat", "Conditional", "DataBoundary", "Slot", "Custom",
+    "ConfirmDialog", "Pagination",
 }
+
+
+def _registered_types() -> set[str]:
+    catalog = json.loads(_CATALOG.read_text())["components"]
+    names = {c["name"] if isinstance(c, dict) else c for c in catalog} \
+        if isinstance(catalog, list) else set(catalog)
+    return names | _NON_CATALOG_TYPES
+
+
+REGISTERED_TYPES = _registered_types()
 
 TOKEN_REF_REGEX = re.compile(r"^tokens\.[a-z]+(?:\.[a-zA-Z0-9]+)+$")
 HEX_LIKE_REGEX = re.compile(r"^#[0-9a-fA-F]+$")
@@ -70,14 +69,23 @@ def _all_example_paths() -> list[Path]:
 
 
 def _walk_nodes(node):
-    """Yield every dict that looks like a schema node (has both 'id' and 'type').
+    """Yield every dict that looks like a schema node.
 
-    We require 'id' co-presence so that data-side dicts (action, background,
-    cta, option, etc.) that also happen to carry a 'type' field are not
-    mistaken for nodes.  All v2 NodeV2 types mandate id: string.min(1).
+    Node types are PascalCase; the data-side dicts that also carry a `type`
+    are not — background is "solid"/"gradient", action is "navigate"/
+    "workflow", an input is "email"/"tel"/"text". Case is the discriminator.
+
+    This used to require `id` co-presence instead, on the grounds that every
+    NodeV2 mandates one. stateful_scan_page.json does not carry ids, so all
+    31 of its nodes were skipped and the file passed while being checked for
+    nothing — which is how it kept a reference to a component named `Camera`
+    that the registry has never had. Measured over the whole corpus: no
+    id-carrying node has a lowercase type, so nothing that was checked
+    before stops being checked now.
     """
     if isinstance(node, dict):
-        if "type" in node and "id" in node:
+        t = node.get("type")
+        if isinstance(t, str) and t[:1].isupper():
             yield node
         for v in node.values():
             yield from _walk_nodes(v)
@@ -110,6 +118,22 @@ def _all_style_blocks(node):
     elif isinstance(node, list):
         for item in node:
             yield from _all_style_blocks(item)
+
+
+def _is_gold_example(path: Path) -> bool:
+    """A gold example lives in a page-type directory (detail/, form/, list/,
+    landing/, scan/) — exactly what `load_gold_example` globs. Patterns live
+    in enterprise/ or at the top level and are loaded by other functions for
+    other reasons."""
+    return path.parent != EXAMPLES_DIR and path.parent.name != "enterprise"
+
+
+def test_the_gold_set_is_not_empty():
+    """Guards the skip above. If the layout moves and every example starts
+    looking like a pattern, the StyleSlot rule would pass by skipping
+    everything — which is the failure this file just had in another form."""
+    gold = [p for p in _all_example_paths() if _is_gold_example(p)]
+    assert len(gold) >= 10, f"expected the gold examples, found {gold}"
 
 
 @pytest.mark.parametrize("example_path", _all_example_paths(),
@@ -158,11 +182,26 @@ class TestSchemaExamples:
             f"{example_path.name} missing schemaVersion '2'"
 
     def test_at_least_one_styleslot(self, example_path: Path):
-        """Each example must demonstrate StyleSlot — at least one node has style."""
+        """Every GOLD example must demonstrate StyleSlot.
+
+        Gold examples are the ones `schema_prompt.load_gold_example` hands the
+        agent as few-shots for a (page_type, archetype) — they teach what a
+        styled page looks like, so one with no style teaches the opposite.
+        All ten carry between 3 and 11 style blocks.
+
+        The patterns are a different artifact and are exempt.
+        `load_enterprise_pattern` returns enterprise/*.json by keyword to
+        supply STRUCTURE (master-detail, wizard, approval-flow), and
+        stateful_scan_page.json is the canonical state-machine shape for the
+        planner. Neither is ever consulted about styling, and requiring style
+        of them was the rule reaching past what it was for.
+        """
+        if not _is_gold_example(example_path):
+            pytest.skip("pattern, not a gold example — teaches structure, not style")
         page = json.loads(example_path.read_text())
         count = sum(1 for _ in _all_style_blocks(page))
         assert count >= 1, \
-            f"{example_path.name} has no StyleSlot — examples must showcase v2 features"
+            f"{example_path.name} has no StyleSlot — gold examples must showcase v2 features"
 
 
 def test_examples_directory_has_expected_archetypes():
