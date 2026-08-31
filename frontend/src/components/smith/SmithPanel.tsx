@@ -859,7 +859,11 @@ function StageList({
   const startedAt = useRef<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   if (run.status === "running" && startedAt.current === null) {
-    startedAt.current = Date.now();
+    // A reattached run did not begin when this component mounted. Seeding the
+    // clock from the server's elapsed keeps "21m 06s" from restarting at zero
+    // on every reload, which would read as a run that keeps starting over.
+    startedAt.current =
+      Date.now() - (run.reattachedElapsedMs ?? 0);
   }
   useEffect(() => {
     if (run.status !== "running") return;
@@ -923,9 +927,16 @@ function StageList({
             <span>
               {(() => {
                 const busyNode = run.nodes.find((n) => n.state === "running");
+                // A REATTACHED run has no node list — this client never saw
+                // the stream that built one — so the stage name comes from the
+                // server instead of falling back to "Thinking it through",
+                // which is what an idle panel says.
                 const verb = busyNode
                   ? STAGE_VERB[busyNode.key] ?? labelFor(busyNode.key)
-                  : "Thinking it through";
+                  : run.reattachedStage
+                    ? STAGE_VERB[run.reattachedStage] ??
+                      labelFor(run.reattachedStage)
+                    : "Thinking it through";
                 return busyNode?.subject
                   ? `${verb} · ${busyNode.subject}`
                   : verb;

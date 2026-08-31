@@ -56,6 +56,8 @@ logger = logging.getLogger(__name__)
 #:
 #: A task with no strong reference can be collected mid-await, so they are held
 #: here until they finish and discard themselves.
+from services import run_registry
+
 _DETACHED: set[asyncio.Task] = set()
 
 
@@ -241,6 +243,11 @@ async def generate_via_blueprint(
         loop.call_soon_threadsafe(
             queue.put_nowait, {"event": event, "data": json.dumps(data)}
         )
+        # Also record it where a client that is NOT holding this stream can
+        # find it. See services/run_registry.
+        run_registry.note(str(project_id), event, data)
+
+    run_registry.begin(str(project_id), phase="build")
 
     async def generate() -> None:
 
@@ -431,6 +438,26 @@ async def smith_greeting(
         "openers": [{"kind": o.kind, "example": o.example} for o in g.openers],
         "facts": g.facts,
     }
+
+
+@router.get("/api/projects/{project_id}/run")
+async def read_run(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Whether a run is in flight for this project, and how far along.
+
+    The panel rebuilds its progress from the SSE stream, so a reload during a
+    build showed an idle project over a working DAG — the run was only ever
+    visible to the client that started it. This is how a client that arrives
+    late finds out there is something to wait for.
+
+    Answers about THIS process only: the run is a detached task here, so if the
+    process is gone the run is too, and reporting one would be a lie.
+    """
+    await get_project_with_auth(project_id, user, db)
+    return run_registry.snapshot(str(project_id))
 
 
 @router.get("/api/projects/{project_id}/blueprint")
@@ -624,11 +651,21 @@ async def smith_chat(
                        if k in ("options", "diffSummary", "status", "intent")
                        and v},
                       lock=memory_lock)
+        # The telemetry is still not written to the transcript — it would make
+        # the conversation unreadable. It goes to the run registry instead, so
+        # a page that loads mid-run can rebuild the progress bar without the
+        # stream that produced it.
+        run_registry.note(str(project_id), event, data)
 
     # One per request: turns from this conversation queue behind each other
     # and nothing else waits on them.
     memory_lock = asyncio.Lock()
     _remember(loop, project_id, "user", req.message, lock=memory_lock)
+
+    # `approved` is the difference between defining and building, and it is
+    # what the panel needs to word the wait correctly.
+    run_registry.begin(str(project_id),
+                       phase="build" if req.approved else "define")
 
     async def turn() -> None:
 

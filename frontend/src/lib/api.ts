@@ -37,7 +37,14 @@ async function request<T>(
 
   // Handle 401 — attempt token refresh
   if (res.status === 401 && token) {
-    const refreshed = await attemptTokenRefresh();
+    // A request that was already in flight when someone else refreshed comes
+    // back 401 holding a token that is simply out of date. Refreshing again
+    // would present the rotated token and fail, logging the user out for a
+    // race they already won — so retry with what is current instead.
+    const current =
+      typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const refreshed =
+      current && current !== token ? true : await attemptTokenRefresh();
     if (refreshed) {
       // Retry with new token
       headers["Authorization"] = `Bearer ${localStorage.getItem("token")}`;
@@ -112,7 +119,33 @@ export function describeDetail(detail: unknown): string {
   return String(detail);
 }
 
-async function attemptTokenRefresh(): Promise<boolean> {
+// The single refresh in flight, shared by every caller.
+//
+// Refresh tokens are single-use: /api/auth/refresh rotates the token and
+// invalidates the one presented. This function was called per-request, so two
+// requests 401ing together fired two refreshes — the first rotated the token
+// and returned 200, the second presented the consumed one and got 401, and a
+// failed refresh clears localStorage and redirects to /login.
+//
+// That is not a rare interleaving. The project page loads the project and its
+// latest deployment side by side, so an expired access token produces exactly
+// two simultaneous 401s and the user is signed out mid-build. Observed at
+// 22:54: `POST /api/auth/refresh 200` and `POST /api/auth/refresh 401` in the
+// same millisecond.
+//
+// So the first caller performs the refresh and everyone else awaits the same
+// promise. Cleared in `finally` so the next expiry refreshes again.
+let refreshInFlight: Promise<boolean> | null = null;
+
+function attemptTokenRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = performTokenRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function performTokenRefresh(): Promise<boolean> {
   const refreshToken = localStorage.getItem("refresh_token");
   if (!refreshToken) return false;
 

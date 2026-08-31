@@ -17,7 +17,8 @@
  * what made an earlier progress bar read "44 of 22" and keep climbing.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -92,6 +93,13 @@ export interface BlueprintRun {
   usage: RunUsage | null;
   status: "idle" | "running" | "complete" | "error";
   error: string | null;
+  /**
+   * The stage name a REATTACHED run is on, when this client did not watch the
+   * stream that produced it and so has no `nodes` to read a label from.
+   */
+  reattachedStage?: string | null;
+  /** How long the reattached run has ACTUALLY been going, per the server. */
+  reattachedElapsedMs?: number | null;
 }
 
 const EMPTY: BlueprintRun = {
@@ -127,10 +135,72 @@ export interface StartOptions {
 export function useBlueprintRun(projectId: string | null) {
   const [run, setRun] = useState<BlueprintRun>(EMPTY);
   const abortRef = useRef<AbortController | null>(null);
+  // True while this hook is driving its own stream. A reattached run must not
+  // be overwritten by polling, and polling must stop the moment we start one.
+  const ownStreamRef = useRef(false);
+
+  // REATTACH. The run's progress arrives over SSE and lives nowhere else, so a
+  // reload — or a session that expired and was signed back in — left the panel
+  // idle while the DAG carried on. The server now says whether a run is in
+  // flight; ask on mount, and keep asking until it is not.
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      if (cancelled || ownStreamRef.current) return;
+      try {
+        const snap = await api.get<{
+          active?: boolean;
+          phase?: string;
+          stage?: string | null;
+          nodesDone?: number;
+          nodesTotal?: number;
+          elapsedMs?: number;
+          awaitingApproval?: boolean;
+          status?: string;
+          error?: string | null;
+        }>(`/api/projects/${projectId}/run`);
+        if (cancelled || ownStreamRef.current) return;
+
+        if (snap.active) {
+          setRun((prev) => ({
+            ...prev,
+            // Nodes are not replayed — only how many. The panel counts, and a
+            // fabricated node list would claim names we were not told.
+            nodesDone: snap.nodesDone ?? 0,
+            nodesTotal: snap.nodesTotal ?? 0,
+            awaitingApproval: Boolean(snap.awaitingApproval),
+            reattachedStage: snap.stage ?? null,
+            reattachedElapsedMs: snap.elapsedMs ?? null,
+            status: "running",
+          }));
+          timer = setTimeout(poll, 4000);
+        } else if (snap.status === "error") {
+          setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
+        } else if (snap.status === "complete") {
+          setRun((prev) =>
+            prev.status === "running" ? { ...prev, status: "complete" } : prev,
+          );
+        }
+      } catch {
+        // A project with no run answers plainly; anything else is not worth
+        // interrupting the page for.
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [projectId]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    ownStreamRef.current = false;
   }, []);
 
   const start = useCallback(
@@ -142,6 +212,7 @@ export function useBlueprintRun(projectId: string | null) {
       stop();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      ownStreamRef.current = true;
       setRun({ ...EMPTY, status: "running" });
 
       const token =
