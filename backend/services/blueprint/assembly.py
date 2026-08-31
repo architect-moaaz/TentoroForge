@@ -171,6 +171,13 @@ EDGE_PAGES: tuple[str, ...] = (
     "src/components/EdgePageFrame.tsx",
 )
 
+#: Scaffold files carrying placeholders that are NOT `{{…}}`. `layout.tsx`
+#: holds `__APP_LOCALE__` / `__APP_DIR__` — §11's interface language reaching
+#: the document. Same failure as EDGE_PAGES and the same cause: a plain `.tsx`
+#: the `.tmpl` copy step never reads. It is listed separately only because the
+#: token spelling differs; the substitution pass below is one pass, not two.
+PLACEHOLDER_PAGES: tuple[str, ...] = EDGE_PAGES + ("src/app/layout.tsx",)
+
 
 def _landing_route(doc: dict) -> str:
     """Where "back to the app" should point.
@@ -194,19 +201,33 @@ def _landing_route(doc: dict) -> str:
 
 
 def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
-    """Substitute the scaffold's `{{…}}` placeholders from the Blueprint."""
+    """Substitute the scaffold's placeholders from the Blueprint.
+
+    Runs on THIS path — the Blueprint pipeline assembles through
+    `copy_scaffold`, never through `app_emitter.emit_standalone_app`, and
+    `inject_runtime`'s callers are all in the legacy router. Anything a
+    scaffold `.tsx` leaves unsubstituted ships literally.
+    """
+    from services.runtime_injector import _RTL_LANGUAGES  # one RTL list
+
     application = doc.get("application") or {}
     app_name = application.get("name") or "the app"
     initial = next((c for c in app_name if c.isalnum()), "A").upper()
+
+    tag = str((doc.get("product") or {}).get("locale") or "").strip() or "en"
+    base = tag.replace("_", "-").split("-")[0].lower()
+
     values = {
         "{{app_name}}": app_name,
         "{{app_initial}}": initial,
         "{{home_route}}": _landing_route(doc),
+        "__APP_LOCALE__": tag,
+        "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }
 
     out = Path(app_root)
     touched: list[str] = []
-    for rel in EDGE_PAGES:
+    for rel in PLACEHOLDER_PAGES:
         path = out / rel
         if not path.is_file():
             continue
