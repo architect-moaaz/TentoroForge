@@ -1081,6 +1081,57 @@ def build_prompt(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
     system += reference_addendum(references, node)
+
+    if node == "data_model" and subject:
+        # ONE MODULE AT A TIME. Authoring every entity in one reply put the
+        # whole brief in one response budget: measured on the legislative
+        # platform, the model spent 9m24s and returned JSON truncated
+        # mid-string at 45,182 characters — the 32k ceiling — which fails to
+        # parse, retries, and truncates again. Four attempts, ~38 minutes, no
+        # entities, no error.
+        #
+        # Scoped to one module the reply is small enough to close, and a module
+        # that fails costs its own entities rather than the application's.
+        module = next((m for m in (doc.get("modules") or [])
+                       if m.get("id") == subject), {})
+        wanted = set(module.get("requirements") or [])
+        reqs = [r for r in (doc.get("requirements") or []) if r.get("id") in wanted]
+        product = doc.get("product") or {}
+        brief = {
+            "module": {k: module.get(k) for k in ("id", "name", "description")},
+            "requirements": [
+                {k: r.get(k) for k in ("id", "description", "acceptanceCriteria")}
+                for r in reqs
+            ],
+            "terminology": product.get("terminology") or [],
+            "otherModules": [
+                {"id": m.get("id"), "name": m.get("name")}
+                for m in (doc.get("modules") or []) if m.get("id") != subject
+            ],
+        }
+        user = (
+            "Model the entities THIS MODULE owns — the records that exist "
+            "because of its requirements, and no others.\n\n"
+            "The other modules are listed so you can see the boundary, and "
+            "they are being modelled at the same time as this one. When this "
+            "module needs a record another one owns — a session, a member, a "
+            "committee — do NOT define it again: add a field with "
+            "`references` naming that entity, and leave its fields to the "
+            "module that owns it. An entity two modules genuinely share is "
+            "merged by name, so a near-miss spelling is what creates a "
+            "duplicate; use the terminology below verbatim.\n\n"
+            "Fields need real types, one human-readable label field, and "
+            "`sensitive: true` on anything personal or financial. Declare "
+            "associations with `references` on the field rather than "
+            "explaining them in the description — a relationship written in "
+            "English is one no later stage can read.\n\n"
+            "```json\n" + json.dumps(brief, indent=2, sort_keys=True) + "\n```"
+        )
+        if feedback:
+            user += ("\n\nYour previous attempt was rejected:\n\n" + feedback +
+                     "\n\nFix exactly those.")
+        return system, user
+
     if spec.agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
