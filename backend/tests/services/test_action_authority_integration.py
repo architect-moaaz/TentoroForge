@@ -45,9 +45,21 @@ class TestActionValidatorIntegration:
         ])
         vs = validate_plan_completeness(plan)
         action_vs = [v for v in vs if v.rule.startswith("action_")]
-        assert len(action_vs) == 1
-        assert action_vs[0].rule == "action_phantom_workflow_target"
-        assert "GhostWorkflow" in action_vs[0].msg
+
+        # TWO rules fire for one phantom, and both are correct.
+        #   action_phantom_workflow_target — Slice B, _check_action_targets,
+        #     which delegates to action_authority.validate_action_targets and
+        #     builds its slug as f"action_{kind}" (which is why the name
+        #     appears nowhere in the source).
+        #   action_target_resolves — R3, _check_action_target_resolves, whose
+        #     docstring says it "closes the phantom workflow class".
+        # R3 was added after this test and covers the same ground, so the
+        # REVISE loop is now told twice about one mistake. Worth collapsing;
+        # asserted here as it is rather than pretending one of them is gone.
+        assert {v.rule for v in action_vs} == {
+            "action_phantom_workflow_target", "action_target_resolves"
+        }
+        assert all("GhostWorkflow" in v.msg for v in action_vs)
 
     def test_revise_output_names_the_action(self):
         plan = _plan_with_actions([
