@@ -225,8 +225,30 @@ def registry_from_blueprint(doc: dict) -> dict:
             cols.append(col)
         out[name] = {"slug": ent.get("table") or str(name).lower(),
                      "columns": cols}
+    # WHICH ENTITY EACH PAGE IS ABOUT, from the page's own contract.
+    #
+    # A2UI names its data after the screen — `{"path": "/team"}` on the /team
+    # page — and the binder resolves pointers by entity name. That works when
+    # the two coincide (/tickets, Ticket) and fails when they do not (/team,
+    # TeamMember): the pointer goes unbound, the page ends with no data source
+    # at all, and the floor then correctly refuses a page whose bindings have
+    # nothing behind them. The seam was working by coincidence of naming.
+    #
+    # This is a declaration, not a guess. `primaryEntity` is what the Page
+    # Contract says the page is for, which is exactly the question the binder
+    # cannot answer from a route-shaped pointer.
+    page_entity: dict[str, str] = {}
+    by_id = {e.get("id"): (e.get("name") or e.get("id"))
+             for e in (doc.get("data") or {}).get("entities") or []}
+    for page in doc.get("pages") or []:
+        want = (page.get("data") or {}).get("primaryEntity")
+        named = by_id.get(want) or (want if want in out else None)
+        if page.get("id") and named:
+            page_entity[str(page["id"])] = str(named)
+
     return {
         "entities": out,
+        "pageEntity": page_entity,
         # Identity, not just a label. The generated route is
         # `/api/workflows/{id}/execute` (api_derivation._workflow_path), so the
         # id is what a Button or a Form has to carry; a name reaches nothing.

@@ -1196,3 +1196,50 @@ def test_args_never_carry_a_sample_value():
     out = translate(_dispatch_surface(), reg, route="/tickets/[id]",
                     page_id="P", kind="record_workspace")
     assert "TCK-1042" not in json.dumps(out["schema"])
+
+
+# --- the page contract answers what the pointer could not ------------------
+
+_ROUTE_NAMED = {"messages": [
+    {"updateDataModel": {"path": "/", "value": {"team": [{"id": "1"}]}}},
+    {"updateComponents": {"components": [
+        {"id": "root", "component": "Stack", "children": ["t"]},
+        {"id": "t", "component": "Table", "rows": {"path": "/team"},
+         "columns": [{"key": "name", "label": "Name"}]},
+    ]}},
+]}
+
+_REG = {"entities": {"TeamMember": {"slug": "team_members",
+                                    "columns": [{"name": "id"},
+                                                {"name": "name"}]}}}
+
+
+def test_a_route_named_pointer_resolves_through_the_page_contract():
+    """A2UI names data after the screen and the binder resolves by entity, so
+    `/team` on a page whose entity is TeamMember matched nothing and the page
+    ended with no sources at all — then failed the floor for bindings with
+    nothing behind them. `primaryEntity` is what the page says it is about."""
+    reg = {**_REG, "pageEntity": {"PAGE-004": "TeamMember"}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    names = [s["name"] for s in out["schema"].get("dataSources") or []]
+    assert names, "the page still bound nothing"
+    assert any("TeamMember" in a for a in out.get("assumptions") or []), \
+        "the inference was not recorded"
+
+
+def test_no_declaration_still_refuses_to_guess():
+    reg = {**_REG, "pageEntity": {}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    assert not (out["schema"].get("dataSources") or [])
+    assert any("could not resolve" in w for w in out.get("warnings") or [])
+
+
+def test_a_declaration_naming_no_real_entity_is_ignored():
+    """Otherwise the fallback would launder a bad contract into a binding."""
+    reg = {**_REG, "pageEntity": {"PAGE-004": "Nonexistent"}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    assert not (out["schema"].get("dataSources") or [])
+    assert any("could not resolve" in w for w in out.get("warnings") or [])

@@ -372,6 +372,20 @@ class _Binder:
                 f"entity; assumed {entity} — the dominant entity on this surface."
             )
         if not entity:
+            # THE PAGE SAYS WHAT IT IS ABOUT. A2UI names its data after the
+            # screen and this resolves by entity name, so `/team` on a page
+            # whose entity is `TeamMember` matched nothing and the page ended
+            # with no sources at all. Reading `primaryEntity` off the Page
+            # Contract is not the guess this refuses to make — it is the
+            # declaration the pointer failed to reach.
+            declared = getattr(self, "page_entity", "")
+            if declared and declared in (self.registry.get("entities") or {}):
+                entity = declared
+                self.assumptions.append(
+                    f'{comp.get("id")}.{prop}: "{path}" names no entity; used '
+                    f"{entity} — what this page's contract says it is about."
+                )
+        if not entity:
             self.warnings.append(
                 f'{comp.get("id")}.{prop}: could not resolve "{path}" to an entity '
                 f"(label {label!r}). Left unbound rather than guessed."
@@ -918,6 +932,10 @@ def translate(payload: dict, registry: dict, route: str = "/",
 
     binder = _Binder(registry, data_model)
     binder.page_kind = str(kind or "").strip().lower()
+    # The entity this page's own contract says it is about — the last thing
+    # tried before a pointer is left unbound.
+    binder.page_entity = str(
+        (registry.get("pageEntity") or {}).get(str(page_id)) or "")
     binder.entity_hints = dict(entity_hints or {})
 
     # Which entity does this surface mostly talk about? Counted over every path
