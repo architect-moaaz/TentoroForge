@@ -1687,6 +1687,15 @@
             },
             "default": []
           },
+          "composedBy": {
+            "type": "string",
+            "enum": [
+              "a2ui",
+              "agent",
+              ""
+            ],
+            "default": ""
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },

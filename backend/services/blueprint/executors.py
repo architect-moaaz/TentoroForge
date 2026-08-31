@@ -1424,6 +1424,13 @@ def make_executor(
                 section="pageLayouts",
                 natural_key=spec.subject,
                 body={"page": spec.subject, "root": _as_template(out["root"]),
+                      # WHO DESIGNED THIS SCREEN. A2UI and the LLM page author
+                      # emit the same shape, so a page composed well and a page
+                      # nobody could compose properly were indistinguishable in
+                      # the Blueprint — answerable only from run logs, which
+                      # age out. Recorded where it is known rather than
+                      # inferred later from what a tree looks like.
+                      "composedBy": "a2ui",
                       # CARRIED, NOT RE-DERIVED. The binder rewrote every
                       # pointer into a {{name}} and emitted the source behind
                       # it in the same pass; it is the only place the tree and

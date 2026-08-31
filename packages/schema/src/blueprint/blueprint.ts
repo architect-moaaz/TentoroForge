@@ -592,6 +592,23 @@ export const PageLayout = z.object({
   root: TemplateNode,
   /** The fetches `root` binds to, as the composer's binder resolved them. */
   dataSources: z.array(PageDataSource).default([]),
+  /**
+   * Which composer produced this tree.
+   *
+   * Two can: A2UI, and the LLM page author that runs when A2UI declines or
+   * fails. They emit the same shape, so a page nobody could compose properly
+   * and a page composed well were indistinguishable in the Blueprint —
+   * answerable only from run logs, which age out. §76 asks for divergence to
+   * be legible, and "who designed this screen" is exactly that question.
+   *
+   * The same argument removed the deterministic pattern stub: a stubbed page
+   * and a designed one looking alike was judged unacceptable. This closes the
+   * remaining half of it.
+   *
+   * Empty on layouts written before this was recorded, which is honest — it
+   * means unknown, not "the fallback".
+   */
+  composedBy: z.enum(["a2ui", "agent", ""]).default(""),
   ...artifactBase,
 });
 

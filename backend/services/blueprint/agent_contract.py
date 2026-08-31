@@ -463,6 +463,21 @@ def apply_agent_result(
     check_capability(result)
     check_pattern_templates(result, svc.doc)
 
+    # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
+    #
+    # Two composers write pageLayouts — A2UI, and the LLM page author that runs
+    # when A2UI declines or fails — and they emit the same shape. So a page
+    # composed well and a page nobody could compose properly were
+    # indistinguishable in the Blueprint, answerable only from run logs that
+    # age out. The same argument removed the deterministic pattern stub: a
+    # stubbed page and a designed one looking alike was judged unacceptable.
+    #
+    # `_compose_via_a2ui` stamps its own; anything arriving here unstamped came
+    # from an agent, and this is the one place every layout passes through.
+    for proposal in result.proposals:
+        if proposal.section == "pageLayouts" and not proposal.body.get("composedBy"):
+            proposal.body["composedBy"] = "agent"
+
     if result.status != "completed":
         return AgentApplication(
             applied=False, result=result, change_requests=list(result.change_requests),
