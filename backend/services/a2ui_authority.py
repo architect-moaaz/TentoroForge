@@ -314,6 +314,17 @@ def registry_for_binder(root: Path) -> dict:
     return {"entities": out, "workflows": flows}
 
 
+def _locale_of(root: Path) -> str:
+    """The application's language tag, or "" when the Blueprint states none."""
+    try:
+        doc = json.loads(
+            (Path(root) / ".forge" / "blueprint" / "current.json")
+            .read_text(encoding="utf-8"))
+        return str((doc.get("product") or {}).get("locale") or "").strip()
+    except Exception:  # noqa: BLE001 — a missing Blueprint is not an error here
+        return ""
+
+
 def build_requirement(root: Path, kind: str = "dashboard",
                       route: str = "/", shared_context: str = "",
                       presentation: str = "page") -> str:
@@ -358,6 +369,26 @@ def build_requirement(root: Path, kind: str = "dashboard",
             "that surface: no page container, no back link, no heading that "
             "repeats the title the dialog already shows. The caller stays "
             "visible behind it and the reader has not gone anywhere."
+        )
+    # THE LANGUAGE IT IS WRITTEN IN. Every label, heading, empty state and
+    # button on the screen is written by the composer, in English, because
+    # nothing ever told it otherwise — an Arabic-first brief produced an
+    # English application and the mismatch was invisible until somebody opened
+    # it. Said in the requirement rather than as a protocol argument: this is
+    # prose the model reads, and it needs no agreement about a parameter the
+    # server may or may not have.
+    #
+    # Only when it is not English. A sentence saying "write this in English"
+    # on every call is noise, and noise is what a model learns to skip.
+    locale = _locale_of(root)
+    if locale and not locale.lower().startswith("en"):
+        parts.append(
+            f"\nLANGUAGE: this application is written in {locale}. Every "
+            f"string you author — labels, headings, column names, button text, "
+            f"empty states, placeholder and helper text — must be in that "
+            f"language, not translated afterwards. Field and column "
+            f"IDENTIFIERS stay as the data model gives them; it is the words a "
+            f"reader sees that change."
         )
     if purpose:
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
