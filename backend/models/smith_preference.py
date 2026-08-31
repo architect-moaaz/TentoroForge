@@ -39,7 +39,7 @@ class SmithPreference(Base):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("orgs.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
