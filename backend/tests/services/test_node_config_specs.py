@@ -44,10 +44,16 @@ def test_registry_shape_is_valid():
             assert entry.key and isinstance(entry.key, str)
             assert entry.provider and isinstance(entry.provider, str)
             assert entry.label and isinstance(entry.label, str)
-            assert entry.kind in ("password", "text", "url"), (
-                f"{action_type}/{entry.key}: kind must be password|text|url, "
-                f"got {entry.kind!r}"
+            assert entry.kind in ("password", "text", "url", "select"), (
+                f"{action_type}/{entry.key}: kind must be "
+                f"password|text|url|select, got {entry.kind!r}"
             )
+            # `select` is the one kind that carries a closed value list, and
+            # a dropdown with nothing in it is worse than a text box.
+            if entry.kind == "select":
+                assert entry.options, (
+                    f"{action_type}/{entry.key}: kind='select' needs options"
+                )
             assert isinstance(entry.required, bool)
             # Optional fields
             if entry.default is not None:
@@ -108,14 +114,28 @@ def test_runtime_action_types_covered():
         )
 
 
-def test_send_email_has_resend_key_required():
+def test_send_email_offers_resend_or_smtp():
+    """send_email has two providers, so neither key is individually required.
+
+    This asserted `RESEND_API_KEY.required is True` from when Resend was the
+    only way to send mail. SMTP was added as an alternative, and requiring
+    the Resend key would then demand a credential from anyone using SMTP —
+    the spec says so in as many words: "optional because SMTP is an
+    alternative". What must hold is that both routes are declared and the
+    key is still masked.
+    """
     from services.node_config_specs import NODE_CONFIG_SPECS
 
     keys = {e.key: e for e in NODE_CONFIG_SPECS["send_email"]}
     assert "RESEND_API_KEY" in keys, "send_email must declare RESEND_API_KEY"
-    assert keys["RESEND_API_KEY"].required is True
     assert keys["RESEND_API_KEY"].kind == "password"
     assert keys["RESEND_API_KEY"].provider == "resend"
+    assert keys["RESEND_API_KEY"].required is False
+
+    assert {e.provider for e in NODE_CONFIG_SPECS["send_email"]} == {"resend", "smtp"}
+    assert keys["SMTP_PASSWORD"].kind == "password"
+    assert not any(e.required for e in NODE_CONFIG_SPECS["send_email"]), \
+        "with two alternative providers no single key can be required"
 
 
 def test_ai_actions_share_anthropic_key():
@@ -256,8 +276,11 @@ def test_providers_used_by_plan_tolerates_malformed_nodes():
         ]
     }
     provs = providers_used_by_plan(plan)
-    assert provs == ["resend"], (
-        f"expected [resend] from the one valid node, got {provs}"
+    # send_email declares both providers, so one valid node yields both. The
+    # point of this test is that the malformed entries above are skipped
+    # rather than crashing — not which providers send_email happens to have.
+    assert sorted(provs) == ["resend", "smtp"], (
+        f"expected send_email's providers from the one valid node, got {provs}"
     )
 
 

@@ -174,8 +174,16 @@ def test_nested_route_uses_folder_layout():
     assert _schema_file_from_route("/requests/new") == "src/schemas/requests/new.json"
 
 
-def test_dynamic_route_collapses_to_detail():
-    assert _schema_file_from_route("/users/[id]") == "src/schemas/users/detail.json"
+def test_dynamic_route_keeps_its_parameter_segment():
+    """/users/[id] resolves to users/[id].json, not users/detail.json.
+
+    The "detail convention" was dropped so this mirrors slugify_route, which
+    is where page_schema_agent actually writes. A resolver that renamed the
+    segment pointed one filename away from its writer — the same reader/writer
+    split that produced the empty editor panels.
+    """
+    assert _schema_file_from_route("/users/[id]") == "src/schemas/users/[id].json"
+    assert _schema_file_from_route("/users/:id") == "src/schemas/users/[id].json"
 
 
 def test_empty_route_treated_as_root():
