@@ -487,6 +487,31 @@ class SmithChatRequest(BaseModel):
     approved: bool = False
 
 
+def _brief_from(history: Any, message: str) -> str:
+    """Everything the user has said, in order, as one brief.
+
+    Smith's questions are dropped: a definition is written from what was
+    asked for, and "which language should the interface be in?" is not part
+    of the request. The answers are, and they read as qualifications of the
+    sentences above them — which is how somebody would have written it had
+    they thought of it first.
+    """
+    said: list[str] = []
+    for turn in history or []:
+        role = getattr(turn, "role", None) or (
+            turn.get("role") if isinstance(turn, dict) else None)
+        text = getattr(turn, "text", None) or (
+            turn.get("text") if isinstance(turn, dict) else None)
+        if str(role) == "user" and str(text or "").strip():
+            said.append(str(text).strip())
+    if str(message or "").strip():
+        said.append(str(message).strip())
+    # De-duplicated in order: a resent message must not appear twice.
+    seen: set[str] = set()
+    out = [t for t in said if not (t in seen or seen.add(t))]
+    return "\n\n".join(out)
+
+
 def _remember(loop: Any, project_id: Any, role: str, content: str,
               meta: dict | None = None, lock: Any = None) -> None:
     """Append one turn to the project's conversation, best effort.
@@ -676,7 +701,20 @@ async def smith_chat(
                     "text": "Let me define that first — I'll show you what I "
                             "understood before building anything.",
                 })
-                return _run_dag(str(output_dir), app_root, req.message,
+                # THE WHOLE ASK, NOT THE LAST LINE OF IT. When Smith asks a
+                # question the answer arrives as the next message, and on this
+                # path no Blueprint exists yet — so `create` took the answer as
+                # the entire description and the request that prompted it was
+                # never written down. A noticeboard for a community centre in
+                # Ramallah became "Arabic. Olive and sand. Anyone can post
+                # freely."
+                #
+                # 99d217e fixed the same loss on the load path, where a
+                # Blueprint already existed to append to. This is the create
+                # path, which had no prior text to append to and needed the
+                # conversation instead.
+                return _run_dag(str(output_dir), app_root,
+                                _brief_from(req.history, req.message),
                                 approved=req.approved, emit=emit)
 
             # An application exists, so Smith reasons about it.
