@@ -251,7 +251,14 @@ export function SmithPanel({
       // outside the browser when they have already allowed one.
       notifyDone(run.awaitingApproval, run.nodesTotal > 0);
     }
-    if (run.status === "running") completedRef.current = false;
+    if (run.status === "running") {
+      completedRef.current = false;
+      // AND HAND THE PANEL BACK TO THE LIVE RUN. A finished run is pinned
+      // open so its approval gate does not vanish, but pinning it also meant
+      // the next build had nowhere to appear: approving showed the definition
+      // that had just been approved, while twenty stages ran unseen behind it.
+      setOpenPlan(null);
+    }
   }, [run.status, run.awaitingApproval, onRunComplete]);
 
   /**
