@@ -521,6 +521,27 @@ async def smith_chat(
                                 approved=True, emit=emit)
 
             if not defined:
+                # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
+                # unsaid gets decided by twenty agents, each inventing an
+                # answer, and every later node builds on it. A question worth
+                # thirty seconds here saves a rebuild.
+                #
+                # Only on the opening message. `history` is empty exactly once
+                # per conversation, so this asks once and then defines —
+                # whether or not the answer was any good. A clarifier that can
+                # fire twice can fire forever.
+                if not req.history:
+                    from services.smith.clarify_brief import clarify_brief
+
+                    asked = clarify_brief(req.message)
+                    if asked.get("question"):
+                        emit("message", {
+                            "text": asked["question"],
+                            "options": asked.get("options") or [],
+                            "status": "asked",
+                        })
+                        return {"status": "asked"}
+
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
                             "understood before building anything.",
