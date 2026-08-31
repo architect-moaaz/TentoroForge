@@ -1265,3 +1265,95 @@ def test_only_a_node_s_own_id_is_stripped():
     out = _as_template({"id": "t", "type": "Table",
                         "props": {"rowKey": "id", "id": "a-real-prop"}})
     assert out["props"] == {"rowKey": "id", "id": "a-real-prop"}
+
+
+# ══════════════════════════════════════════════════════════════════
+# data_model replies compactly; the envelope is built in code
+# ══════════════════════════════════════════════════════════════════
+
+
+def test_data_model_reply_expands_to_the_same_proposals():
+    """The compact shape must produce exactly what the model used to hand-write.
+
+    Agents answer in the §29 envelope, where `body` is the artifact encoded as
+    a JSON STRING — every quote escaped. Measured on a real 21-entity model:
+    47,715 characters as envelopes against 20,223 in this shape. A reply
+    truncated at 45,183, so a 21-entity model already exceeded the ceiling as
+    envelopes and no amount of thinking budget would have helped.
+    """
+    from services.blueprint.executors import expand_data_model
+
+    props = expand_data_model({"entities": [
+        {"name": "Member",
+         "description": "An elected member.",
+         "fields": [
+             {"name": "id", "type": "uuid", "required": True},
+             {"name": "fullName", "type": "string", "label": True,
+              "sensitive": True},
+             {"name": "blocId", "type": "uuid", "references": "PoliticalBloc"},
+         ],
+         "constraints": ["fullName is unique within a term"]},
+        {"name": "PoliticalBloc",
+         "fields": [{"name": "id", "type": "uuid"}]},
+    ]})
+
+    assert [p.natural_key for p in props] == ["Member", "PoliticalBloc"]
+    assert {p.section for p in props} == {"data.entities"}
+    member = props[0].body
+    assert member["name"] == "Member"
+    assert [f["name"] for f in member["fields"]] == ["id", "fullName", "blocId"]
+    # Identity is the deterministic layer's to assign.
+    assert "id" not in member
+    # The flags downstream reads must survive the trip.
+    assert member["fields"][1]["sensitive"] is True
+    assert member["fields"][2]["references"] == "PoliticalBloc"
+    assert member["constraints"] == ["fullName is unique within a term"]
+
+
+def test_data_model_reply_that_names_nothing_is_refused():
+    """A parse that yields no entities must fail, not commit an empty section.
+
+    `data.entities` missing is what a run stopped at 3/18 looked like for three
+    attempts — an absent section reads as a stall, and nothing said otherwise.
+    """
+    import json
+
+    import pytest as _pytest
+
+    from services.blueprint.executors import MalformedEnvelope, parse_envelope
+
+    for reply in ({"entities": []}, {"entities": [{"fields": []}]}):
+        with _pytest.raises(MalformedEnvelope):
+            parse_envelope(json.dumps({**reply, "confidence": 0.9}),
+                           task_id="t", agent="data_model", node="data_model")
+
+
+def test_other_nodes_still_answer_in_the_envelope():
+    """Only data_model changed shape; every other node is untouched."""
+    import json
+
+    from services.blueprint.executors import (PROPOSAL_SCHEMA, SCHEMA_BY_NODE,
+                                              parse_envelope)
+
+    assert set(SCHEMA_BY_NODE) == {"data_model"}
+    assert SCHEMA_BY_NODE["data_model"] is not PROPOSAL_SCHEMA
+
+    result = parse_envelope(
+        json.dumps({"proposals": [{"section": "modules", "natural_key": "M",
+                                   "body": json.dumps({"name": "M"})}],
+                    "confidence": 0.8}),
+        task_id="t", agent="ux_architecture", node="ux_architecture")
+    assert [p.section for p in result.proposals] == ["modules"]
+
+
+def test_the_data_model_prompt_asks_for_entities_not_proposals():
+    """A prompt carrying both contracts would contradict itself."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"application": {"id": "APP-1"}, "requirements": [], "modules": []}
+    system, _ = build_prompt(doc, "data_model")
+    assert "Return `entities`" in system
+    assert "body is a JSON string" not in system
+
+    other, _ = build_prompt(doc, "ux_architecture")
+    assert "body is a JSON string" in other

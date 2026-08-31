@@ -763,13 +763,7 @@ the agent that owns it. A proposal outside your boundary is rejected outright, \
 so it costs you the whole turn.
 
 Rules that decide whether your output is usable:
-
-- natural_key is an artifact's stable identity across runs — an entity's name, \
-a page's route, an endpoint's METHOD and path. The same artifact must produce \
-the same key next time, or it will be duplicated instead of updated. Never put \
-a timestamp, a counter, or anything run-specific in it.
-- Do not invent IDs. Leave `id` out of every body; identity is assigned for you.
-- body is a JSON string containing one artifact object.
+{reply_rules}
 - Reference existing artifacts by the IDs shown in the Blueprint you were \
 given. To reference something you are proposing in this same turn — a \
 relationship between two entities you are creating right now — cite it by its \
@@ -784,6 +778,31 @@ fields hold data; a field asking for identifiers wants identifiers, not an \
 explanation of why you chose them.
 
 {task}"""
+
+#: The reply contract, per node. Everything but `data_model` proposes artifact
+#: envelopes; `data_model` states entities and the envelopes are built in code.
+#: A prompt that carried both would contradict itself, so this is a slot rather
+#: than an addendum.
+ENVELOPE_RULES = """
+- natural_key is an artifact's stable identity across runs — an entity's name, \
+a page's route, an endpoint's METHOD and path. The same artifact must produce \
+the same key next time, or it will be duplicated instead of updated. Never put \
+a timestamp, a counter, or anything run-specific in it.
+- Do not invent IDs. Leave `id` out of every body; identity is assigned for you.
+- body is a JSON string containing one artifact object."""
+
+DATA_MODEL_REPLY_RULES = """
+- Return `entities`: one entry per entity. No `proposals`, no \
+`natural_key`, no `body` — the name IS the identity and the rest is built for \
+you after you reply.
+- Each entry is {{name, fields, description?, constraints?}}, and each field \
+is {{name, type, required?, sensitive?, label?, references?, enumValues?, \
+unique?}}.
+- State a flag only when it is true. `"sensitive": false` on forty fields is \
+forty facts nobody asked for, and this reply has a budget.
+- Do not invent IDs. Identity is assigned for you from the entity's name, so \
+two modules naming the same entity update one record rather than duplicating \
+it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
     "design_system": (
@@ -1072,6 +1091,8 @@ def build_prompt(
     system = SYSTEM.format(
         agent=spec.agent,
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
+        reply_rules=(DATA_MODEL_REPLY_RULES if node == "data_model"
+                     else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
     if inline_shapes:
@@ -1166,17 +1187,164 @@ def build_prompt(
 # Parsing
 # ---------------------------------------------------------------------------
 
+#: What `data_model` replies with instead of proposals.
+#:
+#: Every other agent answers in the §29 envelope, where `body` is the artifact
+#: encoded as a JSON STRING — so every quote inside every field is escaped and
+#: `{"name":"x"}` travels as `"{\"name\":\"x\"}"`. Measured on a real
+#: 21-entity model: 47,715 characters as envelopes against 17,301 in the shape
+#: below, losing nothing. The Palestinian Legislative Council reply truncated
+#: at 45,183 — a 21-entity model already exceeds the ceiling as envelopes, and
+#: that domain needs about thirty. It was never going to fit, at any effort.
+#:
+#: The envelope is how an artifact is STORED and identified. There is no reason
+#: the model should spend tokens writing one, so this node states entities and
+#: `expand_data_model` builds the proposals in code — the same proposals, so
+#: everything downstream is untouched.
+#:
+#: Taken from the legacy pipeline's planner, which emitted
+#: `entities: {Name: {fields: {...}}}` and never met this wall.
+DATA_MODEL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["entities", "confidence", "assumptions", "issues",
+                 "change_requests"],
+    "properties": {
+        # A LIST, not a map keyed by name. Structured outputs reject
+        # `additionalProperties: true`, so an open-keyed object is not
+        # expressible: `output_config.format.schema: For 'object' type,
+        # 'additionalProperties: true' is not supported`. Almost none of the
+        # saving was in the keying anyway — it is the per-entity envelope and
+        # the JSON-in-JSON escaping. Measured on the same 21-entity model:
+        # 47,715 chars as envelopes, 20,223 here.
+        "entities": {
+            "type": "array",
+            "description": (
+                "Every entity the application stores. `name` IS its identity "
+                "across runs, so use the terminology verbatim — two modules "
+                "naming the same entity update one record, and a near-miss "
+                "spelling is what creates a duplicate."
+            ),
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "fields"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["name", "type"],
+                            "properties": {
+                                "name": {"type": "string"},
+                                "type": {"type": "string"},
+                                "required": {"type": "boolean"},
+                                "sensitive": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "Personal or financial. Downstream "
+                                        "agents cannot see this section to "
+                                        "second-guess it."
+                                    ),
+                                },
+                                "label": {
+                                    "type": "boolean",
+                                    "description": "The human-readable field.",
+                                },
+                                "references": {
+                                    "type": "string",
+                                    "description": (
+                                        "The entity this field points at. A "
+                                        "relationship explained in the "
+                                        "description is one no later stage "
+                                        "can read."
+                                    ),
+                                },
+                                "unique": {"type": "boolean"},
+                                "enumValues": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                    "constraints": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Uniqueness and checks the columns cannot express "
+                            "on their own."
+                        ),
+                    },
+                },
+            },
+        },
+        "confidence": {"type": "number"},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "change_requests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["section", "reason"],
+                "properties": {"section": {"type": "string"},
+                               "reason": {"type": "string"}},
+            },
+        },
+    },
+}
+
+#: The reply shape each node is held to. Absent means the §29 envelope.
+SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {"data_model": DATA_MODEL_SCHEMA}
+
+
+def expand_data_model(data: dict) -> list["ArtifactProposal"]:
+    """The compact `entities` object as the proposals the pipeline expects.
+
+    Rebuilds exactly what the model used to write by hand, so `svc.upsert`,
+    the allocator, `natural_key` identity and re-run idempotency all see what
+    they see today. A field given as a bare string is its type.
+    """
+    out: list[ArtifactProposal] = []
+    for spec in (data.get("entities") or []):
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name") or "").strip()
+        if not name:
+            continue
+        body = {k: v for k, v in spec.items() if v not in (None, [], "")}
+        body["name"] = name
+        body["fields"] = [f for f in (spec.get("fields") or [])
+                          if isinstance(f, dict) and f.get("name")]
+        out.append(ArtifactProposal(
+            section="data.entities", natural_key=name, body=body,
+        ))
+    return out
+
+
 class MalformedEnvelope(ValueError):
     """The model's reply did not parse as the §29 envelope."""
 
 
-def parse_envelope(raw: str, *, task_id: str, agent: str) -> AgentResult:
+def parse_envelope(raw: str, *, task_id: str, agent: str,
+                   node: str = "") -> AgentResult:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise MalformedEnvelope(f"reply was not JSON: {exc}") from exc
 
     proposals: list[ArtifactProposal] = []
+    if node in SCHEMA_BY_NODE and node == "data_model":
+        proposals = expand_data_model(data)
+        if not proposals:
+            # A reply that parsed but named nothing is not a data model. Said
+            # here rather than committed as an empty section, which is how a
+            # missing `data.entities` looked like a stall for three runs.
+            raise MalformedEnvelope("data_model: reply declared no entities")
     for i, p in enumerate(data.get("proposals") or []):
         body_raw = p.get("body")
         try:
@@ -1320,20 +1488,6 @@ EFFORT_BY_NODE: dict[str, str] = {
     # Structure over work already decided; the shape is tightly constrained.
     "ux_architecture": "medium",
     "design_system": "medium",
-    # THE OUTPUT AND THE THINKING SHARE ONE CEILING. At `high` this node spent
-    # so much of `max_tokens` reasoning that the JSON it then had to emit did
-    # not fit: measured on a 12-module legislative platform, 564s and a reply
-    # truncated mid-string at 45,183 characters, which fails to parse and
-    # retries — ~38 minutes producing nothing, twice.
-    #
-    # The same whole-application call at medium returns in 530s with 109
-    # proposals and no truncation. Slightly faster, and it finishes.
-    #
-    # Not a smaller model and not a bigger ceiling: the answer always fitted,
-    # the thinking was crowding it out. Every sibling here was tuned when it
-    # was written; this one kept the default and nobody re-read it after the
-    # node moved to Opus 5.
-    "data_model": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     "testing": "medium",
     # A short list of named third parties.
@@ -1512,11 +1666,12 @@ def make_executor(
                     "Return a corrected envelope. Do not explain the mistake."
                 )
             t0 = time.monotonic()
+            reply_schema = SCHEMA_BY_NODE.get(spec.node, PROPOSAL_SCHEMA)
             raw = (
-                client(system=system, user=prompt, schema=PROPOSAL_SCHEMA,
+                client(system=system, user=prompt, schema=reply_schema,
                        images=shown)
                 if shown else
-                client(system=system, user=prompt, schema=PROPOSAL_SCHEMA)
+                client(system=system, user=prompt, schema=reply_schema)
             )
             elapsed = time.monotonic() - t0
 
@@ -1533,7 +1688,8 @@ def make_executor(
                 )
 
             try:
-                return parse_envelope(text, task_id=spec.task_id, agent=spec.agent)
+                return parse_envelope(text, task_id=spec.task_id,
+                                      agent=spec.agent, node=spec.node)
             except MalformedEnvelope as exc:
                 last = exc
 
