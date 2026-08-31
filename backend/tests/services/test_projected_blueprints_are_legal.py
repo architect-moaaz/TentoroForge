@@ -32,9 +32,20 @@ def _generated() -> list[Path]:
     return sorted(_OUTPUT.glob("*/.forge/blueprint/current.json"))
 
 
-@pytest.mark.parametrize(
-    "path", _generated(), ids=lambda p: p.parents[2].name,
-)
+def _project_id(path: object) -> str:
+    """Name the project a Blueprint came from.
+
+    Guards the empty case. With no argvalues pytest still builds one
+    placeholder — value `NOTSET` — and calls this to name it, so a
+    `p.parents[2]` here raised AttributeError during COLLECTION. That aborts
+    the whole run, not this file: a fresh clone has no `output/`, so
+    `pytest tests` ended in "Interrupted: 1 error during collection" and not
+    one test ran anywhere in the suite.
+    """
+    return path.parents[2].name if isinstance(path, Path) else "no-generated-apps"
+
+
+@pytest.mark.parametrize("path", _generated(), ids=_project_id)
 def test_a_generated_blueprint_still_satisfies_the_contract(path):
     """A document the engine wrote and the engine rejects is unwritable: the
     next save raises, so the application can never be changed again."""
