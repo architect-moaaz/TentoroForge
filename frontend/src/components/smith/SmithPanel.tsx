@@ -237,6 +237,12 @@ export function SmithPanel({
       if (run.nodes.length > 0 || run.awaitingApproval) {
         setMessages((m) => [...m, { role: "smith", text: "", at: Date.now(),
                                     plan: run }]);
+        // AND KEEP IT OPEN. Without this the panel empties the moment a run
+        // finishes, so the definition and its Approve button disappear until
+        // somebody thinks to click the marker — the same vanishing gate this
+        // work set out to fix, reintroduced by moving it. The marker stays
+        // clickable for older runs; this only decides what is showing now.
+        setOpenPlan(run);
       }
       onRunComplete?.();
       // A build runs for ten minutes or more, so nobody watches it finish.
