@@ -323,6 +323,26 @@ class _Binder:
                     return lit
         return ""
 
+    def _add_source(self, spec: dict) -> str:
+        """Register a fetch, reusing an identical one. Returns its name.
+
+        `_by_path` is keyed on the POINTER, so two pointers resolving to the
+        same entity and the same operation each minted their own source: one
+        page declared `books`, `books2` and `books3` — three identical list
+        queries against one table, with the tree reading all three.
+
+        Sameness is the whole spec apart from its name. An aggregate with
+        different metrics, or a list carrying a filter, is a different fetch
+        and keeps its own; nothing is merged that would return different rows.
+        """
+        without_name = {k: v for k, v in spec.items() if k != "name"}
+        for existing in self.sources:
+            if {k: v for k, v in existing.items() if k != "name"} == without_name:
+                return str(existing["name"])
+        spec = {**spec, "name": self._unique(str(spec["name"]))}
+        self.sources.append(spec)
+        return str(spec["name"])
+
     def _unique(self, base: str) -> str:
         name, n = base, 2
         while name in self._names:
@@ -469,8 +489,8 @@ class _Binder:
             # choice through rather than binding it.
             return "__literal__"
         else:
-            name = self._unique(slug)
-            self.sources.append({"name": name, "entity": entity, "op": "list", "limit": 10})
+            name = self._add_source({"name": slug, "entity": entity,
+                                     "op": "list", "limit": 10})
             binding = f"{{{{{name}}}}}"
 
         self._by_path[key] = binding
@@ -503,8 +523,8 @@ class _Binder:
         existing = getattr(self, "_record_src", None)
         if existing:
             return str(existing)
-        name = self._unique(_slug_for(entity, self.registry))
-        self.sources.append({"name": name, "entity": entity, "op": "get"})
+        name = self._add_source({"name": _slug_for(entity, self.registry),
+                                 "entity": entity, "op": "get"})
         self._record_src = name
         return name
 
