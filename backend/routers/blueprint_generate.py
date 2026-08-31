@@ -45,6 +45,23 @@ from services.project_paths import project_root
 from services.project_service import get_project_with_auth
 
 logger = logging.getLogger(__name__)
+
+#: Runs that outlived the reader watching them.
+#:
+#: A generation writes to the Blueprint, not to the response — the stream is a
+#: view of work whose result is durable either way. Cancelling it when the
+#: reader leaves threw away everything the run had not yet reached: a session
+#: expiring mid-build left an output directory with no Blueprint in it, forty
+#: minutes of work gone, and no error anywhere because nothing had failed.
+#:
+#: A task with no strong reference can be collected mid-await, so they are held
+#: here until they finish and discard themselves.
+_DETACHED: set[asyncio.Task] = set()
+
+
+def _detach(task: "asyncio.Task") -> None:
+    _DETACHED.add(task)
+    task.add_done_callback(_DETACHED.discard)
 router = APIRouter(tags=["generation", "blueprint"])
 
 
@@ -359,14 +376,21 @@ async def generate_via_blueprint(
 
     async def stream():
         task = asyncio.create_task(generate())
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-        finally:
-            task.cancel()
+        # THE RUN OUTLIVES THE READER. This used to cancel on the way out, so
+        # closing the tab, expiring a session or a dropped connection killed a
+        # build that had already been paid for — and left a half-written
+        # Blueprint with no error to explain it.
+        #
+        # The trade is that Stop no longer halts the work, only the watching.
+        # A build that survives a network blip is worth more than one that can
+        # be stopped by one, and stopping deserves an endpoint of its own
+        # rather than a side effect of hanging up.
+        _detach(task)
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
 
     return EventSourceResponse(stream())
 
@@ -681,15 +705,15 @@ async def smith_chat(
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     async def stream():
+        # Same reasoning as the generation stream above: a turn that starts the
+        # DAG is a build, and hanging up must not destroy it.
         task = asyncio.create_task(turn())
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-        finally:
-            task.cancel()
+        _detach(task)
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
 
     return EventSourceResponse(stream())
 
