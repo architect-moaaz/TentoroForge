@@ -1357,3 +1357,64 @@ def test_the_data_model_prompt_asks_for_entities_not_proposals():
 
     other, _ = build_prompt(doc, "ux_architecture")
     assert "body is a JSON string" in other
+
+
+def test_the_compact_reply_schema_agrees_with_the_blueprint_contract():
+    """Every key the reply may carry must be one the contract accepts.
+
+    The first compact schema invented a shape — `label` on a field,
+    `constraints` on an entity, no `table` — and `data.entities` is
+    `additionalProperties: false` with `table` required. Every proposal was
+    rejected on apply: the node reported done, the section stayed empty, and
+    the run ended at 5/18 having written nothing, with no error anywhere.
+
+    A reply schema that disagrees with the contract it feeds is the same defect
+    as a reader pointed one directory away from its writer.
+    """
+    import json
+
+    import jsonschema
+
+    from services.blueprint.executors import DATA_MODEL_SCHEMA, expand_data_model
+    from services.blueprint.service import CONTRACT_PATH
+
+    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+    entity_schema = (contract["properties"]["data"]["properties"]["entities"]
+                     ["items"])
+
+    reply_entity = DATA_MODEL_SCHEMA["properties"]["entities"]["items"]
+    allowed = set(entity_schema["properties"])
+    assert set(reply_entity["properties"]) <= allowed, (
+        set(reply_entity["properties"]) - allowed)
+
+    reply_field = reply_entity["properties"]["fields"]["items"]
+    allowed_field = set(entity_schema["properties"]["fields"]["items"]["properties"])
+    assert set(reply_field["properties"]) <= allowed_field, (
+        set(reply_field["properties"]) - allowed_field)
+
+    # And an expanded body must actually validate. The contract folds `$ref`
+    # against the whole document, so it is registered under a URI and the
+    # entity reached through it — validating the sub-schema alone leaves every
+    # `#/properties/...` pointing at nothing.
+    from referencing import Registry, Resource
+
+    registry = Registry().with_resource(
+        "urn:contract", Resource.from_contents(contract))
+    reach = {"$ref": "urn:contract#/properties/data/properties/entities/items"}
+
+    props = expand_data_model({"entities": [{
+        "name": "Member", "table": "members", "labelField": "fullName",
+        "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "fullName", "type": "string", "sensitive": True,
+             "required": True},
+            {"name": "blocId", "type": "uuid", "references": "PoliticalBloc"},
+        ]}]})
+
+    # `references` names an entity; resolve_batch_references rewrites names to
+    # allocated IDs before validation, so substitute here as that layer does.
+    body = dict(props[0].body, id="ENTITY-001")
+    for f in body["fields"]:
+        if f.get("references"):
+            f["references"] = "ENTITY-002"
+    jsonschema.Draft202012Validator(reach, registry=registry).validate(body)

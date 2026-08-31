@@ -795,9 +795,11 @@ DATA_MODEL_REPLY_RULES = """
 - Return `entities`: one entry per entity. No `proposals`, no \
 `natural_key`, no `body` — the name IS the identity and the rest is built for \
 you after you reply.
-- Each entry is {{name, fields, description?, constraints?}}, and each field \
-is {{name, type, required?, sensitive?, label?, references?, enumValues?, \
-unique?}}.
+- Each entry is {{name, table, fields, description?, labelField?}} — `name` \
+PascalCase singular, `table` snake_case plural, `labelField` naming the field \
+a human reads to tell one record from another. Each field is {{name, type, \
+required?, primaryKey?, unique?, sensitive?, references?, enumValues?, \
+description?}}.
 - State a flag only when it is true. `"sensitive": false` on forty fields is \
 forty facts nobody asked for, and this reply has a budget.
 - Do not invent IDs. Identity is assigned for you from the entity's name, so \
@@ -1217,6 +1219,14 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
         # saving was in the keying anyway — it is the per-entity envelope and
         # the JSON-in-JSON escaping. Measured on the same 21-entity model:
         # 47,715 chars as envelopes, 20,223 here.
+        # MIRRORS THE CONTRACT, key for key. The first version invented a
+        # shape — `label` on a field, `constraints` on an entity, no `table` —
+        # and `data.entities` is `additionalProperties: false` with `table`
+        # required, so every proposal was rejected on apply. The node reported
+        # done, the section stayed empty, and the run ended at 5/18 with
+        # nothing written and no error. A reply schema that does not match the
+        # contract it feeds is the same defect as a reader pointed one
+        # directory from its writer.
         "entities": {
             "type": "array",
             "description": (
@@ -1228,10 +1238,20 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["name", "fields"],
+                "required": ["name", "table", "fields"],
                 "properties": {
-                    "name": {"type": "string"},
+                    "name": {"type": "string",
+                             "description": "PascalCase singular — Member."},
+                    "table": {"type": "string",
+                              "description": "snake_case plural — members."},
                     "description": {"type": "string"},
+                    "labelField": {
+                        "type": "string",
+                        "description": (
+                            "The field a human reads to tell one record from "
+                            "another. Names a field below."
+                        ),
+                    },
                     "fields": {
                         "type": "array",
                         "items": {
@@ -1241,7 +1261,10 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},
+                                "description": {"type": "string"},
                                 "required": {"type": "boolean"},
+                                "primaryKey": {"type": "boolean"},
+                                "unique": {"type": "boolean"},
                                 "sensitive": {
                                     "type": "boolean",
                                     "description": (
@@ -1249,10 +1272,6 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                         "agents cannot see this section to "
                                         "second-guess it."
                                     ),
-                                },
-                                "label": {
-                                    "type": "boolean",
-                                    "description": "The human-readable field.",
                                 },
                                 "references": {
                                     "type": "string",
@@ -1263,21 +1282,12 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                         "can read."
                                     ),
                                 },
-                                "unique": {"type": "boolean"},
                                 "enumValues": {
                                     "type": "array",
                                     "items": {"type": "string"},
                                 },
                             },
                         },
-                    },
-                    "constraints": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": (
-                            "Uniqueness and checks the columns cannot express "
-                            "on their own."
-                        ),
                     },
                 },
             },
