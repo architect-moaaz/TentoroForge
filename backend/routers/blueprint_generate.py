@@ -431,6 +431,41 @@ class SmithChatRequest(BaseModel):
     approved: bool = False
 
 
+def _remember(loop: Any, project_id: Any, role: str, content: str,
+              meta: dict | None = None) -> None:
+    """Append one turn to the project's conversation, best effort.
+
+    Fire-and-forget on the event loop: the turn is already streaming and a
+    write that is slow, or a database that is briefly unavailable, must not
+    hold up what the user is reading. A conversation with a hole in it is a
+    smaller loss than a chat that stalls.
+    """
+    if not (content or "").strip():
+        return
+
+    async def _write() -> None:
+        try:
+            from database import async_session
+            from models.project import Conversation, MessageRole, MessageType
+
+            async with async_session() as sess:
+                sess.add(Conversation(
+                    project_id=project_id,
+                    role=MessageRole(role),
+                    content=content,
+                    message_type=MessageType.chat,
+                    metadata_=meta or {},
+                ))
+                await sess.commit()
+        except Exception as exc:  # noqa: BLE001 — never fail a turn over memory
+            logger.warning("[smith] could not remember a turn: %s", exc)
+
+    try:
+        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_write()))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @router.post("/api/projects/{project_id}/smith/chat")
 async def smith_chat(
     project_id: uuid.UUID,
@@ -480,6 +515,23 @@ async def smith_chat(
     def emit(event: str, data: dict) -> None:
         loop.call_soon_threadsafe(
             queue.put_nowait, {"event": event, "data": json.dumps(data)})
+        # §8 LAYER 1, WRITTEN DOWN. Smith's conversation memory had no store:
+        # every turn was streamed to whoever was watching and then gone, so the
+        # panel opened blank on a project with a long history, and Smith could
+        # not recall the question it had asked a moment earlier. The client was
+        # carrying the whole transcript because nothing else did.
+        #
+        # Only what Smith SAID. `node:start`, `usage` and the rest are a run's
+        # telemetry, replayed from the Blueprint and its report; keeping them
+        # here would make the transcript unreadable to reconstruct a progress
+        # bar nobody is watching any more.
+        if event == "message":
+            _remember(loop, project_id, "assistant", str(data.get("text") or ""),
+                      {k: v for k, v in data.items()
+                       if k in ("options", "diffSummary", "status", "intent")
+                       and v})
+
+    _remember(loop, project_id, "user", req.message)
 
     async def turn() -> None:
 

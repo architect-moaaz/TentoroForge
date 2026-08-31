@@ -342,6 +342,55 @@ export function SmithPanel({
    * list the user's turns go into, as they arrive, and order is simply the
    * order things happened.
    */
+  /**
+   * §8 layer 1 — the conversation, from where it is kept.
+   *
+   * The transcript lived only in this component, so opening a project showed
+   * a blank pane however long its history was, and leaving the page threw the
+   * exchange away. Smith now writes each turn to the project's conversation;
+   * this reads it back so the panel opens where it left off.
+   *
+   * Once, on mount, and only into an empty transcript: a run in progress is
+   * already streaming turns in, and merging a fetch into that would duplicate
+   * whatever arrived while it was in flight.
+   */
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (!projectId || loadedRef.current) return;
+    loadedRef.current = true;
+    let live = true;
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const headers: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+    fetch(`${API_BASE}/api/projects/${projectId}/conversations`, {
+      credentials: "include",
+      headers,
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<Record<string, unknown>>) => {
+        if (!live || !Array.isArray(rows) || rows.length === 0) return;
+        const past: Message[] = rows
+          .filter((r) => String(r.content ?? "").trim())
+          .map((r) => {
+            const meta = (r.metadata ?? {}) as Record<string, unknown>;
+            return {
+              role: r.role === "user" ? ("user" as const) : ("smith" as const),
+              text: String(r.content ?? ""),
+              at: r.created_at ? Date.parse(String(r.created_at)) : undefined,
+              options: (meta.options as string[]) ?? undefined,
+              diffSummary: (meta.diffSummary as string) || undefined,
+            };
+          });
+        setMessages((m) => (m.length ? m : past));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+
   const copiedRef = useRef(0);
   useEffect(() => {
     // A new run empties `run.messages`; what was already copied stays in the
