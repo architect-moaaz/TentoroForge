@@ -66,7 +66,7 @@ def test_build_schema_from_jsx_sets_id_and_emits_navflow(demo_project):
     jsx = FIXTURE_LOGIN.read_text()
     out = str(demo_project)
 
-    schema, _ = asyncio.get_event_loop().run_until_complete(
+    schema, _ = asyncio.run(
         build_schema_from_jsx(
             jsx,
             out,
@@ -93,7 +93,7 @@ def test_commitbiz_demo_two_page_project(demo_project):
     out = str(demo_project)
 
     # Page 1: Login
-    login_schema, _ = asyncio.get_event_loop().run_until_complete(
+    login_schema, _ = asyncio.run(
         build_schema_from_jsx(
             FIXTURE_LOGIN.read_text(),
             out,
@@ -107,7 +107,7 @@ def test_commitbiz_demo_two_page_project(demo_project):
     login_path.write_text(json.dumps(login_schema, indent=2))
 
     # Page 2: Intent Intelligence
-    intel_schema, _ = asyncio.get_event_loop().run_until_complete(
+    intel_schema, _ = asyncio.run(
         build_schema_from_jsx(
             FIXTURE_INTEL.read_text(),
             out,
