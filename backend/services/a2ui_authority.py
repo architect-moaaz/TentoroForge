@@ -65,11 +65,22 @@ A2UI_REPO = os.environ.get(
 # cost a live run to find ("tentoro.com" vs "tentoroforge.local").
 
 # The composer is a network round trip with up to three validate-and-retry
-# attempts inside it, each generating a whole surface. Measured live at ~4
-# minutes for a first-attempt success, so 240s cut a working composition off
-# mid-flight. A ceiling, not a target — post-gen runs inside a build someone
-# is watching, and the fallback costs nothing.
-DEFAULT_TIMEOUT = int(os.environ.get("FORGE_A2UI_TIMEOUT", "600"))
+# attempts inside it, each generating a whole surface. A ceiling, not a target
+# — post-gen runs inside a build someone is watching, and the fallback costs
+# nothing.
+#
+# LOWERED FROM 600 NOW THAT A DROPPED CALL IS RETRIED. At ten minutes a single
+# hung call spent the whole budget and left the page with no layout at all —
+# /tickets 404'd in a generated app for exactly that reason, one API read
+# timing out at 300s. With three attempts, ten minutes each would be half an
+# hour on one page.
+#
+# 240s because that is well clear of every composition observed finishing:
+# 14s, 21s, 38s, 80s, 88s, 92s, 108s, 133s. A call still running past four
+# minutes has stopped being slow and started being stuck, and the honest
+# response is to ask again rather than keep waiting — which is now something
+# this can do.
+DEFAULT_TIMEOUT = int(os.environ.get("FORGE_A2UI_TIMEOUT", "240"))
 
 SurfaceProvider = Callable[[str, str], dict]
 

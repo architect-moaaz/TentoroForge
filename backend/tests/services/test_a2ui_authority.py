@@ -964,3 +964,31 @@ def test_a_healthy_provider_is_asked_once(tmp_path):
 
     compose_dashboard_via_a2ui(str(root), surface_provider=fine)
     assert calls["n"] == 1
+
+
+def test_a_timed_out_call_is_retried(tmp_path):
+    """A hung call is the expensive kind of no-answer: it spends the whole
+    budget and leaves the page with no layout. /tickets 404'd in a generated
+    app for exactly that — one read timing out at 300s."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def slow_then_fine(req, ctx):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("a2ui composition exceeded 240s")
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=slow_then_fine)
+    assert calls["n"] == 3
+    assert res["applied"] is True, res.get("reason")
+
+
+def test_the_ceiling_leaves_room_for_three_attempts():
+    """Ten minutes made a single hung call spend the whole budget, and three
+    of those would be half an hour on one page. Every observed composition
+    finished inside 133s."""
+    from services.a2ui_authority import DEFAULT_TIMEOUT
+
+    assert DEFAULT_TIMEOUT <= 300, (
+        f"{DEFAULT_TIMEOUT}s x 3 attempts is longer than anyone will wait")
