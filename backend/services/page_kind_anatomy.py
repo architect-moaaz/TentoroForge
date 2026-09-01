@@ -61,11 +61,62 @@ from services.dashboard_anatomy import page_root
 # The planner names kinds with more words than there are shapes. `list` and
 # `collection` are the same job; `create`, `edit` and `form` are the same job.
 # Normalising here keeps the rules from multiplying with the vocabulary.
+#: Every page kind this pipeline can declare, reduced to the four shapes the
+#: floors are written for.
+#:
+#: THE DECLARED PATTERNS WERE MISSING FROM IT, and the consequence was not that
+#: they went unjudged — it is that they were judged as something else. Measured
+#: across the Blueprint's eighteen-pattern enum:
+#:
+#:   * eleven fell through to `a2ui_authority._family_of`'s `dashboard`
+#:     default, so `settings`, `configuration`, `calendar`, `search_results`,
+#:     `data_explorer` and `document_workspace` were each required to carry
+#:     KPIs, a chart and an activity feed. A security-settings page cannot
+#:     satisfy that, so it was refused every time — six of the fourteen routes
+#:     that 404ed on a real application.
+#:   * five more — `entity_list`, `record_workspace`, `master_detail`,
+#:     `wizard`, `approval_inbox`, which is most of what any application is
+#:     made of — matched nothing here, so `page_kind_findings` returned "not my
+#:     rule" and they were held to NO floor whatsoever.
+#:
+#: Wrong in both directions at once, from one table being incomplete. The
+#: generic words below stay: callers outside the Blueprint pipeline pass
+#: `list`, `detail`, `form` and always have.
 _FAMILY = {
+    # Generic kind words, from callers that predate the pattern enum.
     "list": "collection", "collection": "collection", "index": "collection",
-    "search": "collection", "kanban": "collection",
+    "search": "collection",
     "form": "form", "create": "form", "edit": "form", "new": "form",
     "detail": "record", "record": "record", "show": "record", "profile": "record",
+
+    # The Blueprint's declared patterns. Every one of them, deliberately: a
+    # pattern absent here is a page judged by a floor written for a different
+    # kind of screen, and `test_every_declared_pattern_has_a_family` fails
+    # rather than letting a new pattern default into one.
+    #
+    # dashboard — numbers, a breakdown worth charting, what just happened.
+    "dashboard": "dashboard",
+    "analytics": "dashboard",
+    "command_center": "dashboard",
+    # collection — many records, however they are laid out. A calendar and a
+    # kanban are lists with an opinion about position, not a different job.
+    "entity_list": "collection",
+    "approval_inbox": "collection",
+    "kanban": "collection",
+    "calendar": "collection",
+    "scheduler": "collection",
+    "timeline": "collection",
+    "search_results": "collection",
+    "data_explorer": "collection",
+    # record — one thing, in detail, with something to do to it.
+    "master_detail": "record",
+    "record_workspace": "record",
+    "split_view": "record",
+    "document_workspace": "record",
+    # form — the reader is here to enter or change values.
+    "wizard": "form",
+    "configuration": "form",
+    "settings": "form",
 }
 
 # A surface that shows many records. Kanban and Calendar qualify — they are

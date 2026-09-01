@@ -745,11 +745,24 @@ def test_blueprint_patterns_map_to_their_job_family():
     assert _family_of("dashboard") == "dashboard"
 
 
-def test_an_unknown_kind_still_falls_back():
-    """Right for a kind nobody declared; it was only wrong for known ones."""
-    from services.a2ui_authority import _family_of
+def test_an_unknown_kind_falls_back_to_the_mildest_floor():
+    """It fell back to `dashboard`, and this test said that was right for a
+    kind nobody declared. It was not.
 
-    assert _family_of("something-nobody-declared") == "dashboard"
+    `dashboard` is the most demanding floor there is — KPIs, a chart and an
+    activity feed — so an unrecognised kind was required to be a dashboard.
+    That is the wrong direction to guess in: a screen nobody has classified
+    should be held to the least that any screen showing something owes, which
+    is a list and something to click.
+
+    It also stopped being reachable for a declared pattern. All eighteen are
+    classified in `page_kind_anatomy._FAMILY` now, held there by
+    `test_every_declared_pattern_has_a_family`.
+    """
+    from services.a2ui_authority import UNCLASSIFIED_FAMILY, _family_of
+
+    assert _family_of("something-nobody-declared") == UNCLASSIFIED_FAMILY
+    assert UNCLASSIFIED_FAMILY == "collection"
 
 
 def test_the_domain_context_can_come_from_a_supplied_registry():

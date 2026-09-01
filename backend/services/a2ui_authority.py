@@ -157,24 +157,30 @@ _JOB = {
 #: and what breakdown is worth charting" — the dashboard job, sent verbatim to
 #: /recipes/new. Falling back to dashboard is right for an unknown kind and
 #: wrong for a known one nobody mapped.
-_PATTERN_FAMILY = {
-    "dashboard": "dashboard",
-    "entity_list": "collection",
-    "approval_inbox": "collection",
-    "record_workspace": "record",
-    "master_detail": "record",
-    "form": "form",
-    "wizard": "form",
-}
+#: The family used when a kind is not classified anywhere. Named rather than
+#: inlined because the value matters: it was `dashboard`, the most demanding
+#: floor there is, so an unrecognised page kind was required to carry KPIs, a
+#: chart and an activity feed. `collection` asks for a list and something to
+#: click, which is the least a screen showing anything can get away with.
+#:
+#: It should be unreachable for a declared pattern — `page_kind_anatomy._FAMILY`
+#: covers the whole enum and a test holds it there. This is for kinds from
+#: outside the Blueprint pipeline.
+UNCLASSIFIED_FAMILY = "collection"
 
 
 def _family_of(kind: Any) -> str:
-    """Every declared kind reduced to one of the four shapes above."""
+    """Every declared kind reduced to one of the four shapes above.
+
+    ONE TABLE, IN THE MODULE THAT OWNS THE QUESTION. This kept a second,
+    partial copy — seven entries against the enum's eighteen — consulted only
+    when `page_family` had no answer, which was most of the time. The two
+    disagreed by omission rather than by contradiction, so nothing looked
+    wrong: eleven patterns fell past both and defaulted to `dashboard`.
+    """
     from services.page_kind_anatomy import page_family
-    fam = page_family(kind)
-    if fam:
-        return fam
-    return _PATTERN_FAMILY.get(str(kind or "").strip().lower(), "dashboard")
+
+    return page_family(kind) or UNCLASSIFIED_FAMILY
 
 
 def is_a2ui_enabled() -> bool:
