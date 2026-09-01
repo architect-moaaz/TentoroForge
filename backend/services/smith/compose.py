@@ -33,6 +33,25 @@ from services.llm_client import tell
 logger = logging.getLogger(__name__)
 
 
+#: The agent that actually authors a layout — the one `page_layouts` runs, and
+#: per AGENT_REGISTRY the only agent permitted to write `pageLayouts` at all.
+#:
+#: SMITH DID NOT WRITE THIS. Committing under `agent="smith"` was refused by
+#: §30's boundary check after a 147-second composition had already succeeded:
+#:
+#:     CapabilityViolation: agent 'smith' may not write 'pageLayouts' (§30).
+#:
+#: The refusal is correct and widening Smith's capability to satisfy it would
+#: be the wrong repair — a coordinator exempt from the boundary check is §28's
+#: uncontrolled swarm with a nicer name. Smith orchestrated; `a2ui_pages`
+#: authored; the commit is attributed to the author.
+#:
+#: One constant for both the TaskSpec and the commit, so the agent that runs
+#: and the agent that is credited cannot drift apart — which is the only way
+#: this error comes back.
+COMPOSER_AGENT = "a2ui_pages"
+
+
 class ComposeError(RuntimeError):
     """The request named something the Blueprint does not have."""
 
@@ -93,7 +112,7 @@ def compose_route(
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
                                     usage=RunUsage(), reasoning=reasoning)
     spec = TaskSpec(task_id=f"smith-compose-{page['id']}", node="page_layouts",
-                    agent="a2ui_pages", attempt=1, subject=page["id"],
+                    agent=COMPOSER_AGENT, attempt=1, subject=page["id"],
                     feedback=None)
 
     tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
@@ -118,7 +137,7 @@ def compose_route(
         request or f"compose the screen at {page.get('route')}",
         proposals=list(result.proposals),
         interpretation=f"recompose {page.get('route')} ({page.get('pattern')})",
-        agent="smith",
+        agent=COMPOSER_AGENT,
         app_root=app_root,
         executor=_traced(run, reasoning),
     )

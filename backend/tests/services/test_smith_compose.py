@@ -147,3 +147,41 @@ def test_a_run_with_nobody_watching_is_unchanged():
     from services.smith.compose import _traced
 
     assert _traced(lambda _s: 7, None)(SimpleNamespace(node="frontend")) == 7
+
+
+# ── who is credited for the write ───────────────────────────────────────
+
+def test_the_layout_is_committed_under_the_agent_that_authored_it():
+    """§30's boundary refused the commit AFTER a 147-second composition had
+    already succeeded:
+
+        CapabilityViolation: agent 'smith' may not write 'pageLayouts' (§30).
+
+    The refusal is correct. Smith orchestrated; `a2ui_pages` authored. Widening
+    Smith's capability to make the error go away would be the wrong repair — a
+    coordinator exempt from the boundary check is §28's uncontrolled swarm with
+    a nicer name.
+    """
+    from services.blueprint.agent_contract import AGENT_REGISTRY
+    from services.smith.compose import COMPOSER_AGENT
+
+    writes = set(getattr(AGENT_REGISTRY[COMPOSER_AGENT], "writes", ()) or ())
+    assert "pageLayouts" in writes
+
+    smith = set(getattr(AGENT_REGISTRY["smith"], "writes", ()) or ())
+    assert "pageLayouts" not in smith, (
+        "Smith was given the capability instead of the commit being attributed"
+    )
+
+
+def test_the_agent_that_runs_and_the_agent_credited_are_the_same():
+    """Two spellings of one fact is how this error comes back: the TaskSpec
+    names who composes, `apply_change` names who wrote, and if they drift the
+    boundary check fires again after the expensive part."""
+    import inspect
+
+    from services.smith.compose import compose_route
+
+    src = inspect.getsource(compose_route)
+    assert 'agent="a2ui_pages"' not in src, "the agent is spelled twice"
+    assert src.count("COMPOSER_AGENT") == 2, "spec and commit must share it"
