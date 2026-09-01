@@ -90,10 +90,11 @@ REQUEST:
 {message}"""
 
 
-def _default_provider(prompt: str) -> str:
+def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None) -> str:
     from services.llm_client import complete
 
-    return complete(content=prompt, max_tokens=1200)
+    return complete(content=prompt, max_tokens=1200,
+                    reasoning_callback=reasoning)
 
 
 def _render_history(history: list | None) -> str:
@@ -121,6 +122,7 @@ def understand_ask(
     *,
     history: list | None = None,
     provider: Callable[[str], str] | None = None,
+    reasoning: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """(message, ctx) -> {clarification_needed, target_file, element_label, new_value}.
 
@@ -136,7 +138,12 @@ def understand_ask(
                 "verb": "", "route": "", "widgets": [],
                 "target_file": "", "element_label": "", "new_value": ""}
 
-    call = provider or _default_provider
+    # SHOWN, NOT JUST HAD. `reasoning` is where Smith's thinking goes on its
+    # way to the user; without it the model still reasons and nobody sees it.
+    # An INJECTED provider keeps the one-argument seam it has always had —
+    # every test supplies a plain `lambda prompt: "..."` and none of them
+    # should have to grow a parameter to say it does no thinking.
+    call = provider or (lambda prompt: _default_provider(prompt, reasoning))
     try:
         raw = call(_PROMPT.format(ctx=blueprint_ctx or "(nothing yet)",
                                   history=_render_history(history),

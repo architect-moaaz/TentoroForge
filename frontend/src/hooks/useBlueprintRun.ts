@@ -70,6 +70,18 @@ export interface RunMessage {
 export interface BlueprintRun {
   /** Smith's own words — it decides what to do, and says so. */
   messages: RunMessage[];
+  /**
+   * How Smith got to what it said, while it is getting there.
+   *
+   * A turn that composes a screen runs for a minute behind a single
+   * `message`, and until it lands the panel shows a spinner — a long turn and
+   * a stuck one look exactly alike. These arrive as the model produces them.
+   *
+   * Cleared per run, not accumulated across the conversation: this is the
+   * reasoning behind the turn in flight, and the transcript keeps only what
+   * Smith actually said.
+   */
+  thoughts: string[];
   /** Every event, in order. The engine's own account of the run. */
   events: RunEvent[];
   /** Ordered as the orchestrator planned them, not as they finish. */
@@ -104,6 +116,7 @@ export interface BlueprintRun {
 
 const EMPTY: BlueprintRun = {
   messages: [],
+  thoughts: [],
   events: [],
   nodes: [],
   nodesDone: 0,
@@ -341,11 +354,24 @@ export function reduce(
     case "started":
       return { ...prev, status: "running" };
 
+    case "thought":
+      // Smith's reasoning, as it arrives. Not folded into `messages`: it is
+      // how the answer was reached, not part of the conversation, and the
+      // server does not write it to the transcript either.
+      return String(data.text ?? "").trim()
+        ? { ...prev, thoughts: [...prev.thoughts, String(data.text)] }
+        : prev;
+
     case "message":
       // What Smith is doing, in its words. `asked` turns arrive this way too,
       // carrying the options §16 wants offered instead of a guess.
+      //
+      // The thinking that led here has served its purpose — the answer is now
+      // on screen and says it better. Clearing keeps the reasoning from one
+      // turn out of the next.
       return {
         ...prev,
+        thoughts: [],
         messages: [...prev.messages, {
           text: String(data.text ?? ""),
           options: (data.options as string[]) ?? undefined,

@@ -124,6 +124,7 @@ class SmithSession:
         guards_fn: GuardsFn | None = None,
         understand_ask_fn: UnderstandFn | None = None,
         iteration_move_fn: MoveFn | None = None,
+        reasoning_fn: Callable[[str], None] | None = None,
     ) -> None:
         self.project_id = project_id
         self.output_dir = output_dir
@@ -134,6 +135,9 @@ class SmithSession:
         self._guards = guards_fn or (lambda _out: [])
         self._understand = understand_ask_fn
         self._move = iteration_move_fn
+        # Where Smith's reasoning goes so the user can read it. None means
+        # nobody is watching, which is every caller that predates it.
+        self._reasoning = reasoning_fn
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -270,9 +274,12 @@ class SmithSession:
         # and the reply is the word "yes", which means nothing without the
         # question above it. Default None keeps every existing caller — and
         # every test — working unchanged.
+        seam_kwargs: dict[str, Any] = {"history": history or []}
+        if self._reasoning is not None:
+            seam_kwargs["reasoning"] = self._reasoning
         try:
             understanding = self._understand(
-                user_message, blueprint_ctx, history=history or [],
+                user_message, blueprint_ctx, **seam_kwargs,
             ) or {}
         except TypeError:
             # A seam that predates the history argument. Degrades to the old

@@ -707,6 +707,7 @@ export function SmithPanel({
           </div>
         ))}
 
+        <ThinkingTrail thoughts={run.thoughts} busy={busy} />
 
         {run.status === "error" && (
           <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1062,6 +1063,37 @@ function StageList({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * What Smith is working through, while it works through it.
+ *
+ * A turn that composes a screen runs for around a minute behind one `message`
+ * event. Until that lands the panel shows a spinner, so a long turn and a
+ * stuck one are indistinguishable — which is the same complaint as the empty
+ * editor panels and the unreported runs: doing something and doing nothing
+ * look identical from outside.
+ *
+ * SECONDARY BY CONSTRUCTION. Small, muted, and gone the moment Smith speaks —
+ * the answer says it better than the reasoning that reached it. §111 asks that
+ * BUILD PROGRESS show observable status rather than model reasoning, and the
+ * stage list still does exactly that; this is the conversation.
+ */
+function ThinkingTrail({ thoughts, busy }: { thoughts: string[]; busy: boolean }) {
+  if (!thoughts.length) return null;
+  return (
+    <div className="max-w-[90%] space-y-1 border-l-2 border-muted pl-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+        <span className="font-medium">Thinking</span>
+      </div>
+      {thoughts.map((t, i) => (
+        <p key={i} className="whitespace-pre-wrap text-xs italic text-muted-foreground">
+          {t}
+        </p>
+      ))}
     </div>
   );
 }

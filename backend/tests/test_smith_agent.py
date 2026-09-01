@@ -532,6 +532,17 @@ def test_thinking_is_not_behind_a_switch():
     assert not hasattr(fix_chat_agent, "_thinking_budget")
 
 
+def test_one_table_says_what_a_model_accepts():
+    """The agent and the one-shot transport both ask this question. Two prefix
+    tables drift the first time one is updated for a new release, and the
+    symptom is a 400 from whichever call site was missed."""
+    from agents import fix_chat_agent
+    from services import llm_client
+
+    assert fix_chat_agent._thinking_block is llm_client.thinking_block_for
+    assert fix_chat_agent._model_supports_thinking is llm_client.supports_thinking
+
+
 def _mock_anthropic_response(*, thinking_texts, text_payload):
     """Build a stand-in for anthropic's msg.content — a mix of thinking
     blocks (attr `.thinking`) and text blocks (attr `.text`), the same
@@ -615,8 +626,10 @@ def test_default_query_sends_no_thinking_block_to_a_model_without_it(monkeypatch
 
     from agents import fix_chat_agent
 
-    monkeypatch.setattr(fix_chat_agent, "_model_supports_thinking",
-                        lambda _m: False)
+    # The seam the call site actually consults. `_model_supports_thinking` is
+    # now an import from services.llm_client, and patching the local alias
+    # would not reach the function that reads it.
+    monkeypatch.setattr(fix_chat_agent, "_thinking_block", lambda _m: None)
 
     captured: dict = {}
     fake_msg = _mock_anthropic_response(

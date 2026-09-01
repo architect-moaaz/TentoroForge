@@ -755,10 +755,26 @@ async def smith_chat(
                                 approved=req.approved, emit=emit)
 
             # An application exists, so Smith reasons about it.
+            # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
+            # composes a screen runs for a minute behind one `message`, and
+            # until it lands the panel shows a spinner and the user cannot
+            # tell a long turn from a stuck one. Emitting the reasoning as it
+            # arrives is what makes the wait legible.
+            #
+            # `emit` is already thread-safe (`call_soon_threadsafe`) and this
+            # runs in the executor thread, which is the same arrangement every
+            # other event here uses. Not remembered: `_remember` writes only
+            # `message`, so reasoning stays out of the transcript — it is how
+            # Smith got to the answer, not part of the conversation.
+            #
+            # §111 asks that BUILD PROGRESS show observable status rather than
+            # model reasoning; the stage list above still does exactly that.
+            # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
                 message=req.message,
                 history=[(t.role, t.text) for t in req.history if t.text],
+                reasoning_fn=lambda text: emit("thought", {"text": text}),
             ))
             emit("message", {
                 "text": turn_result.answer,

@@ -56,6 +56,10 @@ class ChatV2Request:
     #: has none.
     history: list[tuple[str, str]] = field(default_factory=list)
     source: str = "user"
+    #: Called with each reasoning chunk as it arrives, from the worker thread.
+    #: The router hands in one that emits a `thought` event; a caller with
+    #: nobody watching passes None and the model reasons privately, as before.
+    reasoning_fn: Callable[[str], None] | None = None
     # For tests + gradual wiring: caller can override any SmithSession
     # seam. Prod passes {} and the handler wires the real defaults.
     session_overrides: dict[str, Callable[..., Any]] = field(default_factory=dict)
@@ -142,6 +146,7 @@ def _build_session(
         # than believing it. Wired here; overrides still win, which is how the
         # handler stays testable without touching a filesystem.
         iteration_move_fn=overrides.get("iteration_move_fn") or move_dispatcher,
+        reasoning_fn=req.reasoning_fn,
     )
 
 

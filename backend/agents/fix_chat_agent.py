@@ -39,70 +39,15 @@ QueryFn = Callable[[str, list[dict], list[dict]], Iterable[dict]]
 _TERMINAL = "__terminal__"
 _MAX_UNKNOWN_STREAK = 2  # two consecutive unknown-tool calls → force ask_user
 
-# Extended-thinking gating — Sonnet 4.5+, Opus 4+, Fable 5+ support the
-# ``thinking={"type":"enabled",…}`` request block. Older sonnet/opus/haiku
-# models silently ignore it (or reject on newer server-side gates), so we
-# prefix-match here rather than sending it unconditionally.
-_THINKING_MODEL_PREFIXES: tuple[str, ...] = (
-    "claude-sonnet-4-5",
-    "claude-sonnet-4-6",
-    "claude-sonnet-5",
-    "claude-opus-4",
-    "claude-opus-5",
-    "claude-fable-5",
+# Extended thinking — WHICH BLOCK A MODEL ACCEPTS is a fact about the
+# transport, and `services.llm_client` owns it. This module used to keep its
+# own prefix table; two tables drift the first time one is updated for a new
+# release, and the symptom is a 400 from whichever call site was missed.
+from services.llm_client import (  # noqa: E402
+    THINKING_HEADROOM_TOKENS,
+    supports_thinking as _model_supports_thinking,
+    thinking_block_for as _thinking_block,
 )
-
-
-def _model_supports_thinking(model: str) -> bool:
-    """Return True when ``model`` is an Anthropic model in the family
-    that supports the extended-thinking request block. Prefix match so
-    dated variants (``…-20260215``) all pass."""
-    if not isinstance(model, str) or not model:
-        return False
-    m = model.strip()
-    return any(m.startswith(p) for p in _THINKING_MODEL_PREFIXES)
-
-
-#: Models that take ``thinking={"type": "adaptive"}`` and REJECT
-#: ``budget_tokens`` outright (400) — everything from the 4.6 generation on.
-#: The model decides how long to think per turn, which is what makes thinking
-#: affordable on an interactive loop: a fixed budget spends it whether the turn
-#: needs it or not.
-_ADAPTIVE_THINKING_PREFIXES: tuple[str, ...] = (
-    "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5",
-    "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5",
-)
-
-#: Reasoning headroom for the pre-4.6 models that still take an explicit
-#: budget, and the headroom added to ``max_tokens`` on the adaptive path,
-#: where the cap covers thinking and output together.
-THINKING_HEADROOM_TOKENS = 4096
-
-
-def _thinking_block(model: str) -> "dict | None":
-    """The ``thinking`` request block for this model, or None when it has no
-    thinking to request.
-
-    NO SWITCH. This was read from ``FORGE_SMITH_THINKING_BUDGET``, defaulting
-    to zero — so the reasoning stream, the SSE event and the frontend's
-    renderer all worked and emitted nothing, and finding out why meant reading
-    four files to arrive at an unset env var. Smith either shows its reasoning
-    or it does not, and a flag whose off-position silently removes a
-    capability is the shape that has cost this codebase the most.
-
-    TWO FORMS, AND SENDING THE WRONG ONE IS A 400. ``budget_tokens`` is how
-    thinking was requested before the 4.6 generation and is rejected outright
-    from 4.7 on; `adaptive` is the current form and lets the model decide per
-    turn. The supported-model list already named `claude-opus-5` and
-    `claude-sonnet-5` while the call site sent them `budget_tokens`, so
-    changing the model would have failed every request with an error naming
-    neither the model nor the block.
-    """
-    if not _model_supports_thinking(model):
-        return None
-    if any(model.strip().startswith(p) for p in _ADAPTIVE_THINKING_PREFIXES):
-        return {"type": "adaptive"}
-    return {"type": "enabled", "budget_tokens": THINKING_HEADROOM_TOKENS}
 
 
 def run_fix_agent(
