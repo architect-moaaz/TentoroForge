@@ -156,10 +156,20 @@ def runs(output_dir: str | Path) -> list[str]:
 
 
 def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]:
-    """Where a run got to and what stopped it.
+    """Where a run got to, and — if it is over — what stopped it.
 
     The question every post-mortem asked, answered from the file rather than
     from mtimes and missing Blueprint sections.
+
+    A LIVE RUN AND A DEAD ONE ARE NOT DESCRIBED THE SAME WAY. Both leave nodes
+    that started and never finished, and the first version called them
+    `stoppedIn` regardless: four nodes running normally in a wave were reported
+    as the place a healthy run had stopped. A diagnostic that reads "working"
+    as "stopped" sends the next post-mortem exactly where the last one went
+    wrong, which is the mistake this module exists to stop repeating.
+
+    So `running` is either true or the run is over, and the unfinished nodes
+    are named `inFlight` while it lives and `stoppedIn` once it cannot move.
     """
     ids = runs(output_dir)
     rid = run_id or (ids[0] if ids else None)
@@ -174,8 +184,11 @@ def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]
     ended: dict[str, Any] | None = None
     crashed: dict[str, Any] | None = None
 
+    pid: int | None = None
     for e in events:
         kind = e.get("event")
+        if kind == "run:start":
+            pid = e.get("pid")
         if kind == "plan":
             planned = list(e.get("nodes") or [])
         elif kind == "node:start":
@@ -190,17 +203,50 @@ def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]
             crashed = e
 
     # A node that started and never finished is where the run stopped — the
-    # single fact that took an hour to establish by hand, three times.
+    # single fact that took an hour to establish by hand, three times. But
+    # only once the run is over; before that it is simply the work in hand.
     unfinished = [n for n in started if n not in done and n not in failed]
+
+    # OVER, AND HOW WE KNOW. A run that ends records it. A run whose PROCESS
+    # dies records nothing — which is the case this module exists for, and
+    # "no end event" alone cannot tell the two apart.
+    #
+    # The pid is written at run:start, so liveness is a fact rather than a
+    # timeout guessing at one. A pid that is gone cannot still be working.
+    # (Reuse could in principle resurrect a dead run's number; on a local
+    # single-host run that is remote, and the alternative — calling a run dead
+    # because it has been quiet for N minutes — is a heuristic that would have
+    # mislabelled `data_model` every single time it thought for nine.)
+    over = bool(ended or crashed)
+    if not over and pid:
+        try:
+            os.kill(pid, 0)          # signal 0: liveness only, no effect
+        except ProcessLookupError:
+            over = True              # the process is gone; so is the run
+        except PermissionError:
+            pass                     # alive, owned by someone else
 
     return {
         "found": True,
         "runId": rid,
+        "running": not over,
+        # How `over` was decided, because "the process is gone" and "the run
+        # said it finished" are different facts and a reader should not have
+        # to guess which one they are looking at.
+        "endedBy": ("crash" if crashed else "outcome" if ended
+                    else "process gone" if over else None),
         "planned": planned,
         "completed": done,
         "failed": failed,
-        "stoppedIn": unfinished,
-        "neverStarted": [n for n in planned if n not in started],
+        # Named for what they mean, so a caller cannot read a live wave as a
+        # stall. Both keys always exist; the one that does not apply is empty.
+        "inFlight": [] if over else unfinished,
+        "stoppedIn": unfinished if over else [],
+        # "Never started" is only a finding once nothing more can start.
+        "neverStarted": ([n for n in planned if n not in started]
+                         if over else []),
+        "pending": ([] if over else
+                    [n for n in planned if n not in started]),
         "endedCleanly": bool(ended),
         "crashed": crashed,
         "events": len(events),
