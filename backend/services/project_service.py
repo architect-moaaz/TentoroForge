@@ -1,5 +1,6 @@
 """Project lifecycle service — create, retrieve, authorize."""
 
+import os
 import re
 import shutil
 import uuid
@@ -12,8 +13,20 @@ from models.auth import PlatformUser
 from models.org import OrgMember, OrgMemberRole, InviteStatus
 from models.project import Project, ProjectStatus, _generate_short_id
 
-OUTPUT_BASE = Path(__file__).parent.parent.parent / "output"
-OUTPUT_BASE.mkdir(exist_ok=True)
+#: Where a project's application lives.
+#:
+#: REDIRECTABLE, because the test suite creates projects and this pointed at
+#: the developer's real one. Every run left eight to ten empty git repos in
+#: `output/` beside the actual applications — 300 of them, 23MB, indistinguish-
+#: able from a project someone had started and abandoned. Nothing cleaned them
+#: up because nothing knew they were test output.
+#:
+#: Read from the environment at import, the same way `DATABASE_URL` is, so the
+#: isolation lives in `tests/conftest.py` with the rest of it rather than in a
+#: fixture each test has to remember.
+OUTPUT_BASE = Path(os.environ.get("FORGE_OUTPUT_BASE")
+                   or Path(__file__).parent.parent.parent / "output")
+OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
 
 
 async def create_project(
