@@ -367,3 +367,39 @@ def test_read_page_bubbles_up_fix_agent_errors(tmp_path):
     result = smith_tools.read_page(str(tmp_path), "nonexistent/page.json")
     assert "error" in result
     assert "outline" not in result
+
+
+def test_a_request_smith_has_no_move_for_is_not_reported_as_no_change():
+    """"I don't have that move" and "the state already matches" are different
+    facts and had one sentence between them.
+
+    The dispatcher implements one move — retitling an element — and returns
+    None at its first guard for anything else. So a user asking four times for
+    a dashboard at `/` with five named widgets was told four times that nothing
+    needed changing, once directly after Smith had offered to build it and been
+    told "yes please".
+    """
+    import inspect
+
+    from services import smith_session
+
+    src = inspect.getsource(smith_session.SmithSession.run_iteration) \
+        if hasattr(smith_session, "SmithSession") else \
+        Path(smith_session.__file__).read_text(encoding="utf-8")
+
+    # The no-move branch must fire before the dispatcher is consulted, and must
+    # not claim the state matches.
+    assert "I can't make that change from here yet" in src
+    assert "not element_label or not new_value" in src
+    # And the genuine no-match message must name what it looked for, so it
+    # cannot be mistaken for the other case.
+    assert "could not find it" in src
+
+
+def test_the_no_match_message_names_what_was_searched():
+    from pathlib import Path as _P
+
+    from services import smith_session
+
+    src = _P(smith_session.__file__).read_text(encoding="utf-8")
+    assert "editing the nearest thing" in src

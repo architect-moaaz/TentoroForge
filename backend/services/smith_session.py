@@ -266,13 +266,45 @@ class SmithSession:
                        "should I edit? A route path or a screen name works.",
             )
 
+        # TWO DIFFERENT FACTS, AND THEY HAD ONE SENTENCE BETWEEN THEM.
+        #
+        # `move is None` means either "I looked for that label and the state
+        # already matches" or "what you asked for is not a move I have". The
+        # dispatcher implements ONE move — retitling an element — and returns
+        # None at its first guard for anything else, so a request to build a
+        # dashboard came back as "the current state already matches".
+        #
+        # Observed: a user asked four times for a dashboard at `/` with five
+        # named widgets, and was told four times that nothing needed changing —
+        # including once directly after Smith had itself offered to build it
+        # and been told "yes please". Claiming the state matches when the truth
+        # is "I cannot do that yet" sends someone to re-describe work that was
+        # never going to be picked up.
+        new_value = (understanding.get("new_value") or "").strip()
+        if not element_label or not new_value:
+            return TurnResult(
+                status="needs_user",
+                answer=(
+                    "I can't make that change from here yet. Editing an "
+                    "existing application currently covers renaming things — "
+                    "tell me the current wording and what it should say "
+                    "instead and I will change it.\n\n"
+                    "Building a new screen, or adding widgets to one, is a "
+                    "generation rather than an edit: say \u201crebuild\u201d "
+                    "and I will define it and run the build again."
+                ),
+            )
+
         move = self._move(understanding, self.output_dir)
         if move is None:
             return TurnResult(
                 status="no_op",
-                answer="I looked at what you asked and I don't see anything "
-                       "to change — the current state already matches. If "
-                       "that surprises you, let me know what's off from your side.",
+                answer=(
+                    f"I looked for \u201c{element_label}\u201d in "
+                    f"{target_file} and could not find it, so I have changed "
+                    "nothing rather than editing the nearest thing. If it is "
+                    "there under different wording, tell me the exact text."
+                ),
             )
 
         # Ground truth: what did git actually see change?
