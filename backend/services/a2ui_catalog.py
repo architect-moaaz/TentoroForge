@@ -499,6 +499,29 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
             {"$ref": "#/$defs/CatalogComponentCommon"},
             body,
         ],
+        # THE COMPOSER'S VALIDATOR AND OURS AGREE NOW. This was absent, so it
+        # defaulted to true: A2UI validated its own output against a catalog
+        # that accepted any extra property, passed, returned — and Forge's
+        # catalog, which sets `additionalProperties: false`, refused the page.
+        # `density` on a Card cost a composition three minutes after A2UI had
+        # already declared it valid, and A2UI's own three retries never fired
+        # because its validator saw nothing wrong.
+        #
+        # `unevaluatedProperties`, not `additionalProperties`: this is an
+        # `allOf`, and `additionalProperties` in one branch cannot see the
+        # properties the two `$ref`s contribute, so it would reject `id` and
+        # everything else inherited. `unevaluatedProperties` is evaluated
+        # across the whole composition, which is what draft 2020-12 added it
+        # for. A2UI builds Draft202012Validator, so it is understood.
+        #
+        # STRICTNESS WAS TRIED BEFORE AND MADE THINGS WORSE — see the note
+        # above on `_COMPOSE_ONE_OF`: `additionalProperties: false` rejected
+        # `Button.action` without saying what to write instead, so the retry
+        # guessed again and a page died having guessed three times. What was
+        # missing then was a positive statement of the requirement, and that
+        # is what `anyOf` now supplies. Rejecting an invented prop is only
+        # safe alongside a schema that says what the real one is.
+        "unevaluatedProperties": False,
     }
 
 
