@@ -185,3 +185,84 @@ def test_the_agent_that_runs_and_the_agent_credited_are_the_same():
     src = inspect.getsource(compose_route)
     assert 'agent="a2ui_pages"' not in src, "the agent is spelled twice"
     assert src.count("COMPOSER_AGENT") == 2, "spec and commit must share it"
+
+
+# ── a refused composition is re-asked, not abandoned ────────────────────
+
+def _svc_with_home():
+    class _Svc:
+        doc = {"pages": [{"id": "PAGE-002", "route": "/", "name": "Home",
+                          "pattern": "dashboard"}]}
+        output_dir = "/tmp/nope"
+    return _Svc()
+
+
+class _Proposal:
+    section = "pageLayouts"
+
+
+class _Result:
+    proposals = [_Proposal()]
+
+
+def test_a_refused_composition_is_re_asked_with_the_reason(monkeypatch):
+    """The DAG catches a rejected apply, records the validator's message as
+    the subject's feedback and runs the node again. A conversation reached
+    none of that: three and a half minutes of composing were thrown away over
+    a `density` on a Card, and the message that would have fixed it went only
+    to a log."""
+    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.smith import compose as mod
+
+    seen: list = []
+    calls = {"n": 0}
+
+    def _apply(*_a, **_kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise InvalidPatternTemplate(
+                "PAGE-002: props.(root): Additional properties are not "
+                "allowed ('density' was unexpected)")
+        return "COMMITTED"
+
+    monkeypatch.setattr("services.smith.change.apply_change", _apply)
+
+    def _run(spec):
+        seen.append(spec.feedback)
+        return _Result()
+
+    out = mod.compose_route(_svc_with_home(), "/", executor=_run)
+    assert out == "COMMITTED"
+    assert calls["n"] == 2, "the refusal ended the turn instead of re-asking"
+    # §102 — the second ask is told what the first one got wrong.
+    assert seen[0] is None
+    assert "density" in (seen[1] or ""), "re-asked without the reason"
+
+
+def test_it_gives_up_and_says_why(monkeypatch):
+    """Bounded like the DAG's. A refusal that survives the retry is reported
+    with the validator's own words, not as a bare failure."""
+    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.smith import compose as mod
+
+    def _apply(*_a, **_kw):
+        raise InvalidPatternTemplate("PAGE-002: 'items' is a required property")
+
+    monkeypatch.setattr("services.smith.change.apply_change", _apply)
+
+    with pytest.raises(mod.ComposeError) as exc:
+        mod.compose_route(_svc_with_home(), "/", executor=lambda _s: _Result())
+    assert "'items' is a required property" in str(exc.value)
+    assert "nothing has been changed" in str(exc.value)
+
+
+def test_the_attempt_budget_matches_the_dag():
+    """Two paths composing the same page should not disagree about how many
+    tries it gets."""
+    import inspect
+
+    from services.blueprint import orchestrator
+    from services.smith.compose import MAX_ATTEMPTS
+
+    dag_default = inspect.signature(orchestrator.run).parameters["max_attempts"].default
+    assert MAX_ATTEMPTS == dag_default

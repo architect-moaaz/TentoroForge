@@ -79,6 +79,14 @@ def _page_for_route(doc: dict, route: str) -> dict | None:
     return None
 
 
+#: How many times a conversational compose may be asked, matching the DAG's
+#: `max_attempts`. One is not enough and the reason is measured: on this
+#: application A2UI composed a dashboard carrying `density` on Card — a prop
+#: the catalog advertises on Table and not on Card — and the whole turn was
+#: lost to it. The DAG would have re-asked with the validator's own message.
+MAX_ATTEMPTS = 2
+
+
 def compose_route(
     svc: Any,
     route: str,
@@ -93,9 +101,22 @@ def compose_route(
     Runs the `page_layouts` agent for exactly that page — the same executor,
     the same TaskSpec, the same A2UI path the build uses — then hands the
     proposals to `apply_change`.
+
+    RE-ASKED WHEN REFUSED, for the same reason the DAG re-asks. `orchestrator`
+    catches a rejected apply, records `_reason(exc)` as the subject's feedback
+    and runs the node again; every one of those mechanisms is on the DAG path,
+    and a conversation reached none of them. So a composition refused for one
+    unexpected prop ended the turn — three and a half minutes of composing
+    thrown away over a `density` on a Card, with the message that would have
+    fixed it going only to a log.
+
+    §102: a retry that is not told what went wrong is the same request again,
+    so the feedback rides on the TaskSpec exactly as it does in a run.
     """
+    from services.blueprint.agent_contract import InvalidPatternTemplate
     from services.blueprint.executors import make_executor, tiered_router, RunUsage
     from services.blueprint.orchestrator import TaskSpec
+    from services.blueprint.service import BlueprintInvalid
     from services.smith.change import apply_change
 
     page = _page_for_route(svc.doc, route)
@@ -111,36 +132,55 @@ def compose_route(
     # executor's stream was already open and its thinking events discarded.
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
                                     usage=RunUsage(), reasoning=reasoning)
-    spec = TaskSpec(task_id=f"smith-compose-{page['id']}", node="page_layouts",
-                    agent=COMPOSER_AGENT, attempt=1, subject=page["id"],
-                    feedback=None)
+    feedback = ""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        spec = TaskSpec(task_id=f"smith-compose-{page['id']}-{attempt}",
+                        node="page_layouts", agent=COMPOSER_AGENT,
+                        attempt=attempt, subject=page["id"],
+                        feedback=feedback or None)
 
-    tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
-    result = run(spec)
-    if not getattr(result, "proposals", None):
-        # The composer declining is a real outcome and says so. Reporting it as
-        # a success with nothing behind it is the failure this whole module is
-        # a reaction to.
-        raise ComposeError(
-            f"the composer returned nothing for {page.get('route')}. "
-            "Nothing has been changed."
-        )
+        tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
+        result = run(spec)
+        if not getattr(result, "proposals", None):
+            # The composer declining is a real outcome and says so. Reporting
+            # it as a success with nothing behind it is the failure this whole
+            # module is a reaction to.
+            raise ComposeError(
+                f"the composer returned nothing for {page.get('route')}. "
+                "Nothing has been changed."
+            )
 
-    # THE EXECUTOR IS WHAT MAKES THE CHANGE REACH THE APP. `apply_change` runs
-    # the §72 sub-DAG only `if run_agents and executor is not None`, and this
-    # passed none — so the layout was committed to the Blueprint, the version
-    # bumped, the turn reported success, and the frontend was never projected.
-    # The route stayed blank. Committing without regenerating is exactly the
-    # divergence §115 refuses, arrived at by omitting an argument.
-    return apply_change(
-        svc,
-        request or f"compose the screen at {page.get('route')}",
-        proposals=list(result.proposals),
-        interpretation=f"recompose {page.get('route')} ({page.get('pattern')})",
-        agent=COMPOSER_AGENT,
-        app_root=app_root,
-        executor=_traced(run, reasoning),
-    )
+        # THE EXECUTOR IS WHAT MAKES THE CHANGE REACH THE APP. `apply_change`
+        # runs the §72 sub-DAG only `if run_agents and executor is not None`,
+        # and this passed none — so the layout was committed to the Blueprint,
+        # the version bumped, the turn reported success, and the frontend was
+        # never projected. The route stayed blank. Committing without
+        # regenerating is exactly the divergence §115 refuses, arrived at by
+        # omitting an argument.
+        try:
+            return apply_change(
+                svc,
+                request or f"compose the screen at {page.get('route')}",
+                proposals=list(result.proposals),
+                interpretation=(f"recompose {page.get('route')} "
+                                f"({page.get('pattern')})"),
+                agent=COMPOSER_AGENT,
+                app_root=app_root,
+                executor=_traced(run, reasoning),
+            )
+        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+            feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+            if attempt == MAX_ATTEMPTS:
+                raise ComposeError(
+                    f"the composition of {page.get('route')} was refused "
+                    f"{MAX_ATTEMPTS} times and nothing has been changed. "
+                    f"The last reason was: {feedback}"
+                ) from exc
+            tell(reasoning,
+                 f"That composition was refused — {feedback} Composing again.",
+                 "step")
+
+    raise ComposeError(f"no composition was produced for {page.get('route')}.")
 
 
 def _traced(executor: Any, reasoning: Any) -> Any:
