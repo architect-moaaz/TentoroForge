@@ -90,11 +90,29 @@ SurfaceProvider = Callable[[str, str], dict]
 # `build_requirement` for why the maquette stopped being sent.
 _JOB = {
     "dashboard": (
+        # "chart", NOT "charting". The A2UI server matches its capability
+        # keywords as WHOLE WORDS (tools/a2ui-mcp/checks.py, ~line 200 — a
+        # substring test read "chart" inside "flowchart"), so "worth charting"
+        # matched nothing and the composer was never told a chart was wanted.
+        # Forge's dashboard floor then required one unconditionally and refused
+        # the surface: `dashboard_no_chart`, after 140 seconds of composition,
+        # deterministically, on every dashboard.
+        #
+        # Two answers to "what must a dashboard contain" that never agreed.
+        # This is the one place they can be made to: the floor is the
+        # authority, so the requirement states what the floor will demand.
+        #
+        # A demand and not an example, unlike the components named elsewhere in
+        # this file — the surrounding comments warn that naming a component
+        # reads as mandatory, and here it IS mandatory. Only for dashboards:
+        # `collection` and the form kinds say nothing about charts and the
+        # floor asks nothing of them.
         "This is the first screen someone sees after signing in. Decide what "
-        "belongs on it: which numbers matter in this domain, what breakdown is "
-        "worth charting, what a person needs to see happened recently, and what "
-        "they are most likely to want to do next. Use the composition your "
-        "judgement of the domain calls for — you are not filling in a template."
+        "belongs on it: which numbers matter in this domain, which breakdown "
+        "deserves a chart, what a person needs to see happened recently, and "
+        "what they are most likely to want to do next. Use the composition "
+        "your judgement of the domain calls for — you are not filling in a "
+        "template."
     ),
     "collection": (
         # NAMES NO COMPONENTS, DELIBERATELY. The A2UI server scans this text

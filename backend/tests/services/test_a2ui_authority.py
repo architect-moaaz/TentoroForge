@@ -870,15 +870,35 @@ def test_the_closing_rule_does_not_read_as_a_chart_request(tmp_path):
         assert not re.search(rf"\b{re.escape(word)}\b", req), word
 
 
-def test_no_job_text_names_a_component_the_checker_will_demand():
+#: The only component demands a job statement is allowed to make, and the floor
+#: rule that justifies each one.
+#:
+#: THE RULE IS NOT "NAME NO COMPONENTS", it is "demand nothing the floor does
+#: not require". Those read the same until they disagree, and they disagreed
+#: here: `dashboard_findings` raises `dashboard_no_chart` for any dashboard
+#: without a chart, while the brief said "worth charting" — which A2UI's
+#: whole-word matcher does not read as "chart". So the composer was never told,
+#: composed no chart, and was refused. 140 seconds, every dashboard, every time.
+#:
+#: A demand belongs here only when the floor requires that capability
+#: unconditionally AND accepts nothing else in its place. `dashboard_no_activity`
+#: takes a Table, List, Timeline, Kanban or Calendar, so naming any one of them
+#: would over-constrain a choice the floor leaves open — which is exactly the
+#: harm the original blanket rule was written about.
+_JUSTIFIED_DEMANDS: dict[str, set[str]] = {
+    "dashboard": {"chart"},   # dashboard_anatomy.dashboard_findings, no_chart
+}
+
+
+def test_no_job_text_demands_a_component_the_floor_does_not_require():
     """The A2UI server scans the requirement for capability keywords and makes
     any match mandatory. "a table, a board, a calendar, a timeline" offered
     four ways to think about a list; the checker read two demands, so every
     collection page carried a Table and a Timeline or was rejected — a Timeline
     on a two-entity plant tracker, a table on a create form.
 
-    Pinned across every family, so a future rewrite cannot put a component name
-    back into any of them without this failing.
+    Pinned across every family, so a future rewrite cannot put an unjustified
+    component name into any of them without this failing.
     """
     import re
     from services.a2ui_authority import _JOB
@@ -893,9 +913,20 @@ def test_no_job_text_names_a_component_the_checker_will_demand():
         "datagrid", "timeline", "gantt", "kanban", "swimlane", "board column",
     )
     for family, text in _JOB.items():
-        hits = [k for k in keywords
-                if re.search(rf"\b{re.escape(k)}\b", text.lower())]
-        assert not hits, f"{family}: {hits}"
+        hits = {k for k in keywords
+                if re.search(rf"\b{re.escape(k)}\b", text.lower())}
+        unjustified = hits - _JUSTIFIED_DEMANDS.get(family, set())
+        assert not unjustified, f"{family}: {sorted(unjustified)}"
+
+
+def test_every_justified_demand_is_one_the_floor_actually_makes():
+    """The other half. An entry here that the floor does not require is a
+    component demanded of every page of that family for no reason — the
+    original defect, arrived at through the exemption list instead."""
+    from services.dashboard_anatomy import _CHART_TYPES
+
+    assert _JUSTIFIED_DEMANDS["dashboard"] == {"chart"}
+    assert _CHART_TYPES, "the floor no longer requires a chart; drop the demand"
 
 
 def test_every_composition_attempt_keeps_its_own_surface(tmp_path):

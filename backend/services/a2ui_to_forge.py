@@ -925,6 +925,35 @@ def dangling_bindings(schema: dict) -> list[str]:
     declared = {s.get("name") for s in (schema.get("dataSources") or [])}
     found: set[str] = set()
 
+    def _repeat_var(node: dict) -> str:
+        """The loop variable a `Repeat` introduces, if it iterates a real source.
+
+        THIS MODULE MINTS THE NODE AND DID NOT RECOGNISE IT. `_repeat_from`
+        emits `{"type": "Repeat", "props": {"source": <name>, "as": "item"}}`
+        and its children bind `{{item.titleAr}}` — so a page composed here was
+        refused by the floor over `binding 'item' has no declared data source`,
+        after A2UI had spent 140 seconds on it.
+
+        `_row_scope` below looks for a `repeat` KEY, or for `rows`/`items`/
+        `data` holding `{{…}}` syntax. A Repeat has neither: the prop is
+        `source` and its value is a bare source name. Two spellings of "this is
+        a row scope", with the checker attached to neither of the ones the
+        translator actually produces.
+
+        The variable is read from `as` rather than assumed to be `item`, and
+        only a source the page really declares opens the scope — a Repeat over
+        an invented collection is still a dangling binding and must still be
+        reported.
+        """
+        if node.get("type") != "Repeat":
+            return ""
+        props = node.get("props")
+        props = props if isinstance(props, dict) else {}
+        source = str(props.get("source") or "").strip().split(".")[0]
+        if not source or source not in declared:
+            return ""
+        return str(props.get("as") or "item").strip()
+
     def _row_scope(node: dict) -> bool:
         """Whether this node renders once per item of a declared collection.
 
@@ -952,16 +981,23 @@ def dangling_bindings(schema: dict) -> list[str]:
                 return True
         return False
 
-    def walk(node: Any, in_row: bool = False) -> None:
+    def walk(node: Any, in_row: bool = False,
+             bound: frozenset[str] = frozenset()) -> None:
         if isinstance(node, list):
             for n in node:
-                walk(n, in_row)
+                walk(n, in_row, bound)
             return
         if not isinstance(node, dict):
             return
         # The collection binding itself is page-level — it is what opens the
         # row scope — so the node is judged before the scope is entered.
         row = in_row or _row_scope(node)
+        var = _repeat_var(node)
+        # NAMED, NOT BLANKET. `row` suppresses every unknown name inside it,
+        # which is right when the row's fields are unknowable. A Repeat says
+        # exactly what its variable is called, so only that one is bound and
+        # anything else inside it is still reported.
+        inner = bound | {var} if var else bound
         for value in node.values():
             if isinstance(value, str):
                 # `{{plants}}` and `{{record.title}}` both name `plants`/`record`.
@@ -969,9 +1005,10 @@ def dangling_bindings(schema: dict) -> list[str]:
                          for m in re.findall(r"\{\{([^}]+)\}\}", value)]
                 # Within a row, only a name the page actually declares is a
                 # page binding; anything else is a field of the row.
-                found.update(n for n in names if not row or n in declared)
+                found.update(n for n in names
+                             if n not in bound and (not row or n in declared))
             else:
-                walk(value, row)
+                walk(value, row, inner)
 
     walk(schema.get("root"))
     return sorted(n for n in found if n and n not in declared)
