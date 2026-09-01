@@ -187,3 +187,25 @@ def test_once_it_is_over_the_same_nodes_are_where_it_stopped(tmp_path):
     assert info["inFlight"] == []
     assert info["neverStarted"] == ["preview"]
     assert info["pending"] == []
+
+
+def test_a_node_that_finished_is_never_reported_as_pending(tmp_path):
+    """Service and projection nodes emitted `node:done` without `node:start`,
+    so `explain` listed a node that had RUN as still waiting to run — the exact
+    misreading this ledger exists to prevent.
+
+    Fixed at the source (all node kinds now emit a start) and again here, since
+    a ledger written by an older build must not produce a wrong verdict when
+    read by a newer one.
+    """
+    rid = "20260901-110000-svc001"
+    led = RunLedger(tmp_path, rid)
+    led.planned(["data_model", "apis", "preview"])
+    led.node_start("data_model")
+    led.node_done("data_model")
+    led.node_done("apis")            # done with no start, as older runs wrote
+
+    info = explain(tmp_path, rid)
+    assert "apis" in info["completed"]
+    assert "apis" not in info["pending"]
+    assert info["pending"] == ["preview"]

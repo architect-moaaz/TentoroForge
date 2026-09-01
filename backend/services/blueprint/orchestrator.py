@@ -893,6 +893,14 @@ def _run_wave(
     # pole is the only thing left to wait on.
     for key in wave:
         node = DAG[key]
+        # EVERY KIND OF NODE STARTS, not just the ones that call a model.
+        # `node:start` was emitted for agent nodes only, so a service or
+        # projection node that ran appeared in `done` and never in `started` —
+        # and `explain` therefore listed it as still pending. A node that ran
+        # reading as one that never began is the exact misreading this ledger
+        # exists to prevent.
+        if node.kind in ("service", "projection"):
+            _note(ledger, "node_start", key, 1)
         if node.kind == "service":
             handler = SERVICE_HANDLERS.get(key)
             if handler is None:

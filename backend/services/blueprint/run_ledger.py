@@ -245,8 +245,12 @@ def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]
         # "Never started" is only a finding once nothing more can start.
         "neverStarted": ([n for n in planned if n not in started]
                          if over else []),
+        # Not `planned - started`: a node can finish without this ledger having
+        # seen it start (older runs, or a writer that missed the event), and
+        # calling a finished node pending is worse than saying nothing.
         "pending": ([] if over else
-                    [n for n in planned if n not in started]),
+                    [n for n in planned
+                     if n not in started and n not in done and n not in failed]),
         "endedCleanly": bool(ended),
         "crashed": crashed,
         "events": len(events),
