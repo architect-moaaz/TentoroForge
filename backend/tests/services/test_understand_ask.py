@@ -69,7 +69,11 @@ def test_missing_keys_normalise_to_strings():
     """`run_iteration` calls .strip() on these."""
     out = understand_ask("x", CTX, provider=_says('{"target_file":"/plants"}'))
     assert out == {"answer": "", "clarification_needed": "", "target_file": "/plants",
-                   "element_label": "", "new_value": ""}
+                   "element_label": "", "new_value": "",
+                   # `run_iteration` dispatches on the verb and reads route and
+                   # widgets off the same dict. An absent verb still means
+                   # rename, which is what every turn used to be.
+                   "verb": "", "route": "", "widgets": []}
 
 
 def test_a_replacement_carries_the_value_to_write():
@@ -106,4 +110,5 @@ def test_every_early_return_carries_the_full_shape():
         understand_ask("x", CTX, provider=_says("not json")),
     ):
         assert set(out) == {"answer", "clarification_needed", "target_file",
-                            "element_label", "new_value"}
+                            "element_label", "new_value",
+                            "verb", "route", "widgets"}
