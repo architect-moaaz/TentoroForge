@@ -373,6 +373,45 @@ class InvalidPatternTemplate(ValueError):
     """A2UI proposed a template the component registry cannot render."""
 
 
+def _blamed(exc: Exception, svc: Any) -> Exception:
+    """The same failure, saying whose fault it is.
+
+    THE WHOLE DOCUMENT IS VALIDATED ON EVERY COMMIT, so a Blueprint that is
+    already invalid refuses every write — and the error names the section that
+    is broken, which is rarely the section being written. It reads exactly like
+    a rejected proposal.
+
+    Measured: a 50-page application carried `runtime.placeholders`, an empty
+    list left by a since-removed producer. Every write to that project had
+    failed ever since, and a composition that was demonstrably valid — it
+    passed `check_pattern_templates` — was reported refused. Two rounds of
+    investigation went into the composition before anyone validated the
+    untouched document, which fails in one line.
+
+    Nothing is repaired here and nothing is loosened. The document is still
+    invalid and the write still refused; the message stops pointing at the
+    wrong thing.
+    """
+    from services.blueprint.service import BlueprintInvalid
+
+    if not isinstance(exc, BlueprintInvalid):
+        return exc
+    try:
+        svc.validate()          # the restored document, as it was before
+    except BlueprintInvalid as prior:
+        # `BlueprintInvalid` takes the error LIST, not a message — its own
+        # __init__ builds the prose. Handing it a string makes each character
+        # an error, which is a 310-error report of one sentence.
+        return BlueprintInvalid([
+            "this Blueprint was ALREADY invalid before the change, so every "
+            "write to it fails. Nothing about the proposed change caused it.",
+            *list(getattr(prior, "errors", None) or [str(prior)]),
+        ])
+    except Exception:  # noqa: BLE001 — never mask the original failure
+        return exc
+    return exc
+
+
 def check_pattern_templates(result: AgentResult,
                             doc: dict | None = None) -> None:
     """Reject templates that do not compose against the real catalog.
@@ -556,12 +595,12 @@ def apply_agent_result(
             recorded = list(result.assumptions)
 
         svc.validate()
-    except Exception:
+    except Exception as exc:
         # Restored in place: callers and the orchestrator hold this dict, so
         # rebinding the attribute would leave them on the poisoned copy.
         svc.doc.clear()
         svc.doc.update(snapshot)
-        raise
+        raise _blamed(exc, svc) from exc
 
     if commit:
         svc.commit(
