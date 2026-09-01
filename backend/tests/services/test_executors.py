@@ -1418,3 +1418,31 @@ def test_the_compact_reply_schema_agrees_with_the_blueprint_contract():
         if f.get("references"):
             f["references"] = "ENTITY-002"
     jsonschema.Draft202012Validator(reach, registry=registry).validate(body)
+
+
+def test_database_is_tuned_but_the_deciding_nodes_are_not():
+    """`database` projects a data model that is already decided; the nodes the
+    rest of the run derives from keep their reasoning.
+
+    Measured: 224s a call at `high`, against 65s for ux_architecture and 102s
+    for design_system — both tuned when they were written. `security`,
+    `workflows` and `business_rules` stay high on purpose; the test above
+    protects them, and that objection was right about `data_model`, where the
+    fix turned out to be the reply's shape rather than its thinking.
+    """
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    assert r.for_task("database", "x").effort == "medium"
+    for node in ("security", "workflows", "business_rules", "data_model"):
+        assert r.for_task(node, "x").effort == "high", node
+
+
+def test_a_lone_fanout_can_run_at_full_width():
+    """WAVE_CONCURRENCY caps the wave; FANOUT_CONCURRENCY caps one node inside
+    it. If the wave cap were the lower of the two, raising the fan-out would be
+    half a change — page_layouts would still be throttled by the wave."""
+    from services.blueprint.orchestrator import (FANOUT_CONCURRENCY,
+                                                 WAVE_CONCURRENCY)
+
+    assert WAVE_CONCURRENCY >= FANOUT_CONCURRENCY

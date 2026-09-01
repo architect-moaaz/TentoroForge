@@ -1498,6 +1498,17 @@ EFFORT_BY_NODE: dict[str, str] = {
     # Structure over work already decided; the shape is tightly constrained.
     "ux_architecture": "medium",
     "design_system": "medium",
+    # Tables, columns and indexes over a data model that is already decided —
+    # the entity IS the table, and `data_model` did the thinking. Measured at
+    # 224s a call at `high`, against 65s for ux_architecture and 102s for
+    # design_system, both of which were tuned when they were written.
+    #
+    # `security`, `workflows` and `business_rules` are NOT tuned with it, and
+    # deliberately: test_effort_is_tiered_per_node_and_the_load_bearing_nodes_
+    # stay_high protects them because everything downstream derives from what
+    # they decide. That objection was right about `data_model` too — the fix
+    # there was the reply's shape, not its reasoning.
+    "database": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     "testing": "medium",
     # A short list of named third parties.

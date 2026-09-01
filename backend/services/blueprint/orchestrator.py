@@ -811,7 +811,20 @@ def _execute(
 #: tree, reading nothing another page wrote — and a serial fan-out was the
 #: dominant cost of a run: twenty-four pages at roughly seventy-five seconds
 #: each is half an hour inside a single node.
-FANOUT_CONCURRENCY = 6
+#:
+#: Raised from 6 on measurement. `page_layouts` averages 102s a page, and a
+#: legislative platform declared 44 of them: at 6 wide that is 8 rounds and
+#: ~14 minutes, the single largest block in a 40-minute build. At 12 it is 4
+#: rounds and ~7.
+#:
+#: Not raised further, and this is the ceiling worth defending rather than the
+#: number: past a dozen in flight the limit stops being this machine and starts
+#: being the provider's, and a rate-limited page fails as an UNBUILT ROUTE —
+#: `_unbuilt_pages` reports it, the run still succeeds, and the app 404s where
+#: a page should be. Trading correctness for minutes is the wrong trade. If
+#: several pages start failing at once, lower this: `RunReport.failed_because`
+#: names the exception, so the report distinguishes transport from content.
+FANOUT_CONCURRENCY = 12
 
 #: How many model calls a whole wave keeps in flight, across every node in it.
 #: A wave of four fanning-out nodes would otherwise open twenty-four
@@ -821,7 +834,12 @@ FANOUT_CONCURRENCY = 6
 #: multiply. If a run starts failing several nodes at the same level, lower
 #: this: ``RunReport.failed_because`` names the exception, so the report says
 #: whether the cause was transport or content.
-WAVE_CONCURRENCY = 8
+#:
+#: Moved with FANOUT_CONCURRENCY to keep the invariant this comment states —
+#: above it, so a lone fan-out still runs at full width. Leaving it at 8 while
+#: the fan-out asked for 12 would have capped `page_layouts` at 8 and made the
+#: raise half a change.
+WAVE_CONCURRENCY = 14
 
 
 @dataclass
