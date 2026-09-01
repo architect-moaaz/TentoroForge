@@ -1540,6 +1540,37 @@ EFFORT_BY_NODE: dict[str, str] = {
 }
 
 
+#: Nodes that have been MEASURED at the ceiling, and what to give them.
+#:
+#: `max_tokens` caps thinking and answer together, so a node can truncate
+#: without its answer being large — `data_model` emits ~10,400 tokens of JSON
+#: after ~18,600 of reasoning. Truncation is the expensive failure: the reply
+#: stops mid-JSON, fails to parse, burns a repair attempt, and on a fanning
+#: node costs a page. Unused headroom is free; a truncated reply is not.
+#:
+#: From data/build-usage.jsonl, output tokens per call over one night:
+#:
+#:     data_model       32,000 reached 16 times   (mostly pre-compact-reply)
+#:     page_contracts   32,000 reached  1 time
+#:     database         32,000 reached  1 time
+#:     security         32,000 reached  1 time
+#:     workflows        32,000 reached  1 time
+#:
+#: Everything else peaked at 65% or below and is left alone: a ceiling nobody
+#: approaches is not insurance, it is just a bigger number to be wrong about.
+#:
+#: 64000 is the value `__post_init__` already uses for xhigh/max effort, so
+#: this is the established headroom rather than a new one. These nodes are
+#: above STREAM_ABOVE either way, so they were already streaming.
+MAX_TOKENS_BY_NODE: dict[str, int] = {
+    "data_model": 64000,
+    "page_contracts": 64000,
+    "database": 64000,
+    "security": 64000,
+    "workflows": 64000,
+}
+
+
 def tiered_router(
     default_effort: str = "high", model: str = DEFAULT_MODEL,
 ) -> "ModelRouter":
@@ -1548,11 +1579,16 @@ def tiered_router(
     Same model everywhere: this isolates the effort question, so a regression
     can be attributed to thinking budget rather than to a model swap.
     """
+    tuned = set(EFFORT_BY_NODE) | set(MAX_TOKENS_BY_NODE)
     return ModelRouter(
         default=AnthropicModel(model=model, effort=default_effort),
         by_node={
-            node: AnthropicModel(model=model, effort=effort)
-            for node, effort in EFFORT_BY_NODE.items()
+            node: AnthropicModel(
+                model=model,
+                effort=EFFORT_BY_NODE.get(node, default_effort),
+                max_tokens=MAX_TOKENS_BY_NODE.get(node, DEFAULT_MAX_TOKENS),
+            )
+            for node in tuned
         },
     )
 

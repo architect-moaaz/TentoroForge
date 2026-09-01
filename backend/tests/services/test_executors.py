@@ -1535,3 +1535,43 @@ def test_a_brief_without_phasing_is_unaffected():
     prompt = page_slot_prompt(
         {"application": {"description": "A noticeboard for a community centre."}})
     assert "When the brief names no phases, this does not apply" in prompt
+
+
+def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
+    """`max_tokens` caps thinking AND answer together, so a node can truncate
+    without its answer being large — data_model emits ~10,400 tokens of JSON
+    after ~18,600 of reasoning.
+
+    Five nodes were measured at exactly 32,000 output tokens in one night's
+    runs. Everything else peaked at 65% or below and is left alone: a ceiling
+    nobody approaches is not insurance, it is a bigger number to be wrong
+    about.
+    """
+    from services.blueprint.executors import (DEFAULT_MAX_TOKENS,
+                                              MAX_TOKENS_BY_NODE, tiered_router)
+
+    r = tiered_router()
+    for node in ("data_model", "page_contracts", "database", "security",
+                 "workflows"):
+        assert r.for_task(node, "x").max_tokens == 64000, node
+    for node in ("requirements", "ux_architecture", "integrations",
+                 "page_layouts", "design_system", "testing"):
+        assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
+    assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
+                                       "database", "security", "workflows"}
+
+
+def test_raising_the_ceiling_did_not_disturb_effort():
+    """The router now builds its by_node map from the union of two dicts. A node
+    tuned for tokens but not effort must keep the default, and vice versa."""
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    # tuned for tokens only — effort must stay at the default
+    assert r.for_task("workflows", "x").effort == "high"
+    assert r.for_task("security", "x").effort == "high"
+    # tuned for both
+    assert r.for_task("database", "x").effort == "medium"
+    # tuned for effort only — ceiling must stay default
+    assert r.for_task("integrations", "x").effort == "low"
+    assert r.for_task("ux_architecture", "x").effort == "medium"
