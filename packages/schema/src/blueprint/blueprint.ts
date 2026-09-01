@@ -665,8 +665,19 @@ export const PageLayout = z.object({
    *
    * Empty on layouts written before this was recorded, which is honest — it
    * means unknown, not "the fallback".
+   *
+   * THREE CAN, NOT TWO. `blueprint/landing_page` composes the entry point
+   * deterministically when nothing else did — an application whose front door
+   * 404s is not a working application with one page missing, so that one route
+   * gets a layout assembled from navigation rather than none at all.
+   *
+   * It records `deterministic`, exactly so it is legible as the third case,
+   * and this enum did not know the word. The layout was written and the whole
+   * document then failed contract validation — which, since every commit
+   * validates the whole document, refuses every later write to that project.
+   * The composer was added and the vocabulary it writes in was not.
    */
-  composedBy: z.enum(["a2ui", "agent", ""]).default(""),
+  composedBy: z.enum(["a2ui", "agent", "deterministic", ""]).default(""),
   ...artifactBase,
 });
 

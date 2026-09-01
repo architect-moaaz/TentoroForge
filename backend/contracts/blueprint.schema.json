@@ -1742,6 +1742,7 @@
             "enum": [
               "a2ui",
               "agent",
+              "deterministic",
               ""
             ],
             "default": ""

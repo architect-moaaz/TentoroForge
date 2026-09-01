@@ -1210,6 +1210,35 @@ def build_prompt(
             )
         return system, user
 
+    if node == "workflows":
+        # THE PAGES THAT HAVE NOWHERE TO SUBMIT, named. This agent already
+        # reads `pages` (§101) and authored thirty-five good workflows without
+        # noticing that eleven create pages had nothing to call: it was asked
+        # for the processes the requirements describe, and it delivered them.
+        # Nothing asked whether the pages that exist can do anything.
+        #
+        # Slots for the same reason `page_contracts` gets them — a sentence
+        # saying "cover the create pages" competes with the rest of the
+        # prompt, and a list of the specific routes does not.
+        from services.blueprint.workflow_slots import (
+            workflow_slot_prompt, workflow_slots,
+        )
+
+        slots = workflow_slots(doc)
+        user = (
+            "Here is the Blueprint.\n\n```json\n"
+            + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+            + "\n```"
+        )
+        if slots:
+            user += (
+                "\n\n" + workflow_slot_prompt(doc) + "\n\n```json\n"
+                + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
+            )
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
+
     if node == "page_contracts":
         # The answer space is the slot list, not "whatever pages you think of".
         # Three paragraphs of prose telling this agent that a filter belongs in
