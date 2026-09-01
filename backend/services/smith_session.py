@@ -202,6 +202,61 @@ class SmithSession:
 
     # ---- Iteration flow (§5.2 / §7 / §11) -------------------------------
 
+    def _compose(self, verb: str, understanding: dict,
+                 user_message: str) -> "TurnResult":
+        """Compose a screen, or add sections to one, through the real agent.
+
+        `services.smith.compose` builds the same TaskSpec the orchestrator
+        builds and hands it to the same executor, so a page Smith composes and
+        a page the build composed come from one code path — then commits it
+        through `apply_change` so the Blueprint stays the record.
+        """
+        from services.blueprint.service import BlueprintService
+        from services.smith.compose import ComposeError, add_widgets, compose_route
+
+        route = str(understanding.get("route") or "").strip()
+        try:
+            svc = BlueprintService.load(output_dir=str(self.output_dir))
+        except FileNotFoundError:
+            return TurnResult(
+                status="needs_user",
+                answer=("This project has no definition yet, so there is no "
+                        "screen to compose. Describe what you want built and "
+                        "I will define it first."),
+            )
+
+        app_root = str(Path(self.output_dir) / "app")
+        try:
+            if verb == "add_widgets":
+                widgets = [str(w) for w in (understanding.get("widgets") or [])]
+                result = add_widgets(svc, route, widgets, app_root=app_root,
+                                     request=user_message)
+                did = f"added {', '.join(widgets)} to {route}"
+            else:
+                result = compose_route(svc, route, app_root=app_root,
+                                       request=user_message)
+                did = f"composed {route}"
+        except ComposeError as exc:
+            # The composer declining is a real outcome. Saying so beats
+            # reporting success with nothing behind it, which is the failure
+            # this whole path is a reaction to.
+            return TurnResult(status="needs_user", answer=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[smith] %s failed", verb)
+            return TurnResult(
+                status="needs_user",
+                answer=f"I tried to {verb.replace('_', ' ')} {route} and it "
+                       f"failed: {type(exc).__name__}: {exc}",
+            )
+
+        touched = sorted(getattr(result, "artifacts", None) or [])
+        return TurnResult(
+            status="resolved",
+            answer=(f"I {did}. " + (f"Updated: {', '.join(touched[:6])}."
+                                    if touched else
+                                    "The Blueprint and the app were updated.")),
+        )
+
     def run_iteration(self, user_message: str,
                       history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
@@ -257,6 +312,43 @@ class SmithSession:
         if clarification:
             return TurnResult(status="asked", answer=clarification)
 
+        # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
+        # five required fields, so a composition could not be expressed at all.
+        # Requirements are per verb now; see services/smith/verbs.
+        from services.smith.verbs import (VERB_HELP, is_known, missing_fields,
+                                          verb_of)
+
+        verb = verb_of(understanding)
+        if not is_known(understanding):
+            return TurnResult(
+                status="needs_user",
+                answer=("I did not recognise that as something I can do. I can "
+                        + "; ".join(f"{v} — {h.split('.')[0].lower()}"
+                                    for v, h in VERB_HELP.items()) + "."),
+            )
+        # Only the new verbs are gated here. `rename` keeps the path it always
+        # had — its fields are enforced by `understand_ask`, and re-checking
+        # them in the turn made a call that used to reach the dispatcher stop
+        # short of it.
+        if verb != "rename":
+            gaps = missing_fields(understanding)
+            if gaps:
+                return TurnResult(
+                    status="asked",
+                    answer=(f"I can do that, I just need {' and '.join(gaps)}. "
+                            + VERB_HELP.get(verb, "")),
+                )
+
+        if verb in ("compose_route", "add_widgets"):
+            return self._compose(verb, understanding, user_message)
+        if verb == "rebuild":
+            return TurnResult(
+                status="needs_user",
+                answer=("A rebuild regenerates the whole application from its "
+                        "definition. Say \u201crebuild\u201d again to confirm "
+                        "and I will start it."),
+            )
+
         target_file = (understanding.get("target_file") or "").strip()
         element_label = (understanding.get("element_label") or "").strip()
         if not target_file:
@@ -266,35 +358,11 @@ class SmithSession:
                        "should I edit? A route path or a screen name works.",
             )
 
-        # TWO DIFFERENT FACTS, AND THEY HAD ONE SENTENCE BETWEEN THEM.
-        #
-        # `move is None` means either "I looked for that label and the state
-        # already matches" or "what you asked for is not a move I have". The
-        # dispatcher implements ONE move — retitling an element — and returns
-        # None at its first guard for anything else, so a request to build a
-        # dashboard came back as "the current state already matches".
-        #
-        # Observed: a user asked four times for a dashboard at `/` with five
-        # named widgets, and was told four times that nothing needed changing —
-        # including once directly after Smith had itself offered to build it
-        # and been told "yes please". Claiming the state matches when the truth
-        # is "I cannot do that yet" sends someone to re-describe work that was
-        # never going to be picked up.
-        new_value = (understanding.get("new_value") or "").strip()
-        if not element_label or not new_value:
-            return TurnResult(
-                status="needs_user",
-                answer=(
-                    "I can't make that change from here yet. Editing an "
-                    "existing application currently covers renaming things — "
-                    "tell me the current wording and what it should say "
-                    "instead and I will change it.\n\n"
-                    "Building a new screen, or adding widgets to one, is a "
-                    "generation rather than an edit: say \u201crebuild\u201d "
-                    "and I will define it and run the build again."
-                ),
-            )
-
+        # The "is this even a rename?" question is the VERB's now, decided
+        # above, so it is not re-litigated here. f1a601f checked `new_value`
+        # at this point and stopped turns that carry the rename shape without
+        # it — the dispatcher derives that field, and an injected mover does
+        # not need it at all.
         move = self._move(understanding, self.output_dir)
         if move is None:
             return TurnResult(

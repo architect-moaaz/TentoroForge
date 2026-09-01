@@ -373,26 +373,28 @@ def test_a_request_smith_has_no_move_for_is_not_reported_as_no_change():
     """"I don't have that move" and "the state already matches" are different
     facts and had one sentence between them.
 
-    The dispatcher implements one move — retitling an element — and returns
-    None at its first guard for anything else. So a user asking four times for
-    a dashboard at `/` with five named widgets was told four times that nothing
-    needed changing, once directly after Smith had offered to build it and been
-    told "yes please".
+    A user asked four times for a dashboard at `/` with five named widgets and
+    was told four times that nothing needed changing — once directly after
+    Smith had offered to build it and been told "yes please".
+
+    The distinction is the VERB now: a request that is not a rename dispatches
+    on its own verb instead of falling through the rename path to a no-op.
     """
-    import inspect
+    from pathlib import Path as _P
 
     from services import smith_session
+    from services.smith.verbs import REQUIRED_BY_VERB
 
-    src = inspect.getsource(smith_session.SmithSession.run_iteration) \
-        if hasattr(smith_session, "SmithSession") else \
-        Path(smith_session.__file__).read_text(encoding="utf-8")
+    # A composition is expressible, and needs a route rather than a label.
+    assert "compose_route" in REQUIRED_BY_VERB
+    assert REQUIRED_BY_VERB["compose_route"] == {"route"}
+    assert "element_label" not in REQUIRED_BY_VERB["compose_route"]
 
-    # The no-move branch must fire before the dispatcher is consulted, and must
-    # not claim the state matches.
-    assert "I can't make that change from here yet" in src
-    assert "not element_label or not new_value" in src
-    # And the genuine no-match message must name what it looked for, so it
-    # cannot be mistaken for the other case.
+    src = _P(smith_session.__file__).read_text(encoding="utf-8")
+    # The turn dispatches on the verb before it reaches the rename path.
+    assert 'if verb in ("compose_route", "add_widgets")' in src
+    # And a dispatcher that ran and found nothing names what it searched for,
+    # so it cannot be mistaken for "I had no move".
     assert "could not find it" in src
 
 

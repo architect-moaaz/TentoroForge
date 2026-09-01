@@ -534,18 +534,27 @@ TOOL_CATALOG: list[dict] = [
 
     # Orchestrator-era tools --------------------------------------------
     {"name": "understand_ask",
-     "signature": "understand_ask({screen, element_label, "
-                  "current_behavior, desired_behavior, target_file, "
-                  "target_node_hint?, confidence?, clarification_needed?})",
+     "signature": "understand_ask({verb, ...fields for that verb, "
+                  "confidence?, clarification_needed?})",
      "desc": "REQUIRED first tool for any change ask (skip for "
-             "greetings/meta questions). Extracts the user's ask into "
-             "a structured target that the orchestrator will later "
-             "verify your diff against. If you can't confidently fill "
-             "in `target_file` or `element_label`, use read_page / "
-             "list_pages first; if the ask itself is ambiguous, set "
-             "`clarification_needed` and follow up with ask_user. Only "
-             "SKIP understand_ask for greeting/explain turns — every "
-             "edit turn is gated on it."},
+             "greetings/meta questions). CHOOSE THE VERB FIRST — each "
+             "needs different facts, and a request forced into the "
+             "wrong one fails as 'nothing to change':\n"
+             "  rename        {screen, element_label, current_behavior, "
+             "desired_behavior, target_file} — change the wording of "
+             "something that exists.\n"
+             "  compose_route {route} — build or rebuild the screen at a "
+             "route. Use this when a route renders nothing.\n"
+             "  add_widgets   {route, widgets:[...]} — add named sections "
+             "to a screen: 'put upcoming sessions and quorum status on "
+             "the dashboard'.\n"
+             "  rebuild       {} — regenerate the whole application from "
+             "its definition.\n"
+             "Omitting `verb` means rename. If you can't confidently fill "
+             "the verb's fields, use read_page / list_pages first; if the "
+             "ask itself is ambiguous, set `clarification_needed` and "
+             "follow up with ask_user. Only SKIP understand_ask for "
+             "greeting/explain turns — every edit turn is gated on it."},
     {"name": "think",
      "signature": "think(thought) -> {recorded, chars}",
      "desc": "Private reasoning step. No-op side-effects; the thought "
@@ -1218,8 +1227,20 @@ def _smith_understand_ask(args: dict) -> dict:
     orchestrator to ``ask_user`` on low-confidence asks."""
     if not isinstance(args, dict):
         return {"recorded": False, "error": "understand_ask requires an object arg"}
-    missing = [k for k in _UNDERSTAND_ASK_REQUIRED
-               if not (isinstance(args.get(k), str) and args.get(k).strip())]
+    # PER VERB, NOT ONE SHAPE. These five fields describe a rename, and they
+    # were required of every request — so "build the dashboard at /" could not
+    # be expressed here at all. The model either failed validation or invented
+    # an `element_label`, and the dispatcher then found nothing to rename and
+    # reported that the current state already matched.
+    from services.smith.verbs import missing_fields, is_known, VERB_HELP
+
+    if not is_known(args):
+        return {
+            "recorded": False,
+            "error": ("unknown verb. Choose one of: "
+                      + "; ".join(f"{v} — {h}" for v, h in VERB_HELP.items())),
+        }
+    missing = missing_fields(args)
     clarification = args.get("clarification_needed")
     if missing and not (isinstance(clarification, str) and clarification.strip()):
         return {
@@ -1239,6 +1260,11 @@ def _smith_understand_ask(args: dict) -> dict:
     return {
         "recorded": True,
         "understanding": {
+            # What kind of change this is. Absent means `rename`, which is what
+            # every turn used to be.
+            "verb": (str(args.get("verb") or "").strip().lower() or "rename"),
+            "route": args.get("route"),
+            "widgets": args.get("widgets") or [],
             "screen": args.get("screen"),
             "element_label": args.get("element_label"),
             "current_behavior": args.get("current_behavior"),
