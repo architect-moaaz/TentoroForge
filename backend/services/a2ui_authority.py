@@ -506,7 +506,8 @@ def build_composition_guidance(root: Path,
 
 
 def build_domain_context(root: Path, registry: dict | None = None,
-                         page_id: str = "", shared_context: str = "") -> str:
+                         page_id: str = "", shared_context: str = "",
+                         feedback: str = "") -> str:
     """The entities, columns and workflows a composition may bind to.
 
     Came back empty for every Blueprint-pipeline page — it read plan.json
@@ -542,7 +543,11 @@ def build_domain_context(root: Path, registry: dict | None = None,
     mine = [w for w in flows
             if page_id and page_id in (w.get("launchedFrom") or [])
             and w.get("trigger") == "manual"]
-    if not lines and not mine and not shared_context:
+    # A refusal is worth sending on its own. Without it in this guard, a
+    # composition on an application whose registry came back empty would be
+    # refused and then recomposed knowing nothing — which is the case most
+    # likely to be refused twice.
+    if not lines and not mine and not shared_context and not feedback.strip():
         return ""
 
     parts = []
@@ -585,6 +590,32 @@ def build_domain_context(root: Path, registry: dict | None = None,
                 + (f" — {w['purpose']}" if w.get("purpose") else "")
                 for w in mine
             )
+        )
+
+    # WHY THE LAST ATTEMPT WAS THROWN AWAY. The orchestrator records the
+    # validator's own message and threads it into the retry's TaskSpec, and the
+    # authoring agent's prompt reads it — but a `page_layouts` retry hands the
+    # page back to A2UI first, and A2UI was told nothing. So a composition
+    # refused for `'items' is a required property` was recomposed by a composer
+    # with no idea it had been refused, which is the definition of a wasted
+    # retry (§102: a retry that is not told what went wrong is the same request
+    # again).
+    #
+    # IN THE DOMAIN CONTEXT, NOT THE REQUIREMENT, and that is the whole reason
+    # it is here rather than in `build_requirement`. The A2UI server scans the
+    # REQUIREMENT for capability keywords and makes every match mandatory
+    # (tools/a2ui-mcp/checks.py — `req = (requirement or "").lower()`; the
+    # domain context is not read). A rejection that happened to say "table" or
+    # "chart" would silently become a demand on the retry, so the message
+    # explaining the last failure would cause the next one.
+    if feedback.strip():
+        parts.append(
+            "\nWHAT WAS WRONG WITH YOUR LAST ATTEMPT AT THIS SCREEN. It was "
+            "composed and then refused for this:\n\n"
+            + feedback.strip()
+            + "\n\nCompose the screen again without that fault. Everything "
+            "else about the screen is still yours to decide — this names one "
+            "thing that was wrong, not a specification."
         )
     return "\n".join(parts)
 
@@ -796,6 +827,7 @@ def compose_page_via_a2ui(
     registry: dict | None = None,
     presentation: str = "page",
     progress: Any = None,
+    feedback: str = "",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -857,7 +889,8 @@ def compose_page_via_a2ui(
                                                          presentation),
                                        build_domain_context(root, registry,
                                                             page_id,
-                                                            shared_context))
+                                                            shared_context,
+                                                            feedback))
         except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
             last_exc, payload = exc, None
         else:

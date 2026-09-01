@@ -1706,6 +1706,12 @@ def make_executor(
                 registry=registry_from_blueprint(svc.doc),
                 presentation=page.get("presentation") or "page",
                 progress=reasoning,
+                # The retry's whole point. `spec.feedback` carries the
+                # validator's message from the attempt that was refused, and
+                # this path re-composed with A2UI before the authoring agent
+                # could read it — so on a page A2UI owns, the correction
+                # reached nobody.
+                feedback=spec.feedback or "",
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
