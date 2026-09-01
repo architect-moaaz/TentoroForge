@@ -28,6 +28,8 @@ import logging
 from pathlib import Path
 from typing import Any, Sequence
 
+from services.llm_client import tell
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +96,7 @@ def compose_route(
                     agent="a2ui_pages", attempt=1, subject=page["id"],
                     feedback=None)
 
+    tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
     result = run(spec)
     if not getattr(result, "proposals", None):
         # The composer declining is a real outcome and says so. Reporting it as
@@ -104,6 +107,12 @@ def compose_route(
             "Nothing has been changed."
         )
 
+    # THE EXECUTOR IS WHAT MAKES THE CHANGE REACH THE APP. `apply_change` runs
+    # the §72 sub-DAG only `if run_agents and executor is not None`, and this
+    # passed none — so the layout was committed to the Blueprint, the version
+    # bumped, the turn reported success, and the frontend was never projected.
+    # The route stayed blank. Committing without regenerating is exactly the
+    # divergence §115 refuses, arrived at by omitting an argument.
     return apply_change(
         svc,
         request or f"compose the screen at {page.get('route')}",
@@ -111,7 +120,29 @@ def compose_route(
         interpretation=f"recompose {page.get('route')} ({page.get('pattern')})",
         agent="smith",
         app_root=app_root,
+        executor=_traced(run, reasoning),
     )
+
+
+def _traced(executor: Any, reasoning: Any) -> Any:
+    """The executor, saying which node it is on.
+
+    Deterministic work, not reasoning — the sub-DAG re-projects the frontend
+    from the committed Blueprint. It is the last stretch of a compose turn and
+    it was the quiet one: composition reported itself, then the panel went
+    still for the part that actually puts the page on disk.
+
+    The same wrapper shape `_run_dag` uses for a full build, so a node reports
+    itself identically whether the run came from a build or from a sentence in
+    a conversation.
+    """
+    def _go(spec: Any) -> Any:
+        tell(reasoning, f"Regenerating {spec.node}.", "step", spec.node)
+        out = executor(spec)
+        tell(reasoning, f"{spec.node} done.", "step", spec.node)
+        return out
+
+    return _go
 
 
 def add_widgets(

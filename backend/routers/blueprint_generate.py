@@ -774,7 +774,8 @@ async def smith_chat(
                 project_id=str(project_id), output_dir=str(output_dir),
                 message=req.message,
                 history=[(t.role, t.text) for t in req.history if t.text],
-                reasoning_fn=lambda text: emit("thought", {"text": text}),
+                reasoning_fn=lambda text, kind="reasoning", node="": emit(
+                    "thought", {"text": text, "kind": kind, "node": node}),
             ))
             emit("message", {
                 "text": turn_result.answer,

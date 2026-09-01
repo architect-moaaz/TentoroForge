@@ -21,10 +21,27 @@ describe("thought events", () => {
   it("collects reasoning in arrival order", () => {
     let s = reduce(EMPTY, "thought", { text: "The route / has no layout." });
     s = reduce(s, "thought", { text: "So this is a composition." });
-    expect(s.thoughts).toEqual([
+    expect(s.thoughts.map((t) => t.text)).toEqual([
       "The route / has no layout.",
       "So this is a composition.",
     ]);
+    expect(s.thoughts.every((t) => t.kind === "reasoning")).toBe(true);
+  });
+
+  it("keeps deterministic steps distinct from reasoning", () => {
+    // "Regenerating the frontend" is not something anybody thought, and
+    // rendering the two alike would be a small lie told on every turn.
+    const s = reduce(EMPTY, "thought", {
+      text: "Regenerating frontend.", kind: "step", node: "frontend",
+    });
+    expect(s.thoughts).toEqual([
+      { kind: "step", text: "Regenerating frontend.", node: "frontend" },
+    ]);
+  });
+
+  it("carries no node when the emitter sent none", () => {
+    const s = reduce(EMPTY, "thought", { text: "Thinking about it." });
+    expect(s.thoughts[0]?.node).toBeUndefined();
   });
 
   it("drops empty reasoning rather than rendering a blank line", () => {
@@ -37,6 +54,7 @@ describe("thought events", () => {
     // the server does not write it to the stored transcript either.
     const s = reduce(EMPTY, "thought", { text: "Considering the route." });
     expect(s.messages).toEqual([]);
+    expect(s.thoughts).toHaveLength(1);
   });
 
   it("clears the reasoning once Smith speaks", () => {

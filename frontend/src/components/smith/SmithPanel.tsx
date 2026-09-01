@@ -52,6 +52,7 @@ import {
   useBlueprintRun,
   type RunNode,
   type RunEvent as RunEventT,
+  type RunThought,
   type BlueprintRun,
 } from "@/hooks/useBlueprintRun";
 
@@ -1081,19 +1082,40 @@ function StageList({
  * BUILD PROGRESS show observable status rather than model reasoning, and the
  * stage list still does exactly that; this is the conversation.
  */
-function ThinkingTrail({ thoughts, busy }: { thoughts: string[]; busy: boolean }) {
+function ThinkingTrail({
+  thoughts,
+  busy,
+}: {
+  thoughts: RunThought[];
+  busy: boolean;
+}) {
   if (!thoughts.length) return null;
+  const last = thoughts[thoughts.length - 1];
   return (
     <div className="max-w-[90%] space-y-1 border-l-2 border-muted pl-3">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-        <span className="font-medium">Thinking</span>
+        {/* Named for what is happening now: a turn moves from thinking to
+            doing, and a "Thinking" header over "Regenerating the frontend"
+            describes the wrong half of it. */}
+        <span className="font-medium">
+          {last?.kind === "step" ? "Working" : "Thinking"}
+        </span>
       </div>
-      {thoughts.map((t, i) => (
-        <p key={i} className="whitespace-pre-wrap text-xs italic text-muted-foreground">
-          {t}
-        </p>
-      ))}
+      {thoughts.map((t, i) =>
+        t.kind === "step" ? (
+          // Deterministic work, so it reads as status rather than thought —
+          // upright, and labelled from the same table the stage list uses.
+          <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Circle className="h-2 w-2 shrink-0 fill-current" />
+            {t.node ? labelFor(t.node) : t.text}
+          </p>
+        ) : (
+          <p key={i} className="whitespace-pre-wrap text-xs italic text-muted-foreground">
+            {t.text}
+          </p>
+        ),
+      )}
     </div>
   );
 }

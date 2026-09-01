@@ -122,13 +122,21 @@ def test_a_session_with_a_sink_hands_it_to_the_seam():
 
 
 def test_the_router_gives_chat_v2_a_sink_that_emits():
-    """The hop that was missing on the other endpoint for the whole session."""
+    """The hop that was missing on the other endpoint for the whole session.
+
+    Asserted loosely on purpose: the sink grew a `kind` and a `node` when the
+    sub-DAG started reporting itself, and a test pinned to the lambda's exact
+    spelling fails for a change that is entirely correct. What must hold is
+    that chat_v2 is handed a sink and that the sink emits a thought event.
+    """
     import inspect
 
     import routers.blueprint_generate as bg
 
     src = inspect.getsource(bg.smith_chat)
-    assert 'reasoning_fn=lambda text: emit("thought"' in src
+    assert "reasoning_fn=" in src, "chat_v2 is handed no sink"
+    assert 'emit(\n                    "thought"' in src or \
+           'emit("thought"' in src, "the sink emits no thought event"
 
 
 def test_chat_v2_passes_the_sink_into_the_session():

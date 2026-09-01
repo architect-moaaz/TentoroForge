@@ -353,6 +353,42 @@ def thinking_block_for(model: str) -> dict | None:
     return {"type": "enabled", "budget_tokens": THINKING_HEADROOM_TOKENS}
 
 
+def tell(sink: Any, text: str, kind: str = "reasoning",
+         node: str = "") -> None:
+    """Report one line to whoever is watching, if anyone is.
+
+    TWO KINDS ON ONE CHANNEL. `reasoning` is the model thinking; `step` is
+    deterministic work naming itself — "Regenerating the frontend". They read
+    differently and must LOOK different, or the projection step renders as
+    something the model thought, which is a small lie told repeatedly.
+
+    A sink taking one argument gets one argument. Every existing caller passes
+    `list.append` or a plain lambda, and none of them should have to grow a
+    parameter to say they only ever hear reasoning.
+    """
+    if sink is None:
+        return
+    try:
+        arity = _arity(sink)
+        if arity >= 3:
+            sink(text, kind, node)
+        elif arity == 2:
+            sink(text, kind)
+        else:
+            sink(text)
+    except Exception:  # noqa: BLE001 — reporting the work must never fail it
+        pass
+
+
+def _arity(fn: Any) -> int:
+    import inspect
+
+    try:
+        return len(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return 1
+
+
 class ReasoningSink:
     """Thinking deltas in, readable lines out.
 

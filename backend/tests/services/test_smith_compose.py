@@ -102,3 +102,48 @@ def test_add_widgets_records_intent_in_the_contract_before_composing():
     # The task the page already had is kept, not replaced.
     assert "See what needs attention" in saved["body"]["primaryTasks"]
     assert calls["subject"] == "PAGE-001"
+
+
+# ── the change has to reach the application ─────────────────────────────
+
+def test_the_composition_is_regenerated_not_just_committed():
+    """`apply_change` runs the §72 sub-DAG only `if run_agents and executor is
+    not None`, and this passed none — so the layout was committed, the version
+    bumped, the turn reported success, and the frontend was never projected.
+    The route stayed blank.
+
+    Committing without regenerating is the divergence §115 refuses, reached by
+    omitting an argument.
+    """
+    import inspect
+
+    from services.smith.compose import compose_route
+
+    src = inspect.getsource(compose_route)
+    assert "executor=_traced(run, reasoning)" in src
+
+
+def test_each_regenerated_node_says_so():
+    """The sub-DAG is the last stretch of a compose turn and it was the quiet
+    one: composition reported itself, then the panel went still for the part
+    that puts the page on disk."""
+    from types import SimpleNamespace
+
+    from services.smith.compose import _traced
+
+    said: list[tuple] = []
+    run = _traced(lambda _spec: "RESULT",
+                  lambda t, kind="reasoning", node="": said.append((kind, node, t)))
+
+    assert run(SimpleNamespace(node="frontend")) == "RESULT"
+    assert [k for k, _n, _t in said] == ["step", "step"], "reported as reasoning"
+    assert [n for _k, n, _t in said] == ["frontend", "frontend"]
+
+
+def test_a_run_with_nobody_watching_is_unchanged():
+    """Every batch caller passes no sink; the wrapper must be transparent."""
+    from types import SimpleNamespace
+
+    from services.smith.compose import _traced
+
+    assert _traced(lambda _s: 7, None)(SimpleNamespace(node="frontend")) == 7

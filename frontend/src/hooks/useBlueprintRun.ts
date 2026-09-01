@@ -60,6 +60,22 @@ export interface RunEvent {
   detail: string;
 }
 
+/**
+ * One line of Smith working, as it worked.
+ *
+ * `reasoning` is the model thinking. `step` is deterministic work naming
+ * itself — "Regenerating the frontend" — which is not something anybody
+ * thought, and rendering the two alike would be a small lie told on every
+ * turn. §111 wants build progress shown as observable status; `node` carries
+ * the DAG key so a step can be labelled from the same table the stage list
+ * uses.
+ */
+export interface RunThought {
+  kind: "reasoning" | "step";
+  text: string;
+  node?: string;
+}
+
 /** Something Smith said, in the order it said it. */
 export interface RunMessage {
   text: string;
@@ -81,7 +97,7 @@ export interface BlueprintRun {
    * reasoning behind the turn in flight, and the transcript keeps only what
    * Smith actually said.
    */
-  thoughts: string[];
+  thoughts: RunThought[];
   /** Every event, in order. The engine's own account of the run. */
   events: RunEvent[];
   /** Ordered as the orchestrator planned them, not as they finish. */
@@ -358,9 +374,15 @@ export function reduce(
       // Smith's reasoning, as it arrives. Not folded into `messages`: it is
       // how the answer was reached, not part of the conversation, and the
       // server does not write it to the transcript either.
-      return String(data.text ?? "").trim()
-        ? { ...prev, thoughts: [...prev.thoughts, String(data.text)] }
-        : prev;
+      if (!String(data.text ?? "").trim()) return prev;
+      return {
+        ...prev,
+        thoughts: [...prev.thoughts, {
+          kind: data.kind === "step" ? "step" : "reasoning",
+          text: String(data.text),
+          node: String(data.node ?? "") || undefined,
+        }],
+      };
 
     case "message":
       // What Smith is doing, in its words. `asked` turns arrive this way too,
