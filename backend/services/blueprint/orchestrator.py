@@ -665,6 +665,41 @@ class RunReport:
         return not self.failed and not self.blocked
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _run_id() -> str:
+    """A run's own name. Time-ordered so `runs()` sorts newest-first without
+    reading any of them."""
+    import time as _t
+    import uuid as _u
+
+    return _t.strftime("%Y%m%d-%H%M%S", _t.gmtime()) + "-" + _u.uuid4().hex[:6]
+
+
+def _note(ledger: Any, method: str, *args: Any) -> None:
+    """Record if there is a ledger. Never raise: the ledger describes the run,
+    it does not get to end it.
+
+    A bare `except` here hid the ledger's own bug — `node_done` took its second
+    argument keyword-only, every call raised TypeError, and the ledger recorded
+    plans and failures but never a start or a completion. A programming error
+    in the recorder is not the same as the recorder being unavailable, so the
+    first is logged and only the second is quiet.
+    """
+    if ledger is None:
+        return
+    try:
+        getattr(ledger, method)(*args)
+    except TypeError as exc:  # a wrong call is OUR bug, not a bad disk
+        logger.warning("[ledger] %s(%s) rejected: %s", method,
+                       ", ".join(map(repr, args))[:80], exc)
+    except Exception:  # noqa: BLE001 — disk full, read-only volume, …
+        pass
+
+
 Executor = Callable[[TaskSpec], AgentResult]
 
 
@@ -694,11 +729,49 @@ def run(
     report = RunReport()
     done: set[str] = set()
 
+    # THE ACCOUNT OF THIS RUN, ON DISK, AS IT GOES. `report` is complete and
+    # then discarded when this returns, so a run that ends abnormally leaves
+    # nothing to read. See services/blueprint/run_ledger.
+    from services.blueprint.run_ledger import RunLedger
+
+    ledger = RunLedger(svc.output_dir, _run_id(), phase="build" if commit else "dry")
+    ledger.planned(order)
+
     # §28's graph declares which nodes are independent; running them one after
     # another threw that declaration away. A *wave* is the set of nodes whose
     # in-plan dependencies are all complete — the same shape `levels` computes
     # for the whole DAG, recomputed here because a plan is a subset and because
     # a node that failed must not let its dependents into a later wave.
+    remaining = list(order)
+    try:
+        return _execute(svc, executor, order, in_plan, report, done, ledger,
+                        max_attempts=max_attempts, commit=commit,
+                        user_request=user_request, app_root=app_root)
+    except BaseException as exc:
+        # THE LINE THAT WAS MISSING. A run that raises out of here used to
+        # leave nothing at all — the report died with the call, the registry
+        # forgot it after two minutes, and the only evidence was which
+        # Blueprint sections had not been written. Three post-mortems started
+        # from there and one of them reached the wrong conclusion.
+        ledger.crashed(exc)
+        raise
+
+
+def _execute(
+    svc: BlueprintService,
+    executor: Executor,
+    order: list[str],
+    in_plan: set[str],
+    report: RunReport,
+    done: set[str],
+    ledger: Any,
+    *,
+    max_attempts: int,
+    commit: bool,
+    user_request: str,
+    app_root: str | None,
+) -> RunReport:
+    """The wave loop. Split from `run` so the ledger can record a crash."""
     remaining = list(order)
     while remaining:
         wave = [
@@ -712,7 +785,7 @@ def run(
         _run_wave(
             svc, executor, wave, report=report, done=done,
             max_attempts=max_attempts, commit=commit,
-            user_request=user_request, app_root=app_root,
+            user_request=user_request, app_root=app_root, ledger=ledger,
         )
         ran = set(wave)
         remaining = [key for key in remaining if key not in ran]
@@ -727,7 +800,9 @@ def run(
         unmet = {d for d in DAG[key].depends_on if d in in_plan and d not in done}
         report.skipped.append(key)
         report.skipped_because[key] = ", ".join(sorted(unmet))
+        ledger.node_skipped(key, ", ".join(sorted(unmet)))
 
+    ledger.finish(report)
     return report
 
 
@@ -774,6 +849,7 @@ def _run_wave(
     commit: bool,
     user_request: str,
     app_root: str | None,
+    ledger: Any = None,
 ) -> None:
     """Run one wave: model calls wide, applies narrow and ordered.
 
@@ -803,6 +879,7 @@ def _run_wave(
             handler = SERVICE_HANDLERS.get(key)
             if handler is None:
                 report.blocked.append(key)
+                _note(ledger, "node_blocked", key, "no service handler")
                 continue
             try:
                 handler(svc)
@@ -812,6 +889,7 @@ def _run_wave(
                 # every node behind it and the report said nothing at all.
                 report.failed.append(key)
                 report.failed_because[key] = _reason(exc)
+                _note(ledger, "node_failed", key, _reason(exc))
                 continue
         elif node.kind == "projection":
             projector = PROJECTION_HANDLERS.get(key)
@@ -822,22 +900,28 @@ def _run_wave(
                 # Blueprint<->Implementation would go green against files
                 # nobody wrote.
                 report.blocked.append(key)
+                _note(ledger, "node_blocked", key, "no projection handler or app_root")
                 continue
             try:
                 projector(svc, app_root)
             except Exception as exc:  # noqa: BLE001 - reported, not swallowed
                 report.failed.append(key)
                 report.failed_because[key] = _reason(exc)
+                _note(ledger, "node_failed", key, _reason(exc))
                 continue
         else:
             continue
         report.completed.append(key)
+        _note(ledger, "node_done", key)
         done.add(key)
 
     # Subjects are resolved once, before anything in the wave applies. Nodes in
     # a wave are independent by construction, so none of them can change
     # another's subject list — resolving up front just makes that explicit.
     runs: dict[str, _NodeRun] = {}
+    for _k in wave:
+        if DAG[_k].kind not in ("service", "projection"):
+            _note(ledger, "node_start", _k, len(subjects_for(DAG[_k], svc.doc)))
     for key in wave:
         if DAG[key].kind != "agent":
             continue
@@ -868,8 +952,16 @@ def _run_wave(
         # Only a node that authored nothing at all has genuinely failed;
         # anything less is a partial result its dependents can still use.
         if state.subjects and len(state.failed) == len(state.subjects):
+            # Every subject failed: the node authored nothing. Recorded with
+            # the reasons, because "which of the eighteen stopped it, and why"
+            # is the question the ledger exists to answer.
+            _note(ledger, "node_failed", key,
+                  "; ".join(sorted(state.failed.values()))[:600]
+                  if isinstance(state.failed, dict) else
+                  f"all {len(state.subjects)} subjects failed")
             continue
         report.completed.append(key)
+        _note(ledger, "node_done", key, len(state.subjects or []))
         done.add(key)
 
 
