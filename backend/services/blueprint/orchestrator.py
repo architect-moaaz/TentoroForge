@@ -1230,18 +1230,24 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
         project_nav_flow, project_root_route,
     )
 
-    # THE FRONT DOOR, BEFORE ANYTHING IS PROJECTED. A landing page whose
-    # composition was refused leaves no layout, so the projection writes no
-    # schema and the route 404s — on the page every user arrives at. Runs only
-    # when nothing composed one; a rejected composition stays rejected.
-    from services.blueprint.landing_page import ensure_landing_layout
-
-    if ensure_landing_layout(svc) is not None:
-        logger.warning("[frontend] landing page had no composed layout — "
-                       "assembled one from navigation so the app does not "
-                       "open on a 404")
-        svc.save()
-
+    # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
+    # layout, the projection writes no schema, and `/` 404s — reported by
+    # `_unbuilt_pages` like any other missing route.
+    #
+    # `blueprint/landing_page` used to assemble one here from the navigation
+    # tree, on the argument that the page a user ARRIVES on is different in
+    # kind from a page they might reach. It ran once against a real Blueprint
+    # and emitted props no component has (`text` on a Heading, `href` on a
+    # Link), so the page could not render — and the refusal aborted this
+    # function before `project_design_tokens`, leaving the whole application
+    # unable to compile on a missing tokens.css. It turned one dead route into
+    # no application, which is the trade it existed to prevent, reversed.
+    #
+    # The deeper objection is the one this codebase had already settled when it
+    # removed the deterministic pattern stub: a stubbed page and a designed one
+    # looking alike is unacceptable, and a second composer is a second answer
+    # to "what does this screen look like". An honest 404 on the front door is
+    # a defect anyone can see; a tile grid nobody authored is one they cannot.
     result = apply_frontend_projection(svc, app_root)
     # A page A2UI authored and the planner cannot render is a defect, not an
     # acceptable loss. This projection wrote 23 schemas from 30 authored trees

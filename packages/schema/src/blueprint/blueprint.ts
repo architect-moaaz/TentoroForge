@@ -666,16 +666,22 @@ export const PageLayout = z.object({
    * Empty on layouts written before this was recorded, which is honest — it
    * means unknown, not "the fallback".
    *
-   * THREE CAN, NOT TWO. `blueprint/landing_page` composes the entry point
-   * deterministically when nothing else did — an application whose front door
-   * 404s is not a working application with one page missing, so that one route
-   * gets a layout assembled from navigation rather than none at all.
+   * `deterministic` names a composer that NO LONGER EXISTS.
+   * `blueprint/landing_page` assembled the entry point from the navigation
+   * tree when nothing else composed it. It was deleted: it ran once against a
+   * real Blueprint, emitted props no component has, and turned one dead route
+   * into an application that would not compile — and a second composer is a
+   * second answer to "what does this screen look like", which is the argument
+   * that removed the deterministic pattern stub already.
    *
-   * It records `deterministic`, exactly so it is legible as the third case,
-   * and this enum did not know the word. The layout was written and the whole
-   * document then failed contract validation — which, since every commit
-   * validates the whole document, refuses every later write to that project.
-   * The composer was added and the vocabulary it writes in was not.
+   * THE WORD STAYS. Documents written while it existed carry it, and every
+   * commit validates the whole document — so dropping the value would refuse
+   * every later write to those projects, on a section nobody is touching.
+   * That failure has already cost this codebase two separate investigations
+   * (`runtime.placeholders`, and this very field before it knew the word).
+   *
+   * An enum here is a vocabulary for what WAS written, not only for what can
+   * be written now.
    */
   composedBy: z.enum(["a2ui", "agent", "deterministic", ""]).default(""),
   ...artifactBase,
