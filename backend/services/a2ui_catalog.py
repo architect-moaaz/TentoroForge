@@ -256,6 +256,24 @@ _COMPOSE_ONE_OF: dict[str, tuple[str, ...]] = {
     # enumeration was mine.
     "Button": ("workflow", "navigate", "submit", "onClick",
                "opensDialog", "togglesSidebar"),
+    # A form that submits nowhere is a page-shaped dead end, and
+    # `functional_completeness._ACTIONABLE` has always been ("Button", "Form")
+    # — so a Form with no action was already refused. It was never told:
+    # `anyOf` was on Button alone, so the composer had no way to know the
+    # requirement existed until the page came back rejected. Twice on the last
+    # full build, both on create pages.
+    #
+    # DERIVED, NOT ENUMERATED. `_action_props()` reads this table, so the check
+    # and the catalog cannot disagree about what an action is — and `workflow`
+    # is the only member of that union the Form contract actually offers.
+    # `onSuccess` and `onError` are what happens after the action; `autoSave`
+    # carries a workflow of its own for drafts and is not the submit. Listing
+    # any of them would demand a prop that cannot satisfy the check.
+    #
+    # Adding this changes no behaviour in `_action_props()` — `workflow` is
+    # already in the union from Button — so nothing newly fails. What changes
+    # is that the requirement is now stated where the composer reads it.
+    "Form": ("workflow",),
 }
 
 

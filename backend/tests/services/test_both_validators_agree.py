@@ -78,3 +78,39 @@ def test_a_declared_property_is_still_accepted():
     assert not list(v.iter_errors({"component": "Card", "title": "Sittings"}))
     assert list(v.iter_errors(
         {"component": "Card", "title": "Sittings", "density": "compact"}))
+
+
+def test_a_form_must_say_where_it_submits():
+    """`functional_completeness._ACTIONABLE` is ("Button", "Form"), so a Form
+    with no action has always been refused — and only Button carried an
+    `anyOf`, so the composer had no way to know the requirement existed until
+    the page came back rejected. Twice on the last full build, both on create
+    pages."""
+    body = next(p for p in _a2ui("Form")["allOf"] if "properties" in p)
+    assert body.get("anyOf") == [{"required": ["workflow"]}]
+
+
+def test_the_form_requirement_is_one_the_form_can_meet():
+    """Derived from the intersection of the action props and what the Form
+    contract offers, not enumerated by hand — the mistake recorded above
+    Button, where the list held four of the six the catalog had.
+
+    `onSuccess` and `onError` are what happens after the action; `autoSave`
+    carries a workflow of its own for drafts. `workflow` is the only member of
+    the union a Form actually has."""
+    from services.a2ui_catalog import _COMPOSE_ONE_OF
+
+    actions = {p for choices in _COMPOSE_ONE_OF.values() for p in choices}
+    body = next(p for p in _a2ui("Form")["allOf"] if "properties" in p)
+    offered = set(body.get("properties") or {})
+    assert offered & actions == {"workflow"}
+
+
+def test_adding_form_changed_no_existing_verdict():
+    """`_action_props()` is the union of this table, and `workflow` was already
+    in it via Button — so nothing that passed before fails now. What changed is
+    that the requirement is stated where the composer reads it."""
+    from services.blueprint.functional_completeness import _action_props
+
+    assert _action_props() == {"workflow", "navigate", "submit", "onClick",
+                               "opensDialog", "togglesSidebar"}
