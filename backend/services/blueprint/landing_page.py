@@ -114,12 +114,32 @@ def compose_landing(doc: dict) -> dict | None:
     app = (doc.get("application") or {}).get("name") or ""
     title = str(page.get("name") or app or "Home")
 
+    # THE CATALOG'S PROP NAMES, NOT PLAUSIBLE ONES. This wrote `text` on a
+    # Heading, `href`/`text` on a Link and `title`/`description` on an
+    # EmptyState. The catalog says `content`, `navigate`/`label` and `message`,
+    # and `validate_props` refuses anything else — so the first time this
+    # composer actually ran, it produced a layout the planner could not render:
+    #
+    #     PAGE-001: root.children[0].props.(root): Additional properties are
+    #     not allowed ('text' was unexpected)
+    #
+    # The entry point had no page, which is the one outcome this module exists
+    # to prevent. Worse, the refusal aborted `_project_frontend` before
+    # `project_design_tokens`, so the whole application stopped compiling on a
+    # missing `tokens.css`.
+    #
+    # It went unnoticed because A2UI composed the landing page on every project
+    # that had one, so this path had never run against a real Blueprint. The
+    # test beside this now puts the output through `validate_props` — the same
+    # check `check_pattern_templates` runs — because a deterministic composer
+    # that emits invalid props is worse than no composer at all: it replaces a
+    # missing page with a failed build.
     children: list[dict] = [
-        {"type": "Heading", "props": {"text": title, "level": 1}},
+        {"type": "Heading", "props": {"content": title, "level": 1}},
     ]
     purpose = str(page.get("purpose") or "").strip()
     if purpose:
-        children.append({"type": "Text", "props": {"text": purpose}})
+        children.append({"type": "Text", "props": {"content": purpose}})
 
     if dests:
         children.append({
@@ -130,7 +150,7 @@ def compose_landing(doc: dict) -> dict | None:
                  "props": {"title": d["label"]},
                  "children": [
                      {"type": "Link",
-                      "props": {"href": d["route"], "text": d["label"]}},
+                      "props": {"navigate": d["route"], "label": d["label"]}},
                  ]}
                 for d in dests
             ],
@@ -140,8 +160,7 @@ def compose_landing(doc: dict) -> dict | None:
         # grid that reads as a page still loading.
         children.append({
             "type": "EmptyState",
-            "props": {"title": title,
-                      "description": "This application has no other pages yet."},
+            "props": {"message": "This application has no other pages yet."},
         })
 
     return {
