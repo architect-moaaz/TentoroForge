@@ -11,6 +11,8 @@ inert twice, both times because a caller three layers up did not pass it.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import services.llm_client as lc
 import pytest
 
@@ -19,26 +21,41 @@ from services.smith.understand_ask import understand_ask
 
 @pytest.fixture()
 def transport(monkeypatch):
-    """A fake model that replies with one thinking block and one text block."""
+    """Both paths faked: `create` for an unwatched call, `stream` for a watched
+    one. They are different code paths in `complete` — a watched call streams
+    so the reasoning arrives while it is produced rather than after."""
     seen: dict = {}
 
     class _Msgs:
         def create(self, **kw):
-            seen.update(kw)
+            seen.update(kw, path="create")
             return lc.Message(content=[
                 lc.ThinkingBlock(thinking="/ has a page but no layout."),
                 lc.TextBlock(text='{"verb":"compose_route","route":"/"}'),
             ])
 
+    class _Chat:
+        def __init__(self, **kw):
+            seen.update(kw, path="stream")
+
+        def stream(self, _msgs):
+            yield SimpleNamespace(content=[
+                {"type": "thinking", "thinking": "/ has a page but no layout."}])
+            yield SimpleNamespace(content=[
+                {"type": "text",
+                 "text": '{"verb":"compose_route","route":"/"}'}])
+
     monkeypatch.setattr(lc, "_SyncMessages", lambda _k: _Msgs())
+    monkeypatch.setattr(lc, "_chat_model", lambda _k, **kw: _Chat(**kw))
     return seen
 
 
 def test_complete_asks_for_thinking_only_when_someone_is_listening(transport):
     lc.complete(content="hi")
-    assert transport.get("thinking") is None
+    assert transport["path"] == "create" and transport.get("thinking") is None
 
     lc.complete(content="hi", reasoning_callback=lambda _t: None)
+    assert transport["path"] == "stream"
     assert transport["thinking"] == {"type": "adaptive"}
     # Extended thinking requires temperature=1.0; the API rejects other values
     # when the block is present.

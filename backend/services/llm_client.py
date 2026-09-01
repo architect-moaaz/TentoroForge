@@ -353,6 +353,53 @@ def thinking_block_for(model: str) -> dict | None:
     return {"type": "enabled", "budget_tokens": THINKING_HEADROOM_TOKENS}
 
 
+class ReasoningSink:
+    """Thinking deltas in, readable lines out.
+
+    A model streams reasoning a few tokens at a time. Forwarding each delta as
+    its own event gives the reader a stuttering column of fragments — "The",
+    " route", " /" — which is motion without meaning; buffering the whole reply
+    gives one wall of text at the end, which is not streaming at all. Neither
+    is what "show me what it is thinking" asks for.
+
+    So deltas accumulate and flush at a sentence boundary once there is enough
+    to be worth reading. The reader gets whole thoughts, as they are had.
+
+    `close()` flushes the remainder — reasoning rarely ends on a full stop, and
+    a dropped tail would silently lose the conclusion, which is the sentence
+    that mattered.
+    """
+
+    #: Below this a "sentence" is usually an abbreviation or a list marker.
+    MIN_CHARS = 60
+
+    def __init__(self, emit: Any, *, min_chars: int = MIN_CHARS) -> None:
+        self._emit = emit
+        self._min = min_chars
+        self._buf: list[str] = []
+
+    def feed(self, delta: str) -> None:
+        if not isinstance(delta, str) or not delta:
+            return
+        self._buf.append(delta)
+        text = "".join(self._buf)
+        cut = max(text.rfind(". "), text.rfind(".\n"), text.rfind("\n\n"))
+        if cut >= self._min:
+            self._flush(text[:cut + 1], keep=text[cut + 1:])
+
+    def close(self) -> None:
+        self._flush("".join(self._buf), keep="")
+
+    def _flush(self, text: str, *, keep: str) -> None:
+        self._buf = [keep] if keep else []
+        if not text.strip():
+            return
+        try:
+            self._emit(text.strip())
+        except Exception:  # noqa: BLE001 — showing the reasoning must never
+            pass          # be able to fail the turn that is producing it
+
+
 def _thinking_of(content: Any) -> list[str]:
     """The reasoning in a reply, in order. Empty when the model did none."""
     out: list[str] = []
@@ -393,6 +440,16 @@ def complete(*, system: Any = None, messages: list[dict] | None = None,
 
     use = model or _ONE_SHOT_MODEL
     thinking = thinking_block_for(use) if reasoning_callback is not None else None
+    if thinking is not None:
+        # STREAMED, NOT DELIVERED AT THE END. `create` returns once the whole
+        # reply exists, so the reasoning arrived in a single burst after the
+        # wait it was supposed to fill. Streaming is what makes it reasoning
+        # you can watch rather than a transcript of reasoning already done.
+        return _complete_streaming(
+            model=use, max_tokens=max_tokens + THINKING_HEADROOM_TOKENS,
+            messages=messages, system=system, timeout=timeout,
+            thinking=thinking, reasoning_callback=reasoning_callback)
+
     msg = _SyncMessages(None).create(
         model=use,
         # The cap covers thinking AND output together on the adaptive path, so
@@ -412,3 +469,38 @@ def complete(*, system: Any = None, messages: list[dict] | None = None,
             except Exception:  # noqa: BLE001 — showing the reasoning must
                 pass          # never be able to fail the turn producing it
     return _text_of(msg.content)
+
+
+
+def _complete_streaming(*, model: str, max_tokens: int, messages: list[dict],
+                        system: Any, timeout: float | None,
+                        thinking: dict, reasoning_callback: Any) -> str:
+    """One prompt, streamed, with the reasoning forwarded as it is produced.
+
+    Returns the same thing `complete` returns — the answer text — so the caller
+    cannot tell which path ran except by when the reasoning showed up.
+    """
+    chat = _chat_model(None, model=model, max_tokens=max_tokens,
+                       # Extended thinking requires temperature=1.0; the API
+                       # rejects other values when the block is present.
+                       temperature=1.0, timeout=timeout, thinking=thinking)
+    sink = ReasoningSink(reasoning_callback)
+    parts: list[str] = []
+    try:
+        for chunk in chat.stream(_lc_messages(messages, system)):
+            for block in (chunk.content if isinstance(chunk.content, list)
+                          else [chunk.content]):
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    kind = block.get("type")
+                    if kind == "thinking":
+                        sink.feed(str(block.get("thinking") or ""))
+                    elif kind == "text":
+                        parts.append(str(block.get("text") or ""))
+    finally:
+        # The tail matters most — reasoning rarely ends on a full stop, and the
+        # last sentence is usually the conclusion. Flushed even when the stream
+        # raises, so a failed call still shows how far the thinking got.
+        sink.close()
+    return "".join(parts)

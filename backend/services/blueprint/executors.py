@@ -334,6 +334,15 @@ class AnthropicModel:
     #: Asking for gzip sidesteps it; drop this once brotli/httpx2 agree.
     accept_encoding: str = "gzip"
 
+    #: Called with each readable line of the model's reasoning, as it is
+    #: produced. None means nobody is watching — every batch run, every test.
+    #:
+    #: The stream below was already open: `max_tokens` is above STREAM_ABOVE
+    #: for every tuned node, so each call has always been a live event stream
+    #: whose events were discarded in favour of the accumulated message.
+    #: Forwarding the thinking costs nothing but reading them.
+    reasoning: Any = None
+
     def _anthropic(self) -> Any:
         if self._client is None:
             import anthropic
@@ -350,6 +359,31 @@ class AnthropicModel:
         # 16,000 output tokens and a Blueprint that failed validation.
         if self.max_tokens == DEFAULT_MAX_TOKENS and self.effort in ("xhigh", "max"):
             self.max_tokens = 64000
+
+    def _stream_reasoning(self, stream: Any) -> Any:
+        """Drain the stream, forwarding thinking as it lands.
+
+        A composition runs for around a minute and said nothing until it
+        finished, so a long one and a stuck one looked identical — the same
+        complaint as the unreported runs and the empty editor panels.
+
+        Iterating consumes the same events `get_final_message` accumulates, so
+        it is still the SDK's assembled message that comes back; nothing here
+        rebuilds a reply out of deltas.
+        """
+        from services.llm_client import ReasoningSink
+
+        sink = ReasoningSink(self.reasoning)
+        try:
+            for event in stream:
+                delta = getattr(event, "delta", None)
+                if getattr(delta, "type", None) == "thinking_delta":
+                    sink.feed(str(getattr(delta, "thinking", "") or ""))
+        finally:
+            # The tail is usually the conclusion. Flushed even if the stream
+            # raises, so a failed call still shows how far it got.
+            sink.close()
+        return stream.get_final_message()
 
     def __call__(self, *, system: str, user: str, schema: dict[str, Any],
                  image: str | Path | None = None,
@@ -374,9 +408,12 @@ class AnthropicModel:
         if self.max_tokens > STREAM_ABOVE:
             # The SDK refuses a non-streaming request it estimates could exceed
             # ~10 minutes, which any large max_tokens does. Stream and take the
-            # accumulated message — same object, no event handling needed.
+            # accumulated message.
             with client.messages.stream(**kwargs) as stream:
-                response = stream.get_final_message()
+                if self.reasoning is None:
+                    response = stream.get_final_message()
+                else:
+                    response = self._stream_reasoning(stream)
         else:
             response = client.messages.create(**kwargs)
         # Check before reading content: a refusal returns HTTP 200 with an
@@ -1573,6 +1610,7 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
 
 def tiered_router(
     default_effort: str = "high", model: str = DEFAULT_MODEL,
+    *, reasoning: Any = None,
 ) -> "ModelRouter":
     """A router that varies effort per node and nothing else.
 
@@ -1581,12 +1619,14 @@ def tiered_router(
     """
     tuned = set(EFFORT_BY_NODE) | set(MAX_TOKENS_BY_NODE)
     return ModelRouter(
-        default=AnthropicModel(model=model, effort=default_effort),
+        default=AnthropicModel(model=model, effort=default_effort,
+                               reasoning=reasoning),
         by_node={
             node: AnthropicModel(
                 model=model,
                 effort=EFFORT_BY_NODE.get(node, default_effort),
                 max_tokens=MAX_TOKENS_BY_NODE.get(node, DEFAULT_MAX_TOKENS),
+                reasoning=reasoning,
             )
             for node in tuned
         },

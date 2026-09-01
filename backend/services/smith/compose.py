@@ -65,6 +65,7 @@ def compose_route(
     app_root: str | None = None,
     request: str = "",
     executor: Any = None,
+    reasoning: Any = None,
 ) -> Any:
     """Compose the screen at `route` and commit it.
 
@@ -84,7 +85,11 @@ def compose_route(
             f"Routes it does have include: {', '.join(filter(None, known))}"
         )
 
-    run = executor or make_executor(svc, tiered_router(), usage=RunUsage())
+    # The composition is the slow part of the turn — around a minute behind a
+    # single message. `reasoning` is how that minute becomes legible: the
+    # executor's stream was already open and its thinking events discarded.
+    run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
+                                    usage=RunUsage())
     spec = TaskSpec(task_id=f"smith-compose-{page['id']}", node="page_layouts",
                     agent="a2ui_pages", attempt=1, subject=page["id"],
                     feedback=None)
@@ -117,6 +122,7 @@ def add_widgets(
     app_root: str | None = None,
     request: str = "",
     executor: Any = None,
+    reasoning: Any = None,
 ) -> Any:
     """Add named sections to a screen, by saying so in its contract first.
 
@@ -159,7 +165,7 @@ def add_widgets(
     return compose_route(
         svc, page.get("route") or route, app_root=app_root,
         request=request or f"add {', '.join(wanted)} to {page.get('route')}",
-        executor=executor,
+        executor=executor, reasoning=reasoning,
     )
 
 
@@ -172,7 +178,8 @@ VERBS = ("compose_route", "add_widgets")
 
 
 def run(output_dir: str, verb: str, *, route: str = "",
-        widgets: Sequence[str] = (), request: str = "") -> dict:
+        widgets: Sequence[str] = (), request: str = "",
+        reasoning: Any = None) -> dict:
     """One composition, from an `output_dir` — the shape a tool handler needs.
 
     THE ONLY ENTRY POINT WITH BOTH CALLERS ON IT. The ReAct loop dispatches by
@@ -199,11 +206,11 @@ def run(output_dir: str, verb: str, *, route: str = "",
     try:
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
-                                 request=request)
+                                 request=request, reasoning=reasoning)
             did = f"added {', '.join(wanted)} to {route}"
         elif verb == "compose_route":
             result = compose_route(svc, route, app_root=app_root,
-                                   request=request)
+                                   request=request, reasoning=reasoning)
             did = f"composed {route}"
         else:
             return {"applied": False, "edited_paths": [],

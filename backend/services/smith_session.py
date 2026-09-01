@@ -225,8 +225,13 @@ class SmithSession:
 
         route = str(understanding.get("route") or "").strip()
         widgets = [str(w) for w in (understanding.get("widgets") or [])]
+        # The composition runs for about a minute. Handing it the same sink
+        # `understand_ask` used means the wait carries the model's reasoning
+        # instead of a spinner — and it is the same sink, so a turn reads as
+        # one continuous train of thought rather than two disconnected ones.
         out = compose_run(str(self.output_dir), verb, route=route,
-                          widgets=widgets, request=user_message)
+                          widgets=widgets, request=user_message,
+                          reasoning=self._reasoning)
 
         if not out.get("applied"):
             # A refusal is an outcome. Reporting it beats claiming success with
