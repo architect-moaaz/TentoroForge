@@ -505,39 +505,31 @@ def test_model_supports_thinking_gating():
     assert not _model_supports_thinking(None)  # type: ignore[arg-type]
 
 
-def test_thinking_budget_env_var_reader(monkeypatch):
-    from agents.fix_chat_agent import _DEFAULT_THINKING_BUDGET, _thinking_budget
-    # ON by default. Smith is asked to show its reasoning, and a budget of
-    # zero means no thinking block is requested, so there is no reasoning to
-    # show however well the streaming below it works.
-    monkeypatch.delenv("FORGE_SMITH_THINKING_BUDGET", raising=False)
-    assert _thinking_budget() == _DEFAULT_THINKING_BUDGET
-    # An explicit 0 still turns it off.
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "0")
-    assert _thinking_budget() == 0
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "8192")
-    assert _thinking_budget() == 8192
-    # Malformed falls back to the default, not to silence — a typo in an env
-    # var should not quietly remove a capability.
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "not-an-int")
-    assert _thinking_budget() == _DEFAULT_THINKING_BUDGET
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "-10")
-    assert _thinking_budget() == 0
-
-
 def test_thinking_block_matches_what_the_model_accepts():
     """`budget_tokens` is rejected outright from the 4.7 generation on, and
     `adaptive` is not understood before 4.6. Sending the wrong one is a 400
-    that names neither the model nor the budget."""
-    from agents.fix_chat_agent import _thinking_block
+    that names neither the model nor the block."""
+    from agents.fix_chat_agent import THINKING_HEADROOM_TOKENS, _thinking_block
 
-    assert _thinking_block("claude-sonnet-4-6", 4096) == {"type": "adaptive"}
-    assert _thinking_block("claude-opus-5-20260301", 4096) == {"type": "adaptive"}
-    assert _thinking_block("claude-sonnet-4-5-20260101", 4096) == {
-        "type": "enabled", "budget_tokens": 4096}
-    # No thinking at all: unsupported model, or switched off.
-    assert _thinking_block("claude-haiku-4-5", 4096) is None
-    assert _thinking_block("claude-sonnet-4-6", 0) is None
+    assert _thinking_block("claude-sonnet-4-6") == {"type": "adaptive"}
+    assert _thinking_block("claude-opus-5-20260301") == {"type": "adaptive"}
+    assert _thinking_block("claude-sonnet-4-5-20260101") == {
+        "type": "enabled", "budget_tokens": THINKING_HEADROOM_TOKENS}
+    # The only reason for no thinking is a model that has none.
+    assert _thinking_block("claude-haiku-4-5") is None
+
+
+def test_thinking_is_not_behind_a_switch():
+    """It was, defaulting to off — so the reasoning stream, the SSE event and
+    the frontend renderer all worked and emitted nothing. A capability whose
+    off-position is silent is indistinguishable from a broken one."""
+    import inspect
+
+    from agents import fix_chat_agent
+
+    src = inspect.getsource(fix_chat_agent._thinking_block)
+    assert "environ" not in src and "getenv" not in src
+    assert not hasattr(fix_chat_agent, "_thinking_budget")
 
 
 def _mock_anthropic_response(*, thinking_texts, text_payload):
@@ -579,7 +571,6 @@ def test_default_query_forwards_thinking_blocks_to_reasoning_callback(monkeypatc
     the reasoning callback once per thinking block, then yield the parsed
     tool call."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "4096")
 
     from agents import fix_chat_agent
 
@@ -617,11 +608,15 @@ def test_default_query_forwards_thinking_blocks_to_reasoning_callback(monkeypatc
     assert captured.get("max_tokens", 0) >= 1500 + 4096
 
 
-def test_default_query_disables_thinking_when_budget_is_zero(monkeypatch):
+def test_default_query_sends_no_thinking_block_to_a_model_without_it(monkeypatch):
+    """Haiku and the pre-4.5 families have no extended thinking. That is the
+    only reason a request goes out without the block."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "0")
 
     from agents import fix_chat_agent
+
+    monkeypatch.setattr(fix_chat_agent, "_model_supports_thinking",
+                        lambda _m: False)
 
     captured: dict = {}
     fake_msg = _mock_anthropic_response(
@@ -642,7 +637,6 @@ def test_default_query_disables_thinking_when_budget_is_zero(monkeypatch):
     )
     step = next(iter(stream))
     assert step == {"tool": "answer", "args": {"text": "hi"}}
-    # Budget=0 → no thinking block in the API request
     assert "thinking" not in captured
     # temperature is left unset (defaults on the API side) — thinking-off
     assert "temperature" not in captured
@@ -655,7 +649,6 @@ def test_run_smith_agent_forwards_reasoning_callback_to_default_query(monkeypatc
     """When the caller passes reasoning_callback AND no custom query_fn,
     run_smith_agent must wrap _default_query so the callback reaches it."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "1024")
 
     fake_msg = _mock_anthropic_response(
         thinking_texts=["thinking about it…"],
