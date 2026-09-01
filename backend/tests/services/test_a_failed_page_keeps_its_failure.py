@@ -52,18 +52,44 @@ def test_the_refusal_still_happens():
     assert "raise PlanError" in _source()
 
 
-def test_the_scaffold_import_is_what_makes_it_fatal():
-    """`globals.css` is preserved by the emitter, so the tokens are a separate
-    file it imports. That is a good reason and it means the import is
-    unconditional: nothing degrades gracefully if the file is absent."""
+def test_the_scaffold_ships_what_it_imports():
+    """THE SOURCE, not the trigger. `globals.css` imports `./tokens.css`
+    unconditionally — correctly, since globals.css is preserved by the emitter
+    — so a scaffold without that file does not build. Skipping the projection
+    was one way to reach it; a crash, a timeout, a partial run or an export
+    taken mid-build all reach the same place.
+    """
     import pathlib
 
-    scaffold = (pathlib.Path(__file__).resolve().parents[2]
-                / "templates" / "app-foundation" / "src" / "app" / "globals.css")
-    assert '@import "./tokens.css";' in scaffold.read_text(encoding="utf-8")
-    # And the scaffold does not ship one — the projection is the only writer,
-    # which is exactly why it must not be skippable.
-    assert not (scaffold.parent / "tokens.css").exists()
+    app = (pathlib.Path(__file__).resolve().parents[2]
+           / "templates" / "app-foundation" / "src" / "app")
+    assert '@import "./tokens.css";' in (app / "globals.css").read_text("utf-8")
+    assert (app / "tokens.css").exists(), (
+        "the scaffold imports a file it does not contain, so it does not build"
+    )
+
+
+def test_the_default_never_overwrites_the_real_palette(tmp_path):
+    """Assembly runs AFTER projection, so a scaffold file that always copied
+    would replace the application's own tokens with the neutral ones on every
+    build. It fills a hole; it does not win."""
+    from services.blueprint.assembly import copy_scaffold
+
+    app = tmp_path / "app"
+    (app / "src" / "app").mkdir(parents=True)
+    (app / "src" / "app" / "tokens.css").write_text(":root{--accent:#A16207}")
+    copy_scaffold(app, project_short_id="t")
+    assert "#A16207" in (app / "src" / "app" / "tokens.css").read_text()
+
+
+def test_the_default_lands_when_nothing_projected_one(tmp_path):
+    from services.blueprint.assembly import copy_scaffold
+
+    app = tmp_path / "app"
+    copy_scaffold(app, project_short_id="t")
+    assert (app / "src" / "app" / "tokens.css").exists(), (
+        "a scaffold with no projection behind it still has to build"
+    )
 
 
 def test_design_tokens_needs_nothing_from_the_planner():

@@ -87,6 +87,27 @@ SCAFFOLD_OWNED: tuple[str, ...] = (
     "src/db/schema/user.ts",
 )
 
+#: Scaffold files that are a DEFAULT for something a projection writes: copied
+#: only when the projection did not write one.
+#:
+#: A third category, and it needs to be. `PROJECTED_PATHS` says "never touch",
+#: which leaves nothing when the projection is skipped; `SCAFFOLD_OWNED` says
+#: "always copy", and since assembly runs AFTER projection that would overwrite
+#: the application's own palette with the neutral one every time.
+#:
+#: `globals.css` imports `./tokens.css` unconditionally, so a scaffold without
+#: it does not build — and one page failing to plan was enough to skip the
+#: projection and produce `Module not found: Can't resolve './tokens.css'` for
+#: the whole application. The ordering fix stopped that particular trigger.
+#: This stops the class: a template that imports a file it does not contain is
+#: broken on its own terms, and a crash, a timeout, a partial run or an export
+#: taken mid-build all reach the same place.
+#:
+#: The floor is a plain-looking application, not an unbuildable one.
+SCAFFOLD_DEFAULTS: tuple[str, ...] = (
+    "src/app/tokens.css",
+)
+
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
@@ -143,9 +164,15 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
             if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
-                    and str(dst_rel) not in SCAFFOLD_OWNED):
+                    and str(dst_rel) not in SCAFFOLD_OWNED
+                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
+            # A default only fills a hole. The projection ran first and its
+            # output is the application's; this is what stands in when it did
+            # not run at all.
+            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+                continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
                 dst.write_text(_interpolate(src.read_text(),

@@ -1,0 +1,44 @@
+/* Default theme.
+ *
+ * WHY THIS FILE EXISTS IN THE SCAFFOLD. `globals.css` imports it
+ * unconditionally, and the only thing that writes it is
+ * `blueprint/projection.project_design_tokens`, from the Blueprint's
+ * designSystem. So a scaffold without it is a scaffold that does not build:
+ * copy it anywhere, run `next dev`, and you get
+ *
+ *     ./src/app/globals.css
+ *     Module not found: Can't resolve './tokens.css'
+ *
+ * That is what happened when one page failed to plan and the projection was
+ * skipped — but the skipping was only the trigger. A template that imports a
+ * file it does not contain is broken on its own terms, and every other way of
+ * reaching the same state (a crash, a timeout, a partial run, an export taken
+ * mid-build) produces the identical unbuildable app.
+ *
+ * These values are a neutral light theme and are meant to be replaced: the
+ * projection overwrites this file with the application's own palette, and
+ * assembly will not copy over its work. If you are looking at these values in
+ * a generated app, the design system did not reach it — that is a real defect
+ * and worth chasing, but it is now a plain-looking application rather than one
+ * that will not start.
+ */
+:root {
+  --background: #FFFFFF;
+  --foreground: #0A0A0A;
+  --card: #FFFFFF;
+  --card-foreground: #0A0A0A;
+  --muted: #F5F5F5;
+  --muted-foreground: #737373;
+  --border: #E5E5E5;
+  --input: #E5E5E5;
+  --ring: #0A0A0A;
+  --accent: #171717;
+  --accent-contrast: #FFFFFF;
+  --accent-hover: #262626;
+  --destructive: #DC2626;
+  --destructive-contrast: #FFFFFF;
+  --success: #16A34A;
+  --warning: #CA8A04;
+  --radius: 0.5rem;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
