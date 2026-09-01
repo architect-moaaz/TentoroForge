@@ -1381,7 +1381,29 @@ def page_slot_prompt(doc: dict) -> str:
         "Except: anything the user asked for is not declinable, however "
         "lookup-shaped it shows up here. These are their words:\n\n"
         f"  \u201c{described}\u201d\n\n"
-        "If they named it, it gets its feature, and it gets it complete.\n\n"
+        "If they named it for NOW, it gets its feature, and it gets it "
+        "complete.\n\n"
+        # NAMED AND DEFERRED ARE NOT THE SAME THING. This said "if they named "
+        # it, it gets its feature" — so a brief that names ten modules and then
+        # says which six to begin with got all ten. The Palestinian Legislative
+        # Council brief ended "Begin with sessions, committees, attendance,
+        # voting, minutes, and document management. Add legislative workflows,
+        # mobile access, analytics, and the public portal in later phases", and
+        # the run planned 44 pages across all ten. The sentence was in the
+        # description and quoted above; the rule discarded it, because naming
+        # phase two is how you get phase two built.
+        "Read the phasing in their words, because most briefs have one. "
+        "\u201cBegin with\u2026\u201d, \u201clater\u201d, \u201cphase "
+        "two\u201d, \u201ceventually\u201d and \u201conce that works\u201d "
+        "all name something AND put it out of scope, and the second half is "
+        "as much a decision as the first. Fill what they said to start with. "
+        "Decline what they deferred, and give the deferral as the reason \u2014 "
+        "it is theirs, not yours.\n\n"
+        "Building the later phases now is not generosity. It is pages nobody "
+        "asked for yet, each one a route to compose, maintain and read past on "
+        "the way to the ones they wanted, and it buries the first release in "
+        "work they explicitly postponed. When the brief names no phases, this "
+        "does not apply and everything they named is in scope.\n\n"
         "There is no slot for a filtered list, because a filter is not a page. "
         "Every \u2018only mine\u2019, \u2018overdue\u2019, \u2018unassigned\u2019 or "
         "\u2018awaiting X\u2019 belongs in that list page\u2019s `views` as "

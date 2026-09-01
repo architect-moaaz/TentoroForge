@@ -1497,3 +1497,41 @@ def test_the_page_brief_still_carries_what_is_per_page():
     _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
     assert "PAGE-001" in user
     assert "/sessions" in user
+
+
+def test_the_page_planner_is_told_that_deferred_is_not_declined():
+    """A brief that names ten modules and says which six to begin with must not
+    get all ten.
+
+    The rule read "if they named it, it gets its feature" — so naming phase two
+    is how you got phase two built. The Palestinian Legislative Council brief
+    ended "Begin with sessions, committees, attendance, voting, minutes, and
+    document management. Add legislative workflows, mobile access, analytics,
+    and the public portal in later phases", and the run planned 44 pages across
+    all ten modules. The sentence was in the description and quoted to the
+    model; the instruction beside it discarded the second half.
+    """
+    from services.blueprint.page_planner import page_slot_prompt
+
+    described = ("Sessions, committees, voting and minutes. Begin with "
+                 "sessions and committees. Add analytics and the public "
+                 "portal in later phases.")
+    prompt = page_slot_prompt({"application": {"description": described}})
+
+    # Their words still travel verbatim — the evidence, not a summary of it.
+    assert described in prompt
+    # And the distinction the old rule flattened.
+    assert "for NOW" in prompt
+    assert "Decline what they deferred" in prompt
+    # A brief with no phasing must not be pruned by this.
+    assert "names no phases" in prompt
+
+
+def test_a_brief_without_phasing_is_unaffected():
+    """The escape hatch has to be stated, or a model reads the phasing advice
+    as licence to drop features from a brief that never deferred anything."""
+    from services.blueprint.page_planner import page_slot_prompt
+
+    prompt = page_slot_prompt(
+        {"application": {"description": "A noticeboard for a community centre."}})
+    assert "When the brief names no phases, this does not apply" in prompt
