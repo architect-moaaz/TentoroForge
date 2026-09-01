@@ -866,6 +866,45 @@ def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
     return found
 
 
+def _adopt_table_bindings(schema: dict, binder: Any, registry: dict) -> None:
+    """Declare a source for every dangling binding that names a real table.
+
+    The composer writes `{{blocs}}`; the application has a `Bloc` entity whose
+    table is `blocs`. That is not an invention to refuse, it is a fetch to
+    declare — and declaring it is what the pointer path already does.
+
+    Mutates `schema["dataSources"]` in place. Silent when nothing matches, so
+    a genuinely invented name reaches `dangling_bindings` exactly as before.
+    """
+    dangling = dangling_bindings(schema)
+    if not dangling:
+        return
+
+    # table -> entity, and slug -> entity. Both are names the binder itself
+    # mints sources under, so both are names a composer can reasonably use.
+    by_name: dict[str, str] = {}
+    for ent_name, ent in (registry.get("entities") or {}).items():
+        for alias in (ent.get("table"), ent.get("slug"), ent.get("camel"),
+                      ent_name.lower()):
+            if isinstance(alias, str) and alias:
+                by_name.setdefault(alias, ent_name)
+
+    for name in dangling:
+        # Only the head of a dotted path: `{{votes.total}}` asks for `votes`.
+        head = str(name).split(".")[0].strip()
+        entity = by_name.get(head)
+        if not entity:
+            continue
+        # Named exactly as the composer wrote it, or the binding still dangles
+        # — `_add_source` would otherwise dedupe it onto an existing source
+        # under a different name and leave the tree pointing at nothing.
+        if any(s.get("name") == head for s in binder.sources):
+            continue
+        binder.sources.append({"name": head, "entity": entity,
+                               "op": "list", "limit": 50})
+    schema["dataSources"] = binder.sources
+
+
 def dangling_bindings(schema: dict) -> list[str]:
     """`{{name}}` in the tree with no dataSource named `name`.
 
@@ -1460,6 +1499,27 @@ def translate(payload: dict, registry: dict, route: str = "/",
     # every consumer write `doc.get("dataSources") or []` and makes "this page
     # binds nothing" indistinguishable from "this page predates the field".
     schema["dataSources"] = binder.sources
+
+    # A LITERAL BINDING THAT NAMES A REAL TABLE IS A REQUEST FOR THAT TABLE.
+    #
+    # A2UI can express a data reference two ways: as a pointer into the data
+    # model, which this binder walks and mints a source for, or as a literal
+    # `{{name}}` written straight into a prop, which it passes through
+    # untouched. Only the first declared a source, so a composition that named
+    # the right table the second way was refused for binding data the page
+    # "will never fetch".
+    #
+    # Measured on the legislative platform: 14 of 50 routes went unbuilt, and
+    # EVERY name in the rejections — audit_logs, blocs, document_signatures,
+    # recordings, attendance_records, votes — is a real table in that
+    # application's own schema. The composer was right and the binder had no
+    # opinion. `/` was among the fourteen, so the app opened on a 404.
+    #
+    # So a dangling name that matches an entity's table or slug gets the same
+    # source the pointer path would have minted. A name matching nothing is
+    # still dangling and still refused: this completes the binder, it does not
+    # loosen the check.
+    _adopt_table_bindings(schema, binder, registry)
 
     return {
         "schema": schema,

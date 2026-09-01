@@ -1243,3 +1243,59 @@ def test_a_declaration_naming_no_real_entity_is_ignored():
                     kind="entity_list")
     assert not (out["schema"].get("dataSources") or [])
     assert any("could not resolve" in w for w in out.get("warnings") or [])
+
+
+def test_a_literal_binding_naming_a_real_table_gets_a_source():
+    """A2UI expresses a data reference two ways: as a pointer this binder walks
+    and mints a source for, or as a literal `{{name}}` written into a prop and
+    passed through untouched. Only the first declared a source, so a
+    composition that named the right table the second way was refused for
+    binding data the page "will never fetch".
+
+    Measured on a legislative platform: 14 of 50 routes went unbuilt and every
+    name in the rejections — audit_logs, blocs, votes, attendance_records — is
+    a real table in that application's own schema. `/` was among them, so the
+    app opened on a 404.
+    """
+    from services.a2ui_to_forge import _adopt_table_bindings, dangling_bindings
+
+    class _Binder:
+        def __init__(self):
+            self.sources: list[dict] = []
+
+    registry = {"entities": {"Bloc": {"slug": "blocs", "columns": []},
+                             "Vote": {"slug": "votes", "columns": []}}}
+    schema = {
+        "dataSources": [],
+        "root": {"type": "Stack", "children": [
+            {"type": "Table", "props": {"rows": "{{blocs}}"}},
+            {"type": "MetricTile", "props": {"value": "{{votes.total}}"}},
+        ]},
+    }
+    binder = _Binder()
+    # `dangling_bindings` already reports the head of a dotted path.
+    assert sorted(dangling_bindings(schema)) == ["blocs", "votes"]
+
+    _adopt_table_bindings(schema, binder, registry)
+
+    names = {s["name"] for s in schema["dataSources"]}
+    assert names == {"blocs", "votes"}, names
+    # A dotted binding asks for the head: {{votes.total}} needs `votes`.
+    assert {s["entity"] for s in schema["dataSources"]} == {"Bloc", "Vote"}
+    assert dangling_bindings(schema) == []
+
+
+def test_an_invented_name_still_dangles():
+    """This completes the binder; it does not loosen the check. A name that
+    matches no entity is still a page binding data nobody will fetch."""
+    from services.a2ui_to_forge import _adopt_table_bindings, dangling_bindings
+
+    class _Binder:
+        def __init__(self):
+            self.sources: list[dict] = []
+
+    schema = {"dataSources": [],
+              "root": {"type": "Table", "props": {"rows": "{{sales_forecast}}"}}}
+    _adopt_table_bindings(schema, _Binder(), {"entities": {"Bloc": {"slug": "blocs"}}})
+    assert schema["dataSources"] == []
+    assert dangling_bindings(schema) == ["sales_forecast"]
