@@ -1117,6 +1117,30 @@ def build_prompt(
             repeats=", ".join(REPEAT_SOURCES),
         )
         brief = page_brief(doc, subject) if subject else {}
+        # THE DESIGN LANGUAGE GOES IN THE CACHED PREFIX, NOT THE PAGE BRIEF.
+        #
+        # `designSystem` is 15,923 characters — 66% of a brief — and byte-
+        # identical for every page. It sat in the user message AFTER the page
+        # id, so it could never be a cache prefix: measured over a 44-page
+        # application, ~3,981 tokens re-sent 44 times, ~175,000 input tokens a
+        # run, at full price. The system prompt is already cache-tagged and
+        # already carries the component catalog, and the design language is the
+        # same kind of thing — the vocabulary a page is composed in, not a fact
+        # about which page it is.
+        #
+        # `_cacheable` keys on content, so the first page in the wave writes
+        # this prefix and the other forty-three read it. Retries share it too:
+        # feedback rides in the user message, which is where per-page content
+        # belongs.
+        design = brief.pop("designSystem", None)
+        if design:
+            system += (
+                "\n\nTHE DESIGN LANGUAGE, decided once for this application "
+                "and inherited by every page. Compose within it rather than "
+                "restating or re-deciding it.\n\n```json\n"
+                + json.dumps(design, indent=2, sort_keys=True)
+                + "\n```"
+            )
         user = (
             "Design this page in full. You are given the page's contract, the "
             "requirements it exists to satisfy, the entity behind it and the "

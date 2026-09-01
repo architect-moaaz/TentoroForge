@@ -1446,3 +1446,54 @@ def test_a_lone_fanout_can_run_at_full_width():
                                                  WAVE_CONCURRENCY)
 
     assert WAVE_CONCURRENCY >= FANOUT_CONCURRENCY
+
+
+def test_the_design_language_rides_in_the_cached_prefix():
+    """`designSystem` is identical for every page, so it belongs in the system
+    prompt where it is cached once — not in the per-page brief.
+
+    Measured on a 44-page application: 15,923 chars, 66% of a brief, sitting
+    AFTER the page id in the user message and so never a cache prefix. That is
+    ~3,981 tokens re-sent 44 times, ~175,000 input tokens a run at full price.
+    """
+    from services.blueprint.executors import _cacheable, build_prompt
+
+    doc = {
+        "application": {"id": "APP-1"},
+        "designSystem": {"colour": {"primary": "tokens.color.primary"},
+                         "density": "comfortable"},
+        "pages": [{"id": "PAGE-001", "route": "/a", "pattern": "entity_list"},
+                  {"id": "PAGE-002", "route": "/b", "pattern": "entity_list"}],
+        "data": {"entities": []},
+        "requirements": [],
+    }
+    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002")
+
+    # Identical prefix, or every page writes a new cache entry instead of
+    # reading the last one — which is what an 18% hit rate looked like.
+    assert s1 == s2
+    assert "tokens.color.primary" in s1
+    # And it must not ALSO ride per page, or nothing was saved.
+    assert "tokens.color.primary" not in u1
+    assert "designSystem" not in u1
+
+    blocks = _cacheable(s1)
+    assert isinstance(blocks, list) and "cache_control" in blocks[0]
+
+
+def test_the_page_brief_still_carries_what_is_per_page():
+    """Moving the shared half out must not take the page's own facts with it."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {
+        "application": {"id": "APP-1"},
+        "designSystem": {"density": "comfortable"},
+        "pages": [{"id": "PAGE-001", "route": "/sessions", "name": "Sessions",
+                   "pattern": "entity_list"}],
+        "data": {"entities": []},
+        "requirements": [],
+    }
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "PAGE-001" in user
+    assert "/sessions" in user
