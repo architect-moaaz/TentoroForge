@@ -1230,6 +1230,18 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
         project_nav_flow, project_root_route,
     )
 
+    # THE FRONT DOOR, BEFORE ANYTHING IS PROJECTED. A landing page whose
+    # composition was refused leaves no layout, so the projection writes no
+    # schema and the route 404s — on the page every user arrives at. Runs only
+    # when nothing composed one; a rejected composition stays rejected.
+    from services.blueprint.landing_page import ensure_landing_layout
+
+    if ensure_landing_layout(svc) is not None:
+        logger.warning("[frontend] landing page had no composed layout — "
+                       "assembled one from navigation so the app does not "
+                       "open on a 404")
+        svc.save()
+
     result = apply_frontend_projection(svc, app_root)
     # A page A2UI authored and the planner cannot render is a defect, not an
     # acceptable loss. This projection wrote 23 schemas from 30 authored trees
