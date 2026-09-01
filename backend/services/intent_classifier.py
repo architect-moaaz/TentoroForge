@@ -109,7 +109,7 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
     ],
     "add_page": [
         "understand_ask", "list_pages", "read_page", "list_entities",
-        "add_page", "verify_promise", "answer", "ask_user",
+        "add_page", "compose_route", "verify_promise", "answer", "ask_user",
     ],
     "add_workflow": [
         "understand_ask", "list_entities", "read_entity", "list_workflows",
@@ -123,7 +123,7 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
     ],
     "add_component": [
         "understand_ask", "list_components", "list_pages", "read_page",
-        "find_component", "edit_page",
+        "find_component", "edit_page", "add_widgets",
         "verify_promise", "answer", "ask_user",
     ],
     "add_token": [
@@ -135,6 +135,10 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
     "edit_page": [
         "understand_ask", "list_pages", "read_page", "list_components",
         "find_component", "edit_page", "restrict_page_to_role",
+        # A screen that renders nothing is an edit ask in the user's words and
+        # has no element to edit. Without these the intent scopes Smith to
+        # tools that cannot answer it.
+        "compose_route", "add_widgets",
         "verify_promise", "answer", "ask_user",
     ],
     "edit_workflow": [
@@ -170,7 +174,7 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
     "deploy": ["publish", "answer", "ask_user"],
     "feature": [
         "understand_ask", "recall", "list_pages", "list_entities",
-        "list_workflows", "plan_and_apply",
+        "list_workflows", "plan_and_apply", "compose_route", "add_widgets",
         "verify_promise", "answer", "ask_user",
     ],
 
@@ -236,6 +240,11 @@ TOOL_TAGS: dict[str, set[str]] = {
     "understand_ask":            {"read", "meta"},
     # Add
     "add_page":                  {"add", "page"},
+    # Whole-screen composition. Both verbs and `page`, because composing a
+    # route creates a layout where there was none AND replaces one where
+    # there was: tagging it `add` only would hide it from every edit ask.
+    "compose_route":             {"add", "edit", "page"},
+    "add_widgets":               {"add", "edit", "page", "component"},
     "add_workflow":              {"add", "workflow"},
     "add_entity":                {"add", "entity"},
     "add_role":                  {"add", "auth"},

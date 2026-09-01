@@ -25,6 +25,7 @@ divergence §115 refuses.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
@@ -160,3 +161,71 @@ def add_widgets(
         request=request or f"add {', '.join(wanted)} to {page.get('route')}",
         executor=executor,
     )
+
+
+# ── the tool seam ───────────────────────────────────────────────────────
+
+#: Which verbs this module answers for. `run` is what the agent loop calls, so
+#: an unknown verb has to be named rather than silently doing the default —
+#: that silence is the whole failure this module exists to remove.
+VERBS = ("compose_route", "add_widgets")
+
+
+def run(output_dir: str, verb: str, *, route: str = "",
+        widgets: Sequence[str] = (), request: str = "") -> dict:
+    """One composition, from an `output_dir` — the shape a tool handler needs.
+
+    THE ONLY ENTRY POINT WITH BOTH CALLERS ON IT. The ReAct loop dispatches by
+    tool name and `smith_session.run_iteration` dispatches by verb; if each
+    loaded the Blueprint and called `apply_change` its own way there would be
+    two answers to "what does composing a route do", which is the defect shape
+    this session has spent its time removing. Both go through here.
+
+    Returns the `{applied, edited_paths, ...}` envelope the other write tools
+    return. A refusal is `applied: False` with a `reason` — never an exception
+    that the loop would render as "unknown error" and never a bare success.
+    """
+    from services.blueprint.service import BlueprintService
+
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return {"applied": False, "edited_paths": [],
+                "reason": ("this project has no Blueprint yet, so there is no "
+                           "screen to compose. It needs defining first.")}
+
+    app_root = str(Path(output_dir) / "app")
+    wanted = [str(w).strip() for w in (widgets or []) if str(w).strip()]
+    try:
+        if verb == "add_widgets":
+            result = add_widgets(svc, route, wanted, app_root=app_root,
+                                 request=request)
+            did = f"added {', '.join(wanted)} to {route}"
+        elif verb == "compose_route":
+            result = compose_route(svc, route, app_root=app_root,
+                                   request=request)
+            did = f"composed {route}"
+        else:
+            return {"applied": False, "edited_paths": [],
+                    "reason": f"unknown compose verb {verb!r}; "
+                              f"expected one of {', '.join(VERBS)}"}
+    except ComposeError as exc:
+        # The composer declining is a real outcome and says so.
+        return {"applied": False, "edited_paths": [], "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] %s %s failed", verb, route)
+        return {"applied": False, "edited_paths": [],
+                "reason": f"{type(exc).__name__}: {exc}"}
+
+    # `committed` is what `apply_change` actually reports. An earlier caller
+    # read `artifacts`, which ChangeResult does not have, so every successful
+    # composition reported nothing changed.
+    committed = sorted(getattr(result, "committed", None) or [])
+    return {
+        "applied": bool(getattr(result, "applied", False)),
+        "edited_paths": committed,
+        "diff_summary": did + (f" — {len(committed)} artifact(s)"
+                               if committed else ""),
+        "version": getattr(result, "version", 0),
+        "reason": str(getattr(result, "reason", "") or ""),
+    }

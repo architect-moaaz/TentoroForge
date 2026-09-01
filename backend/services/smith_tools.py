@@ -587,6 +587,27 @@ TOOL_CATALOG: list[dict] = [
              "atomically with rollback on failure. Use when list_pages "
              "shows no matching page for the ask. Skip when you're "
              "modifying an existing page — use edit_page instead."},
+    {"name": "compose_route",
+     "signature": "compose_route(route, request?) -> {applied, "
+                  "edited_paths, diff_summary, reason?}",
+     "desc": "BUILD OR REBUILD THE WHOLE SCREEN at a route, by running "
+             "the same page-composition agent the build itself runs "
+             "(A2UI + the authoring agent), then committing through the "
+             "Blueprint so the app re-projects. Use when a route renders "
+             "nothing or 404s, or when the user wants the screen laid "
+             "out again from scratch. NOT for changing one label or one "
+             "field \u2014 that is edit_page. The page must already exist "
+             "in the definition; check list_pages first."},
+    {"name": "add_widgets",
+     "signature": "add_widgets(route, widgets[], request?) -> {applied, "
+                  "edited_paths, diff_summary, reason?}",
+     "desc": "ADD NAMED SECTIONS to a screen: \"put upcoming sessions, "
+             "quorum status and recent votes on the dashboard\". Records "
+             "each widget in the page's contract and then composes the "
+             "page again against it, so the Blueprint and the rendered "
+             "screen say the same thing \u2014 a patch on the tree alone "
+             "would be dropped by the next composition. Pass what each "
+             "widget SHOWS, not just its name."},
     {"name": "remove_page",
      "signature": "remove_page(route, cascade?, _confirmed?) -> "
                   "{status: 'needs_confirmation'|'ok', ...}",
@@ -1121,6 +1142,10 @@ READONLY_HANDLERS = {
     "run_guards":               lambda output_dir, args: _smith_run_guards(output_dir),
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
     "add_page":                 lambda output_dir, args: _smith_add_page(output_dir, args),
+    # Whole-screen composition \u2014 the page_layouts agent, reachable from a
+    # conversation. See services/smith/compose.py.
+    "compose_route":            lambda output_dir, args: _smith_compose(output_dir, args, "compose_route"),
+    "add_widgets":              lambda output_dir, args: _smith_compose(output_dir, args, "add_widgets"),
     "remove_page":              lambda output_dir, args: _smith_remove_page(output_dir, args),
     "add_workflow":             lambda output_dir, args: _smith_add_workflow(output_dir, args),
     "wire_form_to_workflow":    lambda output_dir, args: _smith_wire_form_to_workflow(output_dir, args),
@@ -1196,6 +1221,41 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
         output_dir=output_dir,
         blueprint_summary=str((args or {}).get("blueprint_summary") or ""),
     )
+
+
+def _smith_compose(output_dir: str, args: dict, verb: str) -> dict:
+    """Compose a screen through the agent that already composes screens.
+
+    Smith could see every page and change one label on one of them. The
+    composer it needed was `page_layouts`, which the build runs for every
+    page and which nothing routed a conversation into \u2014 so asked to build a
+    dashboard Smith replied that nothing needed changing, four times, having
+    understood the request perfectly.
+
+    Thin on purpose: `services.smith.compose.run` is the one place that loads
+    the Blueprint, runs the agent and commits through `apply_change`, and
+    `smith_session` reaches the same function by verb. Two entry points doing
+    it separately would be two answers to what composing a route means.
+    """
+    from services.smith.compose import run as _compose_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [],
+                "reason": f"{verb} requires an object arg"}
+    route = str(args.get("route") or "").strip()
+    if not route:
+        return {"applied": False, "edited_paths": [],
+                "reason": ("no route given. Pass the path of the screen "
+                           "(\"/\", \"/sessions\"); list_pages shows them.")}
+    widgets = args.get("widgets") or args.get("sections") or []
+    if isinstance(widgets, str):
+        widgets = [widgets]
+    if verb == "add_widgets" and not widgets:
+        return {"applied": False, "edited_paths": [],
+                "reason": ("no widgets named. Pass widgets:[...] saying what "
+                           "each one shows.")}
+    return _compose_run(output_dir, verb, route=route, widgets=widgets,
+                        request=str(args.get("request") or ""))
 
 
 def _smith_think(args: dict) -> dict:

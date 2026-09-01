@@ -206,55 +206,39 @@ class SmithSession:
                  user_message: str) -> "TurnResult":
         """Compose a screen, or add sections to one, through the real agent.
 
-        `services.smith.compose` builds the same TaskSpec the orchestrator
+        `services.smith.compose.run` builds the same TaskSpec the orchestrator
         builds and hands it to the same executor, so a page Smith composes and
         a page the build composed come from one code path — then commits it
         through `apply_change` so the Blueprint stays the record.
+
+        THE SAME FUNCTION THE TOOL CALLS. `compose_route` and `add_widgets` are
+        also tools in the ReAct catalogue, which is the path a live chat turn
+        takes. Both arrive here; a private copy of the loading-and-committing
+        would be a second answer to what composing a route means, and it would
+        drift the first time either was touched.
         """
-        from services.blueprint.service import BlueprintService
-        from services.smith.compose import ComposeError, add_widgets, compose_route
+        from services.smith.compose import run as compose_run
 
         route = str(understanding.get("route") or "").strip()
-        try:
-            svc = BlueprintService.load(output_dir=str(self.output_dir))
-        except FileNotFoundError:
-            return TurnResult(
-                status="needs_user",
-                answer=("This project has no definition yet, so there is no "
-                        "screen to compose. Describe what you want built and "
-                        "I will define it first."),
-            )
+        widgets = [str(w) for w in (understanding.get("widgets") or [])]
+        out = compose_run(str(self.output_dir), verb, route=route,
+                          widgets=widgets, request=user_message)
 
-        app_root = str(Path(self.output_dir) / "app")
-        try:
-            if verb == "add_widgets":
-                widgets = [str(w) for w in (understanding.get("widgets") or [])]
-                result = add_widgets(svc, route, widgets, app_root=app_root,
-                                     request=user_message)
-                did = f"added {', '.join(widgets)} to {route}"
-            else:
-                result = compose_route(svc, route, app_root=app_root,
-                                       request=user_message)
-                did = f"composed {route}"
-        except ComposeError as exc:
-            # The composer declining is a real outcome. Saying so beats
-            # reporting success with nothing behind it, which is the failure
-            # this whole path is a reaction to.
-            return TurnResult(status="needs_user", answer=str(exc))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("[smith] %s failed", verb)
-            return TurnResult(
-                status="needs_user",
-                answer=f"I tried to {verb.replace('_', ' ')} {route} and it "
-                       f"failed: {type(exc).__name__}: {exc}",
-            )
+        if not out.get("applied"):
+            # A refusal is an outcome. Reporting it beats claiming success with
+            # nothing behind it, which is the failure this path is a reaction to.
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         f"I could not {verb.replace('_', ' ')} "
+                                         f"{route} and have changed nothing."))
 
-        touched = sorted(getattr(result, "artifacts", None) or [])
+        touched = list(out.get("edited_paths") or [])
         return TurnResult(
             status="resolved",
-            answer=(f"I {did}. " + (f"Updated: {', '.join(touched[:6])}."
-                                    if touched else
-                                    "The Blueprint and the app were updated.")),
+            answer=(str(out.get("diff_summary") or f"I updated {route}.")
+                    + (f" Updated: {', '.join(touched[:6])}." if touched
+                       else "")),
+            touched_paths=touched,
         )
 
     def run_iteration(self, user_message: str,
