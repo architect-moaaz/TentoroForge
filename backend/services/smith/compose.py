@@ -89,7 +89,7 @@ def compose_route(
     # single message. `reasoning` is how that minute becomes legible: the
     # executor's stream was already open and its thinking events discarded.
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
-                                    usage=RunUsage())
+                                    usage=RunUsage(), reasoning=reasoning)
     spec = TaskSpec(task_id=f"smith-compose-{page['id']}", node="page_layouts",
                     agent="a2ui_pages", attempt=1, subject=page["id"],
                     feedback=None)

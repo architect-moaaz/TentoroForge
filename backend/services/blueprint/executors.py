@@ -1666,12 +1666,18 @@ def make_executor(
     *,
     repair_attempts: int = 1,
     usage: RunUsage | None = None,
+    reasoning: Any = None,
 ) -> Callable[[TaskSpec], AgentResult]:
     """Build the callable :func:`services.blueprint.orchestrator.run` expects.
 
     ``repair_attempts`` retries a malformed envelope with the parser's own error
     appended to the prompt. This is pre-commit repair: nothing has been written
     to the Blueprint, so a rejected proposal simply never becomes an artifact.
+
+    ``reasoning`` is where the work reports itself while it happens. It reaches
+    A2UI here as well as the model clients on the router: for a page A2UI owns,
+    no model call of ours is made at all, so the router's sink would leave the
+    longest stretch of a compose turn silent.
     """
 
     def _compose_via_a2ui(spec: TaskSpec) -> AgentResult | None:
@@ -1699,6 +1705,7 @@ def make_executor(
                 page_id=spec.subject,
                 registry=registry_from_blueprint(svc.doc),
                 presentation=page.get("presentation") or "page",
+                progress=reasoning,
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)

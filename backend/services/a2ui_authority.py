@@ -48,6 +48,7 @@ import os
 import re
 import sys
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -597,10 +598,26 @@ def _unwrap_group(exc: BaseException) -> BaseException:
     return exc
 
 
+def _say(progress: Any, text: str) -> None:
+    """Tell the watcher, if there is one. Never at the cost of the work."""
+    if progress is None:
+        return
+    try:
+        progress(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _mcp_surface(requirement: str, domain_context: str,
-                 timeout: int = DEFAULT_TIMEOUT) -> dict:
+                 timeout: int = DEFAULT_TIMEOUT, progress: Any = None) -> dict:
     """Call ``generate_a2ui_surface`` over stdio MCP. Raises on any failure —
-    the caller turns that into a fallback, never a broken page."""
+    the caller turns that into a fallback, never a broken page.
+
+    ``progress`` receives A2UI's own phase log as readable sentences, read from
+    the child's stderr — see `services.a2ui_progress`. The composer has always
+    reported its attempts and its rejections; the parent simply discarded the
+    stream carrying them.
+    """
     from services.a2ui_catalog import write_a2ui_catalog
 
     # Regenerate the catalog into the server's search path on every call. A
@@ -611,6 +628,15 @@ def _mcp_surface(requirement: str, domain_context: str,
     catalog_path = write_a2ui_catalog(catalog_dir / "catalog.json")
     catalog_id = json.loads(catalog_path.read_text(encoding="utf-8"))["catalogId"]
 
+    # A REAL FILE DESCRIPTOR, because `stdio_client` hands `errlog` to
+    # `anyio.open_process(stderr=...)` and the OS wires the child to it. A
+    # file-like object with a `write` method is not enough; it needs a fileno.
+    #
+    # Both ends, always: the pump forwards to the sink AND re-emits the raw
+    # line, so redirecting the child's stderr never costs the developer the
+    # console output they had before.
+    errlog, pump, closer = _stderr_pump(progress)
+
     async def _go() -> dict:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
@@ -620,7 +646,7 @@ def _mcp_surface(requirement: str, domain_context: str,
         env["A2UI_REPO"] = A2UI_REPO
         params = StdioServerParameters(
             command=sys.executable, args=[str(here / "server.py")], env=env)
-        async with stdio_client(params) as (r, w):
+        async with stdio_client(params, errlog=errlog) as (r, w):
             async with ClientSession(r, w) as s:
                 await s.initialize()
                 out = await s.call_tool("generate_a2ui_surface", {
@@ -661,12 +687,52 @@ def _mcp_surface(requirement: str, domain_context: str,
     # one already, and `asyncio.run` inside a live loop raises.
     t = threading.Thread(target=_target, daemon=True)
     t.start()
-    t.join(timeout + 30)
+    pump.start()
+    try:
+        t.join(timeout + 30)
+    finally:
+        # Closing the write end ends the pump's read loop. In a `finally` so a
+        # timeout does not leak the fd or the thread — this runs per page, and
+        # page_layouts fans out over every page in the application.
+        closer()
+        pump.join(5)
     if t.is_alive():
         raise TimeoutError(f"a2ui composition exceeded {timeout}s")
     if "e" in box:
         raise box["e"]
     return box["v"]
+
+
+def _stderr_pump(progress: Any) -> tuple[Any, threading.Thread, Any]:
+    """A pipe for the child's stderr, and a thread turning it into sentences.
+
+    Returns ``(write_end, thread, close)``. The write end is a real file object
+    because `anyio.open_process` gives its fileno to the OS.
+    """
+    import os
+
+    from services.a2ui_progress import phrase
+
+    r_fd, w_fd = os.pipe()
+    write_end = os.fdopen(w_fd, "w", encoding="utf-8", errors="replace")
+
+    def _pump() -> None:
+        try:
+            with os.fdopen(r_fd, "r", encoding="utf-8", errors="replace") as r:
+                for line in r:
+                    # The developer keeps the console output they had before;
+                    # redirecting the child's stderr must not cost it.
+                    sys.stderr.write(line)
+                    said = phrase(line) if progress is not None else None
+                    if said:
+                        try:
+                            progress(said)
+                        except Exception:  # noqa: BLE001 — reporting the work
+                            pass          # must never be able to fail it
+        except Exception:  # noqa: BLE001 — a closed pipe is the normal end
+            pass
+
+    return write_end, threading.Thread(target=_pump, daemon=True), write_end.close
 
 
 # ------------------------------------------------------------------ compose
@@ -711,6 +777,7 @@ def compose_page_via_a2ui(
     page_id: str = "",
     registry: dict | None = None,
     presentation: str = "page",
+    progress: Any = None,
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -728,7 +795,9 @@ def compose_page_via_a2ui(
         ok, why = availability()
         if not ok:
             return {"applied": False, "route": route, "kind": kind, "reason": why}
-        surface_provider = _mcp_surface
+        # Bound rather than passed at the call site, so an INJECTED provider
+        # keeps the two-argument seam every test uses.
+        surface_provider = partial(_mcp_surface, progress=progress)
 
     from services.a2ui_to_forge import translate
 
@@ -781,6 +850,11 @@ def compose_page_via_a2ui(
             logger.info("[a2ui] %s attempt %d returned nothing (%s) — asking "
                         "again", route, attempt,
                         last_exc or "empty surface")
+            # A DROPPED CALL LOOKS LIKE A SLOW ONE from outside. Two of three
+            # parallel calls once came back empty and the retry was invisible,
+            # so the wait read as a single long composition.
+            _say(progress, f"The composer returned nothing for {route} — "
+                           f"asking again ({attempt + 1} of 3).")
     if not payload or not (payload.get("messages") or []):
         why = (f"the composer returned nothing after 3 attempts"
                + (f" ({last_exc})" if last_exc else ""))
