@@ -63,23 +63,67 @@ def _model_supports_thinking(model: str) -> bool:
     return any(m.startswith(p) for p in _THINKING_MODEL_PREFIXES)
 
 
-def _thinking_budget() -> int:
-    """Read the FORGE_SMITH_THINKING_BUDGET env var. 0 disables thinking.
-    Malformed / negative values fall back to the OFF default.
+#: Models that take ``thinking={"type": "adaptive"}`` and REJECT
+#: ``budget_tokens`` outright (400) — everything from the 4.6 generation on.
+#: The model decides how long to think per turn, which is what makes thinking
+#: affordable on an interactive loop: a hard budget spends it whether the turn
+#: needs it or not.
+_ADAPTIVE_THINKING_PREFIXES: tuple[str, ...] = (
+    "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5",
+    "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5",
+)
 
-    Default is 0 (thinking OFF). Extended thinking adds several seconds of
-    serial reasoning-token generation to every ReAct turn — with the loop
-    capped at 8-16 turns, that's tens of seconds of latency per user ask
-    for a modest quality bump. Opt IN via env for hard cases; leave off for
-    the interactive baseline that keeps chat responsive."""
+#: How much room to leave for reasoning tokens on the pre-4.6 models that
+#: still take an explicit budget. Also the headroom added to ``max_tokens``
+#: on the adaptive path, where the cap covers thinking AND output together.
+_DEFAULT_THINKING_BUDGET = 4096
+
+
+def _thinking_budget() -> int:
+    """Reasoning headroom in tokens. 0 disables thinking.
+
+    ON BY DEFAULT. It was off, with the reasoning that extended thinking adds
+    serial reasoning tokens to every turn of a 16-turn loop. That was written
+    against a fixed budget spent on every turn whether or not the turn needed
+    it. Adaptive thinking (below) lets the model decide per turn, so a trivial
+    ask costs nearly nothing and a hard one gets what it needs.
+
+    And the latency argument cut the other way once the thinking was shown to
+    the user: a turn that streams what it is considering does not read as slow
+    in the way a silent spinner does. The reasoning was already forwarded to
+    the UI, rendered as collapsible text, and never produced — because the
+    budget was zero and no thinking block was ever requested.
+
+    ``FORGE_SMITH_THINKING_BUDGET=0`` still turns it off; malformed and
+    negative values fall back to the default rather than to silence, because
+    a typo in an env var should not quietly remove a capability.
+    """
     raw = os.environ.get("FORGE_SMITH_THINKING_BUDGET")
     if raw is None or raw == "":
-        return 0
+        return _DEFAULT_THINKING_BUDGET
     try:
         n = int(raw)
     except (TypeError, ValueError):
-        return 0
+        return _DEFAULT_THINKING_BUDGET
     return max(0, n)
+
+
+def _thinking_block(model: str, budget: int) -> "dict | None":
+    """The ``thinking`` request block for this model, or None for no thinking.
+
+    TWO SHAPES, AND SENDING THE WRONG ONE IS A 400. ``budget_tokens`` is how
+    thinking was requested before the 4.6 generation and is rejected outright
+    from 4.7 on; `adaptive` is the current form. The prefix list already
+    named `claude-opus-5` and `claude-sonnet-5` as thinking-capable while the
+    call site sent them `budget_tokens`, so turning thinking on and changing
+    the model would have failed every request with an error that says nothing
+    about which of the two changes caused it.
+    """
+    if budget <= 0 or not _model_supports_thinking(model):
+        return None
+    if any(model.strip().startswith(p) for p in _ADAPTIVE_THINKING_PREFIXES):
+        return {"type": "adaptive"}
+    return {"type": "enabled", "budget_tokens": budget}
 
 
 def run_fix_agent(
@@ -639,7 +683,8 @@ def _default_query(
 
     model = "claude-sonnet-4-6"
     budget = _thinking_budget()
-    thinking_on = budget > 0 and _model_supports_thinking(model)
+    thinking = _thinking_block(model, budget)
+    thinking_on = thinking is not None
 
     def _next_turn() -> Optional[dict]:  # noqa: ANN001
         last_user_pos = max(
@@ -676,10 +721,7 @@ def _default_query(
             # Extended thinking requires temperature=1.0; the API rejects
             # other values when the thinking block is present.
             create_kwargs["temperature"] = 1.0
-            create_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": budget,
-            }
+            create_kwargs["thinking"] = thinking
 
         msg = client.messages.create(**create_kwargs)
 

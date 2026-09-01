@@ -506,21 +506,38 @@ def test_model_supports_thinking_gating():
 
 
 def test_thinking_budget_env_var_reader(monkeypatch):
-    from agents.fix_chat_agent import _thinking_budget
-    # Default is OFF — extended thinking adds seconds per ReAct turn and
-    # the interactive baseline should stay responsive. Opt in via env.
+    from agents.fix_chat_agent import _DEFAULT_THINKING_BUDGET, _thinking_budget
+    # ON by default. Smith is asked to show its reasoning, and a budget of
+    # zero means no thinking block is requested, so there is no reasoning to
+    # show however well the streaming below it works.
     monkeypatch.delenv("FORGE_SMITH_THINKING_BUDGET", raising=False)
-    assert _thinking_budget() == 0
+    assert _thinking_budget() == _DEFAULT_THINKING_BUDGET
+    # An explicit 0 still turns it off.
     monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "0")
     assert _thinking_budget() == 0
     monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "8192")
     assert _thinking_budget() == 8192
-    # Malformed falls back to the OFF default (not the old 4096).
+    # Malformed falls back to the default, not to silence — a typo in an env
+    # var should not quietly remove a capability.
     monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "not-an-int")
-    assert _thinking_budget() == 0
-    # Negative clamps to 0 (never sends a negative-budget request)
+    assert _thinking_budget() == _DEFAULT_THINKING_BUDGET
     monkeypatch.setenv("FORGE_SMITH_THINKING_BUDGET", "-10")
     assert _thinking_budget() == 0
+
+
+def test_thinking_block_matches_what_the_model_accepts():
+    """`budget_tokens` is rejected outright from the 4.7 generation on, and
+    `adaptive` is not understood before 4.6. Sending the wrong one is a 400
+    that names neither the model nor the budget."""
+    from agents.fix_chat_agent import _thinking_block
+
+    assert _thinking_block("claude-sonnet-4-6", 4096) == {"type": "adaptive"}
+    assert _thinking_block("claude-opus-5-20260301", 4096) == {"type": "adaptive"}
+    assert _thinking_block("claude-sonnet-4-5-20260101", 4096) == {
+        "type": "enabled", "budget_tokens": 4096}
+    # No thinking at all: unsupported model, or switched off.
+    assert _thinking_block("claude-haiku-4-5", 4096) is None
+    assert _thinking_block("claude-sonnet-4-6", 0) is None
 
 
 def _mock_anthropic_response(*, thinking_texts, text_payload):
@@ -593,7 +610,9 @@ def test_default_query_forwards_thinking_blocks_to_reasoning_callback(monkeypatc
         "The Schedule button triggers AssessmentScheduling.",
     ]
     # The thinking block was actually sent to the API.
-    assert captured.get("thinking") == {"type": "enabled", "budget_tokens": 4096}
+    # sonnet-4-6 takes the adaptive form; `budget_tokens` is deprecated
+    # there and a 400 from 4.7 on.
+    assert captured.get("thinking") == {"type": "adaptive"}
     assert captured.get("temperature") == 1.0
     assert captured.get("max_tokens", 0) >= 1500 + 4096
 

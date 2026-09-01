@@ -64,12 +64,17 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
         run["stage"] = data.get("label") or data.get("node") or run.get("stage")
     elif event == "node:done":
         run["nodesDone"] = run.get("nodesDone", 0) + 1
-    elif event == "message":
+    elif event == "done":
         # §25 — the approval gate is a pause, not an end. A client arriving
         # here must see a decision waiting rather than a run in progress.
-        if data.get("status") == "awaiting_approval" or data.get("options"):
+        #
+        # Read from `done`, which carries the flag the panel itself uses. It
+        # was inferred from any message carrying `options`, and Smith's §16
+        # clarifying questions carry options too — so asking which language to
+        # use was reported as a definition waiting to be approved, twenty
+        # seconds into a run with nothing yet to approve.
+        if data.get("awaitingApproval"):
             run["awaitingApproval"] = True
-    elif event == "done":
         finish(project_id, "complete")
     elif event == "error":
         finish(project_id, "error", detail=str(data.get("message") or "")[:400])

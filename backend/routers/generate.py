@@ -1,6 +1,7 @@
 """Generation and chat endpoints — streams SSE events as the agent works."""
 
 import asyncio
+import functools
 import json
 import os
 import re
@@ -8218,6 +8219,121 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     try:
         def _arch_on_iter() -> bool:
             return os.environ.get("FORGE_SMITH_ARCHITECT", "1") != "0"
+
+        # ── Smith thinking out loud ──────────────────────────────────────
+        # Reasoning chunks, tool chips and heartbeats, streamed the instant
+        # they land. A worker-thread callback pushes into `_smith_queue` via
+        # `loop.call_soon_threadsafe`; the drain below runs in the event loop
+        # and yields each one as a `smith_thought` event.
+        #
+        # HOISTED ABOVE THE BRANCH ON PURPOSE. All of this used to live inside
+        # the `else:` arm, and `FORGE_SMITH_ARCHITECT` defaults to ON — so on
+        # every real turn the queue was never created, `reasoning_callback` was
+        # never passed, and the user watched a spinner for the whole run while
+        # the machinery for showing them Smith's thinking sat in a branch
+        # nothing took. `_last_tool` was read by the timeout handler below and
+        # would have raised NameError there but for a bare `except`.
+        _smith_queue: asyncio.Queue = asyncio.Queue()
+        _smith_loop = asyncio.get_running_loop()
+        # Mutable holder so the progress callback (running in the worker
+        # thread) can update the last-seen tool for heartbeat labelling and
+        # timeout messages. Single-write from one thread is safe under the
+        # GIL; no lock needed.
+        _last_tool: dict = {"name": ""}
+        _reasoning_chunks_seen: list[str] = []
+        # Hard deadline on the whole Smith turn. The agent loop and its nested
+        # sub-agents call the model with NO timeout anywhere, so a stalled
+        # response used to hang the turn forever and the spinner never
+        # cleared. 180s default; a real turn is well under it.
+        _smith_timeout = int(os.getenv("FORGE_SMITH_TIMEOUT_S", "180"))
+        _HEARTBEAT_SECONDS = 12.0
+
+        def _reasoning_cb(text: str) -> None:  # noqa: ANN001
+            if isinstance(text, str) and text.strip():
+                _smith_loop.call_soon_threadsafe(
+                    _smith_queue.put_nowait,
+                    {"kind": "reasoning", "text": text},
+                )
+
+        def _progress_cb(evt: dict) -> None:  # noqa: ANN001
+            if not isinstance(evt, dict):
+                return
+            phase = str(evt.get("phase") or "")
+            tool = str(evt.get("tool") or "")
+            if phase == "tool_start" and tool:
+                _last_tool["name"] = tool
+            _smith_loop.call_soon_threadsafe(_smith_queue.put_nowait, evt)
+
+        def _forward_evt_payload(evt: dict) -> "dict | None":
+            """One queue event as the `smith_thought` payload the frontend
+            expects, or None to drop it."""
+            if not isinstance(evt, dict):
+                return None
+            kind = str(evt.get("kind") or "")
+            phase = str(evt.get("phase") or "")
+            if kind == "reasoning":
+                txt = str(evt.get("text") or "")
+                if not txt.strip():
+                    return None
+                _reasoning_chunks_seen.append(txt)
+                return {"kind": "reasoning", "text": txt}
+            if phase == "tool_start":
+                tool = str(evt.get("tool") or "")
+                if not tool:
+                    return None
+                return {"kind": "tool_start", "tool": tool,
+                        "args": evt.get("args") or {}}
+            return None
+
+        async def _drain_smith(worker, started_at: float):
+            """Smith's thoughts while `worker` runs, oldest first.
+
+            Raises `asyncio.TimeoutError` on the deadline, having cancelled
+            the worker — the caller's timeout branch then reports what Smith
+            was last doing rather than a canned apology.
+
+            ONE COPY, BOTH BRANCHES. The architect turn and the tactical turn
+            build their worker differently and are watched identically; a
+            second drain would be a second answer to what streaming a turn
+            looks like, and only one of them would get fixed.
+            """
+            deadline = started_at + _smith_timeout
+            while not worker.done():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    worker.cancel()
+                    raise asyncio.TimeoutError()
+                # Race the queue against the worker finishing, so a fast turn
+                # does not sit out a full heartbeat interval on an empty queue.
+                _q_task = asyncio.ensure_future(_smith_queue.get())
+                done, _pending = await asyncio.wait(
+                    {_q_task, worker},
+                    timeout=min(_HEARTBEAT_SECONDS, remaining),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if _q_task in done:
+                    payload = _forward_evt_payload(_q_task.result())
+                    if payload is not None:
+                        yield payload
+                    continue
+                _q_task.cancel()
+                # Heartbeat only while the worker is still going. One landing
+                # just before the answer would read as noise.
+                if not worker.done():
+                    yield {"kind": "heartbeat",
+                           "elapsed_s": int(time.monotonic() - started_at),
+                           "last_tool": _last_tool["name"]}
+            # Tail events queued after the worker finished but before we
+            # noticed. Bounded: the queue is fed only by the worker.
+            while True:
+                try:
+                    evt = _smith_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                payload = _forward_evt_payload(evt)
+                if payload is not None:
+                    yield payload
+
         if _arch_on_iter():
             # New Smith-as-architect path (Migration Step 3 wire-up):
             # SmithSession → real seams → TurnResult verified against
@@ -8228,11 +8344,26 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 run_iteration_via_architect,
                 turn_result_to_legacy_dict,
             )
-            _turn_result = await asyncio.to_thread(
-                run_iteration_via_architect,
-                message, output_dir, str(project.id) if project else "",
-                memory_block,
-            )
+            # As a task, not an awaited thread, so the drain below can
+            # interleave Smith's thinking between its tool calls. Awaiting
+            # inline is what made this branch silent for the whole run.
+            _arch_worker = asyncio.create_task(asyncio.to_thread(
+                functools.partial(
+                    run_iteration_via_architect,
+                    message, output_dir, str(project.id) if project else "",
+                    memory_block,
+                    reasoning_callback=_reasoning_cb,
+                    progress_callback=_progress_cb,
+                ),
+            ))
+            _arch_started_at = time.monotonic()
+            try:
+                async for _payload in _drain_smith(_arch_worker,
+                                                   _arch_started_at):
+                    yield sse_event("smith_thought", _payload)
+                _turn_result = _arch_worker.result()
+            except asyncio.CancelledError:
+                raise asyncio.TimeoutError()
             logger.info(
                 "[smith-arch] status=%s applied=%d",
                 _turn_result.status, len(_turn_result.touched_paths),
@@ -8264,6 +8395,9 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 _needs = result.pop("_needs_user", None)
                 if _needs:
                     yield sse_event("smith_needs_user", _needs)
+                # Streamed live from the queue above; suppress the post-hoc
+                # replay so a chunk is never shown twice.
+                result["_reasoning_chunks_streamed"] = True
         elif os.environ.get("FORGE_SMITH_ORCH") == "1":
             from services.smith_orchestrator import run as _smith_orch_run
             orch = await asyncio.to_thread(
@@ -8321,44 +8455,6 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 except Exception:
                     logger.exception("intent classifier failed — full catalog")
 
-            # Live SSE stream of Smith's per-turn progress. Previously we
-            # buffered reasoning chunks into a Python list and flushed them
-            # only AFTER `run_smith_agent` returned — the user saw nothing
-            # for the whole 1–3 minute run, and on a timeout got a canned
-            # "took longer than expected" with zero context. The queue-plus-
-            # heartbeat pattern below sends events the instant they land:
-            #  - `reasoning` chunks from extended thinking
-            #  - `tool_start` chips as Smith invokes each tool
-            #  - `heartbeat` chips every ~12s of silence so the chat is
-            #    never blank longer than that
-            # A worker-thread callback pushes into `_smith_queue` via
-            # `loop.call_soon_threadsafe` (thread-safe); the SSE generator
-            # drains the queue in the main loop and yields each event.
-            _smith_queue: asyncio.Queue = asyncio.Queue()
-            _smith_loop = asyncio.get_running_loop()
-            # Mutable holder so the progress callback (running in the worker
-            # thread) can update the last-seen tool for heartbeat labelling
-            # and timeout messages. Single-write from one thread is safe
-            # under the GIL; no lock needed.
-            _last_tool: dict = {"name": ""}
-
-            def _reasoning_cb(text: str) -> None:  # noqa: ANN001
-                if isinstance(text, str) and text.strip():
-                    _smith_loop.call_soon_threadsafe(
-                        _smith_queue.put_nowait,
-                        {"kind": "reasoning", "text": text},
-                    )
-
-            def _progress_cb(evt: dict) -> None:  # noqa: ANN001
-                if not isinstance(evt, dict):
-                    return
-                phase = str(evt.get("phase") or "")
-                tool = str(evt.get("tool") or "")
-                if phase == "tool_start" and tool:
-                    _last_tool["name"] = tool
-                _smith_loop.call_soon_threadsafe(
-                    _smith_queue.put_nowait, evt,
-                )
 
             # The SERVER's record that the previous turn ended asking the user
             # to confirm a destructive op. Without it, `_confirmed` was only
@@ -8385,7 +8481,6 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
             # spinner never cleared ("Smith stops responding"). wait_for guarantees
             # the user always gets a response (the orphaned thread finishes on its
             # own). 180s default; a real turn is well under that.
-            _smith_timeout = int(os.getenv("FORGE_SMITH_TIMEOUT_S", "180"))
             # Smith Auto-Act (recent_edits) — inject the per-project sliding
             # window into memory so resolve_target can echo it back and get
             # the +20 recency bias when the user asks about the same page
@@ -8452,101 +8547,12 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 current_route=current_route,
             ))
             _smith_started_at = time.monotonic()
-            _smith_deadline = _smith_started_at + _smith_timeout
-            _HEARTBEAT_SECONDS = 12.0
-            _reasoning_chunks_seen: list[str] = []
-
-            async def _drain_next_smith_event() -> None:
-                """Yield one queued event (or a heartbeat if quiet).
-                Wrapped in a helper only so the outer generator's flow is
-                readable — the actual yields happen in the caller's loop.
-                (Kept as a marker for future refactors; body inlined below.)
-                """
-                # NB: intentionally not an async gen; wired inline for `yield`.
-                pass
-
-            def _forward_evt_payload(evt: dict) -> "dict | None":
-                """Translate a raw queue event into the smith_thought SSE
-                payload the frontend expects. Returns None to drop."""
-                if not isinstance(evt, dict):
-                    return None
-                kind = str(evt.get("kind") or "")
-                phase = str(evt.get("phase") or "")
-                if kind == "reasoning":
-                    txt = str(evt.get("text") or "")
-                    if not txt.strip():
-                        return None
-                    _reasoning_chunks_seen.append(txt)
-                    return {"kind": "reasoning", "text": txt}
-                if phase == "tool_start":
-                    tool = str(evt.get("tool") or "")
-                    if not tool:
-                        return None
-                    return {
-                        "kind": "tool_start",
-                        "tool": tool,
-                        "args": evt.get("args") or {},
-                    }
-                return None
-
             try:
-                while True:
-                    if _smith_worker.done():
-                        break
-                    now = time.monotonic()
-                    remaining_to_deadline = _smith_deadline - now
-                    if remaining_to_deadline <= 0:
-                        _smith_worker.cancel()
-                        raise asyncio.TimeoutError()
-                    wait_budget = min(_HEARTBEAT_SECONDS, remaining_to_deadline)
-                    # Race the queue against worker completion so a fast
-                    # worker (typical of test fixtures / short asks) doesn't
-                    # trigger a spurious heartbeat while `wait_for` blocks
-                    # on an empty queue for the full budget. `asyncio.wait`
-                    # returns the moment EITHER the queue delivers or the
-                    # worker task finishes — whichever comes first.
-                    _q_task = asyncio.ensure_future(_smith_queue.get())
-                    done, _pending = await asyncio.wait(
-                        {_q_task, _smith_worker},
-                        timeout=wait_budget,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if _q_task in done:
-                        evt = _q_task.result()
-                        payload = _forward_evt_payload(evt)
-                        if payload is not None:
-                            yield sse_event("smith_thought", payload)
-                    else:
-                        # Queue didn't deliver — cancel the pending get()
-                        # so it doesn't dangle. Safe: nothing consumes its
-                        # result on this branch.
-                        _q_task.cancel()
-                        # Heartbeat ONLY if the worker is still running.
-                        # If it's done we'll break at the top of the next
-                        # iteration and drain the tail; a heartbeat right
-                        # before the answer chip would read as noise.
-                        if not _smith_worker.done():
-                            elapsed_s = int(time.monotonic() - _smith_started_at)
-                            yield sse_event("smith_thought", {
-                                "kind": "heartbeat",
-                                "elapsed_s": elapsed_s,
-                                "last_tool": _last_tool["name"],
-                            })
-                # Drain any tail events queued after the worker completed
-                # but before we noticed. Bounded — the queue is fed only
-                # by the worker (now done) and holds at most a few chunks.
-                while True:
-                    try:
-                        evt = _smith_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    payload = _forward_evt_payload(evt)
-                    if payload is not None:
-                        yield sse_event("smith_thought", payload)
-
-                # Surface any exception raised inside the worker (LLM
-                # timeout upstream, tool crash, etc). This re-raises into
-                # the outer `except Exception as e:` below.
+                async for _payload in _drain_smith(_smith_worker,
+                                                   _smith_started_at):
+                    yield sse_event("smith_thought", _payload)
+                # Surface any exception raised inside the worker (LLM timeout
+                # upstream, tool crash). Re-raises into the outer handler.
                 result = _smith_worker.result()
             except asyncio.CancelledError:
                 # Deadline path — re-raise as TimeoutError so the existing
