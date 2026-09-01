@@ -1249,6 +1249,33 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # /parts, /invoices, /staff — failed on one bad prop and vanished. The app
     # built, deployed, and had no lists in it. plan_pages recorded every
     # reason; nothing between it and here ever read them.
+    # THE REST OF THE APPLICATION IS NOT THIS PAGE'S TO LOSE. The raise below
+    # used to come first, and these five never ran — so one page failing on one
+    # bad prop cost the stylesheet, the route graph, the middleware and the
+    # root route. The scaffold's `globals.css` imports `./tokens.css`
+    # unconditionally and `project_design_tokens` is the only thing that writes
+    # it, so the whole application stopped compiling:
+    #
+    #     ./src/app/globals.css
+    #     Module not found: Can't resolve './tokens.css'
+    #     GET / 500
+    #
+    # Not one broken page — no application at all, and an error naming a CSS
+    # import rather than the page that caused it.
+    #
+    # None of these five reads the planning result. `project_design_tokens`
+    # reads `designSystem`; nav_flow and root_route read the Blueprint's own
+    # page list, which is unaffected by which of them the planner could render.
+    # So they are run first and the refusal is raised after: the node still
+    # fails, the retry still happens, and what the failure destroys is now the
+    # page that failed rather than everything around it.
+    project_nav_flow(svc.doc, app_root)
+    project_design_tokens(svc.doc, app_root)
+    project_middleware(svc.doc, app_root)
+    # The data route needs the same list the matcher was built from.
+    project_public_resources(svc.doc, app_root)
+    project_root_route(svc.doc, app_root)
+
     if result.get("failed"):
         raise PlanError(
             f"{len(result['failed'])} page(s) authored but could not be "
@@ -1256,12 +1283,6 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
                 f"  {f['page']}: {f['reason'][:200]}" for f in result["failed"]
             )
         )
-    project_nav_flow(svc.doc, app_root)
-    project_design_tokens(svc.doc, app_root)
-    project_middleware(svc.doc, app_root)
-    # The data route needs the same list the matcher was built from.
-    project_public_resources(svc.doc, app_root)
-    project_root_route(svc.doc, app_root)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
