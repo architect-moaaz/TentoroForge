@@ -1664,7 +1664,8 @@
                   "enum": [
                     "list",
                     "get",
-                    "aggregate"
+                    "aggregate",
+                    "series"
                   ]
                 },
                 "filter": {
@@ -1681,6 +1682,50 @@
                 "orderBy": {
                   "type": "object",
                   "additionalProperties": {}
+                },
+                "groupBy": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "string",
+                  "enum": [
+                    "day",
+                    "week",
+                    "month"
+                  ]
+                },
+                "agg": {
+                  "type": "object",
+                  "properties": {
+                    "fn": {
+                      "type": "string",
+                      "enum": [
+                        "count",
+                        "sum",
+                        "avg",
+                        "min",
+                        "max",
+                        "running_sum"
+                      ]
+                    },
+                    "field": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fn"
+                  ],
+                  "additionalProperties": false
+                },
+                "orderByCol": {
+                  "type": "string"
+                },
+                "sort": {
+                  "type": "string",
+                  "enum": [
+                    "label",
+                    "value"
+                  ]
                 }
               },
               "required": [

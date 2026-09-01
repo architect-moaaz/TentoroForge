@@ -599,11 +599,47 @@ export const PatternTemplate = z.object({
 export const PageDataSource = z.object({
   name: z.string(),
   entity: z.string(),
-  op: z.enum(["list", "get", "aggregate"]),
+  /**
+   * WHAT THE APPLICATION CAN ACTUALLY FETCH. This was list|get|aggregate, and
+   * `series` — the grouped aggregate every chart binds to — was missing.
+   *
+   * Measured on a real 50-page application: 130 committed dataSources and not
+   * one `series`. `schema_prompt.ts`'s CHART DATA block instructs the page
+   * author to emit exactly {op:"series", groupBy, bucket, agg}, the runtime
+   * has a full resolver for it (SeriesSource in data-engine.ts), eight modules
+   * produce it, and `PageDataSource` right here refused it:
+   *
+   *   BlueprintInvalid: pageLayouts/36/dataSources/4:
+   *     Additional properties are not allowed ('agg', 'groupBy' were unexpected)
+   *
+   * The pipeline asked for a shape and then refused it, and the page carrying
+   * it was lost — four of fourteen 404ing routes on that application. It is
+   * also why `dashboard_no_chart` could not be satisfied by composing better:
+   * a dashboard cannot have a chart if a chart's source cannot be committed.
+   *
+   * `../page.ts` has described the full shape all along; this is the second
+   * copy, and it fell behind. Kept narrower than that one on purpose — the
+   * Blueprint requires name+entity+op and does not carry the mutation ops —
+   * so the two are not merged, but the read ops must agree.
+   */
+  op: z.enum(["list", "get", "aggregate", "series"]),
   filter: z.record(z.unknown()).optional(),
   metrics: z.record(z.unknown()).optional(),
   limit: z.number().int().optional(),
   orderBy: z.record(z.unknown()).optional(),
+  /** op:"series" — the GROUP BY column. Ignored when agg.fn is running_sum. */
+  groupBy: z.string().optional(),
+  /** Set when groupBy is a date/timestamp column. */
+  bucket: z.enum(["day", "week", "month"]).optional(),
+  agg: z
+    .object({
+      fn: z.enum(["count", "sum", "avg", "min", "max", "running_sum"]),
+      field: z.string().optional(),
+    })
+    .optional(),
+  /** Order column for running_sum only; defaults to createdAt. */
+  orderByCol: z.string().optional(),
+  sort: z.enum(["label", "value"]).optional(),
 });
 
 export const PageLayout = z.object({
