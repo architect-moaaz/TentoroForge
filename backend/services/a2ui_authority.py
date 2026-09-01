@@ -50,7 +50,7 @@ import sys
 import threading
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -664,7 +664,8 @@ def _say(progress: Any, text: str) -> None:
 
 
 def _mcp_surface(requirement: str, domain_context: str,
-                 timeout: int = DEFAULT_TIMEOUT, progress: Any = None) -> dict:
+                 timeout: int = DEFAULT_TIMEOUT, progress: Any = None,
+                 workflows: Sequence[str] = ()) -> dict:
     """Call ``generate_a2ui_surface`` over stdio MCP. Raises on any failure —
     the caller turns that into a fallback, never a broken page.
 
@@ -680,7 +681,14 @@ def _mcp_surface(requirement: str, domain_context: str,
     # Forge no longer has, and it costs nothing to rule out.
     catalog_dir = Path(A2UI_REPO) / "specification" / "v0_9" / "catalogs" / "forge"
     catalog_dir.mkdir(parents=True, exist_ok=True)
-    catalog_path = write_a2ui_catalog(catalog_dir / "catalog.json")
+    # WHAT A CONTROL MAY RUN, as an enum rather than as advice. The composer
+    # was told in prose which workflows a screen launches and still wrote
+    # `createDocument`; the catalog typed `workflow` as free text, so prose
+    # lost to schema. A2UI validates its own output against this catalog, so
+    # an invented id is now caught and retried inside the composer instead of
+    # refusing the page three minutes later.
+    catalog_path = write_a2ui_catalog(catalog_dir / "catalog.json",
+                                      workflows=workflows)
     catalog_id = json.loads(catalog_path.read_text(encoding="utf-8"))["catalogId"]
 
     # A REAL FILE DESCRIPTOR, because `stdio_client` hands `errlog` to
@@ -853,7 +861,10 @@ def compose_page_via_a2ui(
             return {"applied": False, "route": route, "kind": kind, "reason": why}
         # Bound rather than passed at the call site, so an INJECTED provider
         # keeps the two-argument seam every test uses.
-        surface_provider = partial(_mcp_surface, progress=progress)
+        surface_provider = partial(
+            _mcp_surface, progress=progress,
+            workflows=[str(w.get("id")) for w in (registry.get("workflows") or [])
+                       if isinstance(w, dict) and w.get("id")])
 
     from services.a2ui_to_forge import translate
 

@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from services.library_manifest import build_library_manifest
 
@@ -502,8 +502,62 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
     }
 
 
-def build_a2ui_catalog(manifest: dict | None = None) -> dict:
-    """Forge's component library as an A2UI v0.9 catalog."""
+def _constrain_workflows(node: Any, ids: list[str]) -> Any:
+    """Every `workflow` property becomes the list of ids that actually exist.
+
+    The composer was told, in prose, which workflows a screen launches and to
+    "put the id in `workflow` on the Button or Form that runs it". It wrote
+    `createDocument`, `save_draft`, `mark_read` — plausible names for real
+    intentions, none of them an id — and five pages were refused for naming a
+    workflow the application does not define.
+
+    It was not disobeying a constraint. The catalog typed `workflow` as
+    DynamicString, so ANY string was schema-valid, and prose lost to schema.
+    An enum makes the invented name unrepresentable: A2UI validates its own
+    output against this catalog before returning it, so a wrong id is caught
+    and retried inside the composer rather than surfacing as a refused page
+    three minutes later.
+
+    Constrain, don't correct — the alternative is mapping `createDocument` onto
+    the nearest real id after the fact, which is guessing at intent, silently,
+    and right often enough that nobody removes it.
+
+    THE APPLICATION'S IDS, NOT THE PAGE'S. The per-page set is narrower and is
+    still what the domain context names, but the catalog is one document shared
+    by every page in a run — the cached prefix. Enumerating per page would
+    rebuild it 53 times and lose the cache to buy a narrowing that prose
+    already does. What this removes is the invented id, which is the failure
+    that was actually observed.
+    """
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                out[key] = {
+                    pk: ({"enum": ids,
+                          "description": ("The id of the workflow this runs. "
+                                          "One of the application's own "
+                                          "workflows — not a name you choose.")}
+                         if pk == "workflow" else _constrain_workflows(pv, ids))
+                    for pk, pv in value.items()
+                }
+            else:
+                out[key] = _constrain_workflows(value, ids)
+        return out
+    if isinstance(node, list):
+        return [_constrain_workflows(x, ids) for x in node]
+    return node
+
+
+def build_a2ui_catalog(manifest: dict | None = None,
+                       workflows: Sequence[str] = ()) -> dict:
+    """Forge's component library as an A2UI v0.9 catalog.
+
+    ``workflows`` are the application's workflow ids. Given them, every
+    `workflow` prop is enumerated instead of typed as free text — see
+    `_constrain_workflows`. Empty leaves the catalog exactly as it was, which
+    is what every caller without an application to hand gets.
+    """
     man = manifest or build_library_manifest()
     comps = man.get("components") or {}
 
@@ -513,6 +567,10 @@ def build_a2ui_catalog(manifest: dict | None = None) -> dict:
 
     contracts = load_contracts()
     components = {n: _component_schema(n, comps[n], contracts) for n in present}
+
+    ids = sorted({str(w) for w in (workflows or []) if str(w).strip()})
+    if ids:
+        components = _constrain_workflows(components, ids)
 
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -548,9 +606,10 @@ def build_a2ui_catalog(manifest: dict | None = None) -> dict:
     }
 
 
-def write_a2ui_catalog(dest: Path | str) -> Path:
+def write_a2ui_catalog(dest: Path | str,
+                       workflows: Sequence[str] = ()) -> Path:
     """Write the catalog to `dest` (a directory or an explicit .json path)."""
-    cat = build_a2ui_catalog()
+    cat = build_a2ui_catalog(workflows=workflows)
     p = Path(dest)
     if p.is_dir() or not p.suffix:
         p = p / "catalog.json"

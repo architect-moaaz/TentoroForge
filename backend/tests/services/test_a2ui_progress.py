@@ -101,4 +101,12 @@ def test_an_injected_provider_keeps_its_two_argument_seam():
     from services import a2ui_authority
 
     src = inspect.getsource(a2ui_authority.compose_page_via_a2ui)
-    assert "partial(_mcp_surface, progress=progress)" in src
+    # Bound, not passed positionally — however many keywords it grows. Pinned
+    # to the property rather than the spelling: this failed when the partial
+    # gained `workflows=`, for a change that was entirely correct.
+    assert "partial(" in src and "_mcp_surface" in src
+    import inspect as _i
+    params = list(_i.signature(a2ui_authority._mcp_surface).parameters)
+    assert params[:2] == ["requirement", "domain_context"], (
+        "the injected seam is called with two positional arguments; every test "
+        "supplies `lambda requirement, domain: {...}`")
