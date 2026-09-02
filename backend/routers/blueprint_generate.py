@@ -632,7 +632,25 @@ async def smith_chat(
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    # WHAT THIS TURN ACTUALLY DID, for the line logged when it ends.
+    #
+    # A turn that produces no assistant message leaves no trace anywhere:
+    # `_remember` drops empty content deliberately, `work()` logs nothing on
+    # the way out, and a run that never starts writes no ledger. So a turn that
+    # answered and a turn that vanished look identical afterwards — one arrived
+    # at 16:22, made four model calls, wrote nothing, and cost twenty minutes
+    # of archaeology to NOT explain.
+    said: dict[str, Any] = {"events": 0, "messages": 0, "chars": 0,
+                            "status": "", "ran": False}
+
     def emit(event: str, data: dict) -> None:
+        said["events"] += 1
+        if event == "message":
+            said["messages"] += 1
+            said["chars"] += len(str(data.get("text") or ""))
+            said["status"] = str(data.get("status") or said["status"])
+        elif event == "plan":
+            said["ran"] = True
         loop.call_soon_threadsafe(
             queue.put_nowait, {"event": event, "data": json.dumps(data)})
         # §8 LAYER 1, WRITTEN DOWN. Smith's conversation memory had no store:
@@ -800,6 +818,16 @@ async def smith_chat(
             logger.exception("smith turn failed for %s", project_id)
             emit("error", {"message": str(exc)})
         finally:
+            # ONE LINE, ALWAYS. Whatever happened — answered, asked, ran the
+            # graph, or fell out silently — this says so. `messages=0` is the
+            # signature of the turn that could not be explained.
+            logger.info(
+                "[smith-chat] %s turn ended: messages=%d chars=%d status=%s "
+                "ran_dag=%s events=%d approved=%s",
+                project_id, said["messages"], said["chars"],
+                said["status"] or "-", said["ran"], said["events"],
+                bool(req.approved),
+            )
             loop.call_soon_threadsafe(queue.put_nowait, None)
 
     async def stream():
