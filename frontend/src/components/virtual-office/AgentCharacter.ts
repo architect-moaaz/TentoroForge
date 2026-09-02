@@ -30,6 +30,9 @@ export class AgentCharacter {
   private speechBubble: string | undefined;
   private speechBubbleType: "normal" | "error" | "success" = "normal";
   private progress: number | undefined;
+  private node: string | undefined;
+  private tally: { done: number; total: number } | undefined;
+  private attempt: { n: number; of: number } | undefined;
   private animFrame = 0;
   private walkProgress = 0; // fractional progress between current and next path node
   private onArrivalCallback: (() => void) | undefined;
@@ -77,6 +80,16 @@ export class AgentCharacter {
       case "protesting":
         this.animFrame = getWalkFrame(timestamp);
         break;
+      case "retrying":
+        // Still at the desk and still working — just having a worse time of
+        // it. Reusing the work cycle keeps the retry legible as *the same
+        // job again* rather than a different activity.
+        this.animFrame = getWorkFrame(timestamp);
+        break;
+      case "blocked":
+      case "skipped":
+        this.animFrame = getIdleFrame(timestamp);
+        break;
     }
   }
 
@@ -109,6 +122,7 @@ export class AgentCharacter {
     this._state = "working";
     this.path = [];
     this.targetPosition = undefined;
+    this.attempt = undefined;
     if (message) {
       this.speechBubble = message;
       this.speechBubbleType = "normal";
@@ -162,6 +176,63 @@ export class AgentCharacter {
   }
 
   /**
+   * A proposal was refused and the same call is going round again (§103).
+   */
+  retry(attempt: number, of: number, reason?: string): void {
+    this._state = "retrying";
+    this.path = [];
+    this.targetPosition = undefined;
+    this.attempt = { n: attempt, of };
+    if (reason) {
+      this.speechBubble = reason;
+      this.speechBubbleType = "error";
+    }
+  }
+
+  /**
+   * The agent cannot proceed — it asked a question, or nothing here can do
+   * the job. Distinct from `error`: nothing went wrong, the work is parked.
+   */
+  block(reason?: string): void {
+    this._state = "blocked";
+    this.path = [];
+    this.targetPosition = undefined;
+    this.progress = undefined;
+    this.tally = undefined;
+    this.attempt = undefined;
+    if (reason) {
+      this.speechBubble = reason;
+      this.speechBubbleType = "normal";
+    }
+  }
+
+  /**
+   * The node never ran because its inputs never arrived. The agent shrugs.
+   */
+  skip(reason?: string): void {
+    this._state = "skipped";
+    this.path = [];
+    this.targetPosition = undefined;
+    this.progress = undefined;
+    this.tally = undefined;
+    this.attempt = undefined;
+    if (reason) {
+      this.speechBubble = reason;
+      this.speechBubbleType = "normal";
+    }
+  }
+
+  /** The DAG node this agent is currently running. */
+  setNode(node: string | undefined): void {
+    this.node = node;
+  }
+
+  /** Fan-out position, while authoring one artifact per subject. */
+  setTally(done: number, total: number): void {
+    this.tally = total > 1 ? { done, total } : undefined;
+  }
+
+  /**
    * Set speech bubble text and type.
    */
   setSpeechBubble(text: string, type: "normal" | "error" | "success" = "normal"): void {
@@ -193,6 +264,9 @@ export class AgentCharacter {
     this.speechBubble = undefined;
     this.speechBubbleType = "normal";
     this.progress = undefined;
+    this.node = undefined;
+    this.tally = undefined;
+    this.attempt = undefined;
   }
 
   /**
@@ -239,6 +313,9 @@ export class AgentCharacter {
       progress: this.progress,
       animFrame: this.animFrame,
       onArrival: this.onArrivalCallback,
+      node: this.node,
+      tally: this.tally ? { ...this.tally } : undefined,
+      attempt: this.attempt ? { ...this.attempt } : undefined,
     };
   }
 

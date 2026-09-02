@@ -374,6 +374,7 @@ def apply_change(
     app_root: str | None = None,
     run_agents: bool = True,
     regenerate: bool = True,
+    observer: Callable[[dict], None] | None = None,
 ) -> ChangeResult:
     """§114 steps 3–7: analyse, update the Blueprint, then run the sub-DAG.
 
@@ -395,6 +396,10 @@ def apply_change(
     this is testable without a model. With ``run_agents=False`` the change lands
     in the Blueprint and the plan is reported but not executed — which is what
     §114 step 4 ("proposes change if necessary") needs in order to ask first.
+
+    ``observer`` is passed to the run's ledger, so a caller with somewhere to
+    show progress — the virtual office — sees the sub-DAG unfold live instead
+    of waiting for one report at the end.
     """
     from services.blueprint.agent_contract import AgentResult, apply_agent_result
 
@@ -472,7 +477,7 @@ def apply_change(
 
         report = run_dag(
             svc, executor, plan=impact.plan, commit=False,
-            user_request=request, app_root=app_root,
+            user_request=request, app_root=app_root, observer=observer,
         )
 
     return ChangeResult(

@@ -764,6 +764,7 @@ def run(
     commit: bool = False,
     user_request: str = "",
     app_root: str | None = None,
+    observer: Callable[[dict], None] | None = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -775,6 +776,11 @@ def run(
     A node whose dependencies did not complete is **skipped**, not attempted.
     §28's whole point is that running downstream work on missing inputs is how
     a swarm produces confident nonsense.
+
+    ``observer`` watches the run's ledger as it is written — every line that
+    reaches disk reaches the observer first. That is how the virtual office
+    animates: it reads this same account rather than keeping its own, so a node
+    outcome recorded here cannot be missing from the picture.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
     in_plan = set(order)
@@ -786,7 +792,8 @@ def run(
     # nothing to read. See services/blueprint/run_ledger.
     from services.blueprint.run_ledger import RunLedger
 
-    ledger = RunLedger(svc.output_dir, _run_id(), phase="build" if commit else "dry")
+    ledger = RunLedger(svc.output_dir, _run_id(),
+                       phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
 
     # §28's graph declares which nodes are independent; running them one after
@@ -1020,7 +1027,7 @@ def _run_wave(
             state.pending = _apply_round(
                 svc, key, state, results,
                 attempt=attempt, max_attempts=max_attempts, commit=commit,
-                user_request=user_request, report=report,
+                user_request=user_request, report=report, ledger=ledger,
             )
 
     for key in wave:
@@ -1118,6 +1125,7 @@ def _apply_round(
     commit: bool,
     user_request: str,
     report: RunReport,
+    ledger: Any = None,
 ) -> list[str]:
     """Commit one round's results for one node, in the order its subjects were given.
 
@@ -1126,6 +1134,29 @@ def _apply_round(
     not told what went wrong is just the same request again.
     """
     retry: list[str] = []
+    total = len(state.subjects or [""])
+
+    def _at(subject: str) -> int:
+        """One-based position in the node's subject list, for the record."""
+        try:
+            return (state.subjects or []).index(subject) + 1
+        except ValueError:  # pragma: no cover — a subject not in its own list
+            return 0
+
+    def _rejected(subject: str, label: str, reason: str) -> None:
+        """One subject's proposal was refused. Either it goes round again
+        (§103) or this was the last attempt and the subject is lost."""
+        state.feedback[subject] = reason
+        if attempt == max_attempts:
+            report.failed.append(label)
+            report.failed_because[label] = reason
+            state.failed.append(subject)
+            _note(ledger, "node_subject", key, subject, _at(subject), total, False)
+        else:
+            retry.append(subject)
+            _note(ledger, "node_retry", key, subject,
+                  attempt + 1, max_attempts, reason)
+
     for subject in state.pending:  # given order, not completion order
         # A node that does not fan out has one empty subject, and its label is
         # just the node key — callers test membership by it.
@@ -1133,13 +1164,7 @@ def _apply_round(
         outcome = results.get((key, subject))
 
         if isinstance(outcome, Exception):
-            state.feedback[subject] = _reason(outcome)
-            if attempt == max_attempts:
-                report.failed.append(label)
-                report.failed_because[label] = _reason(outcome)
-                state.failed.append(subject)
-            else:
-                retry.append(subject)
+            _rejected(subject, label, _reason(outcome))
             continue
 
         try:
@@ -1147,18 +1172,13 @@ def _apply_round(
                 svc, outcome, commit=commit, user_request=user_request,
             )
         except (BlueprintInvalid, InvalidPatternTemplate) as exc:
-            state.feedback[subject] = _reason(exc)
-            if attempt == max_attempts:
-                report.failed.append(label)
-                report.failed_because[label] = _reason(exc)
-                state.failed.append(subject)
-            else:
-                retry.append(subject)
+            _rejected(subject, label, _reason(exc))
             continue
 
         if application.applied:
             report.artifacts.extend(application.artifacts)
             report.change_requests.extend(application.change_requests)
+            _note(ledger, "node_subject", key, subject, _at(subject), total, True)
             continue
         if application.needs_clarification or outcome.status == "blocked":
             report.blocked.append(label)

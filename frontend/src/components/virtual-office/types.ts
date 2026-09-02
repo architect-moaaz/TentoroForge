@@ -11,7 +11,14 @@ export type AgentVisualState =
   | "error"
   | "celebrating"
   | "waiting"
-  | "protesting";
+  | "protesting"
+  // ── Blueprint DAG outcomes ───────────────────────────────────────────────
+  // A DAG node ends one of five ways, and only two of them were drawable
+  // before: it ran, it failed. The other three are the ones you actually need
+  // to see, because they are the ones that explain a half-finished app.
+  | "retrying" // a proposal was refused; the agent is going round again
+  | "blocked" // it asked a question, or nothing here can do the job
+  | "skipped"; // its inputs never arrived, so it never started
 
 export interface Position {
   x: number;
@@ -33,6 +40,13 @@ export interface AgentCharacterState {
   progress?: number;
   animFrame: number;
   onArrival?: () => void;
+  /** The DAG node this agent is currently running, e.g. `page_layouts`. */
+  node?: string;
+  /** Fan-out position: `{ done, total }` while authoring one artifact per
+   *  subject. Drawn as a stamp counter over the desk. */
+  tally?: { done: number; total: number };
+  /** Retry attempt, while `state === "retrying"`. */
+  attempt?: { n: number; of: number };
 }
 
 export interface Room {
@@ -92,12 +106,20 @@ export interface Camera {
 }
 
 // ── SSE Event Types ─────────────────────────────────────────────────────────
+//
+// Two producers write these. The Blueprint DAG
+// (`services/blueprint/orchestrator.py`) narrates through
+// `services/office_events.py`'s OfficeNarrator; the legacy relay in
+// `routers/generate.py` emits the same vocabulary directly. Both name agents
+// with the ids in AGENT_REGISTRY below — the backend aliases the relay's older
+// names on the way out, so the office only ever has one cast.
 
 export interface AgentStartEvent {
   type: "agent_start";
   agent: string;
   room: string;
   action?: string;
+  node?: string;
 }
 
 export interface AgentStatusEvent {
@@ -105,10 +127,25 @@ export interface AgentStatusEvent {
   agent: string;
   status: string;
   progress?: number;
+  /** The artifact this call is for, when the node fans out (e.g. `PAGE-009`). */
+  subject?: string;
+  node?: string;
 }
 
 export interface AgentHandoffEvent {
   type: "agent_handoff";
+  from: string;
+  to: string;
+  artifact?: string;
+}
+
+/** A finished artifact travelling to whoever was waiting on it.
+ *
+ *  Deliberately not a handoff: a DAG node feeds several downstream nodes at
+ *  once, and having the author walk each delivery over would leave everyone in
+ *  the corridors and nobody at a desk. The office flies a parcel instead. */
+export interface ArtifactDeliveryEvent {
+  type: "artifact_delivery";
   from: string;
   to: string;
   artifact?: string;
@@ -120,15 +157,53 @@ export interface AgentErrorEvent {
   message: string;
 }
 
+export interface AgentBlockedEvent {
+  type: "agent_blocked";
+  agent: string;
+  reason?: string;
+}
+
+export interface AgentSkippedEvent {
+  type: "agent_skipped";
+  agent: string;
+  reason?: string;
+}
+
+export interface AgentRetryEvent {
+  type: "agent_retry";
+  agent: string;
+  attempt: number;
+  of: number;
+  reason?: string;
+}
+
 export interface AgentCompleteEvent {
   type: "agent_complete";
   agent: string;
   files_generated?: number;
+  node?: string;
 }
 
 export interface ParallelStartEvent {
   type: "parallel_start";
   agents: string[];
+}
+
+/** The roster for this run. Everyone not on it is greyed out and stays at
+ *  their desk, so a five-node incremental change reads as five people working
+ *  rather than eighteen standing around for reasons the picture can't show. */
+export interface RunPlanEvent {
+  type: "run_plan";
+  agents: string[];
+  levels?: string[][];
+}
+
+export interface RunCompleteEvent {
+  type: "run_complete";
+  completed?: number;
+  failed?: number;
+  blocked?: number;
+  skipped?: number;
 }
 
 export interface BuildSuccessEvent {
@@ -157,13 +232,50 @@ export type OfficeEvent =
   | AgentStartEvent
   | AgentStatusEvent
   | AgentHandoffEvent
+  | ArtifactDeliveryEvent
   | AgentErrorEvent
+  | AgentBlockedEvent
+  | AgentSkippedEvent
+  | AgentRetryEvent
   | AgentCompleteEvent
   | ParallelStartEvent
+  | RunPlanEvent
+  | RunCompleteEvent
   | BuildSuccessEvent
   | PhaseStartEvent
   | PhaseCompleteEvent
   | CreditsExhaustedEvent;
+
+// ── Departments ─────────────────────────────────────────────────────────────
+//
+// The rooms, in the order §28's DAG walks them: what the app is for, then how
+// it is shaped, then the two branches that build it (data down the left,
+// experience down the right), then what checks and ships it. Mirrors
+// `DEPARTMENTS` in `backend/services/office_events.py` — the two must agree on
+// ids, because the backend puts agents in rooms by name.
+
+export interface Department {
+  id: string;
+  label: string;
+  color: string;
+  description: string;
+}
+
+export const DEPARTMENTS: Department[] = [
+  { id: "discovery", label: "Discovery", color: "#3B82F6", description: "What the application is for" },
+  { id: "architecture", label: "Architecture", color: "#0369A1", description: "Modules, navigation and the seams outward" },
+  { id: "design_studio", label: "Design Studio", color: "#8B5CF6", description: "The design language, before anything composes" },
+  { id: "data", label: "Data", color: "#059669", description: "Entities, schema, and the endpoints they imply" },
+  { id: "composition", label: "Composition", color: "#EC4899", description: "A2UI patterns and the page trees built from them" },
+  { id: "logic", label: "Logic", color: "#4F46E5", description: "Workflows and business rules" },
+  { id: "security", label: "Security", color: "#DC2626", description: "Roles and the permissions that guard entities" },
+  { id: "qa", label: "Verification", color: "#0891B2", description: "Tests, the verification matrix, and what the run remembers" },
+  { id: "shipping", label: "Shipping", color: "#16A34A", description: "The runtime, the preview, and the deploy" },
+];
+
+export const DEPARTMENT_BY_ID: Record<string, Department> = Object.fromEntries(
+  DEPARTMENTS.map((d) => [d.id, d]),
+);
 
 // ── Agent Registry ──────────────────────────────────────────────────────────
 
@@ -176,80 +288,112 @@ export interface AgentInfo {
   color: string;
 }
 
+// The cast is the Blueprint agent registry
+// (`backend/services/blueprint/agent_contract.py`), seated in the department
+// that owns its §30 capability. `spriteKey` still points at the older sprite
+// filenames — those are pictures of people, not job titles, so renaming the
+// job does not need new art.
+//
+// Two keys in `characters/idle/` are not usable: `auth_agent.png` is a machine
+// rather than a person, and `indexer.png` is a character and a portal in one
+// wide image, which the renderer squashes into a square. Neither is referenced
+// here. `security` and `inspector` have no idle frame at all, which the
+// renderer's sprite fallback covers from the working and base sheets.
 export const AGENT_REGISTRY: AgentInfo[] = [
-  { id: "planner", name: "Planner", spriteKey: "planner", room: "planning", role: "Designs app architecture", color: "#3B82F6" },
-  { id: "discovery", name: "Discovery", spriteKey: "discovery", room: "planning", role: "Explores requirements", color: "#8B5CF6" },
-  { id: "contract_writer", name: "Contract Writer", spriteKey: "contract_writer", room: "planning", role: "Writes specifications", color: "#1E40AF" },
-  { id: "schema_designer", name: "Schema Designer", spriteKey: "schema_designer", room: "design_studio", role: "Designs database schema", color: "#059669" },
-  { id: "data_modeler", name: "Data Modeler", spriteKey: "data_modeler", room: "design_studio", role: "Models data relationships", color: "#B45309" },
-  { id: "auth_agent", name: "Auth Agent", spriteKey: "auth_agent", room: "security", role: "Sets up authentication", color: "#DC2626" },
-  { id: "rules_writer", name: "Rules Writer", spriteKey: "rules_writer", room: "security", role: "Writes business rules", color: "#6D28D9" },
-  { id: "api_generator", name: "API Generator", spriteKey: "api_generator", room: "dev_api", role: "Generates API routes", color: "#EA580C" },
-  { id: "bizlogic_agent", name: "BizLogic Agent", spriteKey: "bizlogic_agent", room: "dev_logic", role: "Implements business logic", color: "#4F46E5" },
-  { id: "workflow_agent", name: "Workflow Agent", spriteKey: "workflow_agent", room: "dev_logic", role: "Builds workflow engine", color: "#0369A1" },
-  { id: "component_builder", name: "Component Builder", spriteKey: "component_builder", room: "dev_ui", role: "Creates UI components", color: "#EC4899" },
-  { id: "page_assembler", name: "Page Assembler", spriteKey: "page_assembler", room: "dev_ui", role: "Assembles page layouts", color: "#F59E0B" },
-  { id: "ui_styler", name: "UI Styler", spriteKey: "ui_styler", room: "dev_ui", role: "Styles the interface", color: "#DB2777" },
-  { id: "navigator", name: "Navigator", spriteKey: "navigator", room: "dev_ui", role: "Configures navigation", color: "#15803D" },
-  { id: "seed_generator", name: "Seed Generator", spriteKey: "seed_generator", room: "shipping", role: "Generates sample data", color: "#16A34A" },
-  { id: "export_agent", name: "Export Agent", spriteKey: "export_agent", room: "shipping", role: "Packages for deployment", color: "#78716C" },
-  { id: "qa_tester", name: "QA Tester", spriteKey: "qa_tester", room: "qa_lab", role: "Tests generated code", color: "#0891B2" },
-  { id: "validator", name: "Validator", spriteKey: "validator", room: "qa_lab", role: "Validates build output", color: "#7C3AED" },
-  { id: "indexer", name: "Indexer", spriteKey: "indexer", room: "library", role: "Indexes app model", color: "#92400E" },
-  { id: "agent_builder", name: "Agent Builder", spriteKey: "agent_builder", room: "library", role: "Builds AI agents", color: "#BE185D" },
-  { id: "portal_builder", name: "Portal Builder", spriteKey: "portal_builder", room: "dev_api", role: "Builds portal features", color: "#0E7490" },
-  { id: "figma_importer", name: "Figma Importer", spriteKey: "figma_importer", room: "design_studio", role: "Imports Figma designs", color: "#A21CAF" },
-  { id: "chat_refiner", name: "Chat Refiner", spriteKey: "chat_refiner", room: "planning", role: "Refines via chat", color: "#E11D48" },
-  { id: "appmodel_manager", name: "AppModel Manager", spriteKey: "appmodel_manager", room: "library", role: "Manages app model index", color: "#475569" },
+  // ── Discovery ─────────────────────────────────────────────────────────
+  { id: "smith", name: "Smith", spriteKey: "contract_writer", room: "discovery", role: "The architect you talk to", color: "#1E40AF" },
+  { id: "requirement", name: "Requirements", spriteKey: "discovery", room: "discovery", role: "Writes down what the app is for", color: "#3B82F6" },
+  { id: "product_analysis", name: "Product Analyst", spriteKey: "planner", room: "discovery", role: "Works out the product shape", color: "#6366F1" },
+  { id: "domain_intelligence", name: "Domain Intel", spriteKey: "chat_refiner", room: "discovery", role: "Knows how this industry works", color: "#E11D48" },
+
+  // ── Architecture ──────────────────────────────────────────────────────
+  { id: "solution_architecture", name: "Solution Architect", spriteKey: "navigator", room: "architecture", role: "Maps modules and navigation", color: "#0369A1" },
+  { id: "integration", name: "Integrations", spriteKey: "portal_builder", room: "architecture", role: "Connects the outside services", color: "#0E7490" },
+
+  // ── Design Studio ─────────────────────────────────────────────────────
+  { id: "accessibility", name: "Design System", spriteKey: "ui_styler", room: "design_studio", role: "Owns the design language", color: "#DB2777" },
+  { id: "page_design", name: "Page Designer", spriteKey: "page_assembler", room: "design_studio", role: "Drafts page contracts", color: "#F59E0B" },
+  { id: "figma_intelligence", name: "Figma Intel", spriteKey: "figma_importer", room: "design_studio", role: "Reads evidence out of Figma", color: "#A21CAF" },
+
+  // ── Data ──────────────────────────────────────────────────────────────
+  { id: "data_model", name: "Data Modeler", spriteKey: "schema_designer", room: "data", role: "Designs entities and the schema", color: "#059669" },
+  { id: "api", name: "API Derivation", spriteKey: "api_generator", room: "data", role: "Derives endpoints from the model", color: "#EA580C" },
+  { id: "backend", name: "Backend Projection", spriteKey: "data_modeler", room: "data", role: "Projects the data layer", color: "#B45309" },
+
+  // ── Composition ───────────────────────────────────────────────────────
+  { id: "a2ui_pages", name: "Page Composer", spriteKey: "component_builder", room: "composition", role: "Composes a tree per page", color: "#EC4899" },
+  { id: "frontend", name: "Frontend Projection", spriteKey: "seed_generator", room: "composition", role: "Projects the page schemas", color: "#16A34A" },
+
+  // ── Logic ─────────────────────────────────────────────────────────────
+  { id: "workflow", name: "Workflow", spriteKey: "workflow_agent", room: "logic", role: "Wires up the workflows", color: "#4F46E5" },
+  { id: "business_rules", name: "Business Rules", spriteKey: "rules_writer", room: "logic", role: "Writes the business rules", color: "#6D28D9" },
+
+  // ── Security ──────────────────────────────────────────────────────────
+  { id: "security", name: "Security", spriteKey: "security", room: "security", role: "Sets roles and permissions", color: "#DC2626" },
+
+  // ── Verification ──────────────────────────────────────────────────────
+  { id: "testing", name: "Testing", spriteKey: "qa_tester", room: "qa", role: "Generates the tests", color: "#0891B2" },
+  { id: "verification", name: "Verification", spriteKey: "validator", room: "qa", role: "Checks the blueprint against itself", color: "#7C3AED" },
+  { id: "memory", name: "Memory", spriteKey: "inspector", room: "qa", role: "Records decisions and coverage", color: "#92400E" },
+
+  // ── Shipping ──────────────────────────────────────────────────────────
+  { id: "build", name: "Build", spriteKey: "export_agent", room: "shipping", role: "Builds the preview", color: "#78716C" },
+  { id: "deployment", name: "Deployment", spriteKey: "bizlogic_agent", room: "shipping", role: "Ships it", color: "#15803D" },
 ];
 
-// Map phase names to room ids
+export const AGENT_BY_ID: Record<string, AgentInfo> = Object.fromEntries(
+  AGENT_REGISTRY.map((a) => [a.id, a]),
+);
+
+// ── Legacy relay phase mapping ──────────────────────────────────────────────
+//
+// The relay still emits `phase_start` / `phase_complete` with the old
+// pipeline's phase names. Both maps below translate those onto this cast, so
+// one office serves both producers.
+
 export const PHASE_ROOM_MAP: Record<string, string> = {
-  planning: "planning",
-  discovery: "planning",
-  contract: "planning",
-  schema: "design_studio",
-  data_model: "design_studio",
+  planning: "discovery",
+  discovery: "discovery",
+  contract: "architecture",
+  navigation: "architecture",
+  schema: "data",
+  data_model: "data",
+  api: "data",
+  seed: "data",
+  styling: "design_studio",
   auth: "security",
   rbac: "security",
-  api: "dev_api",
-  business_logic: "dev_logic",
-  workflow: "dev_logic",
-  components: "dev_ui",
-  pages: "dev_ui",
-  styling: "dev_ui",
-  navigation: "dev_ui",
-  seed: "shipping",
+  business_logic: "logic",
+  workflow: "logic",
+  components: "composition",
+  pages: "composition",
+  qa: "qa",
+  validation: "qa",
+  indexing: "qa",
   export: "shipping",
-  qa: "qa_lab",
-  validation: "qa_lab",
-  indexing: "library",
 };
 
-// Map agent ids to phase names
 export const AGENT_PHASE_MAP: Record<string, string> = {
-  planner: "planning",
-  discovery: "discovery",
-  contract_writer: "contract",
-  schema_designer: "schema",
-  data_modeler: "data_model",
-  auth_agent: "auth",
-  rules_writer: "rbac",
-  api_generator: "api",
-  bizlogic_agent: "business_logic",
-  workflow_agent: "workflow",
-  component_builder: "components",
-  page_assembler: "pages",
-  ui_styler: "styling",
-  navigator: "navigation",
-  seed_generator: "seed",
-  export_agent: "export",
-  qa_tester: "qa",
-  validator: "validation",
-  indexer: "indexing",
-  agent_builder: "indexing",
-  portal_builder: "api",
-  figma_importer: "schema",
-  chat_refiner: "planning",
-  appmodel_manager: "indexing",
+  smith: "planning",
+  requirement: "discovery",
+  product_analysis: "planning",
+  domain_intelligence: "discovery",
+  solution_architecture: "contract",
+  integration: "navigation",
+  accessibility: "styling",
+  page_design: "pages",
+  figma_intelligence: "styling",
+  data_model: "schema",
+  api: "api",
+  backend: "seed",
+  a2ui_pages: "pages",
+  frontend: "components",
+  workflow: "workflow",
+  business_rules: "business_logic",
+  security: "auth",
+  testing: "qa",
+  verification: "validation",
+  memory: "indexing",
+  build: "export",
+  deployment: "export",
 };

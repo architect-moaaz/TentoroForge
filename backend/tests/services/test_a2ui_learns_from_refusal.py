@@ -18,6 +18,8 @@ import inspect
 import re
 from pathlib import Path
 
+from services.blueprint.agent_contract import InvalidPatternTemplate
+
 from services.a2ui_authority import build_domain_context, build_requirement
 
 
@@ -73,9 +75,26 @@ def test_the_executor_hands_the_spec_feedback_over():
 
 def test_the_orchestrator_still_records_the_validator_message():
     """The other end of the same loop, pinned so a refactor cannot quietly
-    drop it — this is what the composer is now being told."""
-    from services.blueprint import orchestrator
+    drop it — this is what the composer is now being told.
 
-    src = inspect.getsource(orchestrator._apply_round)
-    assert "state.feedback[subject] = _reason(exc)" in src
-    assert "InvalidPatternTemplate" in src
+    Asserted by running the round rather than by reading its source. The
+    source-text version pinned one statement, and the statement moved into a
+    helper during an unrelated refactor while the behaviour it guarded stayed
+    exactly the same — a red test that proved nothing about the loop.
+    """
+    from services.blueprint import orchestrator
+    from services.blueprint.orchestrator import RunReport, _NodeRun
+
+    state = _NodeRun(subjects=["PAGE-009"], pending=["PAGE-009"])
+    refusal = InvalidPatternTemplate("bulkActions is not in the catalog")
+
+    retry = orchestrator._apply_round(
+        None, "page_layouts", state,
+        {("page_layouts", "PAGE-009"): refusal},
+        attempt=1, max_attempts=2, commit=False,
+        user_request="", report=RunReport(),
+    )
+
+    # It goes round again, and it is told why.
+    assert retry == ["PAGE-009"]
+    assert "bulkActions" in state.feedback["PAGE-009"]

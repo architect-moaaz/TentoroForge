@@ -572,6 +572,7 @@ class Smith:
         *,
         preview: PreviewContext | dict | None = None,
         run_agents: bool = True,
+        observer: Callable[[dict], None] | None = None,
     ) -> Turn:
         """One exchange. §114's twelve steps, for the ones that apply.
 
@@ -579,6 +580,9 @@ class Smith:
         interpreted, so a turn that fails still leaves a record of what was
         asked for. A transcript that only contains successful turns is a
         transcript that cannot explain how the application got this way.
+
+        ``observer`` watches the sub-DAG this turn runs — see
+        :func:`services.office_bridge.office_sink` for the virtual office's.
         """
         if isinstance(preview, dict):
             preview = resolve_preview(self.doc, **preview)
@@ -643,6 +647,7 @@ class Smith:
                 app_root=self.app_root,
                 run_agents=run_agents and self.executor is not None,
                 regenerate=self.defined,
+                observer=observer,
             )
 
         if plan.intent == "ask" and plan.anchors:

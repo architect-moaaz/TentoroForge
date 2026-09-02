@@ -26,6 +26,13 @@ which is itself worth knowing.
 NOT the run registry. `services.run_registry` answers "is something happening
 right now" for a page that just loaded, in memory, and forgets. This is the
 record that outlives the run.
+
+WATCHABLE WHILE IT HAPPENS. A ledger takes an optional `observer`, and every
+line written to disk is handed to it as it goes. That is how the virtual office
+animates: it is a second reader of this same account, not a second account. One
+call site per event, so a node outcome added here reaches the screen without
+anyone remembering to emit it twice — which is exactly how a picture of a run
+drifts from the run.
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 #: One file per run under the project's own directory, so a ledger travels with
 #: the output it describes rather than living in a log nobody exports.
@@ -53,9 +60,17 @@ class RunLedger:
     swallowed deliberately — the run is the work, this is the account of it.
     """
 
-    def __init__(self, output_dir: str | Path, run_id: str, *, phase: str = "") -> None:
+    def __init__(
+        self,
+        output_dir: str | Path,
+        run_id: str,
+        *,
+        phase: str = "",
+        observer: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.run_id = run_id
         self.path = Path(output_dir) / LEDGER_DIR / f"{run_id}.jsonl"
+        self._observer = observer
         self._t0 = time.monotonic()
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,6 +82,15 @@ class RunLedger:
     # ── writing ─────────────────────────────────────────────────────────
     def _write(self, obj: dict[str, Any]) -> None:
         obj.setdefault("elapsedMs", int((time.monotonic() - self._t0) * 1000))
+        obj.setdefault("runId", self.run_id)
+        if self._observer is not None:
+            # Before the write, not after: the disk write fsyncs, and a watcher
+            # that only hears about a node once the page cache has been forced
+            # is a watcher that is always one node behind.
+            try:
+                self._observer(obj)
+            except Exception:  # noqa: BLE001 — same contract as the file write
+                pass
         try:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
@@ -94,6 +118,31 @@ class RunLedger:
     def node_done(self, key: str, artifacts: int = 0) -> None:
         self._write({"event": "node:done", "node": key, "artifacts": artifacts,
                      "at": _now()})
+
+    def node_subject(self, key: str, subject: str, index: int, total: int,
+                     ok: bool = True) -> None:
+        """One artifact of a fanning-out node.
+
+        "Which of the eighteen stopped it" was the question `node_failed`
+        answered only in aggregate: a node that died on page twelve and one
+        that died on page one left the same line. This is also what lets a
+        watcher show progress through a node that takes eighteen model calls
+        rather than a single silence.
+        """
+        self._write({"event": "node:subject", "node": key, "subject": subject,
+                     "index": index, "total": total, "ok": ok, "at": _now()})
+
+    def node_retry(self, key: str, subject: str, attempt: int, of: int,
+                   reason: str) -> None:
+        """A rejected proposal going round again (§103).
+
+        Invisible before this: a node that succeeded on its second attempt and
+        one that succeeded on its first were indistinguishable, so the cost of
+        the retry loop could not be read off a run at all.
+        """
+        self._write({"event": "node:retry", "node": key, "subject": subject,
+                     "attempt": attempt, "of": of,
+                     "reason": str(reason)[:600], "at": _now()})
 
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
