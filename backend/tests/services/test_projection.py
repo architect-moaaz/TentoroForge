@@ -483,31 +483,53 @@ def test_the_auth_flow_is_never_caught_by_its_own_gate(tmp_path):
     assert "api/auth" in _matcher(tmp_path / "app")
 
 
-def test_the_root_route_is_projected_not_guessed(tmp_path):
+def test_the_root_route_is_owned_inside_the_shell(tmp_path):
     """`[...slug]` is a required catch-all and never matches "/", so the root
-    always needs its own file. The scaffold's hardcoded `redirect("/home")` sent
-    it to a route the app did not have — the root 404d, and the 404 redirected
-    into the login gate."""
+    needs a page of its own — and it has to be the one INSIDE `(dashboard)`,
+    because that group carries the layout with the sidebar.
+
+    This used to write `src/app/page.tsx`, on the grounds that the scaffold's
+    root redirected to a hardcoded `/home`. The scaffold stopped doing that and
+    now ships `(dashboard)/page.tsx`, which renders the `/` schema exactly as
+    the catch-all would — so this was writing a SECOND handler for a route that
+    already had one, outside the group. Both resolved to `/`, route groups not
+    affecting the URL, and the one outside rendered without the shell.
+
+    Every page in the application had a sidebar except the one everybody lands
+    on, with identical content either way, which reads as a styling bug rather
+    than a routing one.
+    """
     from services.blueprint.projection import project_root_route
 
+    def _scaffolded(root):
+        (root / "src" / "app" / "(dashboard)").mkdir(parents=True)
+        (root / "src" / "app" / "(dashboard)" / "page.tsx").write_text(
+            "// scaffold: renders / from the registry\n")
+        return root
+
+    a = _scaffolded(tmp_path / "a")
     claimed = {"pages": [{"id": "PAGE-001", "route": "/", "name": "Entry"},
                          {"id": "PAGE-002", "route": "/overview"}]}
-    r = project_root_route(claimed, tmp_path / "a")
+    r = project_root_route(claimed, a)
     assert r["claimedBy"] == "PAGE-001"
-    body = (tmp_path / "a" / "src" / "app" / "page.tsx").read_text()
-    assert "renderSchemaPage" in body and "redirect(" not in body
+    assert r["files"] == [], "the scaffold's page already renders /"
+    assert not (a / "src" / "app" / "page.tsx").exists(), (
+        "a root page outside (dashboard) resolves to / without the shell")
 
+    b = _scaffolded(tmp_path / "b")
+    (b / "src" / "app" / "page.tsx").write_text("// stale from an older build\n")
     unclaimed = {"pages": [{"id": "PAGE-002", "route": "/sign-in"},
                            {"id": "PAGE-003", "route": "/overview"}]}
-    r = project_root_route(unclaimed, tmp_path / "b")
-    body = (tmp_path / "b" / "src" / "app" / "page.tsx").read_text()
+    r = project_root_route(unclaimed, b)
     assert r["redirectsTo"] == "/overview"
+    assert r["removedStaleRoot"] is True
+    assert not (b / "src" / "app" / "page.tsx").exists()
+    body = (b / "src" / "app" / "(dashboard)" / "page.tsx").read_text()
     assert 'redirect("/overview")' in body
     # Only the *statement* matters — the comment explains the old bug and
     # legitimately names the route it used to hardcode.
     code = "\n".join(l for l in body.splitlines() if not l.strip().startswith("//"))
-    assert '"/home"' not in code, "never a route the Blueprint did not declare"
-
+    assert "/home" not in code
 
 def test_the_root_never_forwards_to_a_login_screen(tmp_path):
     from services.blueprint.projection import landing_route

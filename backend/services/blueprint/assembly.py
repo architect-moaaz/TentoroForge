@@ -65,9 +65,12 @@ PROJECTED_PATHS: tuple[str, ...] = (
     # so leaving this off the list silently restored the hardcoded gate and an
     # app with public pages had them quietly closed again.
     "src/middleware.ts",
-    # `/` needs its own route file because the catch-all is required, and the
-    # scaffold's redirects to a hardcoded "/home".
-    "src/app/page.tsx",
+    # `/` is owned by the scaffold's `(dashboard)/page.tsx`, inside the group
+    # that carries the shell. `project_root_route` overwrites that file with a
+    # redirect when no page claims `/`, and deletes any `src/app/page.tsx` an
+    # older build left beside it — a root page outside the group resolves to
+    # `/` too and renders without the sidebar.
+    "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
     "src/lib/append-only-entities.ts",
 )

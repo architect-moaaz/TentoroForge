@@ -1413,20 +1413,47 @@ def landing_route(doc: dict) -> str:
 
 
 def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
-    """Write ``src/app/page.tsx``.
+    """Make sure `/` resolves — inside the shell, not beside it.
 
     Next's `[...slug]` is a *required* catch-all: it matches `/roles` but never
-    `/`. So the root always needs its own route file, and the scaffold shipped
-    one that redirects to a hardcoded `/home`.
+    `/`, so the root needs a page of its own. This used to write
+    ``src/app/page.tsx``, on the stated grounds that "the scaffold shipped one
+    that redirects to a hardcoded /home".
 
-    Two cases, both read from the Blueprint. If a page claims `/`, render its
-    schema exactly as the catch-all would. If none does, redirect to the
-    declared landing route.
+    It does not any more. The scaffold ships
+    ``src/app/(dashboard)/page.tsx``, which renders the `/` schema exactly as
+    the catch-all would — so this was writing a SECOND handler for a route that
+    already had one. Route groups do not affect the URL, so both resolved to
+    `/`, and the one this wrote sat outside `(dashboard)` and therefore outside
+    `(dashboard)/layout.tsx`, which is where the sidebar lives.
+
+    The result: every route in the application rendered with the shell except
+    the one everybody lands on. The content was identical — same schema, same
+    registry key — so it looked like a styling bug rather than a routing one.
+
+    So the root page is owned in one place now, inside the group:
+
+      * a page claims `/`  — the scaffold's file already does the right thing;
+        leave it alone.
+      * nothing claims `/` — overwrite it with a redirect to the declared
+        landing route, still inside the group.
+
+    Either way any ``src/app/page.tsx`` a previous build left behind is
+    removed, because while it exists it shadows the in-group page and the
+    sidebar goes missing again.
     """
     root_page = next((p for p in _live(doc.get("pages"))
                       if (p.get("route") or "") == "/"), None)
-    out = Path(app_root) / "src" / "app"
+    app = Path(app_root) / "src" / "app"
+    out = app / "(dashboard)"
     out.mkdir(parents=True, exist_ok=True)
+
+    # A root page from a previous build shadows the in-group one. Removed
+    # whichever branch runs — leaving it is what loses the sidebar.
+    stale = app / "page.tsx"
+    removed = stale.is_file()
+    if removed:
+        stale.unlink()
 
     if root_page:
         body = (
@@ -1459,8 +1486,16 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
         )
         claimed = None
 
-    (out / "page.tsx").write_text(body, "utf-8")
-    return {"files": ["src/app/page.tsx"], "claimedBy": claimed,
+    # Only the redirect is written. When a page claims `/` the scaffold's
+    # in-group file already renders it, and rewriting it with an identical
+    # body would be this projection claiming ownership of something it does
+    # not need to own.
+    written: list[str] = []
+    if not root_page:
+        (out / "page.tsx").write_text(body, "utf-8")
+        written.append("src/app/(dashboard)/page.tsx")
+    return {"files": written, "claimedBy": claimed,
+            "removedStaleRoot": removed,
             "redirectsTo": None if root_page else landing_route(doc)}
 
 
