@@ -709,6 +709,22 @@ class RunReport:
     failed_because: dict[str, str] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
+    #: Blocked node -> what it is waiting to be told. A node that STOPS TO ASK
+    #: recorded only its name, and the question went into `change_requests`
+    #: where nothing routed it anywhere.
+    #:
+    #: Measured: `data_model` returned four proposals at confidence 0.20 and
+    #: §17 held them — "confidence 0.20 is below the clarification threshold of
+    #: 0.40" — which is the policy working exactly as written. Everything
+    #: downstream (database, page_contracts, workflows, page_layouts, frontend)
+    #: was skipped, the run ended in 156 seconds, and the only trace anywhere
+    #: was the word `data_model` in a list. Reconstructing the reason meant
+    #: re-running the agent.
+    #:
+    #: A run that stops to ask and a run that stops dead must not look the
+    #: same, which is this session's defect in its purest form: the system
+    #: behaved correctly and said nothing.
+    blocked_because: dict[str, str] = field(default_factory=dict)
     change_requests: list = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
 
@@ -1182,7 +1198,9 @@ def _apply_round(
             continue
         if application.needs_clarification or outcome.status == "blocked":
             report.blocked.append(label)
+            report.blocked_because[label] = _asked(application)
             report.change_requests.extend(application.change_requests)
+            _note(ledger, "node_blocked", key, _asked(application))
             state.failed.append(subject)
             continue
         if attempt == max_attempts:
@@ -1194,6 +1212,28 @@ def _apply_round(
             retry.append(subject)
 
     return retry
+
+
+def _asked(application: Any) -> str:
+    """What a blocked node is waiting to be told, in one line.
+
+    `apply_agent_result` already computes a precise reason — "confidence 0.20
+    is below the §17 clarification threshold of 0.40" — and any questions the
+    agent raised are in `change_requests`. Both were discarded: the report kept
+    the node's name and nothing else, so the only way to learn why a run had
+    stopped was to run the agent again and look.
+    """
+    reason = str(getattr(application, "reason", "") or "").strip()
+    asks: list[str] = []
+    for cr in getattr(application, "change_requests", None) or []:
+        text = (cr.get("question") or cr.get("detail") or cr.get("summary")
+                if isinstance(cr, dict) else str(cr))
+        if text:
+            asks.append(str(text))
+    if asks:
+        reason = f"{reason} — asks: {'; '.join(asks[:3])}" if reason else \
+                 "; ".join(asks[:3])
+    return (reason or "the agent declined without giving a reason")[:600]
 
 
 def _reason(exc: Exception) -> str:
@@ -1263,7 +1303,9 @@ def _run_agent_subject(
             return "completed"
         if application.needs_clarification or result.status == "blocked":
             report.blocked.append(label)
+            report.blocked_because[label] = _asked(application)
             report.change_requests.extend(application.change_requests)
+            _note(ledger, "node_blocked", key, _asked(application))
             return None
         if attempt == max_attempts:
             report.failed.append(label)

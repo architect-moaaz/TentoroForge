@@ -165,6 +165,11 @@ class RunLedger:
             "blocked": list(getattr(report, "blocked", []) or []),
             "skipped": list(getattr(report, "skipped", []) or []),
             "failedBecause": dict(getattr(report, "failed_because", {}) or {}),
+            # A node that STOPPED TO ASK, and what it is waiting to be told.
+            # `blocked` recorded only names, so a run held by §17's clarification
+            # threshold and a run that died looked identical in the one file
+            # that outlives the process.
+            "blockedBecause": dict(getattr(report, "blocked_because", {}) or {}),
             "skippedBecause": dict(getattr(report, "skipped_because", {}) or {}),
         })
 
