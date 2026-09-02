@@ -1426,6 +1426,78 @@
       "additionalProperties": false,
       "default": {}
     },
+    "designSources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^FIGMA-\\d{3,}$"
+          },
+          "type": {
+            "type": "string",
+            "const": "figma",
+            "default": "figma"
+          },
+          "fileKey": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "default": ""
+          },
+          "extractedAt": {
+            "type": "string",
+            "default": ""
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "looksLikeScreen": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "required": [
+                "nodeId",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "id",
+          "fileKey"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "designSystem": {
       "type": "object",
       "properties": {
@@ -1970,6 +2042,59 @@
           "id",
           "decision",
           "source"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gate": {
+            "type": "string",
+            "enum": [
+              "understanding",
+              "blueprint",
+              "plan",
+              "deployment"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "changes_requested",
+              "discussed"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "digest": {
+            "type": "string",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "default": ""
+          },
+          "note": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "gate",
+          "outcome",
+          "version",
+          "at"
         ],
         "additionalProperties": false
       },

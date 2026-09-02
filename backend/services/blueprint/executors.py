@@ -844,6 +844,19 @@ two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
+    "figma_intelligence": (
+        "Read a connected Figma design and record what it is evidence for.\n\n"
+        "You are not designing the application and you are not authoring "
+        "pages \u2014 composition happens later, against this design. Your "
+        "output is requirements, each citing the frame that evidences it.\n\n"
+        "A design is strong evidence of *what the application does* and weak "
+        "evidence of *how it behaves*. Frames named for entities and actions "
+        "tell you the capabilities exist. They do not tell you the rules, the "
+        "permissions, the side effects or the failure paths \u2014 and a "
+        "design drawn to be shown is usually missing the screens a working "
+        "system needs at all. Propose what the design supports, at the "
+        "confidence the design supports it, and leave the rest to be asked."
+    ),
     "design_system": (
         "Establish this application's design language — the decisions every "
         "page then inherits rather than re-litigates: visual personality, "
@@ -1111,6 +1124,7 @@ prose, no markdown fence, no commentary — the object and nothing else:
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
+    output_dir: Any = None,
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
 
@@ -1266,6 +1280,35 @@ def build_prompt(
         system += SCHEMA_ADDENDUM.format(
             schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
         )
+    if spec.agent == "figma_intelligence" and subject:
+        # §48 — the design is evidence, and the brief is where that bound is
+        # set. The agent sees the screens' vocabulary and the extraction's
+        # gaps; it does not see the generated TSX, which is layout noise that
+        # would crowd out the labels that actually carry meaning.
+        from services.figma.brief import brief_for
+
+        user = (
+            "A user connected this Figma design as the visual reference for "
+            "the application being built. Propose the requirements it is "
+            "evidence for.\n\n"
+            "Every requirement must cite the frame it came from, in "
+            "`evidence`, as "
+            '`{"type": "figma", "source": "<source>", "node": "<nodeId>"}`.\n\n'
+            "State only what the design shows. A screen proves that a "
+            "capability is reachable; it does not tell you who may use it, "
+            "what conditions govern it, what it writes, or what happens when "
+            "it is refused. Where the design implies something without "
+            "showing it, propose it at the confidence you actually have — the "
+            "listed gaps are questions the user will be asked, not holes for "
+            "you to fill.\n\n"
+            "```json\n"
+            + json.dumps(brief_for(doc, subject, output_dir), indent=2, sort_keys=True)
+            + "\n```"
+        )
+        if feedback:
+            user += f"\n\nYour previous attempt was rejected:\n\n{feedback}"
+        return system, user
+
     user = (
         "Here is the Blueprint as it stands. Propose the artifacts your stage "
         "owns.\n\n```json\n"
@@ -1818,6 +1861,7 @@ def make_executor(
             svc.doc, spec.node,
             inline_schema=not getattr(client, "enforces_schema", True),
             subject=spec.subject, feedback=spec.feedback, references=shown,
+            output_dir=svc.output_dir,
         )
         last: Exception | None = None
 

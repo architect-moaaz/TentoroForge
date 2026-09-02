@@ -49,7 +49,10 @@ def svc(tmp_path) -> BlueprintService:
 
 def test_dag_is_acyclic_and_layered():
     lv = levels()
-    assert lv[0] == ["requirements"], "requirements come first (§28)"
+    # §28's first tier is everything with no upstream. `figma_intelligence`
+    # joins it because §51 places design extraction upstream of requirement,
+    # entity and page inference — it is evidence those work from.
+    assert set(lv[0]) == {"requirements", "figma_intelligence"}
     flat = [k for level in lv for k in level]
     assert sorted(flat) == sorted(DAG)
 

@@ -44,6 +44,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from services.blueprint import references
 from services.blueprint.ids import IdAllocator, InvalidArtifactId, natural_key_for
+from services.blueprint import approval
 from services.blueprint.orchestrator import (
     ALLOWED_TRANSITIONS,
     IllegalTransition,
@@ -797,6 +798,12 @@ class Smith:
             )
         report = self._author(definition_nodes(), "approve")
         self._walk(APPROVE_WALK)
+        # §25/§95 — the acceptance, on the record and fingerprinted. Without
+        # this the walk to PLAN_REVIEW is the only trace that anyone agreed to
+        # anything, and nothing downstream can tell whether the application has
+        # moved since (§76). Recorded after the walk so the plan being
+        # authorised is the one the run just authored.
+        approval.record(self.blueprint, "plan")
         return report
 
     def build(self, *, app_root: str | None = None) -> RunReport:
@@ -812,7 +819,10 @@ class Smith:
         asserting VERIFICATION because a run was requested — rather than
         because verification ran — would make the state a wish.
         """
-        transition(self.blueprint, "IMPLEMENTATION")  # §107 step 10's gate
+        # §107 step 10's gate, and now actually a gate: `transition` consults
+        # `GATED_TRANSITIONS`, so this refuses unless the plan was accepted and
+        # the application has not moved since.
+        transition(self.blueprint, "IMPLEMENTATION")
         if self.executor is None:
             raise RuntimeError(
                 "Smith needs an executor to build; agents are injected so the "

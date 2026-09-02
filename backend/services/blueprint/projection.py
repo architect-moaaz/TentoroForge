@@ -416,7 +416,13 @@ def project_frontend(doc: dict, app_root: str | Path,
         target.write_text(
             json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
         written.append(rel)
-        code_map.append({"artifact": page_id, "service": [rel]})
+        # `frontend`, not `service`: §21's own example files a page's
+        # implementation under frontend, and `code_intel.where` is what
+        # answers "where is this page implemented". A page schema is what the
+        # UI engine renders — it is the page's frontend here, the same way a
+        # .tsx file is in a bespoke app. Filed under `service` it reported no
+        # frontend at all, while claiming a service layer it does not have.
+        code_map.append({"artifact": page_id, "frontend": [rel]})
 
     # A page that stopped planning must not leave its last good schema behind:
     # the directory would still hold eighteen files and read as a complete

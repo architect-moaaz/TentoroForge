@@ -272,10 +272,32 @@ def test_frontend_projection_records_every_file_in_code_map(tmp_path):
     result = apply_frontend_projection(svc, tmp_path / "app")
 
     entry = next(e for e in svc.doc["codeMap"] if e["artifact"] == "PAGE-001")
-    assert entry["service"] == ["src/schemas/candidates.json"]
-    assert (tmp_path / "app" / entry["service"][0]).exists(), (
+    # §21 files a page's implementation under `frontend`; a page schema is
+    # what the UI engine renders, so it is the page's frontend here.
+    assert entry["frontend"] == ["src/schemas/candidates.json"]
+    assert "service" not in entry
+    assert (tmp_path / "app" / entry["frontend"][0]).exists(), (
         "codeMap must point at a file that exists — the whole point of §21")
     assert result["pages"] == 1
+
+
+def test_a_pages_implementation_is_reachable_as_its_frontend(tmp_path):
+    """The reason the facet matters, not just which key it is. `code_intel.where`
+    answers §21's "where does this page live" off typed facets — filed under
+    `service` a page reported no frontend at all, while claiming a service
+    layer it does not have."""
+    from services.blueprint.projection import apply_frontend_projection
+    from services.smith.code_intel import where
+
+    svc = BlueprintService.create(output_dir=tmp_path / "bp", app_id="a",
+                                  name="n", domain="d")
+    svc.doc.update(_frontend_doc())
+    apply_frontend_projection(svc, tmp_path / "app")
+
+    located = where(svc.doc, "PAGE-001")
+    assert located.frontend == ("src/schemas/candidates.json",)
+    assert located.service == ()
+    assert located.mapped
 
 
 def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):

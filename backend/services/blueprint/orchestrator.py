@@ -40,6 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
     InvalidPatternTemplate,
@@ -89,6 +90,17 @@ def can_transition(src: str, dst: str) -> bool:
     return dst in ALLOWED_TRANSITIONS.get(src, frozenset())
 
 
+#: §95 — the transitions a user must have authorised, and the gate that
+#: authorises each. Only the two edges the PRD puts a gate on: entering
+#: implementation (Gate 3) and deploying (Gate 4). Everything else moves on
+#: engineering grounds, because §95 is explicit that *"small engineering
+#: decisions should not continuously interrupt the user."*
+GATED_TRANSITIONS: dict[tuple[str, str], str] = {
+    ("PLAN_REVIEW", "IMPLEMENTATION"): "plan",
+    ("READY", "EXPORT_DEPLOY"): "deployment",
+}
+
+
 def transition(svc: BlueprintService, dst: str) -> str:
     """Move the application to ``dst``, or refuse."""
     src = svc.doc.get("state", "DISCOVERY")
@@ -101,6 +113,12 @@ def transition(svc: BlueprintService, dst: str) -> str:
             f"{src} → {dst} is not permitted; from {src} you may go to "
             f"{', '.join(sorted(ALLOWED_TRANSITIONS.get(src, ()))) or '<nowhere>'}"
         )
+    gate = GATED_TRANSITIONS.get((src, dst))
+    if gate:
+        # §95's gates are only real if something consults them. A gate nobody
+        # checks is a UI step, and this is where Gate 3 stops being one.
+        approval.require(svc.doc, gate, doing=f"moving to {dst}")
+
     svc.doc["state"] = dst
     svc.save()
     return dst
@@ -171,7 +189,21 @@ def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
 #: §28's graph. Tier names follow the PRD's diagram.
 DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("requirements", "requirement", (), ("requirements",)),
-    _n("application_model", "product_analysis", ("requirements",), ("product",)),
+    # §51 puts Figma Intelligence upstream of domain, page, entity, workflow
+    # and requirement inference — it is the evidence those work from, so it
+    # runs beside `requirements` rather than after them. §48 bounds what it may
+    # conclude: a design proves a screen exists, not who may use it, so this
+    # node writes requirements *with their Figma evidence and a confidence*,
+    # and §17 refuses the ones it cannot stand behind.
+    #
+    # Fans out over connected designs, so a prompt-only application resolves to
+    # no subjects and the stage is absent work discovered from the document
+    # rather than a flag asking whether to skip.
+    _n("figma_intelligence", "figma_intelligence", (), ("requirements",),
+       fanout="design_sources",
+       note="§48-§51; design evidence, not design decisions"),
+    _n("application_model", "product_analysis",
+       ("requirements", "figma_intelligence"), ("product",)),
 
     # left branch — data
     _n("data_model", "data_model", ("application_model",), ("data.entities",)),
@@ -193,6 +225,20 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
     _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",)),
+    # §47 — the design language the connected file already states, projected
+    # onto the Blueprint. Deterministic (§116): published variables *are* the
+    # colour system and type scale, so a model asked to "extract" them can only
+    # paraphrase, and every paraphrase is a silent divergence from the design
+    # the user is holding us to.
+    #
+    # After `design_system`, and that ordering is the mechanism rather than a
+    # detail: `designSystem` is a singleton section, so the last writer of a
+    # key wins, and §40/§53 rank an explicit user design above anything the
+    # platform recommends on its own. Precedence by merge order instead of by
+    # asking an agent to defer. Before `page_layouts`, so composition sees it.
+    _n("figma_design_system", "figma_intelligence", ("design_system",),
+       ("designSystem",), kind="service",
+       note="§40, §47, §53; explicit design outranks generic recommendation"),
     # §34 — one composed tree per page. There were two nodes ahead of this one
     # and both were residue from the pipeline A2UI replaced.
     #
@@ -216,7 +262,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # waves earlier, into the same wave as `workflows` — concurrent with the
     # thing it reads.
     _n("page_layouts", "a2ui_pages",
-       ("page_contracts", "design_system", "workflows"),
+       ("page_contracts", "design_system", "figma_design_system", "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),
@@ -259,6 +305,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
 #: so the DAG stays a description of shape, not a place where documents are
 #: read.
 FANOUT: dict[str, Any] = {
+    # §41 — one call per connected design. A prompt-only application has none,
+    # which resolves to no subjects and completes the node without invoking
+    # anything.
+    "design_sources": lambda doc: [
+        s["id"] for s in (doc.get("designSources") or []) if s.get("id")
+    ],
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
@@ -1358,7 +1410,15 @@ def _record_memory(svc: BlueprintService) -> None:
     apply_completeness(svc)
 
 
+def _project_design_reference(svc: BlueprintService) -> None:
+    """§47 — the connected design's own tokens. No-op without one."""
+    from services.figma.projection import apply_design_reference
+
+    apply_design_reference(svc)
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
+    "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,
     "memory": _record_memory,

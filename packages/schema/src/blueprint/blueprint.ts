@@ -929,6 +929,47 @@ export const Security = z.object({
 // §37 · design system
 // ===========================================================================
 
+/**
+ * §41–§45 — a design the user connected, recorded so citations into it resolve.
+ *
+ * The design itself is not here. A Figma extraction carries generated TSX per
+ * screen and a rendered PNG per frame; §91 snapshots the whole Blueprint on
+ * every accepted change, so putting it in the document would copy megabytes
+ * into every version and pollute every `blueprintDiff` (§92). It lives beside
+ * the Blueprint, and this is the record that says which file it was.
+ *
+ * What this *does* carry is what the rest of the document needs to make sense:
+ * §14 evidence cites `source: "FIGMA-001"`, and `PageContract.figmaFrame`
+ * names a node id. Neither means anything without knowing which file the id
+ * belongs to. That is this record's job.
+ */
+export const DesignSourceFrame = z.object({
+  nodeId: z.string(),
+  name: z.string(),
+  /** False for covers, icon sheets and styleguide boards — recorded rather
+   *  than filtered, because the naming convention is the file author's, not
+   *  ours, and a wrong guess silently deletes evidence (§49). */
+  looksLikeScreen: z.boolean().default(true),
+});
+
+export const DesignSource = z.object({
+  /** `FIGMA-001`. Its own sequence — a design source is evidence, not a
+   *  Blueprint artifact, so it is deliberately outside ID_PREFIXES. */
+  id: z.string().regex(/^FIGMA-\d{3,}$/),
+  type: z.literal("figma").default("figma"),
+  fileKey: z.string(),
+  /** Set when the user linked one frame rather than the whole file (§41). */
+  nodeId: z.string().optional(),
+  url: z.string().default(""),
+  name: z.string().default(""),
+  extractedAt: z.string().default(""),
+  frames: z.array(DesignSourceFrame).default([]),
+  /** §102 — what the design could not answer, so a thin reference looks thin
+   *  instead of passing for a complete one. Each is a clarification owed to
+   *  the user before the DAG builds against it (§48, §50). */
+  gaps: z.array(z.string()).default([]),
+});
+
 export const DesignSystem = z.object({
   visualPersonality: z.string().default(""),
   colors: z.record(z.string(), z.string()).default({}),
@@ -999,6 +1040,45 @@ export const Decision = z.object({
    * decisions the one artifact the Blueprint could not actually store.
    */
   status: ArtifactStatus.default("PROPOSED"),
+});
+
+/**
+ * §25 + §95 — a user approval at one of the four gates.
+ *
+ * Deliberately not a `Decision`. §20 decisions are constraints on the
+ * application that future agents must respect ("use left navigation, because
+ * there are multiple modules"); an approval is a fact about the process ("the
+ * user saw the definition at version 3 and accepted it"). Filing approvals in
+ * `decisions` would make every gate crossing a binding design constraint, and
+ * artifacts cite decisions by id — a page would end up citing a consent event
+ * as its rationale.
+ *
+ * `digest` is what makes the record mean anything. Without it "approved" is
+ * unfalsifiable: the Blueprint moves on and the approval still reads as
+ * current. With it, an approval whose digest no longer matches what the
+ * Blueprint now says is *stale*, and §76's rule that the document must not
+ * silently diverge from what was agreed applies to consent too.
+ */
+export const ApprovalGate = z.enum([
+  "understanding", // §95 Gate 1 — is this what you want to build?
+  "blueprint",     // §95 Gate 2 — are the modules, users and behaviour right?
+  "plan",          // §95 Gate 3 — should Smith proceed with this build?
+  "deployment",    // §95 Gate 4 — the checks passed; deploy?
+]);
+
+export const Approval = z.object({
+  gate: ApprovalGate,
+  /** §25's three answers: accept, modify, discuss. */
+  outcome: z.enum(["accepted", "changes_requested", "discussed"]),
+  /** Blueprint version this answer was given against (§91). */
+  version: z.number().int().min(1),
+  at: z.string().describe("ISO-8601 timestamp"),
+  /** Stable hash of exactly what was shown. See the note above. */
+  digest: z.string().default(""),
+  /** The message the user answered with, in the transcript (§14). */
+  message: z.string().default(""),
+  /** What they asked to change, when the outcome was `changes_requested`. */
+  note: z.string().default(""),
 });
 
 // ===========================================================================
@@ -1170,6 +1250,9 @@ export const Blueprint = z.object({
   integrations: z.array(Integration).default([]),
   security: Security.default({}),
 
+  /** §41–§45 — designs the user connected. Empty for a prompt-only app,
+   *  which is also what tells the orchestrator there is no Figma work to do. */
+  designSources: z.array(DesignSource).default([]),
   designSystem: DesignSystem.default({}),
   uiRegistry: UiRegistry.default({}),
   /** §34 — one per distinct page pattern the app uses. Authored by A2UI. */
@@ -1181,6 +1264,8 @@ export const Blueprint = z.object({
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
   decisions: z.array(Decision).default([]),
+  /** §25/§95 — what the user was shown at each gate, and what they answered. */
+  approvals: z.array(Approval).default([]),
   tests: z.array(Test).default([]),
 
   runtime: Runtime.default({}),
