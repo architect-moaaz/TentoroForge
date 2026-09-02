@@ -135,6 +135,24 @@ _PROP_ALIASES: dict[str, dict[str, str]] = {
 _ENUM_SYNONYMS: dict[str, dict[str, str]] = {
     "direction": {"column": "vertical", "row": "horizontal"},
 }
+# The same floor, for a required prop the composer left out.
+#
+# `MetricTile.format` decides how the number reads — a count, a currency, a
+# percentage — and the node is `.strict()` about having one. Without it the tile
+# rendered blank: schema-valid to A2UI at the time, rejected by Forge's node,
+# and silently empty on the page.
+#
+# Redundant in the happy path now, for the same two reasons as the aliases: the
+# catalog marks `format` required (`required=['component','format','label',
+# 'value']`) and A2UI's own validator refuses a MetricTile without one —
+# verified against that validator, not an approximation. Kept for the same
+# reason too: a rejection costs a retry out of three, and a page is worth more
+# than a default nobody had to guess at.
+#
+# WARNED, LIKE THE ALIASES. Injecting a value the composer did not choose is a
+# decision, and one made silently is one nobody can review. "number" is a
+# reasonable default and it is still a guess — a count and a currency read very
+# differently, and this module has no idea which it is looking at.
 _REQUIRED_DEFAULTS: dict[str, dict[str, Any]] = {
     "MetricTile": {"format": "number"},
 }
@@ -1481,7 +1499,13 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 props.pop("workflow", None)
 
         for req, default in _REQUIRED_DEFAULTS.get(kind, {}).items():
-            props.setdefault(req, default)
+            if req not in props:
+                props[req] = default
+                binder.warnings.append(
+                    f'{c.get("id")}.{req}: {kind} requires a {req!r} and none '
+                    f"was given; defaulted to {default!r}. The catalog marks "
+                    f"it required — the composer should be choosing it."
+                )
         props.update(binder.extra_props.get(str(c.get("id")), {}))
 
         # AFTER THE ALIASES AND THE BINDER'S OWN PROPS, so `Badge.label` is

@@ -1327,3 +1327,33 @@ def test_an_invented_name_still_dangles():
     _adopt_table_bindings(schema, _Binder(), {"entities": {"Bloc": {"slug": "blocs"}}})
     assert schema["dataSources"] == []
     assert dangling_bindings(schema) == ["sales_forecast"]
+
+
+def test_a_missing_required_prop_is_defaulted_and_said_out_loud():
+    """`MetricTile.format` decides how the number reads. The node is strict
+    about having one, and without it the tile rendered blank — schema-valid to
+    A2UI at the time, rejected by Forge's node, silently empty on the page.
+
+    The default is kept as a floor: a rejection costs A2UI a retry out of three
+    and a page is worth more than a value nobody had to guess at. But injecting
+    a value the composer did not choose is a decision, and one made silently is
+    one nobody can review — "number" and "currency" read very differently and
+    this module has no idea which it is looking at.
+    """
+    tile = {"id": "m", "component": "MetricTile", "label": "Total",
+            "value": {"path": "/kpis/total"}}
+    r = translate(payload(_root([tile]), {"kpis": {"total": 4},
+                                          "tasks": {"rows": []}}), REG)
+    assert nodes(r, "MetricTile")[0]["props"]["format"] == "number"
+    assert _warned(r, "format"), "the default was injected silently"
+
+
+def test_a_format_the_composer_chose_is_left_alone_and_unwarned():
+    """The warning has to mean something: a composer that made the choice
+    itself must produce no noise, and must keep its choice."""
+    tile = {"id": "m", "component": "MetricTile", "label": "Revenue",
+            "format": "currency", "value": {"path": "/kpis/total"}}
+    r = translate(payload(_root([tile]), {"kpis": {"total": 4},
+                                          "tasks": {"rows": []}}), REG)
+    assert nodes(r, "MetricTile")[0]["props"]["format"] == "currency"
+    assert not _warned(r, "format")
