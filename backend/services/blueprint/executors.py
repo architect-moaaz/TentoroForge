@@ -1049,8 +1049,60 @@ def writable_shapes(agent: str) -> dict[str, Any]:
                 shape["required"] = [
                     r for r in shape["required"] if r not in WITHHELD_FIELDS
                 ]
-        out[section] = shape
+        out[section] = _inline_refs(shape, contract)
     return out
+
+
+def _inline_refs(node: Any, contract: dict, _seen: tuple[str, ...] = ()) -> Any:
+    """Replace `$ref` with what it points at, so a slice keeps its constraints.
+
+    `writable_shapes` cuts one agent's sections out of the contract and hands
+    them over as a standalone schema — but the refs inside still point into the
+    whole document, at paths like
+    `#/properties/pages/items/properties/data/properties/primaryEntity`, and
+    the slice has no `#/properties/pages`. So every ref-typed field arrived at
+    the model as a pointer to nothing.
+
+    Measured: `data_model` emitted `references: ""` on three fields of a
+    thirty-entity model. The contract requires `^ENTITY-\d{3,}$`, the whole
+    document was refused for it, and thirty entities were lost. The agent was
+    never told the pattern — the ref that carried it did not resolve, and the
+    only thing left was a description reading "Stable ENTITY identifier".
+    Prose loses to schema, again: the model call is structured-output
+    constrained, so an inlined pattern is not advice, it is unrepresentable.
+
+    Twenty-eight refs across four agents' shapes were in that state.
+
+    CYCLES ARE LEFT ALONE. `TemplateNode` contains itself, and expanding that
+    is unbounded. A ref already on the current path stays a ref — one
+    unresolvable pointer is a smaller loss than a schema that does not
+    terminate.
+    """
+    if isinstance(node, list):
+        return [_inline_refs(x, contract, _seen) for x in node]
+    if not isinstance(node, dict):
+        return node
+
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/"):
+        if ref in _seen:
+            return node
+        target: Any = contract
+        try:
+            for part in ref[2:].split("/"):
+                target = target[part]
+        except (KeyError, TypeError):
+            return node                      # a ref we cannot follow, left as-is
+        resolved = _inline_refs(target, contract, _seen + (ref,))
+        if isinstance(resolved, dict):
+            # The local description wins: it was written for this field, and
+            # the target's is generic.
+            merged = {**resolved, **{k: v for k, v in node.items()
+                                     if k != "$ref"}}
+            return merged
+        return resolved
+
+    return {k: _inline_refs(v, contract, _seen) for k, v in node.items()}
 
 
 #: Mirrors PLACEHOLDERS / RepeatSource in the Zod contract. Stated to the agent
