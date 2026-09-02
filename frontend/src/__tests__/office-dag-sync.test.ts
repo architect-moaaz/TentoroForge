@@ -8,6 +8,8 @@
  * get the most attention, because they are the ones that explain a
  * half-finished app.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import {
@@ -46,6 +48,50 @@ const RUN_PLAN: OfficeEvent = {
 beforeEach(() => {
   useOfficeStore.getState().reset();
   useOfficeStore.getState().initialize();
+});
+
+describe("the cast has art", () => {
+  // The one thing the backend's cast test cannot see. It asserts every
+  // Blueprint agent has a desk; this asserts the character at that desk can
+  // actually be drawn. When `a2ui_patterns` was deleted from the agent
+  // registry the backend test caught the missing agent — nothing would have
+  // caught a surviving agent pointed at art that isn't there, and the
+  // renderer's fallback is a coloured circle with an initial in it.
+  const manifest = JSON.parse(
+    readFileSync(join(process.cwd(), "public/sprites/manifest.json"), "utf-8"),
+  ) as Record<string, Record<string, string>>;
+
+  const drawable = new Set([
+    ...Object.keys(manifest.characters_idle ?? {}),
+    ...Object.keys(manifest.characters_working ?? {}),
+    ...Object.keys(manifest.characters ?? {}),
+  ]);
+
+  it("points every agent at a sprite that exists", () => {
+    const missing = AGENT_REGISTRY.filter((a) => !drawable.has(a.spriteKey));
+    expect(missing.map((a) => `${a.id} -> ${a.spriteKey}`)).toEqual([]);
+  });
+
+  it("gives no two agents the same face", () => {
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const a of AGENT_REGISTRY) {
+      const other = seen.get(a.spriteKey);
+      if (other) clashes.push(`${other} and ${a.id} both use ${a.spriteKey}`);
+      else seen.set(a.spriteKey, a.id);
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  it("stays off the two sprites that are not people", () => {
+    // `auth_agent.png` is a gantry machine and `indexer.png` is a character
+    // and a portal in one wide image, which the renderer squashes into a
+    // square. Both shipped in the office for months looking like furniture.
+    const unusable = ["auth_agent", "indexer"];
+    expect(
+      AGENT_REGISTRY.filter((a) => unusable.includes(a.spriteKey)).map((a) => a.id),
+    ).toEqual([]);
+  });
 });
 
 describe("the office floor", () => {
