@@ -95,18 +95,32 @@ _MEASURED_PROPS = frozenset({
     "delta", "change", "comparison", "deltaLabel",
 })
 
-# Last-resort prop reconciliation.
+# A FLOOR, AND NO LONGER A SILENT ONE.
 #
-# The catalog is only as truthful as `library_manifest.key_props`, and that list
-# is empty for some components — Text among them. Given no properties to work
-# from the composer invents plausible ones ("text", "variant"), which then fail
-# Forge's strict schema node ({content, as}). That is the very drift A2UI's
-# closed catalog is supposed to prevent, reappearing one layer up.
+# These rewrite `Text.text` to `Text.content`, `Alert.text` to `Alert.message`
+# and four more. They described themselves as "a stopgap, not the fix. The fix
+# is to make the catalog generator fall back to the schema node when the
+# manifest has no key_props… Every entry here marks a component whose manifest
+# entry is thin."
 #
-# These aliases are a stopgap, not the fix. The fix is to make the catalog
-# generator fall back to the schema node when the manifest has no key_props, so
-# the contract is complete at authoring time instead of patched at translation
-# time. Every entry here marks a component whose manifest entry is thin.
+# That fix has happened. `_PRIMITIVE_PROPS` supplies the fallback, and every
+# one of these seven now points at a canonical prop the catalog already
+# carries — measured, not assumed. With `unevaluatedProperties` on every
+# component, A2UI's own validator rejects `{"component": "Text", "text": …}`
+# and retries, so in the ordinary case the wrong prop never arrives here.
+# Verified against A2UI's validator rather than an approximation of it.
+#
+# KEPT ANYWAY, because "unnecessary in the happy path" and "safe to delete" are
+# different claims. A rejection costs A2UI a retry out of three, shared with
+# whatever else is wrong with that surface; if it cannot self-correct, a page
+# that used to ship is lost. A prop name is not worth a page.
+#
+# What was actually wrong with them was the silence. `translate` reported no
+# warning and nothing dropped, so the composer emitted `text` forever while
+# this table quietly fixed it — a repair nobody could see is a repair nobody
+# removes. Each rename now says so through `warnings`, which is the same
+# channel an unknown prop already uses, so a rename that keeps happening is
+# visible as a catalog defect rather than absorbed as a habit.
 _PROP_ALIASES: dict[str, dict[str, str]] = {
     "Text": {"text": "content"},
     "Heading": {"text": "content"},
@@ -1425,7 +1439,18 @@ def translate(payload: dict, registry: dict, route: str = "/",
             if isinstance(resolved, str):
                 resolved = _ENUM_SYNONYMS.get(k, {}).get(resolved, resolved)
             if resolved is not None:
-                props[aliases.get(k, k)] = resolved
+                canonical = aliases.get(k, k)
+                if canonical != k:
+                    # Said out loud. The catalog already offers the right name,
+                    # so a rename reaching here means the composer was told and
+                    # wrote something else anyway — worth seeing, not worth
+                    # losing the page over.
+                    binder.warnings.append(
+                        f'{c.get("id")}.{k}: {kind} has no {k!r} prop; '
+                        f"renamed to {canonical!r}. The catalog offers "
+                        f"{canonical!r} — the composer should be writing it."
+                    )
+                props[canonical] = resolved
         # EVERY workflow reference, not the one on the component itself. A
         # `workflow` also lives inside `Table.rowActions[]`, `emptyAction`, and
         # any other action object a component accepts — and a composed /plants

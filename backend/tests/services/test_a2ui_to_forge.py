@@ -1029,12 +1029,40 @@ def test_it_is_reported_not_dropped():
     assert nodes(r, "Badge")[0]["props"]["sparkle"] == "yes"
 
 
-def test_an_aliased_prop_is_not_an_unknown_one():
-    """`Badge.label` is `content` by the time this looks. Reporting it would
-    be reporting a rename this module performed itself."""
+def test_an_alias_still_saves_the_page():
+    """The floor. `Badge.label` is renamed to `content` rather than passed
+    through to a `.strict()` node that would reject the whole page.
+
+    A rejection costs A2UI a retry out of three, shared with whatever else is
+    wrong with that surface, and a page that cannot self-correct is lost. A
+    prop name is not worth a page.
+    """
     r = translate(payload(_badge(label="Live"), {"tasks": {"rows": []}}), REG)
     assert nodes(r, "Badge")[0]["props"]["content"] == "Live"
-    assert not _warned(r, "label")
+
+
+def test_the_rename_is_said_out_loud():
+    """What was wrong with the alias table was never the rename — it was the
+    silence. `translate` reported no warning and nothing dropped, so the
+    composer emitted `text` forever while the table quietly fixed it, and a
+    repair nobody can see is a repair nobody removes.
+
+    The catalog now offers `content` and A2UI's own validator rejects `label`,
+    so a rename reaching here means the composer was told and wrote something
+    else anyway. That is a catalog defect worth seeing.
+    """
+    r = translate(payload(_badge(label="Live"), {"tasks": {"rows": []}}), REG)
+    assert _warned(r, "label"), "the rename happened silently"
+    said = next(w for w in r["warnings"] if ".label:" in w)
+    assert "content" in said, "the warning does not name the right prop"
+
+
+def test_a_correct_prop_is_not_warned_about():
+    """The warning must mean something. A composer writing `content` — which
+    is what the catalog tells it to write — must produce no noise."""
+    r = translate(payload(_badge(content="Live"), {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "content")
+    assert nodes(r, "Badge")[0]["props"]["content"] == "Live"
 
 
 def test_a_node_sibling_is_not_an_unknown_prop():
