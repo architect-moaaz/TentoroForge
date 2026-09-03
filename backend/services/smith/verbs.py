@@ -36,6 +36,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # §42 puts `chat history` first on the list of places the raw
     # credential must not come to rest, and Smith's conversation is
     # persisted — so the field Smith may ask for is the reference.
+    # `treat_as` is deliberately NOT required here. Smith asks for it in
+    # `_connect_figma` with the consequence spelled out, because "specification"
+    # and "reference" build different applications from the same file — and a
+    # missing-field message ("I just need treat as") would be a worse way to
+    # ask than the sentence that explains the difference.
     "connect_figma": {"figma_url", "token_env"},
     "rebuild": set(),
 }
@@ -58,7 +63,7 @@ VERB_HELP: dict[str, str] = {
     "connect_figma": (
         "Attach a Figma design as evidence for the application: \"use this "
         "Figma design <url>\". Needs the design URL and the NAME of the "
-        "environment variable holding the Figma token — never the token."
+        "environment variable holding the Figma token — never the token. Smith then asks whether the design is the specification or a reference."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

@@ -93,16 +93,28 @@ def summarise(ref: Any, record: dict) -> str:
     if ref.gaps:
         lines += ["", "What the design does not answer:"]
         lines += [f"  - {g}" for g in ref.gaps[:6]]
-    lines += [
-        "",
-        "These become requirements you can review, not decisions — a screen "
-        "proves a capability is reachable, not who may use it. Say “build” "
-        "when you want the run.",
-    ]
+    if str(record.get("treatAs")) == "specification":
+        lines += [
+            "",
+            "Held as the SPECIFICATION: the application gets one page per frame "
+            "above and no others. Nothing will be added around them — no "
+            "sign-in, no lists behind the numbers, no forms to create what they "
+            "show — unless you drew it. Say “build” when you want the run.",
+        ]
+    else:
+        lines += [
+            "",
+            "Held as EVIDENCE: these become requirements you can review, not "
+            "decisions — a screen proves a capability is reachable, not who may "
+            "use it. The page set is derived from the data model with these "
+            "informing it, so expect more screens than frames. Say “build” when "
+            "you want the run.",
+        ]
     return "\n".join(lines)
 
 
 def connect(output_dir: Any, *, figma_url: str, token_env: str,
+            treat_as: str = "evidence",
             max_screens: int = 40, with_images: bool = True) -> dict[str, Any]:
     """Extract the design and attach it to the Blueprint.
 
@@ -182,5 +194,5 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
         # `.detail` is already redacted by the gateway.
         raise FigmaConnectError(f"Figma {exc.kind}: {exc.detail}") from exc
 
-    record = attach(svc, ref)
+    record = attach(svc, ref, treat_as=treat_as)
     return {"record": record, "summary": summarise(ref, record)}

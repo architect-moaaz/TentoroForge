@@ -131,3 +131,59 @@ def test_a_turn_reports_rather_than_raising():
     })
     assert r.status in ("asked", "needs_user")
     assert r.answer
+
+
+# ------------------------------------- specification or reference, asked once
+
+@pytest.mark.parametrize("said,expected", [
+    ("specification", "specification"),
+    ("spec", "specification"),
+    ("reference", "evidence"),
+    ("a reference", "evidence"),
+    ("evidence", "evidence"),
+    ("", ""),
+    ("maybe", ""),
+])
+def test_the_word_smith_asks_for_is_a_word_smith_accepts(said, expected):
+    """The question offers "specification or reference"; the Blueprint's own
+    vocabulary is `evidence`. A person answers with the word they were given,
+    so both map — otherwise Smith asks a question it then rejects."""
+    from services.smith.understand_ask import _design_scope
+
+    assert _design_scope(said) == expected
+
+
+def test_an_unstated_scope_is_asked_for_not_guessed():
+    """The two answers build different applications from one file — thirteen
+    pages or four. Guessing decides an application's shape silently."""
+    r = _session()._connect_figma({
+        "figma_url": "https://www.figma.com/design/aBcD1234EfGh/P",
+        "token_env": "FIGMA_TOKEN",
+    })
+    assert r.status == "asked"
+    assert "SPECIFICATION" in r.answer and "REFERENCE" in r.answer
+
+
+def test_the_ask_says_what_each_choice_costs():
+    """"Specification" quietly means no sign-in and no create forms. That has
+    to be in the question, not discovered in the built app."""
+    r = _session()._connect_figma({
+        "figma_url": "https://www.figma.com/design/aBcD1234EfGh/P",
+        "token_env": "FIGMA_TOKEN",
+    })
+    assert "nothing else" in r.answer
+    assert "more pages than frames" in r.answer
+
+
+def test_the_store_defaults_to_evidence_and_rejects_nonsense():
+    """§48 is the default, and an unrecognised value must not silently become
+    a specification — that would build the wrong application."""
+    from services.figma.reference import DesignReference, ScreenRef
+    from services.figma.store import source_record
+    from services.figma.url import FigmaTarget
+
+    ref = DesignReference(target=FigmaTarget(file_key="k"), source_id="FIGMA-001",
+                          screens=[ScreenRef(node_id="1:2", name="D")])
+    assert source_record(ref)["treatAs"] == "evidence"
+    assert source_record(ref, treat_as="nonsense")["treatAs"] == "evidence"
+    assert source_record(ref, treat_as="specification")["treatAs"] == "specification"

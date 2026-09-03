@@ -78,6 +78,15 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
           ANYWAY (a value starting `figd_`), leave "token_env" empty, do not
           repeat the value anywhere in your reply, and tell them to export it
           as an environment variable and give you the name instead.
+      "treat_as": whether this design is the SPECIFICATION or a REFERENCE.
+          "specification" when they want exactly the screens they drew and
+          nothing else — "only these pages", "just what is in the design",
+          "build this and nothing more". "evidence" when the design informs
+          an application that is larger than it — the usual case, and the
+          right reading of "use this design", "match this style", "build
+          from this". Leave "" if they have not said, and ask which in
+          "clarification_needed": the difference is a four-page app versus
+          a fourteen-page one, and it is cheap to ask and expensive to undo.
 
 Do not explain. Do not wrap the JSON in prose or code fences.
 
@@ -103,6 +112,24 @@ BLUEPRINT (the relevant part):
 
 REQUEST:
 {message}"""
+
+
+def _design_scope(raw: object) -> str:
+    """`evidence`, `specification`, or "" when they have not said.
+
+    THE WORD SMITH ASKS FOR MUST BE A WORD SMITH ACCEPTS. The question offers
+    "specification or reference", and `reference` is what a person then says —
+    while the Blueprint's own vocabulary for it is `evidence` (§48). Mapping
+    here rather than changing the contract: `evidence` is the accurate name for
+    what the frames are to the rest of the pipeline, and `reference` is the
+    accurate word for what the user is telling you.
+    """
+    text = str(raw or "").strip().lower()
+    if text in ("specification", "spec", "the specification"):
+        return "specification"
+    if text in ("evidence", "reference", "a reference", "the reference"):
+        return "evidence"
+    return ""
 
 
 def _env_name_only(raw: object) -> str:
@@ -168,6 +195,7 @@ def understand_ask(
                 "clarification_needed": "What would you like to change?",
                 "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     # SHOWN, NOT JUST HAD. `reasoning` is where Smith's thinking goes on its
@@ -186,6 +214,7 @@ def understand_ask(
                 "again and I will try once more.",
                 "answer": "", "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     data = _parse(raw)
@@ -195,6 +224,7 @@ def understand_ask(
                 "what on it?",
                 "answer": "", "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
@@ -229,6 +259,7 @@ def understand_ask(
         # have it persisted here, so anything shaped like a Figma PAT is
         # dropped and the user is asked for the variable name instead.
         "token_env": _env_name_only(data.get("token_env")),
+        "treat_as": _design_scope(data.get("treat_as")),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a

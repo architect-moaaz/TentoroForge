@@ -246,8 +246,47 @@ class SmithSession:
                         "tell me what you called it."),
             )
 
+        # THE CHEAP CHECK STAYS FIRST. Asking which kind of design this is
+        # before knowing it IS one answers a mistyped link with a question about
+        # scope — the same ordering mistake the URL check was moved forward to
+        # fix, reintroduced one question later.
+        from services.figma.url import parse as _parse_figma_url
+
+        if _parse_figma_url(url) is None:
+            return TurnResult(
+                status="needs_user",
+                answer=(f"That does not look like a Figma URL: {url!r}. I need "
+                        f"the link from Figma's Share dialog, like "
+                        f"https://figma.com/design/<key>/<name>?node-id=1-2"),
+            )
+
+        from services.smith.understand_ask import _design_scope
+
+        treat_as = _design_scope(understanding.get("treat_as"))
+        if not treat_as:
+            # ASKED ONCE, BECAUSE THE TWO ANSWERS BUILD DIFFERENT APPLICATIONS.
+            # Evidence derives the page set from the data model with the design
+            # informing it — one real dashboard produced thirteen pages that way,
+            # every one a fair reading of what a dashboard implies. Specification
+            # builds the frames and nothing else. Guessing either way is a whole
+            # application's shape decided silently.
+            return TurnResult(
+                status="asked",
+                answer=("Before I pull it in — is this design the "
+                        "SPECIFICATION or a REFERENCE?\n\n"
+                        "• Specification: I build exactly the screens you drew "
+                        "and nothing else. No sign-in, no lists behind the "
+                        "numbers, no forms to create what they show, unless "
+                        "they are in the file.\n"
+                        "• Reference: the screens become requirements and the "
+                        "design language, and the application is built around "
+                        "them — usually more pages than frames.\n\n"
+                        "Say “specification” or “reference”."),
+            )
+
         try:
-            out = connect(self.output_dir, figma_url=url, token_env=token_env)
+            out = connect(self.output_dir, figma_url=url, token_env=token_env,
+                          treat_as=treat_as)
         except FigmaConnectError as exc:
             # Every message on this path names the reference or the failure
             # kind; `FigmaGatewayError` redacts its own detail (§42).

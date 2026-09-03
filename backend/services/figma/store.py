@@ -60,8 +60,15 @@ def next_source_id(doc: dict) -> str:
     return f"FIGMA-{max(used, default=0) + 1:03d}"
 
 
-def source_record(ref: DesignReference, *, name: str = "") -> dict[str, Any]:
-    """The Blueprint's ``designSources`` entry for this reference."""
+def source_record(ref: DesignReference, *, name: str = "",
+                  treat_as: str = "evidence") -> dict[str, Any]:
+    """The Blueprint's ``designSources`` entry for this reference.
+
+    ``treat_as`` is `evidence` or `specification` — whether the page set is
+    derived from the data model with this design informing it, or IS these
+    frames. Defaults to evidence (§48), so a caller that does not care gets the
+    behaviour every existing project already has.
+    """
     return {
         "id": ref.source_id,
         "type": "figma",
@@ -70,6 +77,7 @@ def source_record(ref: DesignReference, *, name: str = "") -> dict[str, Any]:
         "url": ref.target.source_url,
         "name": name,
         "extractedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "treatAs": treat_as if treat_as in ("evidence", "specification") else "evidence",
         "frames": [
             {
                 "nodeId": s.node_id,
@@ -104,7 +112,8 @@ def load(source_id: str, output_dir: str | Path) -> DesignReference | None:
     return _from_dict(json.loads(path.read_text("utf-8")))
 
 
-def connect(svc: Any, ref: DesignReference, *, name: str = "") -> dict[str, Any]:
+def connect(svc: Any, ref: DesignReference, *, name: str = "",
+            treat_as: str = "evidence") -> dict[str, Any]:
     """Record a reference against a Blueprint: payload out, citation in.
 
     Idempotent by ``source_id`` — re-extracting the same file updates its
@@ -112,7 +121,7 @@ def connect(svc: Any, ref: DesignReference, *, name: str = "") -> dict[str, Any]
     safe to retry (§103).
     """
     save(ref, svc.output_dir)
-    record = source_record(ref, name=name)
+    record = source_record(ref, name=name, treat_as=treat_as)
     sources = svc.doc.setdefault("designSources", [])
     for index, existing in enumerate(sources):
         if existing.get("id") == record["id"]:

@@ -74,7 +74,7 @@ def test_missing_keys_normalise_to_strings():
                    # widgets off the same dict. An absent verb still means
                    # rename, which is what every turn used to be.
                    "verb": "", "route": "", "widgets": [],
-                   "figma_url": "", "token_env": ""}
+                   "figma_url": "", "token_env": "", "treat_as": ""}
 
 
 def test_a_replacement_carries_the_value_to_write():
@@ -115,4 +115,5 @@ def test_every_early_return_carries_the_full_shape():
                             "verb", "route", "widgets",
                             # connect_figma. `token_env` is a variable NAME;
                             # the token itself is never a field Smith carries.
-                            "figma_url", "token_env"}
+                            # `treat_as` is evidence vs specification (§48).
+                            "figma_url", "token_env", "treat_as"}
