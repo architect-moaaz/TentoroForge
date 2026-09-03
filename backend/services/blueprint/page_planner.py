@@ -643,7 +643,27 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
             # missing the very prop it was given.
             bound = {k for k, v in props.items()
                      if isinstance(v, str) and "{{" in v}
-            checkable = {k: v for k, v in props.items() if k not in bound}
+            # `className` IS A RENDERER PASSTHROUGH, NOT A COMPONENT PROP.
+            # `packages/library/src/registry.ts` lifts it out of the props and
+            # forwards it to the element deliberately:
+            #
+            #     if (typeof inputProps.className === "string") {
+            #       passthrough.className = inputProps.className;
+            #     }
+            #     delete inputProps.className;
+            #
+            # The catalog declares `additionalProperties: false` with, for
+            # Container, a single `maxWidth` — so the contract forbade what the
+            # renderer explicitly supports, and every Figma-derived page was
+            # refused for carrying the Tailwind that IS its fidelity. Excluded
+            # for the same reason bindings are: the value is real, and this is
+            # not the thing that can judge it.
+            # `style` joins it for the same reason and by the same route —
+            # `registry.ts` lifts both out of the props and forwards them to
+            # the element, so neither is a component prop this can judge.
+            _PASSTHROUGH = {"className", "style"}
+            checkable = {k: v for k, v in props.items()
+                         if k not in bound and k not in _PASSTHROUGH}
             schema = entry["props"]
             if bound and isinstance(schema.get("required"), list):
                 schema = dict(schema)
