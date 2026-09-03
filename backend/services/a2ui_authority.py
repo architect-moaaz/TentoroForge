@@ -169,7 +169,7 @@ _JOB = {
 UNCLASSIFIED_FAMILY = "collection"
 
 
-def _family_of(kind: Any) -> str:
+def _family_of(kind: Any, route: Any = "") -> str:
     """Every declared kind reduced to one of the four shapes above.
 
     ONE TABLE, IN THE MODULE THAT OWNS THE QUESTION. This kept a second,
@@ -178,9 +178,14 @@ def _family_of(kind: Any) -> str:
     disagreed by omission rather than by contradiction, so nothing looked
     wrong: eleven patterns fell past both and defaulted to `dashboard`.
     """
-    from services.page_kind_anatomy import page_family
+    from services.page_kind_anatomy import page_family, route_family
 
-    return page_family(kind) or UNCLASSIFIED_FAMILY
+    # THE ROUTE OUTRANKS THE DECLARED PATTERN, and only ever for create and
+    # edit screens, which the eighteen-value pattern enum cannot name. Without
+    # this, `/contacts/new` came through as `record_workspace` -> `record` and
+    # the composer was handed "This screen shows ONE record in detail" for a
+    # page that exists to collect one.
+    return route_family(route) or page_family(kind) or UNCLASSIFIED_FAMILY
 
 
 def is_a2ui_enabled() -> bool:
@@ -379,7 +384,7 @@ def build_requirement(root: Path, kind: str = "dashboard",
     actors = [a.get("name") or a.get("role") for a in (plan.get("actors") or [])
               if isinstance(a, dict)]
 
-    parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind)]]
+    parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind, route)]]
 
     if presentation in ("drawer", "modal"):
         # A page that opens OVER its caller is not a screen. Composed as one it
@@ -419,7 +424,7 @@ def build_requirement(root: Path, kind: str = "dashboard",
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
-    guidance = build_composition_guidance(root, _family_of(kind))
+    guidance = build_composition_guidance(root, _family_of(kind, route))
     if guidance:
         parts.append("\n" + guidance)
     parts.append(
@@ -808,7 +813,7 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list
 
     from services.a2ui_to_forge import dangling_bindings
 
-    if _family_of(kind) == "dashboard":
+    if _family_of(kind, route) == "dashboard":
         findings = dashboard_findings(route, schema, registry)
     else:
         findings = page_kind_findings(kind, route, schema)
@@ -1027,7 +1032,7 @@ def compose_page_via_a2ui(
     # and now receives the reason this one was refused.
     if findings:
         return {"applied": False, "route": route, "kind": kind,
-                "reason": f"composed page failed the {_family_of(kind)} floor: "
+                "reason": f"composed page failed the {_family_of(kind, route)} floor: "
                           + ", ".join(f["rule"] for f in findings),
                 "findings": [f["rule"] for f in findings],
                 "pruned": pruned,
