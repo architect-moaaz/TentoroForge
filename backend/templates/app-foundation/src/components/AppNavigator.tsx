@@ -28,6 +28,15 @@ type Overlay = { url: string; routeKey: string; entity: string; id?: string; var
 
 const KNOWN_ROUTES = new Set(Object.keys(schemas));
 
+/** Segments this scaffold's own route tree owns as ACTIONS, never as record ids.
+ *
+ *  `src/app/(dashboard)/[entity]/new/page.tsx` and
+ *  `src/app/(dashboard)/[entity]/[id]/edit/page.tsx` are real files shipped with
+ *  every generated app, so these are facts about the router — not a guess about
+ *  which strings look like ids, and not an exception list that needs a new entry
+ *  per app. `TITLES` below is keyed by the same segments and stays in step. */
+const ACTION_SEGMENTS = new Set(["new", "edit"]);
+
 /** Decide whether a URL should render as an overlay, and how. Returns null for
  *  ordinary routes (list pages, dashboard, settings) that navigate normally. */
 function overlayFor(url: string): Overlay | null {
@@ -46,7 +55,19 @@ function overlayFor(url: string): Overlay | null {
   }
   // /[entity]/[id] detail — only when it's a dynamic detail route (not a literal
   // nested page like /tasks/board, which has its own schema key).
-  if (segs.length === 2 && !(path in KNOWN_ROUTES) && `/${entity}/[id]` in schemas) {
+  //
+  // ACTION_SEGMENTS IS CHECKED HERE, NOT ONLY ABOVE. The `new` and `edit`
+  // branches are each guarded by `in schemas`, so when a /new page fails to
+  // compose — and the composer fails exactly those pages most often — `new`
+  // fell past its own branch into this one, became `id`, and
+  // `withClientSources` asked for /api/data/<entity>/new. Postgres casts it to
+  // uuid and raises 22P02, so a missing page surfaced as a 500 on a route that
+  // was never a record lookup.
+  //
+  // A missing schema should navigate to the real page route (which exists on
+  // disk) or 404 honestly. It must never re-interpret a verb as an identifier.
+  if (segs.length === 2 && !ACTION_SEGMENTS.has(last)
+      && !(path in KNOWN_ROUTES) && `/${entity}/[id]` in schemas) {
     return { url, routeKey: `/${entity}/[id]`, entity, id: last, variant: "drawer" };
   }
   return null;

@@ -96,6 +96,22 @@ function errorResponse(error: unknown) {
       { status: 409 }
     );
   }
+  // 22P02 — invalid text representation, i.e. the id in the URL is not the type
+  // the id column is. `/api/data/contacts/new` produced this every time a /new
+  // page failed to compose: `AppNavigator` fell through to its detail branch and
+  // asked for a record named "new", Postgres tried to cast it to uuid, and a
+  // routing mistake surfaced as a 500 with a stack trace.
+  //
+  // AppNavigator no longer does that, and this is the floor underneath it: an id
+  // the column cannot even represent is an id no row can have, so the honest
+  // answer is 404. A malformed id is a client error; it is not the server
+  // failing.
+  if (pgError?.code === "22P02") {
+    return NextResponse.json(
+      { error: { code: "NOT_FOUND", message: "No record with that id" } },
+      { status: 404 }
+    );
+  }
   const message = error instanceof Error ? error.message : "Internal server error";
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message } },
