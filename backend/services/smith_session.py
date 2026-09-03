@@ -206,6 +206,61 @@ class SmithSession:
 
     # ---- Iteration flow (§5.2 / §7 / §11) -------------------------------
 
+    def _connect_figma(self, understanding: dict) -> "TurnResult":
+        """Attach a Figma design, having asked for a URL and a variable NAME.
+
+        SMITH NEVER ASKS FOR THE TOKEN. §42 lists `chat history` first among the
+        places a raw credential must not come to rest, and this conversation is
+        written to disk. `services.figma.credentials` settled the shape before
+        this method existed: a `FigmaCredential` holds a REFERENCE — the name of
+        an environment variable — and the gateway resolves the secret at the
+        moment of the call. A name is not a secret, so it can be asked for,
+        stored and echoed; the token is never held at all.
+
+        The extraction is evidence, not the application (§48-§51). What it
+        produces is a `designSources` record for `figma_intelligence` to fan out
+        over, and the run that follows is the ordinary DAG.
+        """
+        from services.smith.figma_connect import FigmaConnectError, connect
+
+        url = (understanding.get("figma_url") or "").strip()
+        token_env = (understanding.get("token_env") or "").strip()
+
+        if not url:
+            return TurnResult(
+                status="asked",
+                answer="Which Figma file? Paste the link from Figma's Share "
+                       "dialog and I'll pull the screens and tokens out of it.",
+            )
+        if not token_env:
+            # The ask names the shape of the answer, because the obvious reply
+            # to "I need your Figma token" is to paste one — and that is the
+            # outcome this whole path exists to avoid.
+            return TurnResult(
+                status="asked",
+                answer=("Which environment variable holds your Figma token? I "
+                        "need the NAME — `FIGMA_TOKEN`, for example — not the "
+                        "token itself. Anything you type here is written to "
+                        "the conversation log, so a credential must not go in "
+                        "it; export the token in the backend's environment and "
+                        "tell me what you called it."),
+            )
+
+        try:
+            out = connect(self.output_dir, figma_url=url, token_env=token_env)
+        except FigmaConnectError as exc:
+            # Every message on this path names the reference or the failure
+            # kind; `FigmaGatewayError` redacts its own detail (§42).
+            return TurnResult(status="needs_user", answer=str(exc))
+        except Exception as exc:  # noqa: BLE001 — a turn reports, never crashes
+            logger.exception("figma connect failed for %s", self.output_dir)
+            return TurnResult(
+                status="needs_user",
+                answer=f"I could not read that Figma file: {type(exc).__name__}.",
+            )
+
+        return TurnResult(status="resolved", answer=out["summary"])
+
     def _compose(self, verb: str, understanding: dict,
                  user_message: str) -> "TurnResult":
         """Compose a screen, or add sections to one, through the real agent.
@@ -335,6 +390,8 @@ class SmithSession:
                             + VERB_HELP.get(verb, "")),
                 )
 
+        if verb == "connect_figma":
+            return self._connect_figma(understanding)
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, user_message)
         if verb == "rebuild":

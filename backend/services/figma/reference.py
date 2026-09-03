@@ -227,7 +227,23 @@ async def extract(
             continue
         try:
             context = await gateway.call(
-                "get_design_context", file_key=target.file_key, node_id=screen.node_id
+                "get_design_context", file_key=target.file_key,
+                node_id=screen.node_id,
+                # WITHOUT THIS THE SERVER ANSWERS WITH METADATA INSTEAD OF CODE,
+                # silently, whenever the node is large — its own words: "code
+                # should always be returned, instead of returning just metadata
+                # if the output size is too large".
+                #
+                # A real dashboard frame (3902x1975, 104 nested elements) came
+                # back as 139KB of the same `<frame>` markup `get_metadata`
+                # returns. `_structure_from_code` stored it as `code`, so the
+                # reference looked complete and every consumer of it — the
+                # label harvest, the asset list, the whole pixel path, which
+                # parses React JSX — silently had nothing to work with.
+                #
+                # A screen big enough to be worth reproducing is exactly the
+                # screen that trips the size cutoff, so this is not an edge.
+                forceCode=True,
             )
         except FigmaGatewayError as exc:
             ref.gaps.append(f"no structure for {screen.name} ({exc.kind})")
@@ -316,8 +332,107 @@ def payload_of(blocks: Iterable[dict[str, Any]]) -> Any:
         return text
 
 
+#: Element names the Dev Mode MCP uses, mapped to the Figma node types the
+#: rest of this module already understands.
+_MARKUP_TYPES: dict[str, str] = {
+    "canvas": "CANVAS",
+    "frame": "FRAME",
+    "component": "COMPONENT",
+    "componentset": "COMPONENT_SET",
+    "component-set": "COMPONENT_SET",
+    "section": "SECTION",
+    "instance": "INSTANCE",
+    "group": "GROUP",
+    "text": "TEXT",
+    "vector": "VECTOR",
+    "rectangle": "RECTANGLE",
+    "ellipse": "ELLIPSE",
+    "line": "LINE",
+    "image": "IMAGE",
+}
+
+
+def _nodes_from_markup(text: str) -> dict | None:
+    """`get_metadata` as the Dev Mode MCP actually answers it — XML, not JSON.
+
+    THE SAME SURPRISE `_attach_structure` RECORDS ONE FUNCTION BELOW: the
+    server answers in the shape it finds useful, and this package assumed the
+    REST API's node tree. `payload_of` falls back to returning the raw text
+    when it will not parse as JSON, `_walk_nodes` then walks a string and finds
+    nothing, and a file with a hundred frames extracted as "no frames found in
+    the file or selected node" — a wrong reference that looked merely thin.
+
+    Measured on a real file: 141KB of markup, 104 `<frame>` elements, read as
+    zero screens.
+
+    Converted into the dict shape `_walk_nodes` already consumes rather than
+    given a second walker, so everything downstream — the screen filter, the
+    component harvest, the interactions — is untouched. Returns None when the
+    text is not markup either, which keeps "we got prose" distinguishable from
+    "we got a tree with nothing in it".
+    """
+    import xml.etree.ElementTree as ET
+
+    body = (text or "").strip()
+    start, end = body.find("<"), body.rfind(">")
+    if start < 0 or end <= start:
+        return None
+    try:
+        root = ET.fromstring(body[start:end + 1])
+    except ET.ParseError:
+        return None
+
+    # A SCREEN IS A FRAME THE PAGE HOLDS, NOT EVERY FRAME. Dev Mode markup
+    # writes `<frame>` for groups as well, so a real file reported 40 screens
+    # of which one was a screen — the other 39 were "Group", "Mask group" and
+    # "Clip path group" nested inside it. `_NON_SCREEN` filters by name
+    # (cover, thumbnail, logo...) and none of those match.
+    #
+    # Depth is the fact that separates them: on a canvas, the screens are its
+    # direct children; a `<frame>` deeper than that is part of one. Deeper
+    # frames are typed GROUP, which `_screens_from_metadata` already ignores,
+    # and nothing is lost — a screen's internals come from its design context,
+    # not from this tree.
+    #
+    # When a node was selected rather than a page, the root IS the screen and
+    # is kept as one.
+    root_is_canvas = _MARKUP_TYPES.get(root.tag.lower()) == "CANVAS"
+
+    def convert(element: Any, depth: int = 0) -> dict:
+        attrib = element.attrib
+        kind = _MARKUP_TYPES.get(element.tag.lower(), element.tag.upper())
+        if kind == "FRAME" and root_is_canvas and depth > 1:
+            kind = "GROUP"
+        node: dict[str, Any] = {
+            "type": kind,
+            "id": attrib.get("id", ""),
+            "name": attrib.get("name", ""),
+        }
+        box: dict[str, float] = {}
+        for key in ("x", "y", "width", "height"):
+            raw = attrib.get(key)
+            if raw is None:
+                continue
+            try:
+                box[key] = float(raw)
+            except (TypeError, ValueError):
+                continue
+        if box:
+            # Under the name the REST payload uses, so `_screens_from_metadata`
+            # reads one field regardless of which server answered.
+            node["absoluteBoundingBox"] = box
+        children = [convert(child, depth + 1) for child in element]
+        if children:
+            node["children"] = children
+        return node
+
+    return convert(root)
+
+
 def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
     payload = payload_of(blocks)
+    if isinstance(payload, str):
+        payload = _nodes_from_markup(payload) or payload
     nodes = _walk_nodes(payload)
 
     screens: list[ScreenRef] = []
@@ -466,7 +581,10 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
 
 #: Figma's MCP serves rendered assets from this host; the URLs expire, so they
 #: are recorded as evidence of *what* the screen shows, not as a durable src.
-_ASSET_URL = re.compile(r"https://www\.figma\.com/api/mcp/asset/[0-9a-f-]+")
+_ASSET_URL = re.compile(
+    r"https://www\.figma\.com/api/mcp/asset/[A-Za-z0-9_-]+"
+    r"|https?://(?:127\.0\.0\.1|localhost):3845/assets/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9]+)?"
+)
 
 #: Visible copy in generated TSX: JSX text nodes and quoted string props that
 #: read like labels. This is the screen's vocabulary, and §49's inference of

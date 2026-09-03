@@ -32,6 +32,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
                "desired_behavior", "target_file"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
+    # `token_env` is the NAME of an environment variable, never the token.
+    # §42 puts `chat history` first on the list of places the raw
+    # credential must not come to rest, and Smith's conversation is
+    # persisted — so the field Smith may ask for is the reference.
+    "connect_figma": {"figma_url", "token_env"},
     "rebuild": set(),
 }
 
@@ -49,6 +54,11 @@ VERB_HELP: dict[str, str] = {
     "add_widgets": (
         "Add named sections or widgets to a screen that exists: "
         '"put upcoming sessions and quorum status on the dashboard".'
+    ),
+    "connect_figma": (
+        "Attach a Figma design as evidence for the application: \"use this "
+        "Figma design <url>\". Needs the design URL and the NAME of the "
+        "environment variable holding the Figma token — never the token."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

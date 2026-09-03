@@ -41,6 +41,9 @@ Return ONLY a JSON object with exactly these keys:
                         when they want it laid out again from scratch.
       "add_widgets"   — add named sections to a screen that exists: "put
                         upcoming sessions and quorum status on the dashboard".
+      "connect_figma" — they named a Figma design to build from or to use as
+                        the visual reference. Any figma.com/design or
+                        figma.com/file link is this verb.
       "" when you are asking or answering rather than changing.
 
 Then fill in ONLY the fields that verb needs. Leave the others "".
@@ -63,6 +66,18 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "widgets": a JSON array of the sections to add, each naming WHAT IT SHOWS
       ("Upcoming Sessions", "Quorum Status"). Never an empty array — the
       widgets are the request.
+
+  connect_figma needs:
+      "figma_url": the Figma link exactly as they gave it, whole.
+      "token_env": the NAME of the environment variable holding their Figma
+          token — "FIGMA_TOKEN", not the token. If they have not said which
+          variable, leave this "" and ask for the NAME in
+          "clarification_needed", saying plainly that they must not paste
+          the token itself: the conversation is written to disk and a
+          credential must never come to rest there. IF THEY PASTE A TOKEN
+          ANYWAY (a value starting `figd_`), leave "token_env" empty, do not
+          repeat the value anywhere in your reply, and tell them to export it
+          as an environment variable and give you the name instead.
 
 Do not explain. Do not wrap the JSON in prose or code fences.
 
@@ -88,6 +103,22 @@ BLUEPRINT (the relevant part):
 
 REQUEST:
 {message}"""
+
+
+def _env_name_only(raw: object) -> str:
+    """An environment variable NAME, or "" — never a credential.
+
+    §42's first forbidden resting place for a raw token is chat history, and
+    this return value is written to the conversation log. A Figma personal
+    access token is `figd_...`; anything carrying that, or too long or too
+    punctuated to be a variable name, is a secret the model was told not to
+    return. Dropping it is the point: Smith then asks for the NAME, and the
+    token never reaches disk.
+    """
+    text = str(raw or "").strip()
+    if not text or "figd_" in text or len(text) > 64:
+        return ""
+    return text if all(c.isalnum() or c == "_" for c in text) else ""
 
 
 def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None) -> str:
@@ -136,6 +167,7 @@ def understand_ask(
         return {"answer": "",
                 "clarification_needed": "What would you like to change?",
                 "verb": "", "route": "", "widgets": [],
+                "figma_url": "", "token_env": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     # SHOWN, NOT JUST HAD. `reasoning` is where Smith's thinking goes on its
@@ -153,6 +185,7 @@ def understand_ask(
                 "I could not reach my reasoning service just then — say that "
                 "again and I will try once more.",
                 "answer": "", "verb": "", "route": "", "widgets": [],
+                "figma_url": "", "token_env": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     data = _parse(raw)
@@ -161,6 +194,7 @@ def understand_ask(
                 "I did not follow that. Which screen should I change, and "
                 "what on it?",
                 "answer": "", "verb": "", "route": "", "widgets": [],
+                "figma_url": "", "token_env": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
@@ -188,6 +222,13 @@ def understand_ask(
         "route": str(data.get("route") or "").strip(),
         "widgets": [str(w).strip() for w in (data.get("widgets") or [])
                     if str(w).strip()],
+        "figma_url": str(data.get("figma_url") or "").strip(),
+        # THE NAME OF A VARIABLE, NOT ITS VALUE. §42 forbids the raw token
+        # from resting in chat history, and this reply is written to the
+        # conversation log. A model that returns the token anyway must not
+        # have it persisted here, so anything shaped like a Figma PAT is
+        # dropped and the user is asked for the variable name instead.
+        "token_env": _env_name_only(data.get("token_env")),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
