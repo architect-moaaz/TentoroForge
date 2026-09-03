@@ -36,6 +36,7 @@ and a per-app auth secret.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import shutil
 from pathlib import Path
@@ -490,6 +491,45 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
 
 class BuildFailed(RuntimeError):
     """The assembled application does not compile."""
+
+
+def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Planned pages against pages the application actually serves.
+
+    A RUN THAT PLANS N PAGES AND SHIPS FEWER REPORTS SUCCESS. `page_layouts`
+    completes with per-subject failures, every projection downstream faithfully
+    projects what survived, `next build` compiles it, and the missing routes are
+    discovered by a person clicking on them. Measured on two real builds:
+    53 planned -> 27 composed, and 38 planned -> 23 composed. Both "succeeded".
+
+    The projection is lossless — everything is lost at composition — so the
+    honest place to state the shortfall is against the registry the app is
+    actually served from, not against the Blueprint that intended it.
+
+    Returns the counts and the missing routes rather than raising: whether a
+    shortfall should end a run is the caller's decision, and `_project_preview`
+    records it either way. Reporting it is the part that was missing.
+    """
+    root = Path(app_root)
+    planned = {
+        str(p.get("route")) for p in (doc.get("pages") or [])
+        if isinstance(p, dict) and p.get("route")
+    }
+    registry = root / "src" / "schemas" / "registry.ts"
+    served: set[str] = set()
+    if registry.exists():
+        # The generated registry maps route -> loader, one `"<route>": () =>`
+        # per line. Read rather than re-derived, so this cannot agree with the
+        # Blueprint by construction and disagree with the app.
+        served = set(re.findall(r'"([^"]+)":\s*\(\)\s*=>', registry.read_text("utf-8")))
+
+    missing = sorted(planned - served)
+    return {
+        "planned": len(planned),
+        "served": len(served & planned),
+        "missing": missing,
+        "status": "complete" if not missing else "short",
+    }
 
 
 def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:

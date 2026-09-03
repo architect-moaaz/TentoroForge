@@ -23,9 +23,12 @@ against a model's guess.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: What projection still owes, so a green data-layer run is not mistaken for a
 #: runnable app.
@@ -918,7 +921,30 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                     # `status: "{{status}}"`, nothing supplied it, and the
                     # insert failed on a not-null constraint — the design was
                     # right and the projection overwrote it.
-                    for col, val in (step_cfg.get("sets") or {}).items():
+                    # A MAP, OR NOTHING — never a crash. `config` is declared
+                    # `additionalProperties: {}`, a free-form bag, so `sets`
+                    # was unconstrained and one run emitted all 56 of them as
+                    # lists of prose: ["status = in_triage", "lastActionAt =
+                    # now"]. `.items()` raised AttributeError, the `integration`
+                    # node died, and with it every workflow definition and the
+                    # `testing` node downstream — thirty workflows lost to one
+                    # step's shape.
+                    #
+                    # The contract now types `sets` as column-to-value, which is
+                    # where this is actually fixed. This is the floor under it:
+                    # a shape the projection cannot honour is named in the log
+                    # and skipped, because the form-derived values above are
+                    # still a working insert, and losing the whole application's
+                    # workflows is not a better answer than losing one step's
+                    # overrides.
+                    sets = step_cfg.get("sets")
+                    if sets and not isinstance(sets, dict):
+                        logger.warning(
+                            "[projection] %s/%s: `sets` is %s, expected a "
+                            "column-to-value map — step overrides ignored: %.160s",
+                            wf.get("id"), step_id, type(sets).__name__, sets)
+                        sets = None
+                    for col, val in (sets or {}).items():
                         if isinstance(val, str) and val.strip().lower() in _DB_EVALUATED:
                             values.pop(col, None)
                             continue

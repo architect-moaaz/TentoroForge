@@ -722,7 +722,8 @@ async def smith_chat(
             # pressing approve started a conversation instead of a build.
             if req.approved:
                 return _run_dag(str(output_dir), app_root, req.message,
-                                approved=True, emit=emit)
+                                approved=True, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
 
             if not defined:
                 # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
@@ -770,7 +771,8 @@ async def smith_chat(
                 # conversation instead.
                 return _run_dag(str(output_dir), app_root,
                                 _brief_from(req.history, req.message),
-                                approved=req.approved, emit=emit)
+                                approved=req.approved, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
@@ -808,7 +810,8 @@ async def smith_chat(
             # Blueprint. Only a handoff needs the graph.
             if turn_result.status in ("handoff", "not_enabled"):
                 return _run_dag(str(output_dir), app_root, req.message,
-                                approved=req.approved, emit=emit)
+                                approved=req.approved, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
             return {"status": turn_result.status}
 
         try:
@@ -889,7 +892,7 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
-             approved: bool, emit) -> dict:
+             approved: bool, emit, app_name: str = "") -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116)."""
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -924,9 +927,23 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             svc.validate()
             svc.save()
     else:
+        # THE PROJECT ALREADY HAS A NAME AND THIS THREW IT AWAY. A build
+        # started from chat created the Blueprint with the literal string
+        # "Application", so a project the user called "EMR" produced an
+        # application titled "Application" — in its own login screen, its
+        # navigation and its page titles. NO AGENT CAN REPAIR IT LATER:
+        # `application` is outside every capability in the registry, so the
+        # value written here is the value that ships.
+        #
+        # `domain` stays "unknown" and is a smaller loss than it looks: the
+        # brief reaches every agent through `application.description`, which is
+        # why this run still produced 33 correct requirements and named
+        # capabilities. Nothing may write `domain` either, so classifying it
+        # (§96) needs a capability change rather than a better default here.
         svc = BlueprintService.create(
             output_dir=output_dir, app_id=Path(output_dir).name,
-            name="Application", domain="unknown", description=description)
+            name=app_name or "Application", domain="unknown",
+            description=description)
 
     plan = [k for lvl in levels() for k in lvl]
     if not approved:

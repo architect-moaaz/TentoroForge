@@ -137,6 +137,16 @@ export const PagePattern = z.enum([
   "entity_list",
   "master_detail",
   "record_workspace",
+  // A CREATE OR EDIT SCREEN, which this enum could not name. The note below on
+  // per-page authoring already records the cost: `record_workspace` covered
+  // nine pages that were really two jobs, five of them create/edit forms.
+  // `page_planner.ENTITY_SLOTS` has always called the create slot `form`, so
+  // the deterministic planner emitted a pattern the contract rejected, and the
+  // authoring agent — which can only pick from this list — labelled every
+  // create page `record_workspace` and was then handed the record job:
+  // "This screen shows ONE record in detail", for a page that exists to
+  // collect one. `wizard` is the multi-step case and is not the same thing.
+  "form",
   "wizard",
   "approval_inbox",
   "kanban",
@@ -858,7 +868,33 @@ export const WorkflowStep = z.object({
   /** Entity mutation performed, if any. */
   entity: EntityId.optional(),
   next: z.array(z.string()).default([]),
-  config: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Free-form per-step settings, EXCEPT `sets`, which has a consumer.
+   *
+   * `projection.project_workflows` reads `config.sets` as column-to-value pairs
+   * — it is where a workflow states what a person never types, `status: "Open"`
+   * — and called `.items()` on it. Nothing typed it, so one run emitted all 56
+   * as lists of prose (`["status = in_triage", "lastActionAt = now"]`), which
+   * validated against `z.unknown()`, raised AttributeError, and killed the
+   * `integration` node along with thirty workflow definitions and `testing`
+   * downstream.
+   *
+   * Scalars, because a column holds one value; the constraint that matters is
+   * that this is a MAP and not a list. Typing the values as strings instead
+   * rejected 33 existing Blueprints on `closedAt: null` and `isCurrent: true`,
+   * which is what those columns actually hold.
+   */
+  config: z
+    .object({
+      sets: z
+        .record(
+          z.string(),
+          z.union([z.string(), z.number(), z.boolean(), z.null()]),
+        )
+        .optional(),
+    })
+    .catchall(z.unknown())
+    .default({}),
 });
 
 export const Workflow = z.object({
@@ -1131,6 +1167,35 @@ export const Runtime = z.object({
       install: z.number().optional(),
       build: z.number().optional(),
       status: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Substitution markers still in the assembled tree, `[]` when none.
+   *
+   * THE SAME OMISSION AS `build`, one field along. `_project_preview` has
+   * written this since it was added and the contract never declared it, so
+   * every Blueprint carrying it failed validation on the next `save()` —
+   * five generated applications in `output/` are unmodifiable for this reason
+   * alone, and the error names `placeholders` rather than the projection that
+   * wrote it.
+   */
+  placeholders: z.array(z.string()).optional(),
+  /**
+   * Planned pages against pages the application actually serves (§72).
+   *
+   * A run that plans N pages and ships fewer reports success: composition
+   * fails per subject, every projection downstream faithfully projects what
+   * survived, `next build` compiles it, and the missing routes are found by a
+   * person clicking on them. Two real builds went 53 -> 27 and 38 -> 23 that
+   * way. Recorded on every run, `complete` included — a missing key would mean
+   * the check did not run, which is a different fact from no shortfall.
+   */
+  pages: z
+    .object({
+      planned: z.number(),
+      served: z.number(),
+      missing: z.array(z.string()).default([]),
+      status: z.enum(["complete", "short"]),
     })
     .optional(),
 });

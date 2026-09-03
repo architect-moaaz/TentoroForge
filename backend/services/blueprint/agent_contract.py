@@ -130,8 +130,17 @@ _READS: dict[str, set[str]] = {
     # NOT touch business rules, database schema, security rules or role
     # permissions. It still needs to *see* roles and entities to address a page
     # to a role and bind it to an entity; it cannot write either.
+    # `designSources` is here so a page can say WHICH FRAME it is. The contract
+    # already carries `pages[].figmaFrame` and `page_design` could already write
+    # it — but the frames live in `designSources`, which this agent could not
+    # see, so it was being asked to name a node id it had never been shown. The
+    # field existed, the author had the pen, and the paper was missing.
+    #
+    # Read-only, and it stays that way: the extraction is evidence (§48), and an
+    # agent that could edit what the design says could make the design agree
+    # with the app it just invented.
     "page_design": {"requirements", "modules", "data", "designSystem",
-                    "roles", "permissions"},
+                    "roles", "permissions", "designSources"},
 
     # Behaviour: what the business does, over the data it does it to.
     "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
@@ -524,12 +533,41 @@ def apply_agent_result(
         )
 
     if result.confidence < ASK_USER:
+        # WHAT IT WANTS TO BE TOLD, NOT JUST THAT IT STOPPED. §17's band is
+        # named ASK_USER, and the only thing recorded here was the arithmetic:
+        # "confidence 0.10 is below the §17 clarification threshold of 0.40".
+        # A build died on that line, thirteen nodes were skipped, and the user
+        # was shown a number — while the agent's `change_requests` held the
+        # actual questions, in its own words, and were dropped on the floor.
+        #
+        # Measured on a real EMR build: the agent asked whether paying a
+        # supplier invoice should also post an expense transaction, since
+        # REQ-019 and REQ-023/024 disagree and answering it either way changes
+        # the schema. That is a question a person answers in one sentence, and
+        # it never reached them.
+        #
+        # The questions travel in `reason` because that is what the ledger,
+        # `RunReport.blocked_because` and the chat surface all read. They are
+        # already on `change_requests` for a caller that wants them structured.
+        asks = [
+            str(getattr(cr, "reason", "") or "").strip()
+            for cr in result.change_requests
+        ]
+        asks = [a for a in asks if a]
+        if not asks:
+            # Nothing to ask means nothing to answer, and the run stops on a
+            # number the user cannot act on. Say that plainly rather than
+            # implying a question exists.
+            asks = [str(i) for i in (result.issues or [])][:2]
+        detail = (" — needs: " + " | ".join(a[:400] for a in asks[:3])) if asks else (
+            " — and raised no question, so there is nothing to answer"
+        )
         return AgentApplication(
             applied=False, result=result, change_requests=list(result.change_requests),
             needs_clarification=True,
             reason=(
                 f"confidence {result.confidence:.2f} is below the §17 clarification "
-                f"threshold of {ASK_USER:.2f}"
+                f"threshold of {ASK_USER:.2f}{detail}"
             ),
         )
 

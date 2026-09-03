@@ -346,9 +346,25 @@ class AnthropicModel:
     def _anthropic(self) -> Any:
         if self._client is None:
             import anthropic
+            import httpx
 
+            # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
+            # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
+            # or nothing), and then went silent forever. No timeout was set
+            # anywhere, so there was nothing to end it and nothing to retry —
+            # and a stalled run and a slow one look identical from outside.
+            #
+            # `read` is httpx's TIME BETWEEN CHUNKS, not total elapsed, which
+            # is what makes it safe on a stream: a 64k-token generation keeps
+            # arriving and never trips it, while a dead socket trips in five
+            # minutes and the SDK retries. A total-elapsed cap would kill the
+            # long generations we depend on — page_layouts subjects measured
+            # 115-138s each, legitimately.
             self._client = anthropic.Anthropic(
-                default_headers={"accept-encoding": self.accept_encoding}
+                default_headers={"accept-encoding": self.accept_encoding},
+                timeout=httpx.Timeout(connect=15.0, read=300.0,
+                                      write=60.0, pool=15.0),
+                max_retries=3,
             )
         return self._client
 
@@ -835,10 +851,16 @@ you after you reply.
 - Each entry is {{name, table, fields, description?, labelField?}} — `name` \
 PascalCase singular, `table` snake_case plural, `labelField` naming the field \
 a human reads to tell one record from another. Each field is {{name, type, \
-required?, primaryKey?, unique?, sensitive?, references?, enumValues?, \
+required?, primaryKey?, unique?, sensitive?, enumValues?, \
 description?}}.
 - State a flag only when it is true. `"sensitive": false` on forty fields is \
 forty facts nobody asked for, and this reply has a budget.
+- A field has NO `references` key — the schema does not accept one. State \
+every foreign key in `relationships`, by entity name. `references` is typed \
+`^ENTITY-\\d{{3,}}$` in the Blueprint and an empty string matches nothing, so \
+`"references": ""` failed validation for the whole reply and cost real runs \
+seven errors at a time. It is unrepresentable here now rather than merely \
+discouraged, because a pattern is advice a decoder does not enforce.
 - Do not invent IDs. Identity is assigned for you from the entity's name, so \
 two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
@@ -1324,6 +1346,32 @@ def build_prompt(
             + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
             + "\n```"
         )
+        # NAME THE FRAME A PAGE IS. `pages[].figmaFrame` has been in the
+        # contract and in this agent's writable shape from the beginning and
+        # was never once set — `designSources` sat outside what this agent
+        # could read, so it was being asked for a node id it had never been
+        # shown. With the frames in context the mapping is a judgement it can
+        # make and a person can correct, which is what §49 asks for.
+        #
+        # It decides the composer downstream: a page naming a frame is built
+        # from the design pixel-for-pixel, a page naming none is composed by
+        # A2UI. A wrong id here is a screen built from the wrong picture, so
+        # "leave it out" has to stay the easy and honest answer.
+        if doc.get("designSources"):
+            user += (
+                "\n\nA DESIGN IS CONNECTED. `designSources` above lists its "
+                "frames with their `nodeId` and `name`. Where a page you are "
+                "authoring IS one of those frames, set that page's "
+                "`figmaFrame` to the frame's `nodeId` \u2014 the screen is then "
+                "built from the design itself rather than composed from "
+                "components.\n\n"
+                "Match on what the frame IS, not on wording: a frame named "
+                "\"Stock list\" is the items list page. Where nothing in the "
+                "design corresponds, OMIT `figmaFrame` entirely \u2014 that page "
+                "is composed instead, which is a good outcome and not a "
+                "failure. Never guess an id, and never give one frame to two "
+                "pages."
+            )
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
@@ -1367,6 +1415,22 @@ def build_prompt(
         + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
         + "\n```"
     )
+    # EVERY BRANCH ABOVE CARRIES THE REJECTION; THIS ONE DROPPED IT. The
+    # specialised branches return early having appended `feedback`, so the
+    # nodes with no branch of their own — data_model, business_rules, apis,
+    # security, requirements — retried with a byte-identical prompt and failed
+    # the same way twice. `orchestrator._run_one` already says why that is
+    # useless: "a retry that is not told what went wrong is just the same
+    # request again."
+    #
+    # It costs a node. `references` carries `pattern: ^ENTITY-\d{3,}$`, but
+    # structured-output decoding constrains types, enums, `required` and
+    # `additionalProperties` — NOT regex. A pattern is advice the model
+    # usually follows and occasionally does not, and one `references: ""`
+    # fails the whole contract. Told what was rejected, the author fixes its
+    # own field; told nothing, it re-emits it.
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
 
 
@@ -1458,15 +1522,6 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                         "second-guess it."
                                     ),
                                 },
-                                "references": {
-                                    "type": "string",
-                                    "description": (
-                                        "The entity this field points at. A "
-                                        "relationship explained in the "
-                                        "description is one no later stage "
-                                        "can read."
-                                    ),
-                                },
                                 "enumValues": {
                                     "type": "array",
                                     "items": {"type": "string"},
@@ -1474,6 +1529,62 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             },
                         },
                     },
+                },
+            },
+        },
+        # THE CHANNELS ITS CAPABILITY ALREADY GRANTED. `data_model` may write
+        # data.entities, data.relationships, data.constraints and database;
+        # this schema carried `entities` alone, so three of its four sections
+        # had nowhere to go. The agent said so itself, twice, in its own
+        # change_requests: "Response schema for this agent has no channel for
+        # relationship artifacts; needs to be addable before foreign keys such
+        # as StockMovement->Item ... can be declared with cardinality."
+        #
+        # It is not a small loss. Without relationships the projection has no
+        # foreign keys to emit, and an agent that knows it cannot express what
+        # it owns reports low confidence for it — which is how an EMR build
+        # came to block at 0.10 on a model it was perfectly able to describe.
+        #
+        # BY NAME, NOT BY ID. `DATA_MODEL_REPLY_RULES` forbids inventing ids
+        # and the contract types these as `^ENTITY-\d{3,}$`, so the reply cites
+        # the entity's name and `resolve_batch_references` closes the gap at
+        # commit time — the same route every other agent's cross-references
+        # take.
+        "relationships": {
+            "type": "array",
+            "default": [],
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["from", "to", "kind"],
+                "properties": {
+                    "from": {"type": "string",
+                             "description": "The NAME of the owning entity, as spelled in `entities`."},
+                    "to": {"type": "string",
+                           "description": "The NAME of the referenced entity."},
+                    "kind": {"type": "string",
+                             "enum": ["one_to_one", "one_to_many", "many_to_many"]},
+                    "fromField": {"type": "string"},
+                    "toField": {"type": "string"},
+                    "onDelete": {"type": "string",
+                                 "enum": ["cascade", "restrict", "set_null"]},
+                },
+            },
+        },
+        "constraints": {
+            "type": "array",
+            "default": [],
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["entity", "kind", "expression"],
+                "properties": {
+                    "entity": {"type": "string",
+                               "description": "The NAME of the entity this constrains."},
+                    "kind": {"type": "string",
+                             "enum": ["check", "unique", "index", "foreign_key"]},
+                    "expression": {"type": "string"},
+                    "description": {"type": "string"},
                 },
             },
         },
@@ -1517,6 +1628,42 @@ def expand_data_model(data: dict) -> list["ArtifactProposal"]:
                           if isinstance(f, dict) and f.get("name")]
         out.append(ArtifactProposal(
             section="data.entities", natural_key=name, body=body,
+        ))
+
+    # A CHANNEL NOBODY DRAINS IS STILL NO CHANNEL. Accepting `relationships`
+    # and `constraints` in the reply schema without expanding them here would
+    # let the agent state the foreign keys and then drop them silently — the
+    # exact shape of failure this pair of changes exists to end.
+    #
+    # `from`/`to`/`entity` carry entity NAMES; `resolve_batch_references`
+    # turns them into the ENTITY ids the contract requires, at commit, in the
+    # same pass that allocates the entities themselves. That ordering is why
+    # the agent can reference an entity it is proposing in the same reply.
+    for rel in (data.get("relationships") or []):
+        if not isinstance(rel, dict):
+            continue
+        src, dst = str(rel.get("from") or "").strip(), str(rel.get("to") or "").strip()
+        if not (src and dst):
+            continue
+        body = {k: v for k, v in rel.items() if v not in (None, "", [])}
+        out.append(ArtifactProposal(
+            section="data.relationships",
+            natural_key=f"{src}->{dst}:{rel.get('kind') or ''}",
+            body=body,
+        ))
+
+    for con in (data.get("constraints") or []):
+        if not isinstance(con, dict):
+            continue
+        entity = str(con.get("entity") or "").strip()
+        expression = str(con.get("expression") or "").strip()
+        if not (entity and expression):
+            continue
+        body = {k: v for k, v in con.items() if v not in (None, "", [])}
+        out.append(ArtifactProposal(
+            section="data.constraints",
+            natural_key=f"{entity}:{con.get('kind') or ''}:{expression}",
+            body=body,
         ))
     return out
 
@@ -1822,6 +1969,40 @@ def make_executor(
                      if p.get("id") == spec.subject), None)
         if not page or not page.get("route"):
             return None
+
+        # THE PAGE THAT WAS DRAWN IS THE THING THAT WAS DRAWN. A page carrying
+        # `figmaFrame` is built from that frame's design context; a page
+        # carrying none falls straight through to A2UI below. Both produce a
+        # tree of the same catalog components into the same `pageLayouts`
+        # section, so nothing downstream needs to know which happened — the
+        # projection, the floors and the funnel all read one shape.
+        #
+        # Deliberately mixed: a design of eight screens against a data model
+        # implying thirty pages should ship thirty pages, eight of them
+        # pixel-accurate. Falling through is the normal case, not a failure.
+        from services.blueprint import figma_layout
+
+        drawn = figma_layout.compose(svc, page, app_root=svc.output_dir)
+        if drawn is not None:
+            tell(reasoning, f"Building {page.get('route')} from its Figma frame.",
+                 "step", spec.node)
+            return AgentResult(
+                task_id=spec.task_id,
+                agent=spec.agent,
+                proposals=[ArtifactProposal(
+                    section="pageLayouts",
+                    natural_key=spec.subject,
+                    body={"page": spec.subject,
+                          "root": _as_template(drawn["root"]),
+                          "composedBy": "figma",
+                          "dataSources": drawn["dataSources"],
+                          "rationale": (
+                              f"built from Figma frame "
+                              f"{page.get('figmaFrame')} (§48)"),
+                          "requirements": list(page.get("requirements") or [])},
+                )],
+                confidence=0.95,
+            )
         try:
             out = compose_page_via_a2ui(
                 svc.output_dir, page["route"], page.get("pattern") or "",

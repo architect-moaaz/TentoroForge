@@ -52,6 +52,8 @@ re-deriving what a page kind needs.
 
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from services.dashboard_anatomy import page_root
@@ -121,9 +123,15 @@ _FAMILY = {
 
 # A surface that shows many records. Kanban and Calendar qualify — they are
 # lists with an opinion about layout, not a different job.
+# `CardGrid` was here and is in neither the engine registry nor the A2UI
+# catalog, so no page could ever satisfy this floor by carrying one. A floor
+# that names a component nothing can produce is not a lenient floor, it is a
+# misleading one — it reads as an offered alternative that is not on the menu.
+# `Repeat` stays: `a2ui_to_forge` MINTS it, so it is absent from the A2UI
+# catalog and present in the tree these floors actually judge.
 _LIST_TYPES = frozenset({
     "Table", "TableSortable", "DataGrid", "List", "Kanban", "Calendar",
-    "CalendarWeek", "Timeline", "ResourceTimeline", "Repeat", "CardGrid",
+    "CalendarWeek", "Timeline", "ResourceTimeline", "Repeat",
     "SearchResults", "Tree",
 })
 
@@ -156,6 +164,36 @@ _ACTION_TYPES = frozenset({
 })
 
 
+#: A route the scaffold's own tree owns as a form. `[entity]/new/page.tsx` and
+#: `[entity]/[id]/edit/page.tsx` ship with every generated app, so a route
+#: ending this way IS a form — that is a fact about the router, not a reading
+#: of the route string.
+_FORM_ROUTE = re.compile(r"/(new|edit)/?$")
+
+
+def route_family(route: Any) -> str | None:
+    """The family a ROUTE settles, or None when the route has no opinion.
+
+    THE PATTERN ENUM CANNOT NAME A CREATE FORM. Its eighteen values offer
+    `wizard`, `configuration` and `settings` for the form family and nothing
+    for the commonest screen in any CRUD app, so `page_contracts` labelled
+    `/contacts/new`, `/contacts/[id]/edit` and `/sign-in` `record_workspace` —
+    the least-bad value available to it.
+
+    Everything downstream then behaved correctly on a false premise. The family
+    became `record`, so the composer was handed the record job — "This screen
+    shows ONE record in detail" — for a page whose entire purpose is to collect
+    one. It composed a detail surface, never bound `FLOW-001 Create Contact`
+    (which names PAGE-003 in its own `launchedFrom`), and the record floor
+    refused it for having no action. Two runs, two different errors, one cause.
+
+    The route is the stronger evidence and it was already being passed to
+    `page_kind_findings` and ignored. A declared pattern is one agent's choice
+    among values that could not express the answer; `/contacts/new` is a fact.
+    """
+    return "form" if _FORM_ROUTE.search(str(route or "").strip()) else None
+
+
 def page_family(kind: Any) -> str | None:
     """The shape family a declared page kind belongs to, or None if this
     module has no opinion (auth, static, visual_scan and friends)."""
@@ -176,6 +214,53 @@ def _types_present(root: dict) -> set[str]:
     return out
 
 
+def _walk_nodes(node: Any) -> Any:
+    """Every node in the tree, as dicts. `_types_present` throws the props away
+    and some floors need them."""
+    if isinstance(node, list):
+        for item in node:
+            yield from _walk_nodes(item)
+        return
+    if not isinstance(node, dict):
+        return
+    yield node
+    for child in node.get("children") or []:
+        yield from _walk_nodes(child)
+
+
+def _submits(root: dict) -> bool:
+    """Whether anything here can deliver what the form collected.
+
+    A `Form` IS ITS OWN SUBMIT. It renders the button from `submitLabel` and
+    posts to `workflow`, exactly as it carries its inputs in `fields` rather
+    than as child nodes — which is why `_FIELD_TYPES` already counts it alone.
+    `_ACTION_TYPES` lists only child-node controls, so a correct create page
+    holding one Form and no separate Button was refused for having no submit:
+    A2UI composed `{Container, Stack, Text, Link, Card, Form}` for
+    /contacts/new and the floor called it undeliverable.
+
+    Asking for a Button beside a Form asks for a second submit, and the
+    composer was right not to add one.
+
+    The action props come from the composer's own contract for the same reason
+    `functional_completeness._action_props` reads them there: a hand-copied
+    list is how `opensDialog` came to be refused on a modal create form.
+    """
+    try:
+        from services.a2ui_catalog import _COMPOSE_ONE_OF
+        actions = {p for choices in _COMPOSE_ONE_OF.values() for p in choices}
+    except Exception:  # noqa: BLE001 — a floor must not fail on a lookup
+        actions = {"workflow", "navigate", "submit", "onClick"}
+
+    for node in _walk_nodes(root):
+        kind = str(node.get("type"))
+        if kind in _ACTION_TYPES:
+            return True
+        if kind == "Form" and (set(node.get("props") or {}) & actions):
+            return True
+    return False
+
+
 def _finding(rule: str, route: str, slot: str, detail: str) -> dict:
     return {"rule": rule, "route": route, "slot": slot,
             "severity": "error", "action": "reported", "detail": detail}
@@ -188,7 +273,9 @@ def page_kind_findings(kind: Any, route: str, doc: Any) -> list[dict]:
     static — always returns empty: silence here means "not my rule", never
     "checked and fine".
     """
-    family = page_family(kind)
+    # The route first: it settles create and edit screens that the pattern enum
+    # has no value for. See `route_family`.
+    family = route_family(route) or page_family(kind)
     if family is None:
         return []
 
@@ -238,7 +325,7 @@ def page_kind_findings(kind: Any, route: str, doc: Any) -> list[dict]:
             out.append(_finding(
                 "form_no_fields", route, "fields",
                 "a form with no field collects nothing."))
-        if not (types & _ACTION_TYPES):
+        if not _submits(root):
             out.append(_finding(
                 "form_no_submit", route, "submit",
                 "a form with no submit cannot deliver what it collected."))

@@ -149,6 +149,15 @@ def _to_message(ai_msg: Any, model: str) -> Message:
     )
 
 
+#: Time between chunks, not total elapsed — see `_anthropic` in
+#: `blueprint/executors.py` for why that distinction is what makes a bound
+#: safe here. Every caller passed `timeout=None` and nothing supplied a
+#: default, so a Smith turn whose stream went silent waited forever: the
+#: `approve` step hung three separate runs this way, on briefs from 357 bytes
+#: to 1.15MB, which is how we learned it was not a size problem.
+DEFAULT_READ_TIMEOUT_S = 300.0
+
+
 def _chat_model(api_key: str | None, *, model: str, max_tokens: int,
                 temperature: float | None, timeout: float | None,
                 thinking: dict | None = None):
@@ -158,8 +167,8 @@ def _chat_model(api_key: str | None, *, model: str, max_tokens: int,
         kwargs["api_key"] = api_key
     if temperature is not None:
         kwargs["temperature"] = temperature
-    if timeout is not None:
-        kwargs["timeout"] = timeout
+    kwargs["timeout"] = DEFAULT_READ_TIMEOUT_S if timeout is None else timeout
+    kwargs["max_retries"] = 3
     if thinking is not None:
         # Anthropic extended thinking — ChatAnthropic forwards this verbatim.
         kwargs["thinking"] = thinking

@@ -355,6 +355,7 @@
               "entity_list",
               "master_detail",
               "record_workspace",
+              "form",
               "wizard",
               "approval_inbox",
               "kanban",
@@ -1169,6 +1170,19 @@
                 },
                 "config": {
                   "type": "object",
+                  "properties": {
+                    "sets": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
                   "additionalProperties": {},
                   "default": {}
                 }
@@ -2197,6 +2211,43 @@
               "type": "string"
             }
           },
+          "additionalProperties": false
+        },
+        "placeholders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pages": {
+          "type": "object",
+          "properties": {
+            "planned": {
+              "type": "number"
+            },
+            "served": {
+              "type": "number"
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "short"
+              ]
+            }
+          },
+          "required": [
+            "planned",
+            "served",
+            "status"
+          ],
           "additionalProperties": false
         }
       },

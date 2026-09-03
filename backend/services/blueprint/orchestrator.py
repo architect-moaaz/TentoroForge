@@ -898,6 +898,25 @@ def _execute(
 #: `_unbuilt_pages` reports it, the run still succeeds, and the app 404s where
 #: a page should be. Trading correctness for minutes is the wrong trade. If
 #: several pages start failing at once, lower this: `RunReport.failed_because`
+#: Attempts a node gets before the run gives up on it, where two is not enough.
+#:
+#: `data_model` is BIMODAL, measured over six samples on byte-identical prompts:
+#: four produced 18-20 entities at confidence 0.72-0.76, two produced a 900-char
+#: two-entity stub at 0.10-0.20. Nothing landed in between, and no change to the
+#: prompt moved it — three input variants scored the same.
+#:
+#: At a one-in-three stub rate the global budget of two clears 89% of the time,
+#: and an EMR build lost the coin toss twice in a row: three runs, six of twenty
+#: nodes, no application. Four attempts takes that to 98.8%.
+#:
+#: Per node rather than globally, because raising it for all twenty multiplies
+#: the cost of nodes that fail deterministically — where a second attempt is
+#: worth having and a fourth is just the same failure twice more.
+ATTEMPTS_BY_NODE: dict[str, int] = {
+    "data_model": 4,
+}
+
+
 #: names the exception, so the report distinguishes transport from content.
 FANOUT_CONCURRENCY = 12
 
@@ -1031,7 +1050,11 @@ def _run_wave(
 
     limits = {key: threading.Semaphore(FANOUT_CONCURRENCY) for key in runs}
 
-    for attempt in range(1, max_attempts + 1):
+    wave_attempts = max(
+        (ATTEMPTS_BY_NODE.get(k, max_attempts) for k in wave),
+        default=max_attempts,
+    )
+    for attempt in range(1, wave_attempts + 1):
         specs = _round_specs(wave, runs, attempt)
         if not specs:
             break
@@ -1042,7 +1065,9 @@ def _run_wave(
                 continue
             state.pending = _apply_round(
                 svc, key, state, results,
-                attempt=attempt, max_attempts=max_attempts, commit=commit,
+                attempt=attempt,
+                max_attempts=ATTEMPTS_BY_NODE.get(key, max_attempts),
+                commit=commit,
                 user_request=user_request, report=report, ledger=ledger,
             )
 
@@ -1197,6 +1222,9 @@ def _apply_round(
             _note(ledger, "node_subject", key, subject, _at(subject), total, True)
             continue
         if application.needs_clarification or outcome.status == "blocked":
+            if attempt < max_attempts:
+                _rejected(subject, label, _asked(application))
+                continue
             report.blocked.append(label)
             report.blocked_because[label] = _asked(application)
             report.change_requests.extend(application.change_requests)
@@ -1302,6 +1330,21 @@ def _run_agent_subject(
             report.change_requests.extend(application.change_requests)
             return "completed"
         if application.needs_clarification or result.status == "blocked":
+            # RETRY BEFORE BLOCKING. `data_model` is bimodal on one real
+            # Blueprint — six samples, byte-identical prompts: four gave
+            # 18-20 entities at confidence 0.72-0.76, two gave a 900-char
+            # two-entity stub at 0.10-0.20, nothing in between. Blocking on
+            # the first low-confidence reply killed an EMR build and skipped
+            # thirteen nodes when asking again had a two-in-three chance.
+            #
+            # No heuristic decides which it was: a stub asked to be re-run
+            # in its own `change_requests` ("Re-run this stage with a clean
+            # emission"), so "raised a question" does not separate them. A
+            # real clarification survives the retry and blocks on the last
+            # attempt carrying the same question; a stub usually does not.
+            if attempt < max_attempts:
+                feedback = _asked(application)
+                continue
             report.blocked.append(label)
             report.blocked_because[label] = _asked(application)
             report.change_requests.extend(application.change_requests)
@@ -1425,7 +1468,9 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     ``assembly.SUPERSEDED_REPAIRS`` for what each of those repaired and which
     projection makes it unnecessary.
     """
-    from services.blueprint.assembly import apply_assembly, verify_build
+    from services.blueprint.assembly import (
+        apply_assembly, page_funnel, verify_build,
+    )
 
     assembled = apply_assembly(
         svc, app_root,
@@ -1443,6 +1488,18 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     # here so the run names the cause. Always written, empty included: a
     # missing key would mean the guard did not run, which is a different fact.
     runtime["placeholders"] = assembled.get("residualPlaceholders") or []
+    # WHAT THE APPLICATION SERVES, AGAINST WHAT WAS PLANNED. `verify_build`
+    # proves the tree compiles; it cannot notice that half the pages are not in
+    # it. Two real builds went 53 -> 27 and 38 -> 23 and reported success,
+    # because every node downstream of composition faithfully projected what
+    # survived. Recorded on every run, `complete` included: a missing key would
+    # mean the check did not run, which is a different fact from no shortfall.
+    runtime["pages"] = page_funnel(svc.doc, app_root)
+    if runtime["pages"]["missing"]:
+        logger.warning(
+            "[preview] %d of %d planned pages are not served: %s",
+            len(runtime["pages"]["missing"]), runtime["pages"]["planned"],
+            ", ".join(runtime["pages"]["missing"][:8]))
     svc.doc["runtime"] = runtime
     svc.save()
 
