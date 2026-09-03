@@ -1981,8 +1981,22 @@ def make_executor(
         # implying thirty pages should ship thirty pages, eight of them
         # pixel-accurate. Falling through is the normal case, not a failure.
         from services.blueprint import figma_layout
+        from services.llm_client import tell
 
-        drawn = figma_layout.compose(svc, page, app_root=svc.output_dir)
+        # THE APP ROOT, NOT THE PROJECT ROOT. Assets are written to
+        # `<root>/public/figma/` and the generated app serves `public/` from
+        # `<project>/app`, so passing the project directory put every SVG one
+        # level above the tree that references them.
+        drawn = None
+        try:
+            drawn = figma_layout.compose(
+                svc, page, app_root=Path(svc.output_dir) / "app")
+        except Exception as exc:  # noqa: BLE001 — a design must never cost the page
+            # THIS BRANCH SAT OUTSIDE THE TRY BELOW AND A NameError FROM IT
+            # KILLED THE SUBJECT OUTRIGHT: the page was not composed by Figma,
+            # was never offered to A2UI, and vanished from `pageLayouts`
+            # entirely. Falling through is the whole contract of this seam.
+            logger.warning("[figma] %s: %s", spec.subject, exc)
         if drawn is not None:
             tell(reasoning, f"Building {page.get('route')} from its Figma frame.",
                  "step", spec.node)

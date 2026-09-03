@@ -133,7 +133,29 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
         logger.warning("[figma] %s: %s", page.get("id"), exc)
         return None
 
-    children = schema.get("children") or []
+    # WHAT THE RENDERER WILL NOT RENDER DOES NOT BELONG IN THE BLUEPRINT.
+    #
+    # `_figmaNodeId` is provenance the transformer stamps on every node — Forge's
+    # own metadata, not something a component draws.
+    #
+    # `style` IS KEPT. It was dropped while the renderer stripped it — storing
+    # it would have claimed a fidelity the application did not have — and
+    # `registry.ts` now forwards it beside `className` and `data-*`. Figma
+    # expresses in it what Tailwind cannot: exact gradients, transforms, clip
+    # paths. On one real dashboard that is 81 of 626 nodes.
+    _DROP = ("_figmaNodeId",)
+
+    def _strip_provenance(node: Any) -> Any:
+        if isinstance(node, dict):
+            props = node.get("props")
+            if isinstance(props, dict) and any(k in props for k in _DROP):
+                node["props"] = {k: v for k, v in props.items()
+                                 if k not in _DROP}
+            for child in node.get("children") or []:
+                _strip_provenance(child)
+        return node
+
+    children = [_strip_provenance(c) for c in (schema.get("children") or [])]
     root = children[0] if children else None
     if not isinstance(root, dict):
         logger.info("[figma] %s produced no root node — composing instead",

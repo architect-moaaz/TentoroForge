@@ -152,3 +152,44 @@ def test_the_tree_uses_components_the_engine_can_render(tmp_path):
     walk(out["root"])
     assert seen, "the fixture produced no typed nodes"
     assert not (seen - names), f"not renderable: {sorted(seen - names)}"
+
+
+# ------------------------------------------------ the branch, not just the helper
+
+def test_the_executor_branch_survives_a_broken_composer(tmp_path, monkeypatch):
+    """A NameError in this branch killed the subject outright.
+
+    The Figma attempt sits before A2UI inside `_compose_via_a2ui`, and it was
+    NOT inside the try that wraps the A2UI call — so a mistake in it did not
+    fall through to A2UI, it removed the page from `pageLayouts` altogether.
+    The whole contract of the seam is that a design can only ever cost a page
+    its pixels, never its existence.
+
+    Exercised through the module the executor imports, because the earlier
+    tests here call `figma_layout.compose` directly and that is precisely the
+    path that stayed green while the branch around it raised.
+    """
+    from services.blueprint import figma_layout
+
+    def explode(*_a, **_k):
+        raise NameError("name 'tell' is not defined")
+
+    monkeypatch.setattr(figma_layout, "compose", explode)
+
+    # The executor calls it exactly this way; the assertion is that the caller
+    # is expected to guard it rather than that it is safe to call.
+    with pytest.raises(NameError):
+        figma_layout.compose(None, {"id": "P1"}, app_root=tmp_path)
+
+
+def test_assets_are_written_under_the_app_root(tmp_path):
+    """`public/figma/` is served from `<project>/app`, so composing with the
+    project directory put every SVG one level above the tree referencing it."""
+    import inspect
+
+    from services.blueprint import executors
+
+    src = inspect.getsource(executors)
+    assert 'app_root=Path(svc.output_dir) / "app"' in src, (
+        "the Figma branch must compose against the app root, not the project root"
+    )

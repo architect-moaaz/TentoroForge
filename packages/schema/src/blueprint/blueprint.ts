@@ -693,7 +693,14 @@ export const PageLayout = z.object({
    * An enum here is a vocabulary for what WAS written, not only for what can
    * be written now.
    */
-  composedBy: z.enum(["a2ui", "agent", "deterministic", ""]).default(""),
+  // `figma` — built from the frame it was designed as, rather than composed
+  // from the catalog. A page carrying `figmaFrame` takes this route and
+  // every other page takes A2UI, so the two are genuinely different
+  // provenance and the distinction is worth keeping: a screen that came
+  // from a drawing and a screen a model invented are not the same claim.
+  composedBy: z
+    .enum(["a2ui", "agent", "deterministic", "figma", ""])
+    .default(""),
   ...artifactBase,
 });
 
