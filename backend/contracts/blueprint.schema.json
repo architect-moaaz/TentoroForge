@@ -1496,6 +1496,14 @@
             },
             "default": []
           },
+          "treatAs": {
+            "type": "string",
+            "enum": [
+              "evidence",
+              "specification"
+            ],
+            "default": "evidence"
+          },
           "gaps": {
             "type": "array",
             "items": {

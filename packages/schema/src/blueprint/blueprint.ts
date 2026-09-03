@@ -1007,6 +1007,30 @@ export const DesignSource = z.object({
   name: z.string().default(""),
   extractedAt: z.string().default(""),
   frames: z.array(DesignSourceFrame).default([]),
+  /**
+   * WHETHER THIS DESIGN IS EVIDENCE OR THE SPECIFICATION.
+   *
+   * §48 is right that a design is normally evidence: a screen proves a
+   * capability is reachable and says nothing about who may use it or what
+   * happens when it is refused. That is `evidence`, and it stays the default —
+   * one connected dashboard legitimately implies a sign-in, the lists behind
+   * its numbers, and the forms that create them.
+   *
+   * `specification` is the other thing a person means: build these screens and
+   * no others. `page_planner.page_slots` then asks its question frame by frame
+   * instead of entity by entity, so the answer space is the design rather than
+   * the cross-product of the data model.
+   *
+   * Its own docstring is why this is a source property and not a heuristic:
+   * pruning was considered and rejected because "the obvious signals do not
+   * discriminate" — every entity carries requirements, and matching names
+   * against the description is "string-matching a heuristic into a rule". A
+   * frame list is neither. It is an enumeration the user connected on purpose.
+   *
+   * Per source, because a project may connect a specification and a reference
+   * and mean different things by them.
+   */
+  treatAs: z.enum(["evidence", "specification"]).default("evidence"),
   /** §102 — what the design could not answer, so a thin reference looks thin
    *  instead of passing for a complete one. Each is a clarification owed to
    *  the user before the DAG builds against it (§48, §50). */

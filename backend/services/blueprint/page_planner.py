@@ -1323,6 +1323,57 @@ ENTITY_SLOTS = (
 )
 
 
+def specification_frames(doc: dict) -> list[dict]:
+    """Frames from every design the user connected as the specification.
+
+    Empty when none is — the normal case, which keeps `page_slots` answering
+    entity by entity exactly as before.
+
+    Only frames that look like screens: `looksLikeScreen` is recorded rather
+    than enforced at extraction (§49), and a component or a colour swatch is
+    not a page even in a file that IS the specification.
+    """
+    out: list[dict] = []
+    for source in doc.get("designSources") or []:
+        if str(source.get("treatAs") or "evidence") != "specification":
+            continue
+        for frame in source.get("frames") or []:
+            if frame.get("looksLikeScreen", True) and frame.get("nodeId"):
+                out.append({"source": source.get("id"), **frame})
+    return out
+
+
+def frame_slots(frames: list[dict]) -> list[dict]:
+    """One slot per designed screen: the design IS the answer space.
+
+    THE QUESTION NARROWS; THE ANSWER IS NOT FILTERED. `page_slots` says of its
+    own entity slots that pruning was considered and rejected because "the
+    obvious signals do not discriminate", and that matching names against the
+    description would be "string-matching a heuristic into a rule". This is
+    neither. A frame list is an enumeration, and four connected frames are four
+    screens somebody drew on purpose.
+
+    So a design held as the specification does not prune a page set derived
+    from entities — it replaces the question. `page_contracts` is asked which
+    route each frame is, rather than which of thirty entity features to keep.
+    """
+    slots: list[dict] = []
+    for frame in frames:
+        node_id = frame["nodeId"]
+        name = str(frame.get("name") or "").strip() or node_id
+        slots.append({
+            "feature": node_id,
+            "figmaFrame": node_id,
+            "source": frame.get("source"),
+            "name": name,
+            "pages": [{"slot": "screen",
+                       "prompt": "The screen drawn as \u201c%s\u201d." % name}],
+            "prompt": ("Give this frame a route and a pattern. It is a screen "
+                       "the user drew, so it is not declinable."),
+        })
+    return slots
+
+
 def page_slots(doc: dict) -> list[dict]:
     """The features this application's page set may fill, one per entity.
 
@@ -1347,6 +1398,16 @@ def page_slots(doc: dict) -> list[dict]:
     user's own words beside them. "The user named this" is a reading of their
     sentence, which is the one thing a model is better at than a rule.
     """
+    # A DESIGN HELD AS THE SPECIFICATION REPLACES THIS QUESTION.
+    # Entity slots ask which of the data model's features should exist;
+    # connected frames already answer which screens exist. Asking both
+    # gives the cross-product — which is how one dashboard became a
+    # thirteen-page application. Correct for evidence, wrong for a
+    # specification.
+    designed = specification_frames(doc)
+    if designed:
+        return frame_slots(designed)
+
     slots: list[dict] = [
         {"feature": "home", "entity": None, "requirements": [],
          "pages": [{"slot": "home", "pattern": "dashboard",
@@ -1384,6 +1445,34 @@ def page_slots(doc: dict) -> list[dict]:
 def page_slot_prompt(doc: dict) -> str:
     """The slot question, with the user's own words attached (§115)."""
     described = (doc.get("application") or {}).get("description") or ""
+
+    # THE SPECIFICATION ASKS A DIFFERENT QUESTION, so it gets a different
+    # prompt. Everything below argues about which entity features are worth
+    # having — declining lookups, folding line items into their parent, reading
+    # the phasing in the brief. None of it applies when the answer space is a
+    # list of screens somebody drew: there is nothing to decline, and the only
+    # judgement left is what each frame IS.
+    designed = specification_frames(doc)
+    if designed:
+        return (
+            "This application's screens are the frames of a connected design, "
+            "and they are the whole page set. One page per frame: no more, and "
+            "none declined.\n\n"
+            "For each frame decide only what it IS — its route and its pattern. "
+            "Set `figmaFrame` to the frame's `nodeId`, which the slot already "
+            "carries: it is how the screen gets built from the drawing rather "
+            "than composed from components.\n\n"
+            "Do NOT add pages the design does not show. A list behind a "
+            "dashboard's numbers, a form that creates what it displays, a "
+            "sign-in — all reasonable, all absent from these frames, and all "
+            "out of scope here. If the set genuinely cannot work without one, "
+            "say so in `issues` rather than adding it.\n\n"
+            "The entities exist and are still yours to bind: a screen reads "
+            "and writes them. What you may not do is invent a screen for one.\n\n"
+            "The user's own words, for the routes and the wording:\n\n"
+            f"  \u201c{described}\u201d"
+        )
+
     return (
         "Fill in this application's page set feature by feature. A feature is "
         "one entity's pages: fill it completely or decline it completely.\n\n"

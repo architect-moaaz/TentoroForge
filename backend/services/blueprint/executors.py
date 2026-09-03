@@ -1357,7 +1357,18 @@ def build_prompt(
         # from the design pixel-for-pixel, a page naming none is composed by
         # A2UI. A wrong id here is a screen built from the wrong picture, so
         # "leave it out" has to stay the easy and honest answer.
-        if doc.get("designSources"):
+        from services.blueprint.page_planner import specification_frames
+
+        if specification_frames(doc):
+            # The slot prompt already says one page per frame and carries each
+            # `nodeId`; this is the consequence spelled out, because under a
+            # specification a page without one is a screen nobody drew.
+            user += (
+                "\n\nEVERY page you author must carry `figmaFrame`, set to the "
+                "`nodeId` of the slot it answers. A page without one is a screen "
+                "nobody drew, and this design is the specification."
+            )
+        elif doc.get("designSources"):
             user += (
                 "\n\nA DESIGN IS CONNECTED. `designSources` above lists its "
                 "frames with their `nodeId` and `name`. Where a page you are "
