@@ -993,22 +993,53 @@ export const Integration = z.object({
  */
 export const RecordScopeRule = z.object({
   /** Entity name or table, as spelled in `data.entities`. */
-  entity: z.string(),
+  entity: z.string().describe(
+    "Entity name or table this governs, as spelled in data.entities.",
+  ),
   /** Column holding the actor's value (`ownerId`, `createdByUserId`, …). */
-  column: z.string(),
+  column: z.string().describe(
+    "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId.",
+  ),
   /**
    * `scope` — the column decides who may reach the row: set on create and
    * added as a WHERE predicate to every read and write.
    * `attribution` — the column only records who acted: set on create, a body
    * value ignored, never used to filter.
    */
-  kind: z.enum(["scope", "attribution"]).default("scope"),
+  kind: z
+    .enum(["scope", "attribution"])
+    .describe(
+      '"scope": the column decides who may reach the row — it is set from the ' +
+      "session on create AND becomes a WHERE predicate on every read and write. " +
+      '"attribution": the column only records who acted — it is set from the ' +
+      "session on create and a value in the request body is ignored, but it is " +
+      "NEVER used as an access filter. Choose attribution wherever every holder " +
+      "of a role is meant to see every row; scoping on an audit column silently " +
+      "narrows an application that was designed to be shared.",
+    )
+    .default("scope"),
   /** The actor's own id, or the workspace/tenant id their session carries. */
-  scope: z.enum(["user", "workspace"]).default("user"),
+  scope: z
+    .enum(["user", "workspace"])
+    .describe(
+      "What `column` is compared to: the acting user's own id, or the " +
+      "workspace/tenant id their session carries.",
+    )
+    .default("user"),
   /** Roles exempt from the rule — they read unscoped, and may write the column. */
-  unscopedRoles: z.array(z.string()).default([]),
-  note: z.string().default(""),
-});
+  unscopedRoles: z
+    .array(z.string())
+    .describe(
+      "Role names that read and write this entity unscoped. Name a role only " +
+      "where the product genuinely grants it every row.",
+    )
+    .default([]),
+  note: z.string().describe("Why this rule exists, in one sentence.").default(""),
+}).describe(
+  "An enforceable rule about one column and the acting user. A `scope` rule " +
+  "limits which rows the actor reaches; an `attribution` rule only records who " +
+  "acted. Both set the column server-side on create.",
+);
 
 export const Security = z.object({
   authentication: z
@@ -1021,7 +1052,27 @@ export const Security = z.object({
    * user — correct when authorisation is by role rather than by record, and
    * a leak otherwise.
    */
-  ownershipRules: z.array(z.union([z.string(), RecordScopeRule])).default([]),
+  ownershipRules: z
+    .array(
+      z.union([
+        z.string().describe(
+          "Prose statement of an access rule. Documents policy; enforces nothing.",
+        ),
+        RecordScopeRule,
+      ]),
+    )
+    .describe(
+      "Who may reach which rows. A plain string is a prose statement of policy — " +
+      "it documents the rule but nothing enforces it. An object is an enforceable " +
+      "record-scoping rule: it is projected into src/lib/ownership-rules.ts and the " +
+      "data engine adds it as a WHERE predicate to every read and write of that " +
+      "entity, so declaring one here is what actually scopes the rows. An entity " +
+      "with no object rule is readable by every authenticated user, which is " +
+      "correct for an application whose authorisation is by role rather than by " +
+      "record — say so in a string rule so the absence is a decision rather than " +
+      "an omission.",
+    )
+    .default([]),
   protectedRoutes: z.array(z.string()).default([]),
   auditLogging: z.boolean().default(false),
 });
