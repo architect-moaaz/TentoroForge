@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Label } from "@/components/ui/label";
@@ -89,6 +90,20 @@ export function RowAccessRuleForm({
   const setCondition = (when: ConditionExpression | null) => {
     onConfigChange({ ...config, when, whenFeel: conditionToFeel(when) });
   };
+
+  // A rule saved without the builder ever being touched still has to carry a
+  // condition. The engine reads `whenFeel`, and an absent one is not a
+  // condition it can compile — so it refuses the read and the role sees
+  // nothing, which is the exact opposite of the "grants every row" rule the
+  // copy above tells you to write for a role that should see everything.
+  // The empty condition is therefore written down as `true` when the form
+  // opens, rather than left implied by a missing key.
+  useEffect(() => {
+    if (config.whenFeel === undefined) {
+      const when = config.when ?? null;
+      onConfigChange({ ...config, when, whenFeel: conditionToFeel(when) });
+    }
+  }, [config, onConfigChange]);
 
   return (
     <div className="space-y-4">

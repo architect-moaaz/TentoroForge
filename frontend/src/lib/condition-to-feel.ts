@@ -67,27 +67,25 @@ function feelValueTyped(raw: string, cat: FieldCategory): string {
 }
 
 /**
- * `user.id` is the acting user, not the eight-character string "user.id".
+ * `user.<field>` names the ACTING USER, not a string.
  *
- * Every other value the builder collects is a literal, so the encoders quote
- * it. That made the one comparison an access rule most needs — this row
- * belongs to me — impossible to express: it compiled to
- * `ownerId = "user.id"`, which matches nothing, silently, forever.
+ * A row-access rule is almost always "the rows this person owns", which is
+ * written `ownerId = user.id`. Encoded as a value it would quote to
+ * `"user.id"` and compare the column against that literal — a rule that
+ * matches nothing, and says nothing about why. So the reference is passed
+ * through bare, and the readers downstream resolve it from the session:
+ * row-access-sql's `named()` turns it into a bound value (or, when the
+ * session does not carry it, into FALSE).
  *
- * Emitted bare so it stays an identifier. The FEEL evaluator already resolves
- * dotted names against the context it is given, and both consumers put the
- * acting user there: evaluateRuleSet passes `{...entity, user}`, and the data
- * engine's row-access compiler reads `user.<field>` off the session. Only the
- * `user.` prefix is passed through — a row rule compiles to a predicate over
- * ONE table, so letting `order.total` through here would move a failure the
- * author could see now to a read that returns nothing later.
+ * One segment only. `user.profile.org` is not addressable anywhere
+ * downstream, so it stays a literal rather than compiling to a silent null.
  */
-const USER_REF = /^user\.[A-Za-z_][A-Za-z0-9_]*$/;
+const USER_REFERENCE = /^user\.[A-Za-z_][A-Za-z0-9_]*$/;
 
 function encodeValue(raw: string, cat?: FieldCategory): string {
   const v = (raw ?? "").trim();
-  if (USER_REF.test(v)) return v;
-  return cat ? feelValueTyped(raw, cat) : feelValueAuto(raw);
+  if (USER_REFERENCE.test(v)) return v;
+  return cat ? feelValueTyped(v, cat) : feelValueAuto(v);
 }
 
 /** Encode a comma-separated raw value into a FEEL list: a, b, c -> [a, b, c]. */
