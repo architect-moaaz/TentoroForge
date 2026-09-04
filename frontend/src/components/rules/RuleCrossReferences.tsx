@@ -24,6 +24,7 @@ interface RuleCrossReferencesProps {
 const TYPE_BADGE_COLORS: Record<RuleType, string> = {
   validation: "bg-amber-100 text-amber-700",
   access: "bg-blue-100 text-blue-700",
+  row_access: "bg-sky-100 text-sky-700",
   business: "bg-green-100 text-green-700",
   computed: "bg-purple-100 text-purple-700",
   state_machine: "bg-rose-100 text-rose-700",
