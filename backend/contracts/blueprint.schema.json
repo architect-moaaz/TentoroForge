@@ -1026,9 +1026,10 @@
                 "type": "string",
                 "enum": [
                   "manual",
-                  "event",
+                  "webhook",
                   "schedule",
-                  "condition"
+                  "api_event",
+                  "db_change"
                 ]
               },
               "detail": {
@@ -1055,15 +1056,26 @@
                 "type": {
                   "type": "string",
                   "enum": [
-                    "start",
+                    "trigger",
                     "action",
                     "condition",
+                    "exclusive_gateway",
+                    "parallel_gateway",
+                    "fork",
+                    "join",
+                    "decision",
+                    "wait",
+                    "end",
+                    "end_event",
+                    "user_task",
+                    "assignment",
                     "approval",
-                    "human_task",
-                    "notification",
-                    "timer",
-                    "integration",
-                    "end"
+                    "task_pool",
+                    "escalation",
+                    "ai_classify",
+                    "ai_extract",
+                    "ai_decide",
+                    "ai_generate"
                   ]
                 },
                 "entity": {

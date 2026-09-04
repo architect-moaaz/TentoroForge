@@ -16,12 +16,13 @@ import logging
 import re
 from pathlib import Path
 
+from services.workflow_nodes import workflow_node
+
 logger = logging.getLogger(__name__)
 
 
-def _node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
-    return {"id": node_id, "type": ntype, "position": {"x": x, "y": 0},
-            "data": {"config": config, "label": label}}
+def _node(node_id: str, ntype: str, row: int, config: dict, label: str) -> dict:
+    return workflow_node(node_id, ntype, row, config, label)
 
 
 def minimal_workflow(wf_id: str, name: str | None = None) -> dict:
@@ -36,7 +37,7 @@ def minimal_workflow(wf_id: str, name: str | None = None) -> dict:
             "trigger": {"type": "manual"},
             "nodes": [
                 _node("trigger", "trigger", 0, {"type": "manual"}, "Start"),
-                _node("end", "end", 200, {}, "End"),
+                _node("end", "end", 1, {}, "End"),
             ],
             "edges": [{"id": "e_trigger_end", "source": "trigger", "target": "end"}],
         },
@@ -132,10 +133,7 @@ def salvage_workflow(d: object) -> tuple[dict, list[str]] | None:
             losses.append(f"edge {e.get('source')}→{e.get('target')} dropped (endpoint removed)")
 
     if not any(n.get("type") == "trigger" for n in good):
-        good.insert(0, {"id": "trigger", "type": "trigger",
-                        "position": {"x": 0, "y": 0},
-                        "data": {"label": "Start", "nodeType": "trigger",
-                                 "config": {"type": "manual"}}})
+        good.insert(0, _node("trigger", "trigger", 0, {"type": "manual"}, "Start"))
         losses.append("no trigger node — a manual trigger was inserted")
 
     trig = defn.get("trigger")

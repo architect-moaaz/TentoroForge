@@ -43,6 +43,7 @@ from typing import Any, Callable, Iterable, Sequence
 from services.blueprint.agent_contract import (
     AgentResult,
     InvalidPatternTemplate,
+    InvalidWorkflowStep,
     apply_agent_result,
     capability_for,
 )
@@ -735,7 +736,7 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
             feedback = str(exc)
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed

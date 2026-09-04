@@ -27,6 +27,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.catalog import WorkflowNodeCatalog, workflow_nodes
+from services.workflow_nodes import workflow_node
+
 #: What projection still owes, so a green data-layer run is not mistaken for a
 #: runnable app.
 REMAINING: tuple[str, ...] = (
@@ -557,34 +560,81 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # workflows — the definitions the workflow engine executes
 # ---------------------------------------------------------------------------
 
-#: Blueprint step type -> the runtime node type the workflow engine dispatches.
-_STEP_NODE_TYPE: dict[str, str] = {
-    "action": "action", "approval": "approval", "human_task": "human_task",
-    "condition": "condition", "notification": "notification",
-    "integration": "action", "timer": "timer",
-}
-
-#: Blueprint step type -> the db action a mutating step performs.
-_STEP_ACTION: dict[str, str] = {
-    "action": "db_insert", "human_task": "db_update", "approval": "db_update",
-}
+def _wf_node(node_id: str, ntype: str, row: int, config: dict, label: str) -> dict:
+    return workflow_node(node_id, ntype, row, config, label)
 
 
-def _wf_node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
-    return {"id": node_id, "type": ntype, "position": {"x": x, "y": 0},
-            "data": {"config": config, "label": label}}
+def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog) -> dict[str, Any]:
+    """The node config for one step: the catalog's defaults for that node and
+    variant, then what the step declares. The Blueprint may state a condition
+    as ``condition``; the engine evaluates ``expression``."""
+    ntype = step.get("type")
+    declared = dict(step.get("config")) if isinstance(step.get("config"), dict) else {}
+    if ntype == "condition" and "expression" not in declared and declared.get("condition"):
+        declared["expression"] = declared.pop("condition")
+    config: dict[str, Any] = {**catalog.defaults(ntype, declared), **declared}
+    if entity.get("table") and "table" not in config:
+        config["table"] = entity["table"]
+    return config
+
+
+def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
+           end_id: str) -> list[dict]:
+    """Edges from declared connectivity, or a linear chain when none is declared.
+
+    A step's ``next`` lists the keys it hands to. A branching node's first
+    target is the then-branch and its second the else-branch, which is how the
+    editor's handles and the engine's ``edgeType`` both read it. A non-terminal
+    step that names nothing flows to the end node.
+    """
+    by_key = {s.get("key"): s for s in steps}
+    declared = any(s.get("next") for s in steps)
+    branching = set(catalog.branching_types())
+    edges: list[dict] = []
+
+    def add(src: str, tgt: str, kind: str = "default") -> None:
+        e: dict[str, Any] = {"id": f"e_{src}_{tgt}", "source": src, "target": tgt,
+                             "data": {"edgeType": kind}}
+        if kind == "else":
+            e["sourceHandle"] = "else"
+        edges.append(e)
+
+    if not declared:
+        for a, b in zip(chain, chain[1:]):
+            add(a, b)
+        return edges
+
+    add("trigger", steps[0]["key"]) if steps else add("trigger", end_id)
+    for s in steps:
+        key, ntype = s.get("key"), s.get("type")
+        node = catalog.node(ntype) or {}
+        if not node.get("handles", {}).get("out", True):
+            continue
+        targets = [t for t in (s.get("next") or []) if t in by_key]
+        if not targets:
+            add(key, end_id)
+            continue
+        if ntype in branching:
+            add(key, targets[0], "then")
+            for t in targets[1:2]:
+                add(key, t, "else")
+        else:
+            for t in targets:
+                add(key, t)
+    return edges
 
 
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
-    A Blueprint workflow states what the business does; a definition states how
-    the engine runs it. The translation is mechanical — steps become nodes in
-    declared order, joined by edges from a trigger to an end — which is why
-    this is a projection and not an agent. The old chain's own CRUD generator
-    makes the same argument in its docstring: "Mechanical — no LLM, so no
-    hallucinated names."
+    A Blueprint workflow states what the business does in the workflow node
+    catalog's vocabulary; a definition is those nodes assembled for the
+    engine. The translation is mechanical — a step is a catalog node carrying
+    the step's configuration, joined by the edges the step declares — which is
+    why this is a projection and not an agent. There is no mapping table: a
+    step whose type is not in the catalog was refused before it got here.
     """
+    catalog = workflow_nodes()
     entities = {e.get("id"): e for e in (doc.get("data") or {}).get("entities") or []}
     workflows = [w for w in (doc.get("workflows") or [])
                  if w.get("status") != "DEPRECATED"]
@@ -596,37 +646,46 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     code_map: list[dict] = []
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
-        trigger = (wf.get("trigger") or {}).get("kind") or "manual"
+        declared_trigger = wf.get("trigger") or {}
+        trigger_cfg: dict[str, Any] = {
+            **catalog.defaults("trigger"),
+            "type": declared_trigger.get("kind") or "manual",
+        }
+        detail = declared_trigger.get("detail")
+        if detail:
+            trigger_cfg["event" if trigger_cfg["type"] == "api_event" else
+                        "condition" if trigger_cfg["type"] == "db_change" else
+                        "cron" if trigger_cfg["type"] == "schedule" else
+                        "description"] = detail
 
-        nodes = [_wf_node("trigger", "trigger", 0, {"type": trigger}, "Start")]
+        steps = [s for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")]
+        # Top-to-bottom, one node per row: the editor's handles are top (in)
+        # and bottom (out), so this is the layout its edges are drawn for.
+        nodes = [_wf_node("trigger", "trigger", 0, trigger_cfg, "Start")]
         chain = ["trigger"]
-        for i, step in enumerate(wf.get("steps") or [], start=1):
-            step_id = f"s{i}"
-            entity = entities.get(step.get("entity")) or {}
-            config: dict[str, Any] = {
-                "actionType": _STEP_ACTION.get(step.get("type"), "noop"),
-            }
-            if entity.get("table"):
-                config["table"] = entity["table"]
-            if step.get("condition"):
-                config["condition"] = step["condition"]
+        for s in steps:
+            entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
-                step_id, _STEP_NODE_TYPE.get(step.get("type"), "action"),
-                i * 200, config, step.get("name") or step_id,
+                s["key"], s.get("type"), len(chain), _step_config(s, entity, catalog),
+                s.get("name") or s["key"],
             ))
-            chain.append(step_id)
-        nodes.append(_wf_node("end", "end", len(chain) * 200, {}, "End"))
-        chain.append("end")
+            chain.append(s["key"])
+        end_id = next((s["key"] for s in steps
+                       if not (catalog.node(s.get("type")) or {}).get("handles", {}).get("out", True)),
+                      None)
+        if end_id is None:
+            end_id = "end"
+            nodes.append(_wf_node(end_id, "end", len(chain), {}, "End"))
+            chain.append(end_id)
 
-        edges = [{"id": f"e{i}", "source": a, "target": b}
-                 for i, (a, b) in enumerate(zip(chain, chain[1:]))]
+        edges = _edges(chain, steps, catalog, end_id)
 
         definition = {
             "id": slug,
             "name": wf.get("name") or slug,
             "blueprintId": wf.get("id"),
             "processVariables": [],
-            "definition": {"trigger": {"type": trigger},
+            "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},
         }
         (out / f"{slug}.json").write_text(

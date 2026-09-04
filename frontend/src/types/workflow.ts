@@ -39,69 +39,10 @@ export interface NodeCategory {
   nodes: NodeCategoryItem[];
 }
 
-export const NODE_CATEGORIES: NodeCategory[] = [
-  {
-    label: "Triggers",
-    nodes: [
-      { id: "trigger-manual", type: "trigger", label: "Manual", icon: "Hand", description: "User/API triggered", gradient: "bg-gradient-to-br from-orange-400 to-orange-600", defaultConfig: { type: "manual" } },
-      { id: "trigger-webhook", type: "trigger", label: "Webhook", icon: "Webhook", description: "Webhook/message trigger", gradient: "bg-gradient-to-br from-purple-400 to-purple-600", defaultConfig: { type: "webhook" } },
-      { id: "trigger-schedule", type: "trigger", label: "Schedule", icon: "Calendar", description: "Scheduled trigger", gradient: "bg-gradient-to-br from-sky-400 to-sky-600", defaultConfig: { type: "schedule" } },
-      { id: "trigger-api", type: "trigger", label: "API Event", icon: "Zap", description: "Broadcast signal trigger", gradient: "bg-gradient-to-br from-rose-400 to-rose-600", defaultConfig: { type: "api_event" } },
-      { id: "trigger-db", type: "trigger", label: "DB Change", icon: "Database", description: "Data condition trigger", gradient: "bg-gradient-to-br from-amber-400 to-amber-600", defaultConfig: { type: "db_change" } },
-    ],
-  },
-  {
-    label: "Actions",
-    nodes: [
-      { id: "action-custom", type: "action", label: "Custom Action", icon: "Play", description: "Execute custom logic", gradient: "bg-gradient-to-br from-teal-400 to-teal-600", defaultConfig: { actionType: "custom" } },
-      { id: "action-db", type: "action", label: "DB Query", icon: "Database", description: "Database operation", gradient: "bg-gradient-to-br from-cyan-400 to-cyan-600", defaultConfig: { actionType: "db_query" } },
-      { id: "action-http", type: "action", label: "HTTP Call", icon: "Globe", description: "External API call", gradient: "bg-gradient-to-br from-indigo-400 to-indigo-600", defaultConfig: { actionType: "http_call" } },
-      { id: "action-email", type: "action", label: "Send Email", icon: "Mail", description: "Email notification", gradient: "bg-gradient-to-br from-blue-400 to-blue-600", defaultConfig: { actionType: "send_email" } },
-      { id: "action-notify", type: "action", label: "Notification", icon: "Bell", description: "In-app notification", gradient: "bg-gradient-to-br from-orange-400 to-amber-500", defaultConfig: { actionType: "send_notification" } },
-      { id: "action-db-insert", type: "action", label: "Insert Record", icon: "Database", description: "Create a database row", gradient: "bg-gradient-to-br from-green-400 to-green-600", defaultConfig: { actionType: "db_insert" } },
-      { id: "action-db-update", type: "action", label: "Update Record", icon: "Database", description: "Update a database row", gradient: "bg-gradient-to-br from-lime-400 to-lime-600", defaultConfig: { actionType: "db_update" } },
-      { id: "action-db-delete", type: "action", label: "Delete Record", icon: "Database", description: "Delete a database row", gradient: "bg-gradient-to-br from-red-400 to-rose-600", defaultConfig: { actionType: "db_delete" } },
-      { id: "action-set-variable", type: "action", label: "Set Variable", icon: "Hash", description: "Set a process variable", gradient: "bg-gradient-to-br from-slate-400 to-slate-600", defaultConfig: { actionType: "set_variable" } },
-      { id: "action-transform", type: "action", label: "Transform", icon: "Hash", description: "Transform/map data", gradient: "bg-gradient-to-br from-stone-400 to-stone-600", defaultConfig: { actionType: "transform" } },
-      { id: "action-generate-document", type: "action", label: "Generate Document", icon: "FileText", description: "Generate a document", gradient: "bg-gradient-to-br from-emerald-400 to-teal-600", defaultConfig: { actionType: "generate_document" } },
-      { id: "action-mcp-tool", type: "action", label: "MCP Tool Call", icon: "Plug", description: "Call a tool on a configured MCP server", gradient: "bg-gradient-to-br from-violet-400 to-indigo-600", defaultConfig: { actionType: "mcp_tool_call" } },
-      { id: "action-emit-event", type: "action", label: "Emit Event", icon: "Zap", description: "Publish a domain event on the bus", gradient: "bg-gradient-to-br from-yellow-400 to-orange-600", defaultConfig: { actionType: "emit_event" } },
-      { id: "action-wait-event", type: "action", label: "Wait for Event", icon: "Clock", description: "Pause until an event is emitted", gradient: "bg-gradient-to-br from-sky-400 to-indigo-600", defaultConfig: { actionType: "wait_for_event" } },
-    ],
-  },
-  {
-    label: "Flow Control",
-    nodes: [
-      { id: "condition", type: "condition", label: "Condition", icon: "GitBranch", description: "Branch on expression", gradient: "bg-gradient-to-br from-purple-500 to-purple-700" },
-      { id: "exclusive_gateway", type: "exclusive_gateway", label: "Exclusive Gateway", icon: "GitBranch", description: "Branch on one condition", gradient: "bg-gradient-to-br from-purple-500 to-fuchsia-700" },
-      { id: "parallel_gateway", type: "parallel_gateway", label: "Parallel Gateway", icon: "Split", description: "Split/merge parallel paths", gradient: "bg-gradient-to-br from-cyan-500 to-blue-700" },
-      { id: "fork", type: "fork", label: "Fork", icon: "Split", description: "Fork into parallel branches", gradient: "bg-gradient-to-br from-teal-500 to-cyan-700" },
-      { id: "join", type: "join", label: "Join", icon: "GitMerge", description: "Join parallel branches", gradient: "bg-gradient-to-br from-blue-500 to-indigo-700" },
-      { id: "decision", type: "decision", label: "Decision Table", icon: "Table2", description: "Rule-based routing", gradient: "bg-gradient-to-br from-emerald-500 to-green-700" },
-      { id: "wait", type: "wait", label: "Wait", icon: "Clock", description: "Time-based delay", gradient: "bg-gradient-to-br from-amber-500 to-amber-700" },
-      { id: "end", type: "end", label: "End", icon: "Square", description: "Workflow end", gradient: "bg-gradient-to-br from-red-400 to-red-600" },
-    ],
-  },
-  {
-    label: "Human-in-Loop",
-    nodes: [
-      { id: "user_task", type: "user_task", label: "User Task", icon: "ClipboardCheck", description: "Wait for a person to complete a step", gradient: "bg-gradient-to-br from-blue-500 to-cyan-700" },
-      { id: "assignment", type: "assignment", label: "Assignment", icon: "UserPlus", description: "Manual user task", gradient: "bg-gradient-to-br from-blue-500 to-blue-700" },
-      { id: "approval", type: "approval", label: "Approval", icon: "CheckCircle", description: "Review and approve", gradient: "bg-gradient-to-br from-indigo-500 to-indigo-700" },
-      { id: "task_pool", type: "task_pool", label: "Task Pool", icon: "Users", description: "Distributed task queue", gradient: "bg-gradient-to-br from-sky-500 to-sky-700" },
-      { id: "escalation", type: "escalation", label: "Escalation", icon: "ArrowUpCircle", description: "Priority escalation", gradient: "bg-gradient-to-br from-rose-500 to-rose-700" },
-    ],
-  },
-  {
-    label: "AI Nodes",
-    nodes: [
-      { id: "ai_classify", type: "ai_classify", label: "AI Classify", icon: "Brain", description: "Auto-categorize data", gradient: "bg-gradient-to-br from-violet-500 to-violet-700" },
-      { id: "ai_extract", type: "ai_extract", label: "AI Extract", icon: "ScanText", description: "Extract structured data", gradient: "bg-gradient-to-br from-fuchsia-500 to-fuchsia-700" },
-      { id: "ai_decide", type: "ai_decide", label: "AI Decision", icon: "GitBranch", description: "AI-powered routing", gradient: "bg-gradient-to-br from-purple-500 to-violet-700" },
-      { id: "ai_generate", type: "ai_generate", label: "AI Generate", icon: "Sparkles", description: "Generate content", gradient: "bg-gradient-to-br from-pink-500 to-pink-700" },
-    ],
-  },
-];
+// The palette is derived from the workflow node catalog
+// (src/catalog/workflow-nodes.json) — the same list the workflow agent authors
+// against and the engine executes. Re-exported here so existing imports hold.
+export { NODE_CATEGORIES } from "@/catalog/workflowNodes";
 
 // ---------------------------------------------------------------------------
 // Trigger Config
@@ -138,7 +79,7 @@ export type ActionType =
   | "mcp_tool_call"
   | "emit_event"
   | "wait_for_event"
-  | "custom";
+  | "custom" | "ocr_document";
 
 export type ApprovalType = "single" | "sequential" | "parallel_all" | "parallel_any" | "threshold";
 

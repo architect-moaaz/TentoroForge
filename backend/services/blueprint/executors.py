@@ -701,9 +701,18 @@ NODE_TASKS: dict[str, str] = {
         "hole."
     ),
     "workflows": (
-        "Define the business processes. A manually-triggered workflow must name "
-        "the page that launches it, and any step that mutates an entity must name "
-        "a real one."
+        "Define the business processes as workflows built from the workflow node "
+        "catalog below. Every step IS one of those nodes: its `type` is a catalog "
+        "node, and its `config` carries what that node declares it needs — the "
+        "`actionType` and table/values of an action, the `expression` of a "
+        "condition, the `assignType` and `assignTarget` of a human task — filled "
+        "in with real values (entity tables, `{{variable}}` bindings, role names), "
+        "not left for someone else. A step missing a required key is refused. "
+        "Connect steps with `next` (a branching node's first target is the "
+        "then-branch, its second the else-branch); the workflow's `trigger` is "
+        "the start, and an `end` step is the terminal. A manually-triggered "
+        "workflow must name the page that launches it, and any step that mutates "
+        "an entity must name a real one."
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "
@@ -818,6 +827,20 @@ emits nothing, so an optional strip costs a page nothing.
 """
 
 
+WORKFLOW_CATALOG_ADDENDUM = """
+
+## The workflow nodes you may use
+
+This is the whole vocabulary — the workflow node catalog the editor's palette \
+offers and the runtime executes, not a summary of one. A step `type` that is \
+not on this list does not exist and the workflow will be refused. Each node \
+states the configuration it needs; you author that configuration, and a step \
+that leaves a required group empty is refused with the group named.
+
+{catalog}
+"""
+
+
 SHAPE_ADDENDUM = """
 
 Artifacts you write must match these shapes exactly — the Blueprint validates \
@@ -914,6 +937,13 @@ def build_prompt(
             placeholders=", ".join(PLACEHOLDER_VOCABULARY),
             repeats=", ".join(REPEAT_SOURCES),
         )
+    if spec.agent == "workflow":
+        # The catalog is pulled in for the one task that authors workflows,
+        # and for no other: the page agents get the component catalog, this
+        # one gets the node catalog. Neither pays for the other's vocabulary.
+        from services.catalog import workflow_nodes
+
+        system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
     if inline_schema:
         system += SCHEMA_ADDENDUM.format(
             schema=json.dumps(PROPOSAL_SCHEMA, indent=2)

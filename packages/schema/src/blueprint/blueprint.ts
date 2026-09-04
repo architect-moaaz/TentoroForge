@@ -546,22 +546,45 @@ export const DataModel = z.object({
 // §11 · workflows + business rules
 // ===========================================================================
 
+/**
+ * A step IS a workflow node — one of the components the editor's palette
+ * offers and the runtime executes. The vocabulary is the workflow node catalog
+ * (`packages/catalog/workflow-nodes.json`); a step's `config` carries what
+ * that node declares it needs (`actionType` for an action, `expression` for a
+ * condition, `assignType`/`assignTarget` for a human task, …) alongside any
+ * Blueprint references. The workflow's own `trigger` is the start; an `end`
+ * step is the terminal.
+ */
+export const WORKFLOW_NODE_TYPES = [
+    "trigger",
+    "action",
+    "condition",
+    "exclusive_gateway",
+    "parallel_gateway",
+    "fork",
+    "join",
+    "decision",
+    "wait",
+    "end",
+    "end_event",
+    "user_task",
+    "assignment",
+    "approval",
+    "task_pool",
+    "escalation",
+    "ai_classify",
+    "ai_extract",
+    "ai_decide",
+    "ai_generate",
+] as const;
+
 export const WorkflowStep = z.object({
   key: z.string(),
   name: z.string(),
-  type: z.enum([
-    "start",
-    "action",
-    "condition",
-    "approval",
-    "human_task",
-    "notification",
-    "timer",
-    "integration",
-    "end",
-  ]),
+  type: z.enum(WORKFLOW_NODE_TYPES),
   /** Entity mutation performed, if any. */
   entity: EntityId.optional(),
+  /** Keys this step hands to. On a branching node the first is the then-branch, the second the else-branch. */
   next: z.array(z.string()).default([]),
   config: z.record(z.string(), z.unknown()).default({}),
 });
@@ -571,7 +594,8 @@ export const Workflow = z.object({
   name: z.string(),
   purpose: z.string().default(""),
   trigger: z.object({
-    kind: z.enum(["manual", "event", "schedule", "condition"]),
+    /** A trigger variant from the workflow node catalog. */
+    kind: z.enum(["manual", "webhook", "schedule", "api_event", "db_change"]),
     detail: z.string().default(""),
   }),
   steps: z.array(WorkflowStep).default([]),

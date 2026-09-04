@@ -16,6 +16,7 @@ from typing import Any
 
 from services.entity_names import EntityNameError, derive_names, entity_key
 from services.schema_tables import schema_files
+from services.workflow_nodes import workflow_node
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,8 @@ def _writable(fields: list[dict]) -> list[str]:
     return out
 
 
-def _node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
-    return {"id": node_id, "type": ntype, "position": {"x": x, "y": 0},
-            "data": {"config": config, "label": label}}
+def _node(node_id: str, ntype: str, row: int, config: dict, label: str) -> dict:
+    return workflow_node(node_id, ntype, row, config, label)
 
 
 def build_crud_workflow(
@@ -102,7 +102,7 @@ def build_crud_workflow(
             if not ct or not cf or (ct == table and cf == key):
                 continue
             cascade_nodes.append(_node(
-                f"cascade_{i}_{ct}", "action", 100 + i * 40,
+                f"cascade_{i}_{ct}", "action", 1 + len(cascade_nodes),
                 {"actionType": "db_delete", "table": ct,
                  "where": {cf: key_ref}, "continueOnError": True},
                 f"Delete dependent {ct}",
@@ -113,8 +113,8 @@ def build_crud_workflow(
     nodes = [
         _node("trigger", "trigger", 0, {"type": "manual"}, "Start"),
         *cascade_nodes,
-        _node(action_type, "action", 200, config, f"{op_cap} {entity}"),
-        _node("end", "end", 400, {}, "End"),
+        _node(action_type, "action", 1 + len(cascade_nodes), config, f"{op_cap} {entity}"),
+        _node("end", "end", 2 + len(cascade_nodes), {}, "End"),
     ]
     chain = ["trigger", *(n["id"] for n in cascade_nodes), action_type, "end"]
     edges = [

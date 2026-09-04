@@ -340,6 +340,11 @@ class BlueprintService:
             # Never fall back to an empty Blueprint: that would silently
             # discard the application's definition and renumber everything.
             raise BlueprintInvalid([f"{p} is not valid JSON: {exc}"]) from exc
+        # Vocabulary migrations are applied on load and persisted with the
+        # next save; a document written before a vocabulary change still
+        # loads, and validates, afterwards.
+        from services.blueprint.migrations import migrate
+        migrate(svc.doc)
         return svc
 
     def save(self) -> Path:

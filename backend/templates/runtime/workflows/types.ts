@@ -47,7 +47,9 @@ export type ActionType =
   | "ai_generate"
   | "ai_classify"
   | "ai_extract"
-  | "ai_decide";
+  | "ai_decide"
+  | "mcp_tool_call"
+  | "ocr_document";
 
 export type NodeType =
   | "trigger"

@@ -25,6 +25,8 @@ import {
   GitMerge,
   Hash,
   FileText,
+  Plug,
+  ClipboardCheck,
 } from "lucide-react";
 import { NODE_CATEGORIES, type WorkflowNodeType } from "@/types/workflow";
 
@@ -53,6 +55,8 @@ const ICONS: Record<string, typeof Zap> = {
   GitMerge,
   Hash,
   FileText,
+  Plug,
+  ClipboardCheck,
 };
 
 export function NodePalette() {

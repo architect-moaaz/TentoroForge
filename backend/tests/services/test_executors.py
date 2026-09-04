@@ -944,3 +944,17 @@ def test_the_two_agents_that_need_everything_still_get_it():
 
     for agent in ("verification", "memory"):
         assert "*" in AGENT_REGISTRY[agent].reads, agent
+
+
+def test_the_workflow_task_is_handed_the_node_catalog_and_no_other_is(svc):
+    """The catalog is referred to when the task needs it: the workflow agent
+    authors steps against it, so it sees the nodes and what each needs
+    configured; the data-model agent has no use for it and does not pay."""
+    system, _ = build_prompt(svc.doc, "workflows")
+    assert "The workflow nodes you may use" in system
+    assert "db_insert" in system and "user_task" in system
+    assert "*table" in system  # required config keys are stated, not implied
+    assert "then-branch" in system
+
+    other, _ = build_prompt(svc.doc, "data_model")
+    assert "The workflow nodes you may use" not in other

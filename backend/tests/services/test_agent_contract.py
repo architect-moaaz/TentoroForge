@@ -27,7 +27,7 @@ from services.blueprint.agent_contract import (
     apply_agent_result,
     capability_for,
 )
-from services.blueprint.ids import entity_key, page_key, prose_key
+from services.blueprint.ids import entity_key, page_key, prose_key, workflow_key
 from services.blueprint.service import CONTRACT_PATH, BlueprintService
 
 
@@ -487,3 +487,61 @@ def test_a2ui_is_scoped_but_can_see_the_intent_it_designs_for():
         assert {"requirements", "pages", "data"} <= cap.reads, agent
     # Still not everything: it composes UI, it does not reason about endpoints.
     assert "apis" not in AGENT_REGISTRY["a2ui_patterns"].reads
+
+
+# --- workflows are built from catalog nodes, configured -----------------------
+
+def workflow_result(steps, trigger=None) -> AgentResult:
+    return AgentResult(
+        task_id="TASK-777", agent="workflow", confidence=0.9,
+        proposals=[ArtifactProposal(
+            section="workflows", natural_key=workflow_key("Approve expense"),
+            body={"name": "Approve expense", "trigger": trigger or {"kind": "manual"},
+                  "steps": steps},
+        )],
+    )
+
+
+def test_a_workflow_of_configured_catalog_nodes_is_accepted(svc):
+    from services.blueprint.agent_contract import check_workflow_steps
+    check_workflow_steps(workflow_result([
+        {"key": "review", "name": "Manager reviews", "type": "approval",
+         "config": {"assignType": "role", "assignTarget": "Manager"}, "next": ["pay", "done"]},
+        {"key": "pay", "name": "Record payment", "type": "action",
+         "config": {"actionType": "db_insert", "table": "payments", "values": {"amount": "{{amount}}"}},
+         "next": ["done"]},
+        {"key": "done", "name": "Done", "type": "end"},
+    ]))
+
+
+def test_a_step_that_is_not_a_catalog_node_is_refused_with_the_choices(svc):
+    from services.blueprint.agent_contract import InvalidWorkflowStep
+    with pytest.raises(InvalidWorkflowStep) as exc:
+        apply_agent_result(svc, workflow_result([
+            {"key": "n", "name": "Tell them", "type": "notification"},
+        ]))
+    msg = str(exc.value)
+    assert "Approve expense/n" in msg and "'notification' is not a catalog node" in msg
+    assert "user_task" in msg  # the choices travel with the refusal
+
+
+def test_a_node_left_unconfigured_is_refused_naming_the_missing_keys(svc):
+    from services.blueprint.agent_contract import InvalidWorkflowStep
+    with pytest.raises(InvalidWorkflowStep) as exc:
+        apply_agent_result(svc, workflow_result([
+            {"key": "pay", "name": "Record payment", "type": "action",
+             "config": {"actionType": "db_insert", "table": "payments"}},
+            {"key": "review", "name": "Review", "type": "approval", "config": {}},
+        ]))
+    msg = str(exc.value)
+    assert "pay: config needs one of: values" in msg
+    assert "review: config needs one of: assignType" in msg
+    assert "assignTarget|assignVariablePath" in msg
+    assert not svc.artifacts("workflows"), "nothing is written on refusal"
+
+
+def test_a_trigger_outside_the_catalog_is_refused(svc):
+    from services.blueprint.agent_contract import InvalidWorkflowStep
+    with pytest.raises(InvalidWorkflowStep) as exc:
+        apply_agent_result(svc, workflow_result([], trigger={"kind": "event"}))
+    assert "trigger.kind 'event'" in str(exc.value)

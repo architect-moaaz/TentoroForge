@@ -1,0 +1,849 @@
+{
+  "$comment": "Forge workflow node catalog \u2014 the components a workflow is built from. Source of truth: packages/catalog/workflow-nodes.json. The copies at backend/contracts/workflow-node-catalog.json and frontend/src/catalog/workflow-nodes.json are emitted by packages/catalog/scripts/emit.mjs; backend/tests/services/test_workflow_node_catalog.py fails when they drift. Every `type` is a runtime NodeType and every action variant has a registered handler.",
+  "catalogVersion": 1,
+  "categories": [
+    {
+      "id": "triggers",
+      "label": "Triggers"
+    },
+    {
+      "id": "actions",
+      "label": "Actions"
+    },
+    {
+      "id": "flow",
+      "label": "Flow Control"
+    },
+    {
+      "id": "human",
+      "label": "Human-in-Loop"
+    },
+    {
+      "id": "ai",
+      "label": "AI Nodes"
+    }
+  ],
+  "nodes": [
+    {
+      "type": "trigger",
+      "category": "triggers",
+      "label": "Trigger",
+      "icon": "Zap",
+      "gradient": "bg-gradient-to-br from-orange-400 to-orange-600",
+      "description": "Where the workflow starts",
+      "handles": {
+        "in": false,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "type"
+          ]
+        ],
+        "defaults": {
+          "type": "manual"
+        }
+      },
+      "variantKey": "type",
+      "variants": [
+        {
+          "key": "manual",
+          "label": "Manual",
+          "icon": "Hand",
+          "gradient": "bg-gradient-to-br from-orange-400 to-orange-600",
+          "description": "User/API triggered",
+          "config": {
+            "required": [],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "webhook",
+          "label": "Webhook",
+          "icon": "Webhook",
+          "gradient": "bg-gradient-to-br from-purple-400 to-purple-600",
+          "description": "Webhook/message trigger",
+          "config": {
+            "required": [],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "schedule",
+          "label": "Schedule",
+          "icon": "Calendar",
+          "gradient": "bg-gradient-to-br from-sky-400 to-sky-600",
+          "description": "Scheduled trigger",
+          "config": {
+            "required": [
+              [
+                "cron"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "api_event",
+          "label": "API Event",
+          "icon": "Zap",
+          "gradient": "bg-gradient-to-br from-rose-400 to-rose-600",
+          "description": "Broadcast signal trigger",
+          "config": {
+            "required": [
+              [
+                "event"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "db_change",
+          "label": "DB Change",
+          "icon": "Database",
+          "gradient": "bg-gradient-to-br from-amber-400 to-amber-600",
+          "description": "Data condition trigger",
+          "config": {
+            "required": [
+              [
+                "model",
+                "table"
+              ]
+            ],
+            "defaults": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "action",
+      "category": "actions",
+      "label": "Action",
+      "icon": "Play",
+      "gradient": "bg-gradient-to-br from-teal-400 to-teal-600",
+      "description": "Run one automated step",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "actionType"
+          ]
+        ],
+        "defaults": {}
+      },
+      "variantKey": "actionType",
+      "variants": [
+        {
+          "key": "custom",
+          "label": "Custom Action",
+          "icon": "Play",
+          "gradient": "bg-gradient-to-br from-teal-400 to-teal-600",
+          "description": "Execute custom logic",
+          "config": {
+            "required": [
+              [
+                "expression",
+                "code",
+                "handler"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "db_query",
+          "label": "DB Query",
+          "icon": "Database",
+          "gradient": "bg-gradient-to-br from-cyan-400 to-cyan-600",
+          "description": "Database operation",
+          "config": {
+            "required": [
+              [
+                "table"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "http_call",
+          "label": "HTTP Call",
+          "icon": "Globe",
+          "gradient": "bg-gradient-to-br from-indigo-400 to-indigo-600",
+          "description": "External API call",
+          "config": {
+            "required": [
+              [
+                "url",
+                "endpoint"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "send_email",
+          "label": "Send Email",
+          "icon": "Mail",
+          "gradient": "bg-gradient-to-br from-blue-400 to-blue-600",
+          "description": "Email notification",
+          "config": {
+            "required": [
+              [
+                "to",
+                "recipient",
+                "recipientRole"
+              ],
+              [
+                "subject",
+                "body",
+                "template",
+                "message"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "send_notification",
+          "label": "Notification",
+          "icon": "Bell",
+          "gradient": "bg-gradient-to-br from-orange-400 to-amber-500",
+          "description": "In-app notification",
+          "config": {
+            "required": [
+              [
+                "recipient",
+                "to",
+                "userId",
+                "user_id",
+                "channel",
+                "recipientRole",
+                "toRole"
+              ],
+              [
+                "message",
+                "title"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "db_insert",
+          "label": "Insert Record",
+          "icon": "Database",
+          "gradient": "bg-gradient-to-br from-green-400 to-green-600",
+          "description": "Create a database row",
+          "config": {
+            "required": [
+              [
+                "table"
+              ],
+              [
+                "values"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "db_update",
+          "label": "Update Record",
+          "icon": "Database",
+          "gradient": "bg-gradient-to-br from-lime-400 to-lime-600",
+          "description": "Update a database row",
+          "config": {
+            "required": [
+              [
+                "table"
+              ],
+              [
+                "where"
+              ],
+              [
+                "values"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "db_delete",
+          "label": "Delete Record",
+          "icon": "Database",
+          "gradient": "bg-gradient-to-br from-red-400 to-rose-600",
+          "description": "Delete a database row",
+          "config": {
+            "required": [
+              [
+                "table"
+              ],
+              [
+                "where"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "set_variable",
+          "label": "Set Variable",
+          "icon": "Hash",
+          "gradient": "bg-gradient-to-br from-slate-400 to-slate-600",
+          "description": "Set a process variable",
+          "config": {
+            "required": [
+              [
+                "variableName",
+                "name",
+                "var"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "transform",
+          "label": "Transform",
+          "icon": "Hash",
+          "gradient": "bg-gradient-to-br from-stone-400 to-stone-600",
+          "description": "Transform/map data",
+          "config": {
+            "required": [
+              [
+                "expression",
+                "mapping",
+                "code",
+                "template"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "generate_document",
+          "label": "Generate Document",
+          "icon": "FileText",
+          "gradient": "bg-gradient-to-br from-emerald-400 to-teal-600",
+          "description": "Generate a document",
+          "config": {
+            "required": [
+              [
+                "template",
+                "content",
+                "html",
+                "body",
+                "spec",
+                "data",
+                "title"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "mcp_tool_call",
+          "label": "MCP Tool Call",
+          "icon": "Plug",
+          "gradient": "bg-gradient-to-br from-violet-400 to-indigo-600",
+          "description": "Call a tool on a configured MCP server",
+          "config": {
+            "required": [
+              [
+                "mcp_tool_name"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "emit_event",
+          "label": "Emit Event",
+          "icon": "Zap",
+          "gradient": "bg-gradient-to-br from-yellow-400 to-orange-600",
+          "description": "Publish a domain event on the bus",
+          "config": {
+            "required": [
+              [
+                "event",
+                "eventName"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "wait_for_event",
+          "label": "Wait for Event",
+          "icon": "Clock",
+          "gradient": "bg-gradient-to-br from-sky-400 to-indigo-600",
+          "description": "Pause until an event is emitted",
+          "config": {
+            "required": [
+              [
+                "event",
+                "eventName"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "ocr_document",
+          "label": "OCR Document",
+          "icon": "ScanText",
+          "gradient": "bg-gradient-to-br from-amber-400 to-orange-600",
+          "description": "Recognise text in a stored file or URL (PaddleOCR)",
+          "config": {
+            "required": [
+              [
+                "ocrFileRef",
+                "aiFileRef"
+              ]
+            ],
+            "defaults": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "condition",
+      "category": "flow",
+      "label": "Condition",
+      "icon": "GitBranch",
+      "gradient": "bg-gradient-to-br from-purple-500 to-purple-700",
+      "description": "Branch on expression",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": true
+      },
+      "config": {
+        "required": [
+          [
+            "expression",
+            "conditionTree"
+          ]
+        ],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "exclusive_gateway",
+      "category": "flow",
+      "label": "Exclusive Gateway",
+      "icon": "GitBranch",
+      "gradient": "bg-gradient-to-br from-purple-500 to-fuchsia-700",
+      "description": "Branch on one condition",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": true
+      },
+      "config": {
+        "required": [
+          [
+            "expression",
+            "conditionTree"
+          ]
+        ],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "parallel_gateway",
+      "category": "flow",
+      "label": "Parallel Gateway",
+      "icon": "Split",
+      "gradient": "bg-gradient-to-br from-cyan-500 to-blue-700",
+      "description": "Split/merge parallel paths",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "fork",
+      "category": "flow",
+      "label": "Fork",
+      "icon": "Split",
+      "gradient": "bg-gradient-to-br from-teal-500 to-cyan-700",
+      "description": "Fork into parallel branches",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "join",
+      "category": "flow",
+      "label": "Join",
+      "icon": "GitMerge",
+      "gradient": "bg-gradient-to-br from-blue-500 to-indigo-700",
+      "description": "Join parallel branches",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "decision",
+      "category": "flow",
+      "label": "Decision Table",
+      "icon": "Table2",
+      "gradient": "bg-gradient-to-br from-emerald-500 to-green-700",
+      "description": "Rule-based routing",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": true
+      },
+      "config": {
+        "required": [
+          [
+            "decisionTable",
+            "decisionTableId"
+          ]
+        ],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "wait",
+      "category": "flow",
+      "label": "Wait",
+      "icon": "Clock",
+      "gradient": "bg-gradient-to-br from-amber-500 to-amber-700",
+      "description": "Time-based delay",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "duration",
+            "durationMs"
+          ]
+        ],
+        "defaults": {
+          "duration": "1 hour"
+        }
+      }
+    },
+    {
+      "type": "end",
+      "category": "flow",
+      "label": "End",
+      "icon": "Square",
+      "gradient": "bg-gradient-to-br from-red-400 to-red-600",
+      "description": "Workflow end",
+      "handles": {
+        "in": true,
+        "out": false,
+        "else": false
+      },
+      "config": {
+        "required": [],
+        "defaults": {}
+      }
+    },
+    {
+      "type": "end_event",
+      "category": "flow",
+      "label": "End Event",
+      "icon": "Square",
+      "gradient": "bg-gradient-to-br from-red-400 to-red-600",
+      "description": "Workflow end (event); runtime alias of end, not offered in the palette",
+      "handles": {
+        "in": true,
+        "out": false,
+        "else": false
+      },
+      "config": {
+        "required": [],
+        "defaults": {}
+      },
+      "palette": false
+    },
+    {
+      "type": "user_task",
+      "category": "human",
+      "label": "User Task",
+      "icon": "ClipboardCheck",
+      "gradient": "bg-gradient-to-br from-blue-500 to-cyan-700",
+      "description": "Wait for a person to complete a step",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "assignType"
+          ],
+          [
+            "assignTarget",
+            "assignVariablePath"
+          ]
+        ],
+        "defaults": {
+          "assignType": "role"
+        }
+      }
+    },
+    {
+      "type": "assignment",
+      "category": "human",
+      "label": "Assignment",
+      "icon": "UserPlus",
+      "gradient": "bg-gradient-to-br from-blue-500 to-blue-700",
+      "description": "Manual user task",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "assignType"
+          ],
+          [
+            "assignTarget",
+            "assignVariablePath"
+          ]
+        ],
+        "defaults": {
+          "assignType": "role"
+        }
+      }
+    },
+    {
+      "type": "approval",
+      "category": "human",
+      "label": "Approval",
+      "icon": "CheckCircle",
+      "gradient": "bg-gradient-to-br from-indigo-500 to-indigo-700",
+      "description": "Review and approve",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "assignType"
+          ],
+          [
+            "assignTarget",
+            "assignVariablePath"
+          ]
+        ],
+        "defaults": {
+          "approvalType": "single",
+          "assignType": "role",
+          "slaHours": 24
+        }
+      }
+    },
+    {
+      "type": "task_pool",
+      "category": "human",
+      "label": "Task Pool",
+      "icon": "Users",
+      "gradient": "bg-gradient-to-br from-sky-500 to-sky-700",
+      "description": "Distributed task queue",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "assignType"
+          ],
+          [
+            "assignTarget"
+          ]
+        ],
+        "defaults": {
+          "assignType": "group",
+          "slaHours": 24
+        }
+      }
+    },
+    {
+      "type": "escalation",
+      "category": "human",
+      "label": "Escalation",
+      "icon": "ArrowUpCircle",
+      "gradient": "bg-gradient-to-br from-rose-500 to-rose-700",
+      "description": "Priority escalation",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "escalateTo"
+          ]
+        ],
+        "defaults": {
+          "slaHours": 4
+        }
+      }
+    },
+    {
+      "type": "ai_classify",
+      "category": "ai",
+      "label": "AI Classify",
+      "icon": "Brain",
+      "gradient": "bg-gradient-to-br from-violet-500 to-violet-700",
+      "description": "Auto-categorize data",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "aiInput",
+            "input",
+            "aiContext",
+            "context",
+            "aiPrompt",
+            "prompt"
+          ]
+        ],
+        "defaults": {
+          "aiInput": "{{previous.output}}",
+          "aiLabels": []
+        }
+      }
+    },
+    {
+      "type": "ai_extract",
+      "category": "ai",
+      "label": "AI Extract",
+      "icon": "ScanText",
+      "gradient": "bg-gradient-to-br from-fuchsia-500 to-fuchsia-700",
+      "description": "Extract structured data",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "aiExtractFields",
+            "fields",
+            "aiPrompt",
+            "prompt",
+            "instruction"
+          ],
+          [
+            "aiInput",
+            "input",
+            "inputVar",
+            "aiFileRef",
+            "source",
+            "documentUrl"
+          ]
+        ],
+        "defaults": {
+          "aiInput": "{{previous.output}}",
+          "aiExtractFields": []
+        }
+      }
+    },
+    {
+      "type": "ai_decide",
+      "category": "ai",
+      "label": "AI Decision",
+      "icon": "GitBranch",
+      "gradient": "bg-gradient-to-br from-purple-500 to-violet-700",
+      "description": "AI-powered routing",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": true
+      },
+      "config": {
+        "required": [
+          [
+            "aiPrompt",
+            "prompt",
+            "aiContext",
+            "context",
+            "instruction",
+            "aiOptions",
+            "options"
+          ]
+        ],
+        "defaults": {
+          "aiContext": "{{previous.output}}",
+          "aiOptions": []
+        }
+      }
+    },
+    {
+      "type": "ai_generate",
+      "category": "ai",
+      "label": "AI Generate",
+      "icon": "Sparkles",
+      "gradient": "bg-gradient-to-br from-pink-500 to-pink-700",
+      "description": "Generate content",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "aiPrompt",
+            "prompt",
+            "instruction",
+            "aiInput",
+            "input"
+          ]
+        ],
+        "defaults": {
+          "aiTone": "professional"
+        }
+      }
+    }
+  ]
+}

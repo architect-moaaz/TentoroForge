@@ -1,0 +1,10 @@
+{
+  "name": "@tentoroforge/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Forge catalogs \u2014 the components a workflow is built from.",
+  "scripts": {
+    "emit": "node scripts/emit.mjs"
+  }
+}

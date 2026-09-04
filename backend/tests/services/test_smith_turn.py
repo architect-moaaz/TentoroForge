@@ -230,3 +230,46 @@ def test_the_model_may_not_edit_the_selected_batch(ats):
 
 def test_an_empty_batch_asks_nothing(ats):
     assert phrase(FakeModel(), []).items == []
+
+
+# --- workflows are built from catalog nodes ---------------------------------
+
+def _workflow_proposal(steps):
+    return {"section": "workflows", "natural_key": "Approve expense",
+            "body": json.dumps({"name": "Approve expense", "trigger": {"kind": "manual"},
+                                "steps": steps})}
+
+
+def test_a_workflow_step_outside_the_catalog_is_rejected_before_anything_is_applied(ats):
+    plan = parse_turn(plan_json(proposals=[_workflow_proposal([
+        {"key": "n", "name": "Tell them", "type": "notification"},
+        {"key": "pay", "name": "Pay", "type": "action", "config": {"actionType": "db_insert", "table": "t"}},
+    ])]))
+    with pytest.raises(TurnRejected) as exc:
+        validate_turn(plan, ats)
+    msg = str(exc.value)
+    assert "Approve expense/n: type 'notification' is not a catalog node" in msg
+    assert "pay: config needs one of: values" in msg
+    assert exc.value.catalogs == ("workflow_nodes",)
+
+
+def test_a_rejected_workflow_plan_is_re_asked_with_the_node_catalog_in_hand(ats):
+    """The catalog is referred to when it is required: the first ask never
+    carries it, the retry after a workflow refusal does, and a plan refused
+    for any other reason does not."""
+    bad = plan_json(proposals=[_workflow_proposal([{"key": "n", "name": "Tell", "type": "notification"}])])
+    good = plan_json(proposals=[_workflow_proposal([
+        {"key": "n", "name": "Tell", "type": "action",
+         "config": {"actionType": "send_notification", "toRole": "manager", "message": "Expense filed"}},
+    ])])
+    model = FakeModel(bad, good)
+    plan = interpret(model, resolve(ats, "notify managers of expenses"), ats)
+    assert plan.proposals[0].body["steps"][0]["type"] == "action"
+    first, retry = (u for _s, u in model.calls)
+    assert "workflow node catalog" not in first
+    assert "workflow node catalog" in retry and "send_notification" in retry
+    assert "*table" in retry  # required keys are stated
+
+    other = FakeModel(plan_json(anchors=["NOPE-001"]), plan_json())
+    interpret(other, resolve(ats, "hello"), ats)
+    assert "workflow node catalog" not in other.calls[1][1]

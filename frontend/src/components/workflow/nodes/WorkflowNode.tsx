@@ -30,7 +30,9 @@ import {
   Hash,
   FileText,
   Plug,
+  ClipboardCheck,
 } from "lucide-react";
+import { visualFor } from "@/catalog/workflowNodes";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow";
 
 // ---------------------------------------------------------------------------
@@ -40,86 +42,22 @@ const ICONS: Record<string, typeof Zap> = {
   Zap, Play, GitBranch, Clock, Square, UserPlus, CheckCircle, Users,
   ArrowUpCircle, Brain, ScanText, Sparkles, Table2, Hand, Webhook,
   Calendar, Database, Globe, Mail, Bell, Split, GitMerge, Hash, FileText, Plug,
+  ClipboardCheck,
 };
 
 // ---------------------------------------------------------------------------
-// Gradient + icon mapping — keyed by "nodeType" or "nodeType:subType"
-// Each variant gets its own unique gradient color.
+// Visuals — icon + gradient come from the workflow node catalog, so the node
+// on the canvas, the palette entry it was dragged from and the node the agent
+// authored are one definition.
 // ---------------------------------------------------------------------------
 interface NodeVisual {
   gradient: string;
   icon: typeof Zap;
 }
 
-const NODE_VISUALS: Record<string, NodeVisual> = {
-  // Triggers (keyed by trigger config.type)
-  "trigger:manual":    { gradient: "bg-gradient-to-br from-orange-400 to-orange-600", icon: Hand },
-  "trigger:webhook":   { gradient: "bg-gradient-to-br from-purple-400 to-purple-600", icon: Webhook },
-  "trigger:schedule":  { gradient: "bg-gradient-to-br from-sky-400 to-sky-600",       icon: Calendar },
-  "trigger:api_event": { gradient: "bg-gradient-to-br from-rose-400 to-rose-600",     icon: Zap },
-  "trigger:db_change": { gradient: "bg-gradient-to-br from-amber-400 to-amber-600",   icon: Database },
-  // fallback trigger
-  trigger:             { gradient: "bg-gradient-to-br from-orange-400 to-orange-600",  icon: Zap },
-
-  // Actions (keyed by config.actionType)
-  "action:custom":            { gradient: "bg-gradient-to-br from-teal-400 to-teal-600",    icon: Play },
-  "action:db_query":          { gradient: "bg-gradient-to-br from-cyan-400 to-cyan-600",    icon: Database },
-  "action:http_call":         { gradient: "bg-gradient-to-br from-indigo-400 to-indigo-600", icon: Globe },
-  "action:send_email":        { gradient: "bg-gradient-to-br from-blue-400 to-blue-600",    icon: Mail },
-  "action:send_notification": { gradient: "bg-gradient-to-br from-orange-400 to-amber-500", icon: Bell },
-  "action:db_insert":         { gradient: "bg-gradient-to-br from-green-400 to-green-600",  icon: Database },
-  "action:db_update":         { gradient: "bg-gradient-to-br from-lime-400 to-lime-600",    icon: Database },
-  "action:db_delete":         { gradient: "bg-gradient-to-br from-red-400 to-rose-600",     icon: Database },
-  "action:set_variable":      { gradient: "bg-gradient-to-br from-slate-400 to-slate-600",  icon: Hash },
-  "action:transform":         { gradient: "bg-gradient-to-br from-stone-400 to-stone-600",  icon: Hash },
-  "action:generate_document": { gradient: "bg-gradient-to-br from-emerald-400 to-teal-600", icon: FileText },
-  "action:mcp_tool_call":     { gradient: "bg-gradient-to-br from-violet-400 to-indigo-600",  icon: Plug },
-  mcp_tool_call:              { gradient: "bg-gradient-to-br from-violet-400 to-indigo-600",  icon: Plug },
-  // fallback action
-  action:                     { gradient: "bg-gradient-to-br from-teal-400 to-teal-600",    icon: Play },
-
-  // Flow control
-  condition: { gradient: "bg-gradient-to-br from-purple-500 to-purple-700",  icon: GitBranch },
-  decision:  { gradient: "bg-gradient-to-br from-emerald-500 to-green-700",  icon: Table2 },
-  wait:      { gradient: "bg-gradient-to-br from-amber-500 to-amber-700",    icon: Clock },
-  end:       { gradient: "bg-gradient-to-br from-red-400 to-red-600",        icon: Square },
-  end_event: { gradient: "bg-gradient-to-br from-red-400 to-red-600",        icon: Square },
-
-  // Gateways / parallel flow
-  exclusive_gateway: { gradient: "bg-gradient-to-br from-purple-500 to-fuchsia-700", icon: GitBranch },
-  parallel_gateway:  { gradient: "bg-gradient-to-br from-cyan-500 to-blue-700",      icon: Split },
-  fork:              { gradient: "bg-gradient-to-br from-teal-500 to-cyan-700",      icon: Split },
-  join:              { gradient: "bg-gradient-to-br from-blue-500 to-indigo-700",    icon: GitMerge },
-
-  // Human-in-loop
-  assignment: { gradient: "bg-gradient-to-br from-blue-500 to-blue-700",   icon: UserPlus },
-  user_task:  { gradient: "bg-gradient-to-br from-blue-500 to-blue-700",   icon: UserPlus },
-  approval:   { gradient: "bg-gradient-to-br from-indigo-500 to-indigo-700", icon: CheckCircle },
-  task_pool:  { gradient: "bg-gradient-to-br from-sky-500 to-sky-700",     icon: Users },
-  escalation: { gradient: "bg-gradient-to-br from-rose-500 to-rose-700",   icon: ArrowUpCircle },
-
-  // AI nodes
-  ai_classify: { gradient: "bg-gradient-to-br from-violet-500 to-violet-700",  icon: Brain },
-  ai_extract:  { gradient: "bg-gradient-to-br from-fuchsia-500 to-fuchsia-700", icon: ScanText },
-  ai_decide:   { gradient: "bg-gradient-to-br from-purple-500 to-violet-700",  icon: GitBranch },
-  ai_generate: { gradient: "bg-gradient-to-br from-pink-500 to-pink-700",      icon: Sparkles },
-};
-
 function getVisual(nodeType: WorkflowNodeType, config: WorkflowNodeData["config"] | undefined): NodeVisual {
-  // Try specific variant first
-  if (nodeType === "trigger" && config?.type) {
-    const key = `trigger:${config.type}`;
-    if (NODE_VISUALS[key]) return NODE_VISUALS[key];
-  }
-  if (nodeType === "action" && config?.actionType) {
-    const key = `action:${config.actionType}`;
-    if (NODE_VISUALS[key]) return NODE_VISUALS[key];
-    // Legacy form: an `action` node whose actionType is itself a node type (e.g.
-    // ai_generate) — use that top-level visual so older workflows show the AI/etc.
-    // icon, not the generic action fallback.
-    if (NODE_VISUALS[config.actionType]) return NODE_VISUALS[config.actionType];
-  }
-  return NODE_VISUALS[nodeType] || NODE_VISUALS.action;
+  const { icon, gradient } = visualFor(nodeType, config as Record<string, unknown> | undefined);
+  return { gradient, icon: ICONS[icon] || Play };
 }
 
 // ---------------------------------------------------------------------------

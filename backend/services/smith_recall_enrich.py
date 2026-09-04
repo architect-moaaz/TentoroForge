@@ -150,34 +150,20 @@ def _data_engine_surface() -> str:
 # --------------------------------------------------------------------------- #
 
 def _workflow_node_catalog() -> str:
-    """The action-type set the runtime workflow engine recognizes.
-    Sourced from the runtime template's `registerDefaultActions()` —
-    but kept static here to avoid parsing TypeScript. Update when
-    the runtime action list grows."""
+    """The workflow node catalog — the nodes the editor offers and the engine
+    runs, with what each needs configured. Read from the catalog, so Smith
+    proposes exactly the nodes a workflow can be built from."""
+    from services.catalog import workflow_nodes
+
     return "\n".join([
-        "WORKFLOW NODE CATALOG — action types the runtime engine understands:",
-        "  trigger        config: { triggerType: 'manual'|'db_change'|'schedule',",
-        "                            inputs: [{name, type, required?}] }",
-        "  db_insert      config: { table, values: {col: '{{binding}}'} }",
-        "  db_update      config: { table, where: {col: '{{binding}}'},",
-        "                            values: {col: '{{binding}}'} }",
-        "  db_delete      config: { table, where: {col: '{{binding}}'} }",
-        "  db_query       config: { table, where?: {col: '{{binding}}'} }",
-        "                          → outputs: rows",
-        "  ai_generate    config: { prompt, output? }         → outputs: text",
-        "  ai_classify    config: { prompt, options: [str] }  → outputs: choice",
-        "  ai_extract     config: { source, schema: {...} }   → outputs: extracted",
-        "  ai_decide      config: { prompt, options }         → outputs: branch",
-        "  send_notification config: { user, message, kind? }",
-        "  send_email     config: { to, subject, body }",
-        "  task           config: { title, form: {fields}, assignee }",
-        "                        → creates a task row, waits for form submit",
-        "  set_variable   config: { variableName, variableValue }",
-        "  transform      config: { transformExpression }     → outputs: value",
-        "  end            (no config — terminates workflow)",
+        "WORKFLOW NODE CATALOG — the nodes a workflow is built from; every step is one:",
+        workflow_nodes().digest(),
         "",
-        "CONNECTIVITY: every node has `next: <step_id>` OR (gateway) `branches:",
-        "  {label: <step_id>}`. Exactly one trigger + one end per workflow.",
+        "CONNECTIVITY: every step lists the keys it hands to in `next`; a branching",
+        "  node (condition / exclusive_gateway / decision / ai_decide) lists its",
+        "  then-branch first and its else-branch second. The workflow's trigger is",
+        "  the start; an `end` step is the terminal. A user_task is a task a person",
+        "  completes.",
     ])
 
 

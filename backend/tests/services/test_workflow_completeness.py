@@ -34,3 +34,18 @@ def test_repairs_malformed_and_creates_missing(tmp_path):
     # missing plan workflow created (Good already present, so not duplicated)
     assert res["created"] == ["NewFlow.json"]
     assert is_valid_workflow(json.loads((wf / "NewFlow.json").read_text()))
+
+
+def test_stub_and_inserted_trigger_carry_the_editor_type():
+    from services.workflow_completeness import minimal_workflow, salvage_workflow
+
+    stub = minimal_workflow("x")["definition"]["nodes"]
+    assert [(n["type"], n["data"]["nodeType"]) for n in stub] == [
+        ("trigger", "trigger"), ("end", "end")]
+    assert [n["position"]["y"] for n in stub] == [0, 120]
+
+    repaired, _losses = salvage_workflow({"definition": {
+        "nodes": [{"id": "a", "type": "action", "data": {"label": "A"}}],
+        "edges": [], "trigger": {"type": "manual"}}})
+    trig = repaired["definition"]["nodes"][0]
+    assert trig["type"] == "trigger" and trig["data"]["nodeType"] == "trigger"
