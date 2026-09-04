@@ -203,3 +203,33 @@ describe("end-to-end — compile then actually evaluate (the playground path)", 
     expect(run(conditionToFeel(null), { amount: 1 })).toBe(true);
   });
 });
+
+describe("conditionToFeel: the acting user is a reference, not a string", () => {
+  // `ownerId = "user.id"` compiles cleanly and then matches nothing, forever —
+  // the failure mode a row-access rule cannot afford.
+  it("passes user.<field> through bare", () => {
+    expect(conditionToFeel(node("ownerId", "equals", "user.id"))).toBe(
+      "ownerId = user.id",
+    );
+  });
+
+  it("passes it through on a string-typed field too", () => {
+    expect(
+      conditionToFeel(node("ownerId", "equals", "user.id"), { ownerId: "string" }),
+    ).toBe("ownerId = user.id");
+  });
+
+  it("still quotes anything else that contains a dot", () => {
+    expect(conditionToFeel(node("host", "equals", "example.com"))).toBe(
+      'host = "example.com"',
+    );
+  });
+
+  it("does not pass through a reference to another table", () => {
+    // A row rule compiles to a predicate over one table; `order.total` would
+    // be refused at read time, which is far later than here.
+    expect(conditionToFeel(node("total", "equals", "order.total"))).toBe(
+      'total = "order.total"',
+    );
+  });
+});

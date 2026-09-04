@@ -66,7 +66,27 @@ function feelValueTyped(raw: string, cat: FieldCategory): string {
   }
 }
 
+/**
+ * `user.id` is the acting user, not the eight-character string "user.id".
+ *
+ * Every other value the builder collects is a literal, so the encoders quote
+ * it. That made the one comparison an access rule most needs — this row
+ * belongs to me — impossible to express: it compiled to
+ * `ownerId = "user.id"`, which matches nothing, silently, forever.
+ *
+ * Emitted bare so it stays an identifier. The FEEL evaluator already resolves
+ * dotted names against the context it is given, and both consumers put the
+ * acting user there: evaluateRuleSet passes `{...entity, user}`, and the data
+ * engine's row-access compiler reads `user.<field>` off the session. Only the
+ * `user.` prefix is passed through — a row rule compiles to a predicate over
+ * ONE table, so letting `order.total` through here would move a failure the
+ * author could see now to a read that returns nothing later.
+ */
+const USER_REF = /^user\.[A-Za-z_][A-Za-z0-9_]*$/;
+
 function encodeValue(raw: string, cat?: FieldCategory): string {
+  const v = (raw ?? "").trim();
+  if (USER_REF.test(v)) return v;
   return cat ? feelValueTyped(raw, cat) : feelValueAuto(raw);
 }
 
