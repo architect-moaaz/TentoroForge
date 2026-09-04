@@ -1369,19 +1369,24 @@ def build_prompt(
                 "nobody drew, and this design is the specification."
             )
         elif doc.get("designSources"):
+            # The frames arrive as slots now rather than as a list to be
+            # matched against. Asking this agent to NOTICE that one of thirty
+            # invented pages happened to be a screen somebody drew was the
+            # discretionary step: nothing required it to notice, and a drawn
+            # screen quietly composed from components looks exactly like a
+            # page nobody drew. A slot carrying its own `nodeId` is answered
+            # or it is missing, and missing is visible.
             user += (
-                "\n\nA DESIGN IS CONNECTED. `designSources` above lists its "
-                "frames with their `nodeId` and `name`. Where a page you are "
-                "authoring IS one of those frames, set that page's "
-                "`figmaFrame` to the frame's `nodeId` \u2014 the screen is then "
-                "built from the design itself rather than composed from "
-                "components.\n\n"
-                "Match on what the frame IS, not on wording: a frame named "
-                "\"Stock list\" is the items list page. Where nothing in the "
-                "design corresponds, OMIT `figmaFrame` entirely \u2014 that page "
-                "is composed instead, which is a good outcome and not a "
-                "failure. Never guess an id, and never give one frame to two "
-                "pages."
+                "\n\nA DESIGN IS CONNECTED AS A REFERENCE. Its frames are the "
+                "first slots above, each carrying the `figmaFrame` it must be "
+                "built from. Every page answering one of those slots must "
+                "carry that `nodeId` \u2014 it is how the screen is built from "
+                "the drawing rather than composed from components, and it is "
+                "the part of this application somebody actually drew.\n\n"
+                "Pages answering the entity features OMIT `figmaFrame` "
+                "entirely. Those are composed, which is the good outcome and "
+                "not a failure \u2014 the design does not show them. Never guess "
+                "an id, and never give one frame to two pages."
             )
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback

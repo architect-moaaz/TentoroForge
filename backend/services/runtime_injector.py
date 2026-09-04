@@ -38,6 +38,14 @@ const config: Config = {
   darkMode: ["class"],
   content: [
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
+    // THE PAGES ARE JSON, AND THE JIT ONLY COMPILES WHAT IT READS.
+    // Every className a page uses lives in src/schemas/*.json, not in any
+    // .tsx file. Without this glob those classes reach the DOM with no rule
+    // behind them: a Figma page's `inset-[31.04%_88.36%_55.04%_3.18%]`
+    // becomes an absolutely-positioned div with no offsets, and a frame of
+    // thirty cards renders blank. Measured on a real app — 1074 CSS rules
+    // compiled and not one arbitrary `inset-[…]` among them.
+    "./src/schemas/**/*.json",
     "./node_modules/@tentoroforge/library/**/*.{js,jsx,ts,tsx}",
     "./node_modules/@tentoroforge/renderer/**/*.{js,jsx,ts,tsx}",
     "./node_modules/@tentoroforge/engine/**/*.{js,jsx,ts,tsx}",
@@ -1919,8 +1927,14 @@ say "${GREEN}🚀 Starting generated app...${NC}"
 # first version of this produced `app_6vaj13oh_`. The sanitise stays for the
 # uuid-named directories that predate short_id paths.
 DB_NAME="app_$(printf '%s' "$(basename "$(dirname "$PWD")")" | tr -c 'a-z0-9' '_')"
-# Deliberately not read back from .env.local: assembly writes `/app` there for
-# every application, which is the value that put two apps in one database.
+# Derived here as well as written by assembly, and the two MUST agree:
+# `assembly.database_name` now computes this same `app_<sanitised id>` string
+# into .env.local. It used to write `/app` for every application, which is the
+# value that put two apps in one database; deriving it from the directory was
+# the workaround, and it protected only the apps started by this script — not
+# `npm run dev`, drizzle-kit, the verify compose file or a deploy. Keeping
+# both means a project assembled before that fix still gets its own database
+# the moment it is started this way.
 
 # Pick a free host port for Postgres — every generated app otherwise hardcodes
 # 5432 and collides the moment a second app is already running.

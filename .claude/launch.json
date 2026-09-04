@@ -58,6 +58,33 @@
       "cwd": "frontend",
       "port": 6501,
       "autoPort": false
+    },
+    {
+      "name": "figma-dash",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6514"
+      ],
+      "cwd": "output/figma-dash/app",
+      "port": 6514,
+      "autoPort": false
+    },
+    {
+      "name": "figma-spec",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6515"
+      ],
+      "cwd": "output/wzja848q/app",
+      "port": 6515
     }
   ]
 }

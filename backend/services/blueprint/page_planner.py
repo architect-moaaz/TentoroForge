@@ -1323,11 +1323,8 @@ ENTITY_SLOTS = (
 )
 
 
-def specification_frames(doc: dict) -> list[dict]:
-    """Frames from every design the user connected as the specification.
-
-    Empty when none is — the normal case, which keeps `page_slots` answering
-    entity by entity exactly as before.
+def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
+    """Screen-like frames from the sources held one way or the other.
 
     Only frames that look like screens: `looksLikeScreen` is recorded rather
     than enforced at extraction (§49), and a component or a colour swatch is
@@ -1335,7 +1332,8 @@ def specification_frames(doc: dict) -> list[dict]:
     """
     out: list[dict] = []
     for source in doc.get("designSources") or []:
-        if str(source.get("treatAs") or "evidence") != "specification":
+        is_spec = str(source.get("treatAs") or "evidence") == "specification"
+        if is_spec is not specification:
             continue
         for frame in source.get("frames") or []:
             if frame.get("looksLikeScreen", True) and frame.get("nodeId"):
@@ -1343,7 +1341,41 @@ def specification_frames(doc: dict) -> list[dict]:
     return out
 
 
-def frame_slots(frames: list[dict]) -> list[dict]:
+def specification_frames(doc: dict) -> list[dict]:
+    """Frames from every design the user connected as the specification.
+
+    Empty when none is — the normal case, which keeps `page_slots` answering
+    entity by entity exactly as before.
+    """
+    return _screen_frames(doc, specification=True)
+
+
+def reference_frames(doc: dict) -> list[dict]:
+    """Frames from every design connected as a reference rather than the spec.
+
+    THESE ARE SLOTS TOO, AND THAT IS THE WHOLE POINT OF THIS FUNCTION.
+
+    A reference does not decide the page SET — the data model does, and one
+    dashboard legitimately implying thirteen pages is the outcome §48 asks for.
+    But it does decide those pages it drew. A frame somebody drew is a screen
+    somebody drew, whichever way the file is held, and the common case is a
+    design that covers only the interesting part of an application: the part
+    that must come out as drawn, with the rest generated around it.
+
+    That guarantee did not exist. Frames were absent from the slot list under a
+    reference, and `figmaFrame` was attached afterwards only if `page_contracts`
+    happened to notice the correspondence while it was authoring thirty other
+    pages. Nothing required it to notice and nothing reported when it did not,
+    so the failure was a drawn screen quietly composed from components —
+    buildable, and not the thing that was drawn.
+
+    Naming the frames as slots is the same move `frame_slots` already argues
+    for: an enumeration somebody connected on purpose is not a heuristic.
+    """
+    return _screen_frames(doc, specification=False)
+
+
+def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
     """One slot per designed screen: the design IS the answer space.
 
     THE QUESTION NARROWS; THE ANSWER IS NOT FILTERED. `page_slots` says of its
@@ -1357,6 +1389,12 @@ def frame_slots(frames: list[dict]) -> list[dict]:
     from entities — it replaces the question. `page_contracts` is asked which
     route each frame is, rather than which of thirty entity features to keep.
     """
+    why = ("Give this frame a route and a pattern. It is a screen the user "
+           "drew, so it is not declinable.")
+    if not sole:
+        why += (" The entity features below are built around it, not instead "
+                "of it.")
+
     slots: list[dict] = []
     for frame in frames:
         node_id = frame["nodeId"]
@@ -1368,8 +1406,7 @@ def frame_slots(frames: list[dict]) -> list[dict]:
             "name": name,
             "pages": [{"slot": "screen",
                        "prompt": "The screen drawn as \u201c%s\u201d." % name}],
-            "prompt": ("Give this frame a route and a pattern. It is a screen "
-                       "the user drew, so it is not declinable."),
+            "prompt": why,
         })
     return slots
 
@@ -1439,7 +1476,28 @@ def page_slots(doc: dict) -> list[dict]:
                 for slot, pattern, why in ENTITY_SLOTS
             ],
         })
-    return slots
+
+    # THE DRAWN SCREENS LEAD, AND THEY ARE NOT ENTITY FEATURES.
+    # A reference does not replace this question — every entity slot above
+    # survives — but the screens it drew are already answered, so they are
+    # stated rather than left to be noticed. First in the list because they
+    # are the fixed points the rest is arranged around.
+    return frame_slots(reference_frames(doc), sole=False) + slots
+
+
+_DRAWN_PREAMBLE = (
+    "SOME OF THESE SCREENS WERE DRAWN. A design is connected as a reference, "
+    "and the slots at the top of the list are its frames, each carrying the "
+    "`figmaFrame` it must be built from. They are not declinable and they are "
+    "not candidates: every one of them is a page, and every one keeps the "
+    "`figmaFrame` its slot carries \u2014 that is how a screen gets built from "
+    "the drawing rather than composed from components.\n\n"
+    "A design usually covers only the interesting part of an application. The "
+    "entity features that follow are the rest, built AROUND those screens. "
+    "Where an entity feature would BE one of them, answer it with that "
+    "screen\u2019s page instead of authoring a second page at the same route: "
+    "the drawn one is the one that exists.\n\n"
+)
 
 
 def page_slot_prompt(doc: dict) -> str:
@@ -1474,6 +1532,8 @@ def page_slot_prompt(doc: dict) -> str:
         )
 
     return (
+        _DRAWN_PREAMBLE if reference_frames(doc) else ""
+    ) + (
         "Fill in this application's page set feature by feature. A feature is "
         "one entity's pages: fill it completely or decline it completely.\n\n"
         "Filling it completely matters more than filling many. A list with no "

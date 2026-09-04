@@ -122,16 +122,52 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
 
     from services.figma_mcp_pipeline import build_schema_from_jsx
 
+    # THE FRAME'S OWN SIZE, WHICH THE EXTRACTION ALREADY RECORDED. Without it
+    # the root's `size-full` resolves against the viewport, and every child
+    # positioned against a 3902px-wide drawing lands somewhere else — which is
+    # how a thirty-card dashboard rendered three cards and blank space.
+    try:
+        cw = float(getattr(screen, "width", 0) or 0)
+        ch = float(getattr(screen, "height", 0) or 0)
+    except (TypeError, ValueError):
+        cw = ch = 0.0
+    canvas = (cw, ch) if cw > 0 and ch > 0 else None
+    if canvas is None:
+        logger.info("[figma] %s has no recorded frame size — composing flowed",
+                    page.get("id"))
+
     try:
         schema, assets = _run(build_schema_from_jsx(
             code,
             str(app_root),
             route=str(page.get("route") or "") or None,
             title=str(page.get("name") or "") or None,
+            canvas=canvas,
         ))
     except Exception as exc:  # noqa: BLE001 — one frame, never the run
         logger.warning("[figma] %s: %s", page.get("id"), exc)
         return None
+
+    # A PICTURE OF A CHART BECOMES A CHART, BEFORE PROVENANCE IS STRIPPED.
+    #
+    # `realize` finds its regions by `_figmaNodeId`, which the block below
+    # removes — so this runs first or it finds nothing. Everything about it is
+    # optional: no gateway, no classification, no confident binding all leave
+    # the tree exactly as composed, which is the page that already renders.
+    live_sources: list[dict] = []
+    try:
+        classified = _classify_regions(svc, page, code, screen, app_root)
+        if classified:
+            from services.figma import realize as _realize
+
+            schema["children"][0], live_sources, applied = _realize.realize(
+                schema["children"][0], classified)
+            if applied:
+                logger.info("[figma] %s: %d region(s) now live", page.get("id"),
+                            len(applied))
+    except Exception as exc:  # noqa: BLE001 — enrichment, never the page
+        logger.warning("[figma] region pass failed for %s: %s",
+                       page.get("id"), exc)
 
     # WHAT THE RENDERER WILL NOT RENDER DOES NOT BELONG IN THE BLUEPRINT.
     #
@@ -162,8 +198,59 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     page.get("id"))
         return None
 
-    return {
+    out = {
         "root": root,
-        "dataSources": list(schema.get("dataSources") or []),
+        "dataSources": list(schema.get("dataSources") or []) + live_sources,
         "assets": dict(assets or {}),
     }
+    if schema.get("_figmaCanvas"):
+        out["canvas"] = schema["_figmaCanvas"]
+    return out
+
+
+def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
+                      app_root: str | Path) -> list[dict]:
+    """What the frame's rectangles are, looked at rather than guessed.
+
+    Kept in one guarded place because every part of it is allowed to be
+    unavailable: a project with no Figma credential in its integrations, a
+    frame with no recorded size, an endpoint that is not running. Each returns
+    [] and the page composes from the drawing exactly as before.
+    """
+    from services.figma.credentials import EnvSecretResolver, FigmaCredential
+    from services.figma.gateway import FigmaGateway
+    from services.figma.integrations import (
+        MappingResolver, config_for, endpoint_from,
+    )
+    from services.figma.regions import candidates
+    from services.figma import vision
+
+    width = float(getattr(screen, "width", 0) or 0)
+    height = float(getattr(screen, "height", 0) or 0)
+    regions = candidates(code, width, height)
+    if not regions:
+        return []
+
+    file_key = ""
+    for source in svc.doc.get("designSources") or []:
+        file_key = str(source.get("fileKey") or source.get("file_key") or "")
+        if file_key:
+            break
+    if not file_key:
+        return []
+
+    values = config_for(svc.output_dir)
+    ref_name = "FIGMA_TOKEN"
+    resolver = (MappingResolver(values) if values.get(ref_name)
+                else EnvSecretResolver())
+    gateway = FigmaGateway(credential=FigmaCredential(ref=ref_name),
+                           resolver=resolver, endpoint=endpoint_from(values))
+
+    shots = _run(vision.render_regions(gateway, file_key, regions, app_root))
+    if not shots:
+        return []
+
+    from services.blueprint.executors import AnthropicModel
+
+    entities = (svc.doc.get("data") or {}).get("entities") or []
+    return vision.classify(AnthropicModel(max_tokens=8000), shots, entities)

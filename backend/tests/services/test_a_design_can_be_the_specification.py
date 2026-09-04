@@ -54,9 +54,86 @@ def test_a_design_is_evidence_unless_told_otherwise():
     assert specification_frames(_doc()) == []
 
 
-def test_evidence_still_asks_entity_by_entity():
-    """The thirteen-page outcome is correct for evidence and must survive."""
-    assert len(page_slots(_doc())) == len(page_slots({**ENTITIES}))
+def test_evidence_still_asks_every_entity_feature():
+    """The thirteen-page outcome is correct for evidence and must survive.
+
+    Stated as "every entity slot survives" rather than as an equal count: a
+    reference now contributes its drawn screens as slots too, so the list is
+    LONGER than the entity-only list. What must not change is that nothing was
+    taken away — a reference does not narrow the page set, which is the whole
+    distinction from a specification.
+    """
+    entity_only = page_slots({**ENTITIES})
+    with_design = page_slots(_doc())
+
+    assert len(with_design) > len(entity_only)
+    for slot in entity_only:
+        assert slot in with_design
+
+
+# ------------------------------------------- a reference still drew its screens
+
+def test_a_reference_contributes_its_frames_as_slots():
+    """The gap this closes: under a reference the frames were absent from the
+    slot list entirely, and `figmaFrame` was attached afterwards only if
+    `page_contracts` noticed the correspondence while authoring thirty other
+    pages. Nothing required it to notice, and a drawn screen quietly composed
+    from components is indistinguishable from a page nobody drew."""
+    from services.blueprint.page_planner import reference_frames
+
+    assert {f["nodeId"] for f in reference_frames(_doc())} == {"1:2", "1:9"}
+    drawn = [s for s in page_slots(_doc()) if s.get("figmaFrame")]
+    assert {s["figmaFrame"] for s in drawn} == {"1:2", "1:9"}
+
+
+def test_the_drawn_screens_lead_the_list():
+    """They are the fixed points the rest is arranged around, so they are read
+    before the features that must avoid colliding with them."""
+    slots = page_slots(_doc())
+    assert [bool(s.get("figmaFrame")) for s in slots[:2]] == [True, True]
+    assert not any(s.get("figmaFrame") for s in slots[2:])
+
+
+def test_a_reference_frame_that_is_not_a_screen_is_not_a_slot():
+    """Same §49 reading as the specification path: a colour swatch is not a
+    page, however the file is held."""
+    frames = FRAMES + [{"nodeId": "1:30", "name": "Swatches",
+                        "looksLikeScreen": False}]
+    drawn = [s for s in page_slots(_doc(None, frames)) if s.get("figmaFrame")]
+    assert len(drawn) == 2
+
+
+def test_a_specification_does_not_also_get_reference_slots():
+    """The two paths are exclusive: a specification REPLACES the question, so
+    its frames must not arrive twice or drag entity features back in."""
+    slots = page_slots(_doc("specification"))
+    assert len(slots) == 2
+    assert all(s.get("figmaFrame") for s in slots)
+
+
+def test_the_reference_prompt_says_the_drawn_slots_keep_their_frame():
+    text = page_slot_prompt(_doc())
+    assert "SOME OF THESE SCREENS WERE DRAWN" in text
+    assert "not declinable" in text
+    # and that the rest is built around them, not instead of them
+    assert "AROUND" in text
+    # the collision the seeded slots create, answered in the question
+    assert "second page at the same route" in text
+
+
+def test_no_design_gets_no_preamble():
+    """A brief-only application must read exactly as it did."""
+    assert "WERE DRAWN" not in page_slot_prompt({**ENTITIES})
+
+
+def test_the_page_contracts_prompt_requires_the_frame_on_those_slots():
+    """The executor's reference branch used to ask it to MATCH frames against
+    pages it invented. It now points at the slots, which are answered or
+    visibly missing."""
+    user = build_prompt(_doc(), "page_contracts")[1]
+    assert "A DESIGN IS CONNECTED AS A REFERENCE" in user
+    assert "must carry that `nodeId`" in user
+    assert "never give one frame to two pages" in user
 
 
 def test_no_design_at_all_is_unaffected():

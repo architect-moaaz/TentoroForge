@@ -337,13 +337,61 @@ def vendor_engines(app_root: str | Path) -> list[str]:
         if vendor.exists() else []
 
 
-DEFAULT_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/app"
+def database_name(project_short_id: str) -> str:
+    """The database this project owns, and no other project's.
+
+    ONE NAME FOR EVERY APPLICATION IS THE BUG THIS REPLACES. A constant
+    `postgres://…/app` was written into every generated `.env.local`, so every
+    application that read that file — `npm run dev`, drizzle-kit, the verify
+    compose file, a deploy — opened the SAME database. A real run found a
+    Figma-specification app reading an expense tracker's `users` table: the
+    column its schema expected did not exist, `authorize()` threw, and the
+    login page reported "Invalid email or password". A wrong database wearing
+    a wrong-password mask.
+
+    `run.sh` already derived a per-project name and said why it refused to
+    trust the file::
+
+        # Deliberately not read back from .env.local: assembly writes `/app`
+        # there for every application, which is the value that put two apps in
+        # one database.
+
+    That is a workaround living in one of the several things that start an
+    app, and it only protects the one. The name belongs where the file is
+    written, so every reader of the file gets it. THE STRING MUST MATCH WHAT
+    THE SCRIPT COMPUTES — `app_` plus the sanitised directory name — or the
+    two paths would disagree and a script-started app would migrate one
+    database while `npm run dev` read another.
+
+    Postgres takes neither a leading digit nor a dash, which is what the
+    prefix and the substitution are for; a short_id is already eight lowercase
+    alphanumerics, so this only bites the uuid-named directories that predate
+    short_id paths.
+    """
+    ident = re.sub(r"[^a-z0-9]", "_", str(project_short_id or "forge").lower())
+    return f"app_{ident}"
+
+
+def default_database_url(project_short_id: str) -> str:
+    """The connection string for that database, on the conventional dev port.
+
+    The port is a starting point, not a promise: `run.sh` picks a free one and
+    rewrites both env files, because every generated app otherwise hardcodes
+    5432 and collides with the second app to start.
+    """
+    return (f"postgres://postgres:postgres@localhost:5432/"
+            f"{database_name(project_short_id)}")
 
 
 def assemble(doc: dict, app_root: str | Path, *,
              project_short_id: str = "forge",
-             database_url: str = DEFAULT_DATABASE_URL) -> dict[str, Any]:
+             database_url: str | None = None) -> dict[str, Any]:
     """Scaffold + vendored engines + the config the toolchain needs."""
+    # Derived rather than defaulted: the project's identity is already a
+    # parameter of this call, and a module-level constant is how every
+    # application came to share one database.
+    database_url = database_url or default_database_url(project_short_id)
+
     out = Path(app_root)
     scaffold = copy_scaffold(out, project_short_id=project_short_id)
     edge = interpolate_edge_pages(out, doc)
