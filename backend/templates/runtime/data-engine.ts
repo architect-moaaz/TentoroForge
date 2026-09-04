@@ -29,6 +29,14 @@ import { encryptSensitive, decryptSensitive, mask, looksMasked } from "./sensiti
 // each entity carries. Empty for apps with no `search: true` columns, so
 // resolveSearch fast-paths to [] on the miss.
 import { searchableColumnsFor } from "./searchable-columns";
+// What to do with a column that names the acting user. Projected from the
+// Blueprint's `security.ownershipRules`: a kind:"scope" column decides who may
+// reach the row, a kind:"attribution" column only records who acted. Both are
+// filled from the session on create; only the first filters. An entity the
+// manifest does not mention is unscoped, because the Blueprint declared no
+// rule for it — empty for apps that authorise by role alone, so
+// scopeConditions() fast-paths to [].
+import { ownershipRulesFor, type OwnershipRule } from "./ownership-rules";
 
 /**
  * FK-label expansion. A list row only carries the FK id (a UUID), so a table that
@@ -96,7 +104,10 @@ async function attachFkLabels(entityName: string, entity: any, rows: any[]): Pro
 
 // Types
 export interface DataEngineContext {
-  user?: { id: string; role?: string; email?: string };
+  /** The acting user. `workspaceId` is read by a scope:"workspace" ownership
+   *  rule; a session that does not carry one cannot reach workspace-scoped
+   *  rows, which is the safe direction to fail. */
+  user?: { id: string; role?: string; email?: string; workspaceId?: string };
   /** Slice-4: original (plaintext) column names the CALLER is explicitly
    *  asking to see unmasked. The route parses `?unmask=col1&unmask=col2`
    *  and passes them here. The read path only honours the request when
@@ -220,6 +231,172 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
     delete (record as any)[encKey];
   }
   return record;
+}
+
+
+// ─── Row-level scoping ───────────────────────────────────────────────────
+
+/** The actor value a rule compares against, or undefined when we have none. */
+function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
+  const v = rule.scope === "workspace"
+    ? (ctx.user as any)?.workspaceId
+    : ctx.user?.id;
+  return v === undefined || v === null || v === "" ? undefined : v;
+}
+
+/**
+ * The WHERE conditions that limit `entityName` to the rows this actor may reach.
+ *
+ * Every read and every write funnels through this engine: the catch-all API
+ * route calls it, and so does the server render, directly, without passing
+ * through that route. That is why the predicate is built here rather than in a
+ * route handler — a control on the route would leave every server-rendered
+ * list, KPI tile and chart unscoped, which is a longer way of saying unscoped.
+ *
+ * Only kind:"scope" rules produce a predicate. A kind:"attribution" column
+ * records WHO ACTED, not who may look: an ATS fills `createdByUserId` on every
+ * candidate and still means every recruiter to see every row, so filtering on
+ * it would narrow an application designed to be shared. Both kinds are still
+ * filled from the session in create() — the difference is only whether the
+ * column also gates reads.
+ *
+ * Returns [] when the Blueprint declared no scoping rule for the entity. That
+ * is the correct answer for an application authorised by role rather than by
+ * record, and it is why nothing here infers a rule from a column name.
+ *
+ * Returns a false predicate — matching nothing — when a rule EXISTS but cannot
+ * be applied: no actor on the context, or a column the table does not carry.
+ * Both mean the Blueprint and the schema have drifted, and a scoped entity that
+ * quietly reverts to unscoped is the failure this whole function exists to
+ * prevent, so it fails closed and says so.
+ */
+function scopeConditions(
+  entityName: string,
+  entity: { table: PgTableWithColumns<any> },
+  ctx: DataEngineContext,
+): SQL[] {
+  // Tested for "not attribution" rather than "is scope" deliberately: a
+  // manifest from an older projection carries no `kind`, and the safe reading
+  // of a missing one is that the column scopes.
+  const rules: OwnershipRule[] = ownershipRulesFor(entityName)
+    .filter((r) => r.kind !== "attribution");
+  if (rules.length === 0) return [];
+  const role = ctx.user?.role;
+  const cols = entity.table as any;
+  const conds: SQL[] = [];
+  for (const rule of rules) {
+    if (role && (rule.unscopedRoles || []).includes(role)) continue;
+    const col = cols[rule.column];
+    if (col === undefined) {
+      console.error(
+        `[data-engine] ownership rule for ${entityName} names column ` +
+        `"${rule.column}", which the table does not carry — returning no rows ` +
+        `rather than every row.`,
+      );
+      conds.push(sql`false`);
+      continue;
+    }
+    const actor = actorValue(rule, ctx);
+    if (actor === undefined) {
+      conds.push(sql`false`);
+      continue;
+    }
+    conds.push(eq(col, actor as any));
+  }
+  return conds;
+}
+
+/**
+ * The conditions contributed by `row_access` rules — the configurable half.
+ *
+ * `scopeConditions` above covers what the Blueprint declares structurally: a
+ * column that equals the actor. This covers what somebody authored in the
+ * rules builder, which is where a rule with a shape nobody anticipated belongs
+ * — "readable while it is at offer stage and still active, or where this
+ * manager recorded the decision" is not an ownership column, and hard-coding a
+ * predicate for it would make the next such rule another code change.
+ *
+ * Each rule is a GRANT, and grants union: an actor reaches a row if ANY rule
+ * addressed to them admits it. A model with rules but none addressed to this
+ * actor yields FALSE — the same fail-closed reading `canAccessField` uses, so
+ * a role is never handed every row by having been left out.
+ *
+ * A rule whose condition will not compile to SQL also yields FALSE, loudly. It
+ * is the one honest option: evaluating it per row would hide rows from the
+ * page while `total`, the pager and every aggregate still counted them.
+ */
+async function rowAccessConditions(
+  entityName: string,
+  entity: { table: PgTableWithColumns<any> },
+  ctx: DataEngineContext,
+): Promise<SQL[]> {
+  let rules: Array<{ name?: string; config?: any }>;
+  try {
+    const { rowAccessRulesFor } = await import("@/lib/rules");
+    rules = await rowAccessRulesFor(entityName);
+  } catch (e: any) {
+    // No rules module is a legitimate app shape — it can hold no row rules, so
+    // there is nothing to enforce. A module that THREW is a broken app, and
+    // must not be read as one that simply has no rules.
+    rethrowIfRulesEngineFailed(e, entityName, "row access");
+    return [];
+  }
+  if (!rules || rules.length === 0) return [];
+
+  const role = ctx.user?.role;
+  const applicable = rules.filter((r) => {
+    const roles: string[] = r.config?.roles ?? [];
+    return roles.length === 0 || (!!role && roles.includes(role));
+  });
+  if (applicable.length === 0) {
+    console.info(
+      `[data-engine] ${entityName} has row_access rules but none addressed to ` +
+      `role "${role ?? "(none)"}" — no rows.`,
+    );
+    return [sql`false`];
+  }
+
+  const { compileRowAccess } = await import("@/lib/rules/row-access-sql");
+  const grants: SQL[] = [];
+  for (const rule of applicable) {
+    const compiled = compileRowAccess(
+      String(rule.config?.whenFeel ?? ""),
+      entity.table as any,
+      ctx.user as any,
+    );
+    if (!compiled.ok) {
+      console.error(
+        `[data-engine] row_access rule "${rule.name ?? "(unnamed)"}" on ` +
+        `${entityName} cannot be enforced: ${compiled.reason}. Returning no ` +
+        `rows rather than every row.`,
+      );
+      return [sql`false`];
+    }
+    grants.push(compiled.where);
+  }
+  return [grants.length === 1 ? grants[0] : (or(...grants) as SQL)];
+}
+
+/**
+ * Everything that narrows a read of `entityName` for this actor: what the
+ * Blueprint declares as ownership, and what the rules builder declares as row
+ * access. One list, so both end up in the same WHERE and the same count.
+ */
+async function accessConditions(
+  entityName: string,
+  entity: { table: PgTableWithColumns<any> },
+  ctx: DataEngineContext,
+): Promise<SQL[]> {
+  return [
+    ...scopeConditions(entityName, entity, ctx),
+    ...(await rowAccessConditions(entityName, entity, ctx)),
+  ];
+}
+
+/** Fold conditions into one WHERE, or undefined when there are none. */
+function allOf(conds: SQL[]): SQL | undefined {
+  if (conds.length === 0) return undefined;
+  return conds.length === 1 ? conds[0] : (and(...conds) as SQL);
 }
 
 
@@ -528,6 +705,25 @@ export async function create(
     if (_wsId) for (const fk of _needTenancy) cleanData[fk] = _wsId;
   }
 
+  // Ownership on the write side — BOTH kinds of rule. The column names the
+  // acting user, so it is set here and whatever the request body said is
+  // discarded. For a scope column that stops a caller planting a row in
+  // someone else's account (the read leak in reverse, and invisible to the
+  // person it lands on); for an attribution column it is what makes the audit
+  // trail mean anything, since a client that can choose its own
+  // `createdByUserId` has written a signature, not a record. A role the rule
+  // exempts may still file on another's behalf.
+  for (const rule of ownershipRulesFor(entityName)) {
+    if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
+    if (!(rule.column in entity.table)) continue;
+    const actor = actorValue(rule, ctx);
+    // No actor value to write: leave what the tenancy fill above put there
+    // rather than nulling a NOT NULL column. A scope column's read path
+    // already refuses to return rows this actor cannot claim.
+    if (actor === undefined) continue;
+    cleanData[rule.column] = actor;
+  }
+
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);
 
@@ -596,8 +792,12 @@ export async function update(
   const entity = getEntity(entityName);
   if (!entity) throw new Error(`Unknown entity: ${entityName}`);
 
-  // Check exists
-  const [existing] = await db.select().from(entity.table).where(eq(entity.table.id, id)).limit(1);
+  // Check exists — scoped, so a row belonging to someone else is NotFound
+  // rather than editable. The same predicate is reused on the UPDATE below:
+  // checking here and writing unscoped would leave a race between them.
+  const where = allOf([eq(entity.table.id, id),
+                       ...await accessConditions(entityName, entity, ctx)])!;
+  const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
 
   // Strip system fields
@@ -635,7 +835,7 @@ export async function update(
   const updateData = { ...patched, updatedAt: new Date() } as any;
   await _encryptSensitiveOnWrite(entityName, updateData);
 
-  const [record] = await db.update(entity.table).set(updateData).where(eq(entity.table.id, id)).returning();
+  const [record] = await db.update(entity.table).set(updateData).where(where).returning();
   const event = `${entityName.toLowerCase()}_updated`;
 
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
@@ -655,10 +855,12 @@ export async function remove(
   const entity = getEntity(entityName);
   if (!entity) throw new Error(`Unknown entity: ${entityName}`);
 
-  const [existing] = await db.select().from(entity.table).where(eq(entity.table.id, id)).limit(1);
+  const where = allOf([eq(entity.table.id, id),
+                       ...await accessConditions(entityName, entity, ctx)])!;
+  const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
 
-  await db.delete(entity.table).where(eq(entity.table.id, id));
+  await db.delete(entity.table).where(where);
   const event = `${entityName.toLowerCase()}_deleted`;
 
   emit(event, { entityId: id, entity: existing, user: ctx.user }).catch(console.error);
@@ -676,7 +878,13 @@ export async function findById(
   const entity = getEntity(entityName);
   if (!entity) throw new Error(`Unknown entity: ${entityName}`);
 
-  const [record] = await db.select().from(entity.table).where(eq(entity.table.id, id)).limit(1);
+  // The ownership predicate rides in the WHERE, so a row belonging to someone
+  // else is NotFound rather than Forbidden — the caller cannot tell an id that
+  // does not exist from one they may not see, which is what stops a detail
+  // route from being an existence oracle.
+  const where = allOf([eq(entity.table.id, id),
+                       ...await accessConditions(entityName, entity, ctx)])!;
+  const [record] = await db.select().from(entity.table).where(where).limit(1);
   if (!record) throw new NotFoundError(entityName, id);
 
   // Slice-4: mask or unmask sensitive columns before we hand the record to
@@ -703,43 +911,54 @@ export async function query(
   const { search, filters, sort, order = "desc", page = 1, limit = 50 } = opts;
   const offset = (page - 1) * limit;
 
-  let q = db.select().from(entity.table);
+  // ONE condition list, shared by the row query and the count. Drizzle's
+  // .where() REPLACES a previous call rather than ANDing with it, so the old
+  // form — .where(search) then .where(filters) — silently dropped the search
+  // whenever a filter was also present. Collecting the conditions and applying
+  // them once removes the failure mode rather than ordering around it.
+  const conditions: SQL[] = await accessConditions(entityName, entity, ctx);
 
-  // Search
+  // Search — the OR across search fields is ONE condition, so it ANDs with the
+  // filters and with the ownership predicate instead of competing with them.
   if (search && entity.searchFields.length > 0) {
     const searchConditions = entity.searchFields
       .filter(f => entity.table[f])
       .map(f => ilike(entity.table[f], `%${search}%`));
     if (searchConditions.length > 0) {
-      q = q.where(or(...searchConditions) as any) as any;
+      conditions.push(or(...searchConditions) as SQL);
     }
   }
 
   // Filters
   if (filters) {
-    const filterConditions: SQL[] = [];
     for (const [key, value] of Object.entries(filters)) {
       if (value && value !== "undefined" && entity.table[key]) {
-        filterConditions.push(eq(entity.table[key], value));
+        conditions.push(eq(entity.table[key], value));
       }
     }
-    if (filterConditions.length > 0) {
-      q = q.where(and(...filterConditions) as any) as any;
-    }
   }
+
+  const where = allOf(conditions);
+
+  let q: any = db.select().from(entity.table);
+  if (where) q = q.where(where);
 
   // Sort
   const sortCol = sort && entity.table[sort] ? entity.table[sort] : entity.table.createdAt;
   if (sortCol) {
-    q = q.orderBy(order === "asc" ? asc(sortCol) : desc(sortCol)) as any;
+    q = q.orderBy(order === "asc" ? asc(sortCol) : desc(sortCol));
   }
 
-  // Count
-  const [countResult] = await db.select({ total: count() }).from(entity.table);
+  // Count — over the SAME where. It used to count the whole table, so a
+  // filtered or searched list reported the unfiltered total and the pager
+  // offered pages that returned nothing.
+  let countQ: any = db.select({ total: count() }).from(entity.table);
+  if (where) countQ = countQ.where(where);
+  const [countResult] = await countQ;
   const total = countResult?.total ?? 0;
 
   // Paginate
-  const data = await (q as any).limit(limit).offset(offset);
+  const data = await q.limit(limit).offset(offset);
 
   // Slice-4: mask/unmask sensitive columns per row before rules-based
   // field filtering. Rows never expose ciphertext to the client.
@@ -763,11 +982,19 @@ export async function query(
   return { data: filtered, total, page, limit };
 }
 
-export async function stats(entityName: string): Promise<{ total: number }> {
+export async function stats(
+  entityName: string,
+  ctx: DataEngineContext = {},
+): Promise<{ total: number }> {
   const entity = getEntity(entityName);
   if (!entity) throw new Error(`Unknown entity: ${entityName}`);
 
-  const [result] = await db.select({ total: count() }).from(entity.table);
+  // Scoped like the list it summarises. An unscoped count is a row count of
+  // everyone's data wearing a number badge.
+  const where = allOf(await accessConditions(entityName, entity, ctx));
+  let q: any = db.select({ total: count() }).from(entity.table);
+  if (where) q = q.where(where);
+  const [result] = await q;
   return { total: result?.total ?? 0 };
 }
 
@@ -831,9 +1058,11 @@ export function __setTestDb(d: any) { _testDb = d; }
 async function computeSimple(
   defaultEntity: string,
   m: SimpleMetric,
+  ctx: DataEngineContext,
   range?: { start?: Date | null; end?: Date | null },
 ): Promise<number> {
-  const entity = getEntity(m.entity || defaultEntity);
+  const entityName = m.entity || defaultEntity;
+  const entity = getEntity(entityName);
   if (!entity) return 0;
 
   // sum/avg/min/max need a real column; a misconfigured metric without one
@@ -850,8 +1079,10 @@ async function computeSimple(
     m.fn === "min"   ? min(cols[m.field!]) :
                        max(cols[m.field!]);
 
-  // Accumulate WHERE conditions (window / explicit range + equality filters).
-  const conds: SQL[] = [];
+  // Accumulate WHERE conditions (ownership + window / explicit range + filters).
+  // A KPI tile is a read like any other: "12 open invoices" computed over every
+  // tenant's invoices is the same leak as listing them, one integer at a time.
+  const conds: SQL[] = await accessConditions(entityName, entity, ctx);
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
@@ -869,14 +1100,18 @@ async function computeSimple(
 }
 
 /** Resolve one metric (simple | ratio | delta) to a number. Any failure → 0. */
-async function computeMetric(defaultEntity: string, m: Metric): Promise<number> {
+async function computeMetric(
+  defaultEntity: string,
+  m: Metric,
+  ctx: DataEngineContext,
+): Promise<number> {
   // ratio — numerator / denominator (× 100 when percent). Div-by-zero → 0.
   if ((m as RatioMetric).kind === "ratio") {
     const r = m as RatioMetric;
     const ent = r.entity || defaultEntity;
     const [num, den] = await Promise.all([
-      computeSimple(ent, r.numerator),
-      computeSimple(ent, r.denominator),
+      computeSimple(ent, r.numerator, ctx),
+      computeSimple(ent, r.denominator, ctx),
     ]);
     if (!den) return 0;
     const ratio = num / den;
@@ -892,15 +1127,15 @@ async function computeMetric(defaultEntity: string, m: Metric): Promise<number> 
     };
     const prior = priorWindow(d.window);
     const [cur, prev] = await Promise.all([
-      computeSimple(ent, { ...base, window: d.window }),
-      computeSimple(ent, base, prior ?? { start: null, end: null }),
+      computeSimple(ent, { ...base, window: d.window }, ctx),
+      computeSimple(ent, base, ctx, prior ?? { start: null, end: null }),
     ]);
     if (d.percent) return prev === 0 ? 0 : ((cur - prev) / prev) * 100;
     return cur - prev;
   }
 
   // plain aggregate (backward compatible — no `kind`).
-  return computeSimple(defaultEntity, m as SimpleMetric);
+  return computeSimple(defaultEntity, m as SimpleMetric, ctx);
 }
 
 /**
@@ -909,13 +1144,16 @@ async function computeMetric(defaultEntity: string, m: Metric): Promise<number> 
  * Mirrors the real stats() Drizzle pattern. Each failing metric degrades to 0 —
  * the page never blanks or shows a literal {{…}} binding.
  */
-export async function resolveAggregate(source: AggregateSource): Promise<Record<string, number>> {
+export async function resolveAggregate(
+  source: AggregateSource,
+  ctx: DataEngineContext = {},
+): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   const metrics = source.metrics || {};
   await Promise.all(
     Object.entries(metrics).map(async ([key, m]) => {
       try {
-        out[key] = await computeMetric(source.entity, m);
+        out[key] = await computeMetric(source.entity, m, ctx);
       } catch {
         out[key] = 0;
       }
@@ -982,10 +1220,15 @@ function formatSeriesLabel(v: unknown, bucket?: string): string {
  */
 export async function resolveSeries(
   source: SeriesSource,
+  ctx: DataEngineContext = {},
 ): Promise<Array<{ label: string; value: number }>> {
   const entity = getEntity(source.entity);
   if (!entity) return [];
   const cols = entity.table as any;
+  // A chart is a read. A revenue-by-month series over every tenant's rows
+  // leaks the same data a list would, aggregated into a shape that looks
+  // harmless.
+  const scope = await accessConditions(source.entity, entity, ctx);
 
   const fn = source.agg?.fn || "count";
 
@@ -999,7 +1242,7 @@ export async function resolveSeries(
     const orderName = source.orderByCol || "createdAt";
     const orderCol = cols[orderName];
     if (orderCol === undefined) return [];
-    const conds: SQL[] = [];
+    const conds: SQL[] = [...scope];
     for (const [k, v] of Object.entries(source.filter || {})) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
@@ -1042,7 +1285,7 @@ export async function resolveSeries(
   const bucket = source.bucket && _SERIES_BUCKETS.has(source.bucket) ? source.bucket : undefined;
   const labelExpr: any = bucket ? sql`date_trunc(${bucket}, ${groupCol})` : groupCol;
 
-  const conds: SQL[] = [];
+  const conds: SQL[] = [...scope];
   for (const [k, v] of Object.entries(source.filter || {})) {
     if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
   }
@@ -1133,6 +1376,7 @@ const _SEARCH_DEFAULT_LIMIT = 20;
  */
 export async function resolveSearch(
   source: SearchSource,
+  ctx: DataEngineContext = {},
 ): Promise<SearchHit[]> {
   const q = String(source.q ?? "").trim();
   if (!q) return [];
@@ -1189,8 +1433,12 @@ export async function resolveSearch(
       ? sql<string>`ts_headline('english', coalesce(${primaryPlainCol}, ''), ${tsq})`
       : sql<string>`''`;
 
-    // Optional equality filter (mirrors resolveSeries).
-    const conds: SQL[] = [sql`${vectorExpr} @@ ${tsq}`];
+    // Ownership predicate first — a search that matches rows the caller may
+    // not read hands them the contents a snippet at a time.
+    const conds: SQL[] = [
+      sql`${vectorExpr} @@ ${tsq}`,
+      ...await accessConditions(entityName, entity, ctx),
+    ];
     for (const [k, v] of Object.entries(source.filter || {})) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }

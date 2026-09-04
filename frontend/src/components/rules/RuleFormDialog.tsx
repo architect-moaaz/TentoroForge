@@ -25,6 +25,7 @@ import { RULE_TYPES, type Rule, type RuleType, type RuleConfig } from "@/types/r
 import type { AppModel } from "@/types/app-model";
 import { ValidationRuleForm } from "./ValidationRuleForm";
 import { AccessControlRuleForm } from "./AccessControlRuleForm";
+import { RowAccessRuleForm } from "./RowAccessRuleForm";
 import { BusinessRuleForm } from "./BusinessRuleForm";
 import { ComputedFieldRuleForm } from "./ComputedFieldRuleForm";
 import { StateMachineEditor } from "./StateMachineEditor";
@@ -44,6 +45,16 @@ interface RuleFormDialogProps {
   rule: Rule | null;
   modelNames: string[];
   onSaved: () => void;
+  /**
+   * What a NEW rule starts as. The Record Scope panel opens this dialog to
+   * author one specific kind of rule against one already-chosen model, so it
+   * seeds both — and the type is then fixed, because a panel titled "Record
+   * Scope" offering to save a validation rule would be lying about where the
+   * rule lands. Absent (the Rules tab), the dialog behaves as before: a
+   * validation rule with no model, and the type free to change.
+   */
+  defaultRuleType?: RuleType;
+  defaultModelName?: string;
 }
 
 export function RuleFormDialog({
@@ -54,12 +65,14 @@ export function RuleFormDialog({
   rule,
   modelNames,
   onSaved,
+  defaultRuleType,
+  defaultModelName,
 }: RuleFormDialogProps) {
   const queryClient = useQueryClient();
   const { applyChange, isApplying, progress } = useSchemaChange();
 
   const [name, setName] = useState("");
-  const [ruleType, setRuleType] = useState<RuleType>("validation");
+  const [ruleType, setRuleType] = useState<RuleType>(defaultRuleType ?? "validation");
   const [modelName, setModelName] = useState("");
   const [fieldName, setFieldName] = useState("");
   const [config, setConfig] = useState<RuleConfig>({});
@@ -77,14 +90,14 @@ export function RuleFormDialog({
         setConfig(rule.config || {});
       } else {
         setName("");
-        setRuleType("validation");
-        setModelName("");
+        setRuleType(defaultRuleType ?? "validation");
+        setModelName(defaultModelName ?? "");
         setFieldName("");
         setConfig({});
       }
       setError(null);
     }
-  }, [open, rule]);
+  }, [open, rule, defaultRuleType, defaultModelName]);
 
   // Get field names for selected model
   const { data: appModel } = useQuery({
@@ -182,7 +195,7 @@ export function RuleFormDialog({
                   setRuleType(v as RuleType);
                   setConfig({});
                 }}
-                disabled={isEdit}
+                disabled={isEdit || !!defaultRuleType}
               >
                 <SelectTrigger className="mt-1 h-8 text-xs">
                   <SelectValue />
@@ -216,6 +229,18 @@ export function RuleFormDialog({
             <AccessControlRuleForm
               orgId={orgId}
               modelNames={modelNames}
+              config={config}
+              modelName={modelName}
+              onConfigChange={setConfig}
+              onModelChange={setModelName}
+            />
+          )}
+
+          {ruleType === "row_access" && (
+            <RowAccessRuleForm
+              orgId={orgId}
+              modelNames={modelNames}
+              fieldNames={fieldNames}
               config={config}
               modelName={modelName}
               onConfigChange={setConfig}

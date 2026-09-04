@@ -1254,6 +1254,194 @@ def project_searchable_columns(doc: dict, app_root: str | Path) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# ownership — which rows an actor may reach
+# ---------------------------------------------------------------------------
+
+
+def _canonical_key(name: str) -> str:
+    """``Rent_Payment`` / ``rentPayments`` -> ``rentpayment``-ish canonical form.
+
+    Separator- and case-insensitive, because the same entity is spelled four
+    ways across the stack: the Blueprint's ``RentPayment``, the table's
+    ``rent_payments``, the API route's ``rent-payments`` and the SSR source's
+    ``rentPayments``. A scoping rule that misses because the caller spelled the
+    entity differently is a rule that silently stops scoping, so the key is
+    normalised identically here and in ``ownershipRulesFor`` at run time.
+    """
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def _key_forms(name: str) -> set[str]:
+    """Every canonical spelling of one name, singular and plural.
+
+    The ``-es`` strip is conditional on what it leaves behind, because the
+    unconditional form turns ``roles`` into ``rol`` and ``candidates`` into
+    ``candidat`` — keys nothing will ever ask for, and one more chance for a
+    rule to land on the wrong entity. English only writes ``-es`` after a
+    sibilant, so that is the only case where stripping it yields a singular.
+    """
+    canon = _canonical_key(name)
+    if not canon:
+        return set()
+    forms = {canon}
+    if canon.endswith("ies"):
+        forms.add(canon[:-3] + "y")
+    elif canon.endswith("es") and re.search(r"(s|x|z|ch|sh)$", canon[:-2]):
+        forms.add(canon[:-2])
+    if canon.endswith("s"):
+        forms.add(canon[:-1])
+    else:
+        forms.add(canon + "s")
+    return {f for f in forms if f}
+
+
+def ownership_rules(doc: dict) -> dict[str, list[dict]]:
+    """Row-scoping predicates the data engine adds to every read and write.
+
+    ``security.ownershipRules`` holds two kinds of item. A string states policy
+    in prose and enforces nothing — useful documentation, but the reason a
+    generated app could be authenticated and still hand every signed-in user
+    every other user's rows. An object is enforceable, and this is what turns it
+    into the manifest the engine reads.
+
+    An object rule is one of two kinds, and the difference is the whole reason
+    the field exists. A ``scope`` column decides who may reach a row: it is
+    filled from the session and becomes a WHERE predicate. An ``attribution``
+    column only records who acted: it is filled from the session, a body value
+    is ignored, and it is never a filter.
+
+    Nothing here infers the kind from a column name. ``createdByUserId`` looks
+    like ownership and often is not — an ATS records it for the audit trail
+    while every recruiter is meant to see every candidate, so scoping on it
+    would narrow an application designed to be shared. The Blueprint says which
+    columns do which (§100), so an entity with no rule is projected with no
+    predicate: deliberately and visibly, rather than by a guess that happens to
+    be right some of the time.
+
+    Keys are canonical entity spellings (see :func:`_key_forms`); values are the
+    rules that apply to that entity.
+    """
+    entities = [e for e in ((doc.get("data") or {}).get("entities") or [])
+                if e.get("status") != "DEPRECATED"]
+    by_key: dict[str, dict] = {}
+    for entity in entities:
+        name = entity.get("name") or ""
+        table = entity.get("table") or to_snake(name)
+        for form in _key_forms(name) | _key_forms(table):
+            by_key.setdefault(form, entity)
+
+    out: dict[str, list[dict]] = {}
+    for item in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if not isinstance(item, dict):
+            continue                      # prose — documents policy, enforces none
+        column = item.get("column")
+        named = item.get("entity") or ""
+        if not column or not named:
+            continue
+        rule = {
+            "column": column,
+            "kind": item.get("kind") or "scope",
+            "scope": item.get("scope") or "user",
+            "unscopedRoles": list(item.get("unscopedRoles") or []),
+        }
+        # Key the rule under every spelling of the entity it actually resolves
+        # to, so an SSR source asking for `rentPayments` and a route asking for
+        # `rent-payments` both find it. An unresolved entity is still emitted
+        # under what the rule spelled: dropping it here would fail open.
+        entity = by_key.get(_canonical_key(named))
+        if entity is not None:
+            forms = _key_forms(entity.get("name") or "") | _key_forms(
+                entity.get("table") or to_snake(entity.get("name") or ""))
+        else:
+            forms = _key_forms(named)
+        for form in forms:
+            out.setdefault(form, [])
+            if rule not in out[form]:
+                out[form].append(rule)
+    return out
+
+
+def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
+    """The ``src/lib/ownership-rules.ts`` source for a manifest.
+
+    Rendered here rather than at each call site because two pipelines emit this
+    file — the Blueprint projection and the legacy ``schema_builder`` — and a
+    second copy of the lookup would be a second copy that drifts. The lookup
+    below has to agree with :func:`_canonical_key` exactly; a disagreement is
+    not a compile error, it is an entity that silently stops being scoped.
+    """
+    return (
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// security.ownershipRules -> what the data engine does with a column that\n"
+        "// names the acting user. Both kinds are filled from the session on create,\n"
+        "// so a value in the request body never decides who a row is attributed to.\n"
+        "// Only kind:\"scope\" also becomes a WHERE predicate on reads and writes.\n"
+        "//\n"
+        "// An entity absent from this manifest is NOT scoped, and a column recorded\n"
+        "// as kind:\"attribution\" never narrows a read — the right answer for an\n"
+        "// application authorised by role rather than by record, and the wrong one\n"
+        "// everywhere else. The engine never guesses either from a column name.\n\n"
+        "export interface OwnershipRule {\n"
+        "  /** Column carrying the actor's value. */\n"
+        "  column: string;\n"
+        '  /** "scope" -> also filters reads and writes; "attribution" -> fill only. */\n'
+        '  kind: "scope" | "attribution";\n'
+        '  /** "user" -> the actor\'s id; "workspace" -> their workspace/tenant id. */\n'
+        '  scope: "user" | "workspace";\n'
+        "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
+        "  unscopedRoles: string[];\n"
+        "}\n\n"
+        "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
+        f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
+        "/** Canonical key — must match _canonical_key in projection.py. */\n"
+        "function canonical(entity: string): string {\n"
+        '  return String(entity ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");\n'
+        "}\n\n"
+        "/** Rules for an entity, or [] when the Blueprint declared none.\n"
+        " *\n"
+        " * Tries the canonical spelling and its singular/plural forms, because the\n"
+        " * same entity arrives as `RentPayment`, `rent_payments` and `rent-payments`\n"
+        " * from the three call sites. A miss returns [] = unscoped, so the key set\n"
+        " * the projection emits is deliberately generous. Must stay identical to\n"
+        " * _key_forms in projection.py.\n"
+        " */\n"
+        "export function ownershipRulesFor(entity: string): OwnershipRule[] {\n"
+        "  const canon = canonical(entity);\n"
+        "  if (!canon) return [];\n"
+        "  const forms = [canon];\n"
+        '  if (canon.endsWith("ies")) forms.push(canon.slice(0, -3) + "y");\n'
+        '  else if (canon.endsWith("es") && /(s|x|z|ch|sh)$/.test(canon.slice(0, -2)))\n'
+        "    forms.push(canon.slice(0, -2));\n"
+        '  if (canon.endsWith("s")) forms.push(canon.slice(0, -1));\n'
+        '  else forms.push(canon + "s");\n'
+        "  for (const form of forms) {\n"
+        "    const rules = OWNERSHIP_RULES[form];\n"
+        "    if (rules) return rules;\n"
+        "  }\n"
+        "  return [];\n"
+        "}\n"
+    )
+
+
+def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/ownership-rules.ts`` — imported by the data engine.
+
+    Always written, even when empty: the engine imports it statically, so a
+    missing file is a compile error rather than an app that silently stops
+    scoping.
+    """
+    manifest = ownership_rules(doc)
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ownership-rules.ts").write_text(
+        render_ownership_rules_module(manifest), "utf-8")
+    return {"files": ["src/lib/ownership-rules.ts"],
+            "keys": len(manifest),
+            "rules": sum(len(v) for v in manifest.values())}
+
+
+# ---------------------------------------------------------------------------
 # access — which routes the middleware gates
 # ---------------------------------------------------------------------------
 

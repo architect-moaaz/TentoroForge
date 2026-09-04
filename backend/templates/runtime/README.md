@@ -81,6 +81,43 @@ human tasks (`workflow_tasks`, task_type `wait_for_event`).
 Tests: `__tests__/run-event-tests.sh` (cron matcher + trigger matching +
 emit/wait nodes through the real engine).
 
+## Row-level Scoping (data-engine.ts + ownership-rules.ts)
+
+Authentication answers *who is calling*; `src/lib/ownership-rules.ts` answers
+what the engine does with a column that names the acting user. It is projected
+from the Blueprint's `security.ownershipRules`, where an object rule names an
+entity, a column, whether the column holds the actor's user id or their
+workspace id, and its **kind**. Prose entries in the same list document policy
+and enforce nothing.
+
+Both kinds are filled from the session in `create()`, so a request body never
+decides who a row is attributed to. They differ in one thing:
+
+| kind | filled on create | filters reads and writes |
+| --- | --- | --- |
+| `scope` (default) | yes | **yes** — `ownerId`, `workspaceId` |
+| `attribution` | yes | no — `createdByUserId`, `changedByUserId` |
+
+That distinction is load-bearing. An ATS fills `createdByUserId` on every
+candidate and still means every recruiter to see every row; scoping on it would
+narrow an application designed to be shared, silently, across every list, detail
+route, KPI tile and chart at once. The Blueprint says which is which — nothing
+here infers it from the column name.
+
+`scopeConditions()` turns a `scope` rule into a WHERE predicate, and every path
+that touches rows applies it: `query`, `findById`, `stats`, `resolveAggregate`,
+`resolveSeries`, `resolveSearch`, `update` and `remove`. It lives in the engine
+rather than in the API route because the server render calls these functions
+directly, without passing through the route.
+
+An entity with no rule is **not** scoped — correct for an app authorised by role
+rather than by record. A rule that cannot be applied (no actor, or a column the
+table does not carry) matches nothing and logs why: drift fails closed.
+
+Tests: `__tests__/run-ownership-tests.sh` (renders the manifest with the real
+projection, then runs the shipped `data-engine.ts` against it with `drizzle-orm`
+and `@/db` stubbed — no bundler, no `node_modules`).
+
 ## API Route Example
 
 ```ts

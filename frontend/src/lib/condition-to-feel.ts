@@ -66,8 +66,26 @@ function feelValueTyped(raw: string, cat: FieldCategory): string {
   }
 }
 
+/**
+ * `user.<field>` names the ACTING USER, not a string.
+ *
+ * A row-access rule is almost always "the rows this person owns", which is
+ * written `ownerId = user.id`. Encoded as a value it would quote to
+ * `"user.id"` and compare the column against that literal — a rule that
+ * matches nothing, and says nothing about why. So the reference is passed
+ * through bare, and the readers downstream resolve it from the session:
+ * row-access-sql's `named()` turns it into a bound value (or, when the
+ * session does not carry it, into FALSE).
+ *
+ * One segment only. `user.profile.org` is not addressable anywhere
+ * downstream, so it stays a literal rather than compiling to a silent null.
+ */
+const USER_REFERENCE = /^user\.[A-Za-z_][A-Za-z0-9_]*$/;
+
 function encodeValue(raw: string, cat?: FieldCategory): string {
-  return cat ? feelValueTyped(raw, cat) : feelValueAuto(raw);
+  const v = (raw ?? "").trim();
+  if (USER_REFERENCE.test(v)) return v;
+  return cat ? feelValueTyped(v, cat) : feelValueAuto(v);
 }
 
 /** Encode a comma-separated raw value into a FEEL list: a, b, c -> [a, b, c]. */

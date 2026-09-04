@@ -165,7 +165,8 @@ export async function GET(
   try {
     // GET /api/data/[entity]/stats
     if (rest[0] === "stats") {
-      return NextResponse.json(await stats(entity));
+      // Same ctx as the list — the count and the rows it counts must agree.
+      return NextResponse.json(await stats(entity, ctx));
     }
 
     // GET /api/data/[entity]/[id]

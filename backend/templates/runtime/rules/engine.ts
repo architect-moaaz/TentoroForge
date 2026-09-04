@@ -283,6 +283,36 @@ function checkValidation(
 // ---------------------------------------------------------------------------
 
 /**
+ * The `row_access` rules governing a model, active ones only.
+ *
+ * Returned rather than evaluated: unlike every other rule type, a row rule is
+ * not applied here. It is compiled into a WHERE clause by the data engine, so
+ * that a row the actor cannot reach is absent from the query rather than
+ * removed from its result — which is the difference between a count that is
+ * right and a count that is wrong.
+ *
+ * `model_name` is matched separator- and case-insensitively, because the
+ * caller may hold the entity name, the table or the route slug.
+ */
+export async function rowAccessRulesFor(modelName: string): Promise<ProjectRule[]> {
+  await loadRules();
+  const want = canonicalModel(modelName);
+  if (!want) return [];
+  return ruleCache.filter(
+    (r) =>
+      r.rule_type === "row_access" &&
+      canonicalModel(r.model_name ?? "") === want &&
+      isRuleActive(r),
+  );
+}
+
+/** `Rent_Payment` / `rentPayments` / `rent-payments` -> one comparable key. */
+function canonicalModel(name: string): string {
+  const c = String(name ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return c.endsWith("s") ? c.slice(0, -1) : c;
+}
+
+/**
  * Check if a user can perform an action on a field.
  *
  * Used in:

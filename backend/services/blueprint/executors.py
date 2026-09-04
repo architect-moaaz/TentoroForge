@@ -1021,7 +1021,14 @@ NODE_TASKS: dict[str, str] = {
         "domain expert would recognise, and name the artifacts each governs."
     ),
     "security": (
-        "Define roles and the permissions that guard entities and endpoints."
+        "Define roles and the permissions that guard entities and endpoints. "
+        "Then say who reaches which rows: an entity whose rows belong to one "
+        "user or one workspace needs an ownershipRules entry naming the entity "
+        "and the column that scopes it, because that object is what the data "
+        "engine turns into a WHERE clause \u2014 a prose rule beside it "
+        "documents the policy and enforces nothing. Where authorisation really "
+        "is by role and every holder sees every row, write that as a prose rule "
+        "so the absence of a scoping object reads as a decision."
     ),
     "testing": (
         "Write the tests that verify the requirements. Every approved requirement "

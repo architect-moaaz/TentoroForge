@@ -20,11 +20,37 @@ type Source = {
   id?: unknown;
 };
 
-/** Resolve an op:"aggregate" dataSource to a flat { metricKey: number } object. */
-export async function resolveAggregate(source: unknown): Promise<Record<string, number>> {
+/** The caller, in the shape the data engine's ownership rules read. */
+export type ActorCtx = { user?: { id?: string; role?: string; email?: string; workspaceId?: string } };
+
+/** Narrow a session user to the engine's context.
+ *
+ * Keep the ctx whenever we know ANYTHING about the caller — a role with no id
+ * (server render probes, background jobs) must still reach the rules engine,
+ * or field ACLs fail closed and every ruled field comes back null. A row-scoped
+ * entity fails closed on the missing id separately, inside the engine.
+ */
+export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown; workspaceId?: unknown }) {
+  if (!user || !(user.id || user.role)) return undefined;
+  return {
+    user: {
+      id: user.id ? String(user.id) : undefined,
+      role: user.role as string | undefined,
+      email: user.email as string | undefined,
+      workspaceId: user.workspaceId ? String(user.workspaceId) : undefined,
+    },
+  };
+}
+
+/** Resolve an op:"aggregate" dataSource to a flat { metricKey: number } object.
+ *
+ * `ctx` is not optional in spirit: the engine scopes an aggregate to the actor's
+ * own rows wherever the Blueprint declared an ownership rule, so a KPI resolved
+ * without a caller reports zero rather than everyone's total. */
+export async function resolveAggregate(source: unknown, ctx?: ActorCtx): Promise<Record<string, number>> {
   try {
     await ensureDataEngineInitialized();
-    return await _resolveAggregate(source as any);
+    return await _resolveAggregate(source as any, ctx as any);
   } catch (err) {
     console.warn(`[data-engine-bridge] aggregate run failed:`, err);
     return {};
@@ -33,10 +59,10 @@ export async function resolveAggregate(source: unknown): Promise<Record<string, 
 
 /** Resolve an op:"series" dataSource to an array of { label, value } rows (a
  *  grouped aggregate for charts). Degrades to [] so a chart never blanks. */
-export async function resolveSeries(source: unknown): Promise<Array<{ label: string; value: number }>> {
+export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Array<{ label: string; value: number }>> {
   try {
     await ensureDataEngineInitialized();
-    return await _resolveSeries(source as any);
+    return await _resolveSeries(source as any, ctx as any);
   } catch (err) {
     console.warn(`[data-engine-bridge] series run failed:`, err);
     return [];
@@ -51,30 +77,24 @@ export async function resolveSeries(source: unknown): Promise<Array<{ label: str
 const SCALAR_OPS = new Set(["max", "avg", "sum", "count", "min"]);
 
 export const dataEngine: DataEngine = {
-  async run(source: unknown, ctx?: { request?: Request; user?: { id?: string; role?: string; email?: string } }) {
+  async run(source: unknown, ctx?: { request?: Request; user?: { id?: string; role?: string; email?: string; workspaceId?: string } }) {
     const src = (source ?? {}) as Source & { op?: string; field?: string; metrics?: Record<string, unknown> };
     const entity = src.entity;
     if (!entity) return [];
 
-    const user = ctx?.user;
-    // Keep the ctx whenever we know ANYTHING about the caller — a role with no
-    // id (server render probes, background jobs) must still reach the rules
-    // engine, or field ACLs fail closed and every ruled field comes back null.
-    const userCtx = user && (user.id || user.role)
-      ? { user: { id: user.id ? String(user.id) : undefined, role: user.role, email: user.email } }
-      : undefined;
+    const userCtx = actorCtx(ctx?.user);
 
     try {
       await ensureDataEngineInitialized();
 
       // op:"series" — grouped aggregate → [{label, value}] for charts.
       if (src.op === "series") {
-        return await resolveSeries(src);
+        return await resolveSeries(src, userCtx);
       }
 
       // op:"aggregate" — passthrough (planner-authored richer shape).
       if (src.op === "aggregate") {
-        return await resolveAggregate(src as unknown as Record<string, unknown>);
+        return await resolveAggregate(src as unknown as Record<string, unknown>, userCtx);
       }
 
       // Scalar aggregate shorthand — {op:"max", field:"mrr"} → wrap into a
@@ -87,7 +107,7 @@ export const dataEngine: DataEngine = {
           entity,
           metrics: { value: { fn: src.op, field } as Record<string, unknown> },
         };
-        const result = await resolveAggregate(wrapped as unknown as Record<string, unknown>);
+        const result = await resolveAggregate(wrapped as unknown as Record<string, unknown>, userCtx);
         return result?.value ?? 0;
       }
 

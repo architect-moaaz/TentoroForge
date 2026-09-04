@@ -1367,16 +1367,26 @@ def _run_verification(svc: BlueprintService) -> None:
 
 
 def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
-    """Entities -> Drizzle modules, plus the mask manifest the engine reads."""
+    """Entities -> Drizzle modules, plus the manifests the engine reads.
+
+    The mask manifest says which columns come back redacted, the append-only
+    manifest which entities refuse a rewrite, and the ownership manifest which
+    *rows* the actor may reach at all. They are projected together because the
+    data engine reads all three, and it is the one place every read passes
+    through — the API route and the server render call it directly, so a
+    control that lived in the route would not cover the SSR path.
+    """
     from services.blueprint.projection import (
         apply_data_projection, project_append_only_entities,
-        project_searchable_columns, project_sensitive_columns,
+        project_ownership_rules, project_searchable_columns,
+        project_sensitive_columns,
     )
 
     apply_data_projection(svc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
+    project_ownership_rules(svc.doc, app_root)
 
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
