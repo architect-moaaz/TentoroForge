@@ -12,8 +12,8 @@ export interface DrawerProps extends DrawerPropsType {
 }
 
 const SIDE_CLASS: Record<string, string> = {
-  left:   "inset-y-0 left-0 h-full w-80 border-r",
-  right:  "inset-y-0 right-0 h-full w-80 border-l",
+  left:   "inset-y-0 start-0 h-full w-80 border-e",
+  right:  "inset-y-0 end-0 h-full w-80 border-s",
   top:    "inset-x-0 top-0 w-full border-b",
   bottom: "inset-x-0 bottom-0 w-full border-t",
 };
@@ -35,7 +35,7 @@ export function Drawer({ trigger, title, description, side = "right", content, s
           {description && <RDialog.Description className="text-sm text-muted-foreground">{description}</RDialog.Description>}
           <div className="mt-2 text-sm text-foreground">{children ?? content}</div>
           <RDialog.Close asChild>
-            <button type="button" aria-label="Close" className="absolute right-3 top-3 text-muted-foreground hover:text-foreground">✕</button>
+            <button type="button" aria-label="Close" className="absolute end-3 top-3 text-muted-foreground hover:text-foreground">✕</button>
           </RDialog.Close>
         </RDialog.Content>
       </RDialog.Portal>

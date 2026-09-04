@@ -8,7 +8,19 @@ import type { Config } from "tailwindcss";
 import { tailwindTokens } from "./src/theme/tailwind-tokens";
 
 const config: Config = {
-  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
+  // PAGE SCHEMAS ARE SOURCE FOR TAILWIND, for the same reason the safelist
+  // below exists: JIT compiles only what it can SEE by scanning, and a
+  // class it never sees renders in the DOM with no rule behind it.
+  //
+  // A Figma-derived page carries its design in `className` — 398 distinct
+  // classes on one real dashboard, 376 of them arbitrary values such as
+  // `bg-[#ededed]`, `gap-[16px]`, `font-['Clash_Display:Medium']`. Those
+  // live in `src/schemas/*.json`, read at runtime, so scanning JS/TS alone
+  // missed every one: the fidelity survived extraction, composition, the
+  // contract and the projection, and was lost here.
+  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/schemas/**/*.json",
+  ],
   // Grid/library components compose some utility names dynamically
   // (`lg:grid-cols-${n}`), which the JIT scanner can never see —
   // without a safelist those classes render in the DOM with no CSS

@@ -1,3 +1,5 @@
+import json
+
 from services.page_template_generator import generate_template_schema
 
 
@@ -46,11 +48,22 @@ def test_list_template_data_source():
     assert s["dataSources"] == [{"name": "items", "entity": "Order", "op": "list"}]
 
 
-def test_dashboard_template_has_metrics():
+def test_dashboard_without_an_entity_invents_nothing():
+    """A dashboard with no backing entity gets a heading and an honest empty
+    state — not metrics.
+
+    This used to assert three MetricTiles (Total/Active/Pending). They were
+    bound to `{{stats.*}}`, which nothing populated, so the tiles rendered
+    the binding text literally in the browser. The generator now emits fake
+    numbers for nothing: with an entity it renders a real bound Table, and
+    without one it says so.
+    """
     s = generate_template_schema({"id": "home", "route": "/", "type": "dashboard", "name": "Dashboard"})
     flat = _flatten(s["root"])
-    metrics = [n for n in flat if n["type"] == "MetricTile"]
-    assert len(metrics) >= 3  # Total, Active, Pending at minimum
+    assert [n for n in flat if n["type"] == "MetricTile"] == []
+    assert "{{stats." not in json.dumps(s)
+    assert any(n["type"] == "Heading" for n in flat)
+    assert any(n["type"] == "Text" for n in flat)
 
 
 def test_dashboard_data_sources_with_entity():
@@ -122,10 +135,12 @@ def test_unknown_type_falls_back_to_generic():
 
 
 def test_home_type_maps_to_dashboard():
-    s = generate_template_schema({"id": "home", "route": "/", "type": "home", "name": "Home"})
-    flat = _flatten(s["root"])
-    metrics = [n for n in flat if n["type"] == "MetricTile"]
-    assert len(metrics) >= 3
+    """`home` and `dashboard` must produce the same tree — that is the mapping
+    this test is named for. It asserted MetricTiles, which no longer exist for
+    an entity-less page, and so stopped testing the mapping at all."""
+    home = generate_template_schema({"id": "home", "route": "/", "type": "home", "name": "Home"})
+    dash = generate_template_schema({"id": "home", "route": "/", "type": "dashboard", "name": "Home"})
+    assert home["root"] == dash["root"]
 
 
 def test_schema_version_and_shape():

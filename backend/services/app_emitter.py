@@ -33,8 +33,16 @@ _VENDOR_PACKAGES = ("engine", "library", "renderer", "schema")
 _VENDOR_FORGE_PACKAGES = ("patches",)
 
 
-def _interpolate(text: str, *, project_short_id: str) -> str:
-    return text.replace("<<project_short_id>>", project_short_id)
+# Text files worth reading back to substitute placeholders into. Anything
+# else in the template is copied byte for byte.
+_TEXT_SUFFIXES = {".tsx", ".ts", ".jsx", ".js", ".json", ".css", ".mdx"}
+
+
+def _interpolate(text: str, *, project_short_id: str,
+                 locale: str = "en", direction: str = "ltr") -> str:
+    return (text.replace("<<project_short_id>>", project_short_id)
+                .replace("__APP_LOCALE__", locale)
+                .replace("__APP_DIR__", direction))
 
 
 def _ensure_package_built(pkg_dir: Path) -> None:
@@ -237,6 +245,14 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    # §11 — the interface language reaches the document here. This emitter is
+    # the one the Blueprint pipeline runs; `inject_runtime`, which resolves the
+    # same pair for the legacy router, is never called on this path. Imported
+    # rather than reimplemented: one RTL list, not two.
+    from services.runtime_injector import _resolve_locale
+
+    locale, direction = _resolve_locale(out)
+
     for src in _TEMPLATE_DIR.rglob("*"):
         if src.is_dir():
             continue
@@ -251,10 +267,29 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
             content = _interpolate(
                 content,
                 project_short_id=project_short_id,
+                locale=locale,
+                direction=direction,
             )
             dst.write_text(content)
-        else:
-            shutil.copyfile(src, dst)
+            continue
+
+        # A plain .tsx carrying a placeholder — layout.tsx's <html lang/dir> is
+        # the reason this branch exists. Only files that actually hold one are
+        # read back; everything else is still a byte copy.
+        if dst_rel.suffix in _TEXT_SUFFIXES:
+            try:
+                text = src.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                text = None
+            if text is not None and ("__APP_LOCALE__" in text
+                                     or "__APP_DIR__" in text):
+                dst.write_text(
+                    _interpolate(text, project_short_id=project_short_id,
+                                 locale=locale, direction=direction),
+                    encoding="utf-8",
+                )
+                continue
+        shutil.copyfile(src, dst)
 
     # Consolidate the DB schema into a single authoritative barrel so
     # `@/db/schema` can't resolve to a stale singular shadow file (which breaks

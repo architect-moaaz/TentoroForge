@@ -15,9 +15,9 @@ import {
   getWorkFrame,
   getBobOffset,
 } from "./utils/animation";
-import { useOfficeStore, type OfficeStore } from "./OfficeStateManager";
+import { useOfficeStore, type OfficeStore, type Delivery } from "./OfficeStateManager";
 import type { Camera, AgentCharacterState, Position, Room } from "./types";
-import { AGENT_REGISTRY } from "./types";
+import { AGENT_REGISTRY, AGENT_BY_ID } from "./types";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -52,6 +52,28 @@ const CONFETTI_COLORS = [
   "#FDE68A", "#A7F3D0", "#DDD6FE", "#FBBF24",
 ];
 
+// ── Artifact parcel ─────────────────────────────────────────────────────────
+//
+// A finished DAG node feeds everything downstream of it. Walking the author
+// to each dependant would empty the desks, so the artifact travels instead:
+// a folder that arcs across the floor, lands, and pops. It is also the only
+// thing on screen that draws the DAG's edges, which is most of why it's here.
+
+const PARCEL_FLIGHT_MS = 900;
+const PARCEL_POP_MS = 320;
+/** How high the arc rises, as a fraction of the distance travelled. */
+const PARCEL_ARC = 0.28;
+
+interface Parcel {
+  id: number;
+  from: Position; // tile coords
+  to: Position;
+  artifact: string;
+  color: string;
+  /** ms elapsed since launch. */
+  t: number;
+}
+
 // ── Renderer ────────────────────────────────────────────────────────────────
 
 export class OfficeRenderer {
@@ -62,7 +84,13 @@ export class OfficeRenderer {
   private camera: Camera;
   private speechTimestamps: Map<string, number> = new Map();
   private confetti: Confetti[] = [];
-  private confettiSpawned = false;
+  /** Agents already given their finishing pop, so it fires once per node. */
+  private popped: Set<string> = new Set();
+  private parcels: Parcel[] = [];
+  /** Last tally seen per agent, so an increment can be popped exactly once. */
+  private lastTally: Map<string, number> = new Map();
+  /** Desk stamps still fading, as `agentId -> ms remaining`. */
+  private stamps: Map<string, number> = new Map();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -108,6 +136,9 @@ export class OfficeRenderer {
     // Tick all agents (convert dt from ms to seconds for physics)
     store.tick(dt / 1000, timestamp);
 
+    this.updateParcels(dt, store);
+    this.updateStamps(dt, store);
+
     // Update camera – follow selected agent if any
     if (store.selectedAgent) {
       const agent = store.agents.get(store.selectedAgent);
@@ -146,8 +177,13 @@ export class OfficeRenderer {
     this.drawWalls();
     this.drawFurniture();
     this.drawCharacters(timestamp, store);
+    this.drawParcels(timestamp);
     this.drawRoomLabels(store);
     this.drawSpeechBubbles(timestamp, store);
+    // Badges last. They sit above the head, which is also where the speech
+    // bubble goes — drawn with the characters, a blocked agent's padlock ended
+    // up behind the very bubble explaining why it was blocked.
+    this.drawAgentBadges(timestamp, store);
     this.drawEffects(timestamp, store);
     this.updateAndDrawConfetti(store);
 
@@ -603,7 +639,32 @@ export class OfficeRenderer {
           // Angry march — fast lateral shake + vertical bounce
           bobY = Math.abs(Math.sin(timestamp * 0.008)) * -4;
           break;
+        case "retrying":
+          spriteKey = `characters_working_${state.spriteKey}`;
+          // Head-in-hands jitter: still at the desk, doing it all again.
+          bobX = Math.sin(timestamp * 0.03) * 1.2;
+          bobY = Math.sin(timestamp * 0.012) * 1.5;
+          break;
+        case "blocked":
+          spriteKey = `characters_idle_${state.spriteKey}`;
+          // A slow, resigned breath — nothing is wrong, nothing is moving.
+          bobY = Math.sin(timestamp * 0.0018) * 1.5;
+          break;
+        case "skipped":
+          spriteKey = `characters_idle_${state.spriteKey}`;
+          // Shrug: a lean, held, then released.
+          bobX = Math.sin(timestamp * 0.0012) * 3;
+          bobY = Math.abs(Math.sin(timestamp * 0.0012)) * -2;
+          break;
       }
+
+      // Off-roster staff are drawn faint. A five-node incremental run should
+      // read as five people working, not as eighteen people whose stillness
+      // the picture cannot account for. An empty roster means no run declared
+      // one (the legacy relay never does), so everyone stays at full strength.
+      const onDuty = store.roster.size === 0 || store.roster.has(state.id);
+      ctx.save();
+      if (!onDuty) ctx.globalAlpha = 0.35;
 
       // Draw active glow/highlight for working/reading agents
       if (
@@ -691,7 +752,7 @@ export class OfficeRenderer {
       }
 
       // Draw sprite
-      const sprite = getSprite(spriteKey);
+      const sprite = this.characterSprite(spriteKey, state.spriteKey);
       const drawX = px + ts / 2 - charSize / 2 + bobX;
       const drawY = py + ts / 2 - charSize / 2 + bobY;
 
@@ -723,7 +784,177 @@ export class OfficeRenderer {
         ctx.fillStyle = "rgba(30, 41, 59, 0.8)";
         ctx.fillText(state.name, px + ts / 2, py + ts + 2);
       }
+
+      ctx.restore();
     }
+  }
+
+  /** Resolve a character sprite through the sheets that actually have art.
+   *
+   *  The three sheets are not the same size: `characters_working` covers
+   *  everyone, `characters_idle` misses a few, and the base `characters` sheet
+   *  is a small stock set. Falling straight to the coloured-circle placeholder
+   *  on a miss meant an agent whose idle frame was absent turned into a dot
+   *  the moment it stopped working, so try the other sheets first. */
+  private characterSprite(preferred: string, spriteKey: string): HTMLImageElement | null {
+    return (
+      getSprite(preferred) ??
+      getSprite(`characters_working_${spriteKey}`) ??
+      getSprite(`characters_idle_${spriteKey}`) ??
+      getSprite(`characters_${spriteKey}`)
+    );
+  }
+
+  // ── DAG outcome badges ────────────────────────────────────────────────
+  //
+  // The three states the old office had no way to draw. Each gets a symbol
+  // rather than only a colour, so the difference between "going round again",
+  // "parked on a question" and "never started" survives a screenshot.
+
+  private drawAgentBadges(timestamp: number, store: OfficeStore): void {
+    const ts = OFFICE_LAYOUT.tileSize;
+    const charSize = ts * CHARACTER_SCALE;
+    for (const [, agent] of store.agents) {
+      const state = agent.getState();
+      const onDuty = store.roster.size === 0 || store.roster.has(state.id);
+      this.ctx.save();
+      if (!onDuty) this.ctx.globalAlpha = 0.35;
+      this.drawAgentBadge(timestamp, state, ts, charSize);
+      this.ctx.restore();
+    }
+  }
+
+  private drawAgentBadge(
+    timestamp: number,
+    state: AgentCharacterState,
+    ts: number,
+    charSize: number,
+  ): void {
+    const { ctx } = this;
+    const px = state.position.x * ts;
+    const py = state.position.y * ts;
+    const cx = px + ts / 2;
+    // The bubble occupies the space directly above the head, so symbols go to
+    // the shoulder instead of the crown.
+    const sx = px - ts * 0.15;
+
+    switch (state.state) {
+      case "retrying": {
+        // Amber ring plus a spinning ↻ and the attempt count.
+        const pulse = 0.18 + Math.sin(timestamp * 0.008) * 0.1;
+        ctx.fillStyle = `rgba(245, 158, 11, ${pulse})`;
+        ctx.beginPath();
+        ctx.ellipse(cx, py + ts * 0.8, charSize * 0.45, charSize * 0.17, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(sx, py + ts * 0.1);
+        ctx.rotate((timestamp * 0.004) % (Math.PI * 2));
+        ctx.font = "bold 15px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#f59e0b";
+        ctx.fillText("↻", 0, 0);
+        ctx.restore();
+
+        if (state.attempt) {
+          this.drawChip(
+            `try ${state.attempt.n}/${state.attempt.of}`,
+            sx, py + ts * 0.42, "#f59e0b",
+          );
+        }
+        break;
+      }
+      case "blocked": {
+        // Padlock, and a ring that breathes rather than pulses — this is a
+        // stop, not an alarm.
+        const alpha = 0.55 + Math.sin(timestamp * 0.002) * 0.2;
+        ctx.strokeStyle = `rgba(71, 85, 105, ${alpha})`;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.ellipse(cx, py + ts * 0.8, charSize * 0.45, charSize * 0.17, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Drawn rather than sprited: the effects sheet's `lock` key is a
+        // coffee cup, which on a stalled agent reads as "gone for a break".
+        this.drawPadlock(sx, py + ts * 0.1, ts * 0.34);
+        break;
+      }
+      case "skipped": {
+        // Nothing happened here, and the drawing should feel like it: no ring,
+        // just a shrug and a couple of drifting z's.
+        ctx.font = "bold 11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "rgba(100, 116, 139, 0.85)";
+        const drift = Math.sin(timestamp * 0.0015 + state.position.x) * 3;
+        ctx.fillText("¯\\_(ツ)_/¯", cx, py + ts * 1.25 + drift);
+        break;
+      }
+    }
+
+    // Fan-out counter — "7/18" over the desk while a node runs per subject.
+    if (state.tally) {
+      const stampLeft = this.stamps.get(state.id) ?? 0;
+      const punch = stampLeft > 0 ? 1 + (stampLeft / 420) * 0.5 : 1;
+      const info = AGENT_BY_ID[state.id];
+      ctx.save();
+      ctx.translate(cx + ts * 0.55, py + ts * 0.9);
+      ctx.scale(punch, punch);
+      this.drawChip(
+        `${state.tally.done}/${state.tally.total}`,
+        0, 0, info?.color ?? "#3B82F6",
+      );
+      ctx.restore();
+    }
+  }
+
+  /** A padlock, centred on `(cx, cy)` and `size` tall. */
+  private drawPadlock(cx: number, cy: number, size: number): void {
+    const { ctx } = this;
+    const bodyW = size * 0.9;
+    const bodyH = size * 0.62;
+    const bodyY = cy + size * 0.5 - bodyH;
+
+    ctx.save();
+    // Shackle
+    ctx.strokeStyle = "#475569";
+    ctx.lineWidth = Math.max(1.5, size * 0.14);
+    ctx.beginPath();
+    ctx.arc(cx, bodyY, bodyW * 0.3, Math.PI, 0);
+    ctx.stroke();
+    // Body
+    ctx.fillStyle = "#94a3b8";
+    ctx.strokeStyle = "#475569";
+    ctx.lineWidth = Math.max(1, size * 0.08);
+    ctx.beginPath();
+    ctx.roundRect(cx - bodyW / 2, bodyY, bodyW, bodyH, size * 0.12);
+    ctx.fill();
+    ctx.stroke();
+    // Keyhole
+    ctx.fillStyle = "#334155";
+    ctx.beginPath();
+    ctx.arc(cx, bodyY + bodyH * 0.42, size * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** A small rounded label. Coordinates are the chip's centre. */
+  private drawChip(text: string, cx: number, cy: number, color: string): void {
+    const { ctx } = this;
+    ctx.font = "bold 9px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const w = ctx.measureText(text).width + 10;
+    const h = 13;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(cx - w / 2, cy - h / 2, w, h, 6);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, cx, cy + 0.5);
   }
 
   // ── Speech bubbles ────────────────────────────────────────────────────
@@ -859,20 +1090,128 @@ export class OfficeRenderer {
     }
   }
 
+  // ── Artifact parcels ──────────────────────────────────────────────────
+
+  private updateParcels(dt: number, store: OfficeStore): void {
+    for (const d of store.takeDeliveries()) {
+      this.parcels.push({
+        id: d.id,
+        from: { ...d.from },
+        to: { ...d.to },
+        artifact: d.artifact,
+        color: d.color,
+        t: 0,
+      });
+    }
+    if (this.parcels.length === 0) return;
+    const alive: Parcel[] = [];
+    for (const p of this.parcels) {
+      p.t += dt;
+      if (p.t < PARCEL_FLIGHT_MS + PARCEL_POP_MS) alive.push(p);
+    }
+    this.parcels = alive;
+  }
+
+  private drawParcels(timestamp: number): void {
+    if (this.parcels.length === 0) return;
+    const { ctx } = this;
+    const ts = OFFICE_LAYOUT.tileSize;
+    const sprite = getSprite("effects_folder");
+
+    for (const p of this.parcels) {
+      const ax = p.from.x * ts + ts / 2;
+      const ay = p.from.y * ts + ts / 2;
+      const bx = p.to.x * ts + ts / 2;
+      const by = p.to.y * ts + ts / 2;
+
+      if (p.t >= PARCEL_FLIGHT_MS) {
+        // Landed — a short ring pop where it arrived, so the eye is pulled to
+        // the desk that just received work rather than to the empty corridor.
+        const k = (p.t - PARCEL_FLIGHT_MS) / PARCEL_POP_MS;
+        ctx.save();
+        ctx.globalAlpha = 1 - k;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(bx, by, ts * (0.2 + k * 0.5), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+
+      // Ease-out so it leaves fast and settles gently.
+      const raw = p.t / PARCEL_FLIGHT_MS;
+      const k = 1 - Math.pow(1 - raw, 3);
+      const dist = Math.hypot(bx - ax, by - ay);
+      const x = ax + (bx - ax) * k;
+      // Parabolic lift, zero at both ends, peaking mid-flight.
+      const y = ay + (by - ay) * k - Math.sin(k * Math.PI) * dist * PARCEL_ARC;
+
+      // Trail: a few fading ghosts along the path already travelled.
+      for (let i = 1; i <= 4; i++) {
+        const tk = Math.max(0, k - i * 0.045);
+        const tx = ax + (bx - ax) * tk;
+        const tyy = ay + (by - ay) * tk - Math.sin(tk * Math.PI) * dist * PARCEL_ARC;
+        ctx.fillStyle = this.colorWithAlpha(p.color, 0.18 - i * 0.035);
+        ctx.beginPath();
+        ctx.arc(tx, tyy, 4 - i * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const size = ts * 0.5;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.sin(timestamp * 0.006 + p.id) * 0.25);
+      if (sprite) {
+        ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+      } else {
+        // Fallback: a little manila folder.
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-size / 2, -size / 2 + 2, size, size - 4);
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.fillRect(-size / 2, -size / 2, size * 0.45, 4);
+      }
+      ctx.restore();
+    }
+  }
+
+  // ── Fan-out stamps ────────────────────────────────────────────────────
+  //
+  // A node like `page_layouts` runs once per page. Without this the agent just
+  // sits there for eighteen model calls and the office looks frozen; with it,
+  // every finished subject thumps a stamp onto the desk.
+
+  private updateStamps(dt: number, store: OfficeStore): void {
+    for (const [id, agent] of store.agents) {
+      const tally = agent.getState().tally;
+      const done = tally?.done ?? 0;
+      const seen = this.lastTally.get(id) ?? 0;
+      if (done > seen) this.stamps.set(id, 420);
+      if (done !== seen) this.lastTally.set(id, done);
+      if (!tally) this.lastTally.delete(id);
+    }
+    for (const [id, remaining] of this.stamps) {
+      const left = remaining - dt;
+      if (left <= 0) this.stamps.delete(id);
+      else this.stamps.set(id, left);
+    }
+  }
+
   // ── Confetti system ─────────────────────────────────────────────────
 
-  private spawnConfetti(): void {
+  /** A burst centred on a tile. `count` and `spread` scale it from a desk pop
+   *  to a whole-office party. */
+  private spawnConfetti(at: Position, count: number, spread: number): void {
     const ts = OFFICE_LAYOUT.tileSize;
-    const lobby = OFFICE_LAYOUT.lobby;
-    const cx = lobby.x * ts + ts / 2;
-    const cy = lobby.y * ts + ts / 2;
+    const cx = at.x * ts + ts / 2;
+    const cy = at.y * ts + ts / 2;
 
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 1.5 + Math.random() * 4;
       this.confetti.push({
-        x: cx + (Math.random() - 0.5) * ts * 6,
-        y: cy - Math.random() * ts * 3,
+        x: cx + (Math.random() - 0.5) * ts * spread,
+        y: cy - Math.random() * ts * (spread / 2),
         vx: Math.cos(angle) * speed,
         vy: -2 - Math.random() * 4,
         color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
@@ -888,21 +1227,23 @@ export class OfficeRenderer {
   private updateAndDrawConfetti(store: OfficeStore): void {
     const { ctx } = this;
 
-    // Check if any agent is celebrating — spawn confetti once
-    let hasCelebrating = false;
-    for (const [, agent] of store.agents) {
-      if (agent.getState().state === "celebrating") {
-        hasCelebrating = true;
-        break;
-      }
-    }
+    // The whole-office party, which only a shipped build declares.
+    const party = store.takeParty();
+    if (party) this.spawnConfetti(party, 120, 6);
 
-    if (hasCelebrating && !this.confettiSpawned) {
-      this.spawnConfetti();
-      this.confettiSpawned = true;
-    }
-    if (!hasCelebrating) {
-      this.confettiSpawned = false;
+    // A finished node gets a small pop at its own desk. Twenty nodes should
+    // read as twenty small moments of progress, not twenty ticker-tape
+    // parades over an app that has not shipped yet.
+    for (const [id, agent] of store.agents) {
+      const state = agent.getState();
+      if (state.state === "celebrating") {
+        if (!this.popped.has(id)) {
+          this.popped.add(id);
+          this.spawnConfetti(state.position, 18, 1);
+        }
+      } else {
+        this.popped.delete(id);
+      }
     }
 
     // Update and draw confetti

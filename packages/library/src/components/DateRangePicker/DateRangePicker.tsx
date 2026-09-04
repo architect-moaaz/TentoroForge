@@ -128,7 +128,7 @@ export function DateRangePicker({
   return (
     <div className="relative inline-block">
       {label && (
-        <label className="mr-2 text-xs font-medium text-muted-foreground">{label}:</label>
+        <label className="me-2 text-xs font-medium text-muted-foreground">{label}:</label>
       )}
       <button
         type="button"
@@ -139,14 +139,14 @@ export function DateRangePicker({
         <span className="opacity-60">▾</span>
       </button>
       {open && (
-        <div className={`absolute left-0 top-full mt-1 w-72 ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-popover p-3 shadow-md z-10`}>
+        <div className={`absolute start-0 top-full mt-1 w-72 ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-popover p-3 shadow-md z-10`}>
           <ul className="mb-3 space-y-1">
             {presetItems.map((p) => (
               <li key={p.value}>
                 <button
                   type="button"
                   onClick={() => applyPreset(p.value)}
-                  className={`block w-full rounded px-2 py-1 text-left text-xs hover:bg-muted ${activePreset === p.value ? "bg-muted font-semibold" : ""}`}
+                  className={`block w-full rounded px-2 py-1 text-start text-xs hover:bg-muted ${activePreset === p.value ? "bg-muted font-semibold" : ""}`}
                 >
                   {p.label}
                 </button>

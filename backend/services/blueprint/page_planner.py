@@ -141,14 +141,28 @@ def subtitle_field(entity: dict) -> str | None:
 
 
 def summary_fields(entity: dict, limit: int = 6) -> list[dict]:
-    """``[{label, value}]`` — the shape KeyValueList and DescriptionList take."""
+    """``[{term, description}]`` — the canonical DescriptionList pair.
+
+    Emitted in the shape the component actually wants, not the one it has
+    learned to repair. `DescriptionList.schema.ts` accepts `{label, value}` too
+    — "the more common shape LLM-authored schemas tend to emit" — and the
+    component normalises it at render. That is a loosened schema plus a repair
+    pass, added because generated output kept arriving wrong; producing the
+    canonical shape is what makes both unnecessary rather than load-bearing.
+
+    It also matters for correctness, not just tidiness: the strict node shape
+    in `page.ts` only knows `{term, description}`, so the repaired shape
+    rendered fine and failed validation, which is how six pages came to be
+    silently non-conforming.
+    """
     title = title_field(entity)
     out: list[dict] = []
     for f in _visible_fields(entity):
         name = f.get("name")
         if name == title:
             continue
-        out.append({"label": _humanise(name), "value": f"{{{{{RECORD}.{name}}}}}"})
+        out.append({"term": _humanise(name),
+                    "description": f"{{{{{RECORD}.{name}}}}}"})
         if len(out) >= limit:
             break
     return out
@@ -182,10 +196,60 @@ def columns_for(entity: dict, limit: int = 7) -> list[dict]:
     return cols
 
 
-def form_fields_for(entity: dict) -> list[dict]:
+#: Fields a person never fills in on a create form. A record's own lifecycle
+#: state and the timestamps the system stamps are outcomes of using the app,
+#: not questions to answer before it exists.
+DERIVED_ON_CREATE = ("createdat", "updatedat", "savedat", "readat",
+                     "completedat", "deletedat", "archivedat")
+
+
+def _asked_of_a_person(field: dict, *, creating: bool) -> bool:
+    """Whether a create form should ask for this field.
+
+    A generated reading list offered `Is Read`, `Takeaway`, `Read At` and
+    `Saved At` on its *new article* page — while the page's own description
+    said an article "starts unread with no takeaway". The template emitted
+    every entity field indiscriminately, so a form for something that does not
+    exist yet asked about what happens to it later.
+    """
+    if not creating:
+        return True
+    name = str(field.get("name") or "").lower()
+    if name.endswith("at") and name in DERIVED_ON_CREATE:
+        return False
+    # A boolean lifecycle flag defaults false on a new record; asking inverts
+    # the meaning of the form.
+    return not (str(field.get("type") or "").lower() == "boolean"
+                and name.startswith("is"))
+
+
+def enum_values(field: dict) -> list[str]:
+    """The values this field is allowed to hold, as the contract spells them.
+
+    The contract's name is ``enumValues`` and its field object is
+    ``additionalProperties: false``, so ``values`` and ``enum`` — which two
+    readers here were looking for — cannot appear on a valid Blueprint at all.
+    Both branches were dead: a status field seeded as "Status 1" rather than
+    as one of its own states, and every select in every generated form
+    degraded to a free-text box because it found no options.
+
+    The other two spellings are still accepted. This is also called with
+    field-shaped dicts that did not come from the Blueprint, and one name for
+    one thing is worth more than being strict about the two nobody writes.
+    """
+    for key in ("enumValues", "values", "enum"):
+        got = field.get(key)
+        if isinstance(got, (list, tuple)) and got:
+            return [str(v) for v in got]
+    return []
+
+
+def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
     """Form ``fields`` — this is what an app-specific ``*-form`` component was."""
     out: list[dict] = []
     for f in _visible_fields(entity):
+        if not _asked_of_a_person(f, creating=creating):
+            continue
         kind = FORM_KINDS.get(str(f.get("type") or "").lower(), "text")
         field: dict[str, Any] = {
             "kind": kind,
@@ -199,7 +263,7 @@ def form_fields_for(entity: dict) -> list[dict]:
         if kind == "select":
             field["options"] = [
                 {"value": str(v), "label": _humanise(str(v))}
-                for v in (f.get("values") or f.get("enum") or [])
+                for v in enum_values(f)
             ]
             # A select with no options cannot be filled; degrade to text rather
             # than emit a dead control.
@@ -303,10 +367,19 @@ def repeat_items(doc: dict, page: dict, entity: dict | None, over: str) -> list[
     if over == "formFields":
         return ([{"id": f["name"], "label": f["label"], "value": f["name"]}
                  for f in form_fields_for(entity)] if entity else [])
+    if over == "views":
+        return [{"id": v.get("key"), "label": v.get("label"),
+                 "value": v.get("key")}
+                for v in (page.get("views") or [])]
     if over == "states":
-        states = page.get("states") or {}
-        return [{"id": k, "label": _humanise(k), "value": v}
-                for k, v in states.items() if v]
+        # `states` is an array of state names — see PageContract.states, which
+        # is z.array(z.enum([...])). This read it as a mapping and crashed the
+        # whole frontend projection with `'list' object has no attribute
+        # 'items'` the first time a pattern template repeated over it, taking
+        # five nodes down with it. Nothing caught it because no template had
+        # repeated over states before.
+        return [{"id": name, "label": _humanise(name), "value": name}
+                for name in (page.get("states") or []) if name]
     raise PlanError(f"unknown repeat source {over!r}")
 
 
@@ -329,8 +402,20 @@ def build_context(doc: dict, page: dict, entity: dict | None) -> dict[str, Any]:
             "$subtitleField": (f"{{{{{RECORD}.{subtitle_field(entity)}}}}}"
                                if subtitle_field(entity) else ""),
             "$summaryFields": summary_fields(entity),
-            "$formFields": form_fields_for(entity),
+            # A create route asks a person for a new record; a detail route
+            # edits one that exists and may legitimately show its lifecycle.
+            "$formFields": form_fields_for(
+                entity, creating=str(page.get("route") or "").endswith("/new")),
             "$columns": columns_for(entity),
+            # The saved views this page declares, in the shape
+            # `FilterBar.savedViews` and `SavedViewsPicker.views` take. Without
+            # this the contract could describe a view and nothing would render
+            # it, which is how five filtered variants became five routes.
+            "$savedViews": [
+                {"id": v.get("key"), "label": v.get("label"),
+                 "filters": v.get("filter") or {}}
+                for v in (page.get("views") or [])
+            ],
         })
     return ctx
 
@@ -399,7 +484,8 @@ def resolve(value: Any, ctx: dict[str, Any]) -> Any:
 
 
 def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
-                entity: dict | None) -> list[dict]:
+                entity: dict | None,
+                catalog: dict[str, dict] | None = None) -> list[dict]:
     """One template node -> zero or more page-schema nodes.
 
     Returns a list because ``repeat`` fans a subtree out over a derived list;
@@ -419,18 +505,22 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
             if item.get("columns") is not None:
                 scoped["$item.columns"] = item["columns"]
             bare = {k: v for k, v in node.items() if k != "repeat"}
-            out.extend(instantiate(bare, scoped, doc, page, entity))
+            out.extend(instantiate(bare, scoped, doc, page, entity, catalog))
         return out
 
     built: dict[str, Any] = {"type": node["type"]}
     if node.get("id"):
         built["id"] = node["id"]
     props = resolve(node.get("props") or {}, ctx)
+    # A binding carries one concept; each prop takes the shape it declares.
+    entry = (catalog or {}).get(node["type"]) or {}
+    declared = ((entry.get("props") or {}).get("properties") or {})
+    props = {k: narrow_to_prop(v, declared.get(k) or {}) for k, v in props.items()}
     if props:
         built["props"] = props
     children: list[dict] = []
     for child in node.get("children") or []:
-        children.extend(instantiate(child, ctx, doc, page, entity))
+        children.extend(instantiate(child, ctx, doc, page, entity, catalog))
     if children:
         built["children"] = children
     if node.get("visibleIf"):
@@ -441,6 +531,16 @@ def instantiate(node: dict, ctx: dict[str, Any], doc: dict, page: dict,
 # ---------------------------------------------------------------------------
 # Validation — against the real registry, before anything renders
 # ---------------------------------------------------------------------------
+
+#: Node types the engine dispatches directly instead of resolving through the
+#: component registry — RESERVED_V2 in packages/schema/src/page.ts. They are
+#: legal nodes with no catalog entry.
+STRUCTURAL_NODES = frozenset({
+    "Stack", "Row", "Grid", "Container", "Spacer",
+    "Box", "Text", "Image",
+    "Repeat", "Conditional", "DataBoundary", "Slot",
+})
+
 
 def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
     """Structural errors in a template. Empty list means it can be planned.
@@ -454,13 +554,23 @@ def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
     def walk(node: dict, path: str) -> None:
         kind = node.get("type")
         entry = catalog.get(kind)
-        if entry is None:
+
+        # Two questions, and one variable used to answer both. Is this a legal
+        # node? — which decides whether its subtree is worth walking. And do I
+        # have a contract for it? — which decides whether the child rules below
+        # apply. `entry is None` answered the first with the second, so a
+        # `Repeat` was called unregistered and its subtree went unchecked;
+        # NodeV2 declares Repeat at page.ts:332 and the renderer dispatches it.
+        if entry is None and kind not in STRUCTURAL_NODES:
+            # An unknown type makes its children meaningless — nothing below it
+            # can be judged against a contract that does not exist.
             errors.append(f"{path}: '{kind}' is not a registered component")
             return
+
         children = node.get("children") or []
-        if children and not entry["acceptsChildren"]:
+        contract = entry.get("childContract") if entry else None
+        if entry and children and not entry["acceptsChildren"]:
             errors.append(f"{path}: '{kind}' takes no children, got {len(children)}")
-        contract = entry.get("childContract")
         if contract and not node.get("repeat"):
             if contract["kind"] == "roles":
                 roles = contract["roles"]
@@ -487,6 +597,35 @@ def validate_template(template: dict, catalog: dict[str, dict]) -> list[str]:
     return errors
 
 
+def narrow_to_prop(value: Any, spec: dict) -> Any:
+    """Trim a resolved binding to the keys the receiving prop declares.
+
+    One concept, two contracts: a page's saved views feed `FilterBar.savedViews`
+    as {id, label, filters} — where `filters` is required — and
+    `SavedViewsPicker.views` as {id, label, isDefault}, where `filters` is
+    rejected outright. A single `$savedViews` binding cannot satisfy both, and
+    emitting the union failed the stricter one: every collection page in a
+    generated app died on "Additional properties are not allowed ('filters'
+    was unexpected)" and was dropped before it reached disk.
+
+    The planner knows which prop it is filling and the catalog declares that
+    prop's shape, so the binding carries everything and each prop takes what it
+    accepts. Naming two placeholders instead would make A2UI pick correctly
+    between them, which is a thing to get wrong rather than a thing to derive.
+    """
+    items = (spec or {}).get("items") or {}
+    allowed = set((items.get("properties") or {}))
+    if not allowed or items.get("additionalProperties") is not False:
+        return value
+    if not isinstance(value, list):
+        return value
+    return [
+        {k: v for k, v in item.items() if k in allowed}
+        if isinstance(item, dict) else item
+        for item in value
+    ]
+
+
 def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
     """Prop errors in an instantiated page, against each component's own schema."""
     from jsonschema import Draft7Validator
@@ -504,7 +643,27 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
             # missing the very prop it was given.
             bound = {k for k, v in props.items()
                      if isinstance(v, str) and "{{" in v}
-            checkable = {k: v for k, v in props.items() if k not in bound}
+            # `className` IS A RENDERER PASSTHROUGH, NOT A COMPONENT PROP.
+            # `packages/library/src/registry.ts` lifts it out of the props and
+            # forwards it to the element deliberately:
+            #
+            #     if (typeof inputProps.className === "string") {
+            #       passthrough.className = inputProps.className;
+            #     }
+            #     delete inputProps.className;
+            #
+            # The catalog declares `additionalProperties: false` with, for
+            # Container, a single `maxWidth` — so the contract forbade what the
+            # renderer explicitly supports, and every Figma-derived page was
+            # refused for carrying the Tailwind that IS its fidelity. Excluded
+            # for the same reason bindings are: the value is real, and this is
+            # not the thing that can judge it.
+            # `style` joins it for the same reason and by the same route —
+            # `registry.ts` lifts both out of the props and forwards them to
+            # the element, so neither is a component prop this can judge.
+            _PASSTHROUGH = {"className", "style"}
+            checkable = {k: v for k, v in props.items()
+                         if k not in bound and k not in _PASSTHROUGH}
             schema = entry["props"]
             if bound and isinstance(schema.get("required"), list):
                 schema = dict(schema)
@@ -561,29 +720,163 @@ def _bindings_used(node: dict, found: set[str] | None = None) -> set[str]:
     return found
 
 
-def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
-    """Fetches the instantiated page needs, keyed to the bindings it uses."""
-    from services.blueprint.api_derivation import _slug
+def workflow_for_page(doc: dict, page: dict, entity: dict | None) -> str | None:
+    """The workflow a form on this page dispatches on submit.
 
+    Read from `PageContract.dispatches`, not inferred. Inferring it from step
+    order binds the wrong flow: `Bike Drop-off Intake` opens by searching for
+    the owner and registering a Customer, so its first mutating step names
+    Customer while the page that starts it is `/jobs/new`. A rule over "first
+    mutating step" sent the drop-off wizard to `Flag a Job as Awaiting Parts`.
+
+    The workflow states its own entry point in the trigger's prose — "started
+    from the New Drop-off wizard (/jobs/new)" — which is exactly the shape that
+    string-matching would turn into a rule. So the contract carries it instead
+    and the agent that already knows declares it.
+
+    Bound to the form, not to the button that navigates here: a twelve-step
+    intake dispatched from a list page gives the user nowhere to enter
+    anything.
+    """
+    declared = page.get("dispatches")
+    if not declared:
+        return None
+    known = {wf.get("id") for wf in _live(doc.get("workflows"))}
+    return declared if declared in known else None
+
+
+def bind_workflows(node: dict, workflow: str | None) -> dict:
+    """Give every declarative Form on the page the workflow it submits to."""
+    if not workflow or not isinstance(node, dict):
+        return node
+    props = node.get("props") or {}
+    if (node.get("type") == "Form" and props.get("fields")
+            and not props.get("workflow")):
+        node["props"] = {**props, "workflow": workflow}
+    for child in node.get("children") or []:
+        bind_workflows(child, workflow)
+    return node
+
+
+#: What each authored state node is for. A2UI writes all four as siblings in
+#: a Stack, so they render at once and permanently: a spinner beside an empty
+#: state beside an error alert, on a page that fetched successfully.
+STATE_NODES = {
+    "LoadingState": "loading", "Skeleton": "loading",
+    "EmptyState": "empty", "IllustratedEmpty": "empty", "Alert": "error",
+}
+
+
+def gate_states(node: dict, source: str | None) -> dict:
+    """Gate the authored state nodes on the data source, and drop the unreachable.
+
+    `ctx.data` distinguishes three cases, not four: a resolved source is present
+    (empty or not), and a failed one is absent entirely — schema-page.tsx logs
+    the failure and never sets the key, so one bad source cannot blank a page.
+
+    Loading is not among them. Sources resolve server-side before the page
+    renders, so nothing is ever in flight when a Conditional evaluates. A
+    LoadingState on a server-rendered page is a node for a state that cannot
+    occur, which is why "Loading customers" sat permanently under a table that
+    had already loaded. Dropped rather than gated: no expression selects it.
+    """
+    if not source or not isinstance(node, dict):
+        return node
+    kept: list[dict] = []
+    for child in node.get("children") or []:
+        state = STATE_NODES.get(child.get("type")) if isinstance(child, dict) else None
+        if state == "loading":
+            continue
+        if state:
+            kept.append({
+                "type": "Conditional",
+                "props": {"when": (f"{source} == null" if state == "error"
+                                   else f"{source} != null and count({source}) == 0")},
+                "children": [child],
+            })
+            continue
+        kept.append(gate_states(child, source))
+    if node.get("children") is not None:
+        node["children"] = kept
+    return node
+
+
+def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
+    """The fetches this page needs, keyed to the bindings its tree actually uses.
+
+    Emitted empty on every generated page, for three compounding reasons.
+
+    It keyed on the planner's own placeholder names — `rows`, `record` — while
+    an authored tree binds the entity: A2UI writes `{{customers}}`, so `rows in
+    used` was false and nothing was emitted. It carried a `source` URL, which
+    is not a field of the DataSource contract at all (`{name, entity, op}` is —
+    see a reference app's documents.json). And that URL was `/api/{slug}`, the
+    path this morning's derivation fix moved to `/api/data/{slug}`.
+
+    The consequence was the whole visible product: tables bound to
+    `{{customers}}` that never fetched, dashboards of em-dashes, empty states
+    beside a spinner that never resolves, and no SSR — schema-page.tsx falls
+    back to live client rendering when a page declares no sources, so nothing
+    is fetched on the server either.
+
+    The binding name *is* the source name. That is what the renderer looks up,
+    so it is derived from the tree rather than assumed.
+    """
     used = _bindings_used(root)
+    if not used:
+        return []
+
+    entities = _entities(doc)
+    by_name = {_lower_first(e.get("name") or ""): e for e in entities.values()}
+    detail = "[id]" in str(page.get("route") or "")
     out: list[dict] = []
-    if entity:
-        slug = _slug(entity.get("name") or "")
-        if ROWS in used:
-            out.append({"name": ROWS, "source": f"/api/{slug}", "op": "list"})
-        if RECORD in used:
-            out.append({"name": RECORD, "source": f"/api/{slug}/{{id}}", "op": "get"})
-        if "metrics" in used:
-            out.append({"name": "metrics", "source": f"/api/{slug}/metrics", "op": "list"})
-        for rel in related_collections(doc, entity.get("id")):
-            child = _entities(doc).get(rel["entity"]) or {}
-            name = _lower_first(child.get("name") or "")
-            if name and name in used:
-                out.append({
-                    "name": name,
-                    "source": f"/api/{_slug(child.get('name') or '')}",
-                    "op": "list",
-                })
+
+    unresolved: list[str] = []
+    for name in sorted(used):
+        # A binding that names an entity resolves to it; anything else falls
+        # back to the page's own entity, which is what `rows`/`record` mean.
+        target = by_name.get(_lower_first(name)) or by_name.get(
+            _lower_first(name.rstrip("s"))) or (
+            entity if name in {ROWS, RECORD, "metrics"} else None)
+        if not target:
+            # NOT `continue`. Skipping in silence is what put the literal text
+            # "{{overdue.value}}" on a shipped page: the tree kept the binding
+            # and the page lost the fetch, and neither half knew about the
+            # other. Four aggregate counts and two further lists went this way
+            # on one page — all six resolved correctly by the composer's
+            # binder, all six discarded here for not being entity names.
+            unresolved.append(name)
+            continue
+        if name == "metrics":
+            out.append({"name": name, "entity": target.get("name"),
+                        "op": "aggregate"})
+            continue
+        singular = name == RECORD or (detail and target is entity
+                                      and name != ROWS)
+        source = {
+            "name": name,
+            "entity": target.get("name"),
+            "op": "get" if singular else "list",
+        }
+        # A saved view declared a filter, the picker rendered it, and nothing
+        # narrowed the fetch: /articles offered Unread, Read and All saved and
+        # every one showed the same rows. The default view's filter belongs on
+        # the source so the page opens showing what it says it is showing.
+        # Switching views is the renderer's job — this is the load.
+        if not singular and target is entity:
+            default = next(
+                (v for v in (page.get("views") or []) if v.get("isDefault")),
+                None)
+            if default and default.get("filter"):
+                source["filter"] = dict(default["filter"])
+        out.append(source)
+
+    if unresolved:
+        raise PlanError(
+            f"{page.get('id')}: " + ", ".join(
+                f"binding {{{{{n}}}}} names no data this page can fetch"
+                for n in unresolved)
+        )
     return out
 
 
@@ -710,13 +1003,42 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
 
     ctx = build_context(doc, page, entity)
-    roots = instantiate(template["root"], ctx, doc, page, entity)
+    roots = instantiate(template["root"], ctx, doc, page, entity, catalog)
     if len(roots) != 1:
         raise PlanError(
             f"{page.get('id')}: template root produced {len(roots)} nodes; "
             f"a repeat on the root would leave the page without a single root"
         )
-    root = prune_unsatisfiable(roots[0], catalog)
+    root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
+                          workflow_for_page(doc, page, entity))
+    # The composer's binder already resolved this tree's fetches, in the pass
+    # that rewrote its pointers. Prefer them; derive only for a layout that
+    # carries none. See `data_sources` for what re-deriving costs.
+    # ONE CANONICAL FORM FOR `entity`. The engine resolves a source by entity
+    # NAME (data-engine-bridge calls engine.query(entity, …)), and both forms
+    # legitimately arrive here: the composer's binder writes "Plant" because
+    # its registry is keyed by name, while an authoring agent writes
+    # "ENTITY-001" because that is how a page references an entity everywhere
+    # else in the Blueprint.
+    #
+    # Carrying them through unnormalised shipped a /plants whose every source
+    # named ENTITY-001. The engine resolved no such entity, returned [], and
+    # the page rendered its empty state over a database with rows in it — the
+    # conditionals were right, the data was wrong. Only reachable once carried
+    # sources became the default, which is the change that was meant to stop
+    # exactly this kind of divergence.
+    by_id = {e.get("id"): e.get("name") for e in _entities(doc).values()
+             if e.get("id") and e.get("name")}
+    carried = []
+    for x in (template.get("dataSources") or []):
+        if not isinstance(x, dict) or not x.get("name"):
+            continue
+        x = dict(x)
+        x["entity"] = by_id.get(x.get("entity"), x.get("entity"))
+        carried.append(x)
+    sources = carried or (data_sources(doc, page, entity, root) if root else [])
+    primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
+    root = gate_states(root, primary) if root else root
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
@@ -734,22 +1056,25 @@ def plan_page(doc: dict, page: dict, template: dict,
             "pattern": template.get("pattern"),
             "module": page.get("module"),
         },
-        "dataSources": data_sources(doc, page, entity, root),
+        "dataSources": sources,
         "root": root,
     }
     errors = validate_props(schema, catalog)
     if errors:
         raise PlanError(f"{page.get('id')}: " + "; ".join(errors[:4]))
+
     return schema
 
 
 def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, Any]:
     """Plan every page that has a pattern and a template. Reports what it skipped."""
     catalog = catalog or load_catalog()
-    templates = {t.get("pattern"): t for t in _live(doc.get("patternTemplates"))}
-    # An individually authored tree wins over the pattern template for that
-    # page. Both may exist: the pattern is the fallback for pages nobody
-    # authored, so switching a single page to bespoke does not strand the rest.
+    # One composed tree per page, and no second source. There used to be a
+    # per-pattern template to fall back on, authored by its own agent; a page
+    # nobody composed was stubbed from the template for its pattern. That made
+    # "this page was designed" and "this page got the generic shape for its
+    # kind" indistinguishable in the output — §76's silent divergence, arrived
+    # at by fallback. A page nothing composed is now reported as such.
     authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
 
     planned: dict[str, dict] = {}
@@ -757,11 +1082,10 @@ def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, A
     failed: list[dict] = []
     for page in _live(doc.get("pages")):
         pattern = page.get("pattern")
-        layout = authored.get(page.get("id"))
-        template = layout or templates.get(pattern)
+        template = authored.get(page.get("id"))
         if not template:
             skipped.append({"page": page.get("id"), "pattern": pattern,
-                            "reason": "no template for this pattern"})
+                            "reason": "nothing composed a tree for this page"})
             continue
         try:
             planned[page.get("id")] = plan_page(doc, page, template, catalog)
@@ -769,7 +1093,7 @@ def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, A
             failed.append({"page": page.get("id"), "pattern": pattern,
                            "reason": str(exc)})
     return {"planned": planned, "skipped": skipped, "failed": failed,
-            "templates": sorted(templates)}
+            "templates": sorted(authored)}
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +1132,21 @@ def _prop_line(name: str, spec: dict, *, required: bool = False) -> str:
                     if spec.get("enum"):
                         return f"{k}{mark}:" + "|".join(
                             str(v) for v in spec["enum"][:4])
+                    # A nested array of objects needs its own shape stated.
+                    # `FilterBar.chips[].options` is a list of {value, label},
+                    # and rendering it as a bare name let an author write a
+                    # list of plain strings — correct-looking, and rejected.
+                    if spec.get("type") == "array":
+                        inner = spec.get("items") or {}
+                        if inner.get("type") == "object":
+                            keys = list(inner.get("properties") or {})[:4]
+                            inner_req = set(inner.get("required") or [])
+                            if keys:
+                                fields = ", ".join(
+                                    f"{n}{'*' if n in inner_req else ''}"
+                                    for n in keys)
+                                return f"{k}{mark}: [{{{fields}}}]"
+                        return f"{k}{mark}: [{inner.get('type') or 'any'}]"
                     return f"{k}{mark}"
 
                 fields = ", ".join(_item_field(k) for k in list(shape)[:6])
@@ -952,7 +1291,8 @@ def page_brief(doc: dict, page_id: str) -> dict:
         brief["derived"] = {
             "titleField": title_field(entity),
             "columns": columns_for(entity),
-            "formFields": form_fields_for(entity),
+            "formFields": form_fields_for(
+                entity, creating=str(page.get("route") or "").endswith("/new")),
             "summaryFields": summary_fields(entity),
         }
         brief["relatedCollections"] = [
@@ -960,3 +1300,281 @@ def page_brief(doc: dict, page_id: str) -> dict:
             for rel in related_collections(doc, entity.get("id"))
         ]
     return brief
+
+
+# ---------------------------------------------------------------------------
+# §32 — the page set as slots, not as a free list
+# ---------------------------------------------------------------------------
+
+#: One slot per job an entity's UI has to do. A filter over a list is not on
+#: this list, which is the whole point: the page-design prompt was already told
+#: at length that a filter belongs in `views`, with the `/jobs` example spelled
+#: out, and a run still returned `/jobs/mine`, `/jobs/unassigned`,
+#: `/jobs/overdue`, `/jobs/awaiting-decision`, `/jobs/ready-for-collection` and
+#: `/jobs/awaiting-extra-work`. A free list of pages admits a filtered page as a
+#: perfectly good answer, so the instruction was arguing with the question.
+#:
+#: Asking slot by slot removes the room rather than policing it. There is no
+#: sixth jobs slot to put "overdue" in, so it goes where it fits: `views`.
+ENTITY_SLOTS = (
+    ("list", "entity_list", "Every {name}, in one place."),
+    ("detail", "record_workspace", "One {name}, with everything about it."),
+    ("create", "form", "Add a {name}."),
+)
+
+
+def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
+    """Screen-like frames from the sources held one way or the other.
+
+    Only frames that look like screens: `looksLikeScreen` is recorded rather
+    than enforced at extraction (§49), and a component or a colour swatch is
+    not a page even in a file that IS the specification.
+    """
+    out: list[dict] = []
+    for source in doc.get("designSources") or []:
+        is_spec = str(source.get("treatAs") or "evidence") == "specification"
+        if is_spec is not specification:
+            continue
+        for frame in source.get("frames") or []:
+            if frame.get("looksLikeScreen", True) and frame.get("nodeId"):
+                out.append({"source": source.get("id"), **frame})
+    return out
+
+
+def specification_frames(doc: dict) -> list[dict]:
+    """Frames from every design the user connected as the specification.
+
+    Empty when none is — the normal case, which keeps `page_slots` answering
+    entity by entity exactly as before.
+    """
+    return _screen_frames(doc, specification=True)
+
+
+def reference_frames(doc: dict) -> list[dict]:
+    """Frames from every design connected as a reference rather than the spec.
+
+    THESE ARE SLOTS TOO, AND THAT IS THE WHOLE POINT OF THIS FUNCTION.
+
+    A reference does not decide the page SET — the data model does, and one
+    dashboard legitimately implying thirteen pages is the outcome §48 asks for.
+    But it does decide those pages it drew. A frame somebody drew is a screen
+    somebody drew, whichever way the file is held, and the common case is a
+    design that covers only the interesting part of an application: the part
+    that must come out as drawn, with the rest generated around it.
+
+    That guarantee did not exist. Frames were absent from the slot list under a
+    reference, and `figmaFrame` was attached afterwards only if `page_contracts`
+    happened to notice the correspondence while it was authoring thirty other
+    pages. Nothing required it to notice and nothing reported when it did not,
+    so the failure was a drawn screen quietly composed from components —
+    buildable, and not the thing that was drawn.
+
+    Naming the frames as slots is the same move `frame_slots` already argues
+    for: an enumeration somebody connected on purpose is not a heuristic.
+    """
+    return _screen_frames(doc, specification=False)
+
+
+def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
+    """One slot per designed screen: the design IS the answer space.
+
+    THE QUESTION NARROWS; THE ANSWER IS NOT FILTERED. `page_slots` says of its
+    own entity slots that pruning was considered and rejected because "the
+    obvious signals do not discriminate", and that matching names against the
+    description would be "string-matching a heuristic into a rule". This is
+    neither. A frame list is an enumeration, and four connected frames are four
+    screens somebody drew on purpose.
+
+    So a design held as the specification does not prune a page set derived
+    from entities — it replaces the question. `page_contracts` is asked which
+    route each frame is, rather than which of thirty entity features to keep.
+    """
+    why = ("Give this frame a route and a pattern. It is a screen the user "
+           "drew, so it is not declinable.")
+    if not sole:
+        why += (" The entity features below are built around it, not instead "
+                "of it.")
+
+    slots: list[dict] = []
+    for frame in frames:
+        node_id = frame["nodeId"]
+        name = str(frame.get("name") or "").strip() or node_id
+        slots.append({
+            "feature": node_id,
+            "figmaFrame": node_id,
+            "source": frame.get("source"),
+            "name": name,
+            "pages": [{"slot": "screen",
+                       "prompt": "The screen drawn as \u201c%s\u201d." % name}],
+            "prompt": why,
+        })
+    return slots
+
+
+def page_slots(doc: dict) -> list[dict]:
+    """The features this application's page set may fill, one per entity.
+
+    Two rules, both encoded in the shape of the question rather than argued in
+    prose the agent has already been observed to ignore.
+
+    **A feature is filled or declined whole.** The unit is the entity, not the
+    page: a list with no way to create a record is not a cheaper feature, it is
+    a broken one. A per-page question invites exactly that — each page looks
+    reasonable alone while the set does not add up to a job a user can finish.
+    Fewer complete features beat more incomplete ones.
+
+    **What the user asked for is not a candidate for pruning.** Deliberately
+    *not* computed here. The obvious signals do not discriminate: every one of
+    21 entities in a live run carried requirements, and 37 of 39 requirements
+    cited `application.description`, so both mark everything required and mean
+    nothing. Matching entity names against the description would discriminate,
+    but only by string-matching a heuristic into a rule.
+
+    So the judgement stays with the model and the evidence travels to it: the
+    slots carry their requirements, and :func:`page_slot_prompt` puts the
+    user's own words beside them. "The user named this" is a reading of their
+    sentence, which is the one thing a model is better at than a rule.
+    """
+    # A DESIGN HELD AS THE SPECIFICATION REPLACES THIS QUESTION.
+    # Entity slots ask which of the data model's features should exist;
+    # connected frames already answer which screens exist. Asking both
+    # gives the cross-product — which is how one dashboard became a
+    # thirteen-page application. Correct for evidence, wrong for a
+    # specification.
+    designed = specification_frames(doc)
+    if designed:
+        return frame_slots(designed)
+
+    slots: list[dict] = [
+        {"feature": "home", "entity": None, "requirements": [],
+         "pages": [{"slot": "home", "pattern": "dashboard",
+                    "prompt": "Where a user lands."}],
+         "prompt": "Omit if the app opens on a list."},
+    ]
+    entities = (doc.get("data") or {}).get("entities") or []
+    names = {e.get("id"): e.get("name") or e.get("id") for e in entities}
+    for entity in entities:
+        eid = entity.get("id")
+        name = entity.get("name") or eid
+        # A field that references another entity is how "reachable only
+        # through" becomes a fact instead of a guess. PartUsage.jobId and
+        # RepairLine.jobId are the difference between a record a user goes to
+        # and one they only ever write while looking at something else.
+        parents = sorted({
+            f.get("references") for f in (entity.get("fields") or [])
+            if f.get("references") and f.get("required")
+        })
+        slots.append({
+            "feature": eid,
+            "entity": eid,
+            "name": name,
+            "reachedThrough": [names.get(p, p) for p in parents],
+            "requirements": list(entity.get("requirements") or []),
+            "pages": [
+                {"slot": f"{eid}.{slot}", "pattern": pattern,
+                 "prompt": why.format(name=name)}
+                for slot, pattern, why in ENTITY_SLOTS
+            ],
+        })
+
+    # THE DRAWN SCREENS LEAD, AND THEY ARE NOT ENTITY FEATURES.
+    # A reference does not replace this question — every entity slot above
+    # survives — but the screens it drew are already answered, so they are
+    # stated rather than left to be noticed. First in the list because they
+    # are the fixed points the rest is arranged around.
+    return frame_slots(reference_frames(doc), sole=False) + slots
+
+
+_DRAWN_PREAMBLE = (
+    "SOME OF THESE SCREENS WERE DRAWN. A design is connected as a reference, "
+    "and the slots at the top of the list are its frames, each carrying the "
+    "`figmaFrame` it must be built from. They are not declinable and they are "
+    "not candidates: every one of them is a page, and every one keeps the "
+    "`figmaFrame` its slot carries \u2014 that is how a screen gets built from "
+    "the drawing rather than composed from components.\n\n"
+    "A design usually covers only the interesting part of an application. The "
+    "entity features that follow are the rest, built AROUND those screens. "
+    "Where an entity feature would BE one of them, answer it with that "
+    "screen\u2019s page instead of authoring a second page at the same route: "
+    "the drawn one is the one that exists.\n\n"
+)
+
+
+def page_slot_prompt(doc: dict) -> str:
+    """The slot question, with the user's own words attached (§115)."""
+    described = (doc.get("application") or {}).get("description") or ""
+
+    # THE SPECIFICATION ASKS A DIFFERENT QUESTION, so it gets a different
+    # prompt. Everything below argues about which entity features are worth
+    # having — declining lookups, folding line items into their parent, reading
+    # the phasing in the brief. None of it applies when the answer space is a
+    # list of screens somebody drew: there is nothing to decline, and the only
+    # judgement left is what each frame IS.
+    designed = specification_frames(doc)
+    if designed:
+        return (
+            "This application's screens are the frames of a connected design, "
+            "and they are the whole page set. One page per frame: no more, and "
+            "none declined.\n\n"
+            "For each frame decide only what it IS — its route and its pattern. "
+            "Set `figmaFrame` to the frame's `nodeId`, which the slot already "
+            "carries: it is how the screen gets built from the drawing rather "
+            "than composed from components.\n\n"
+            "Do NOT add pages the design does not show. A list behind a "
+            "dashboard's numbers, a form that creates what it displays, a "
+            "sign-in — all reasonable, all absent from these frames, and all "
+            "out of scope here. If the set genuinely cannot work without one, "
+            "say so in `issues` rather than adding it.\n\n"
+            "The entities exist and are still yours to bind: a screen reads "
+            "and writes them. What you may not do is invent a screen for one.\n\n"
+            "The user's own words, for the routes and the wording:\n\n"
+            f"  \u201c{described}\u201d"
+        )
+
+    return (
+        _DRAWN_PREAMBLE if reference_frames(doc) else ""
+    ) + (
+        "Fill in this application's page set feature by feature. A feature is "
+        "one entity's pages: fill it completely or decline it completely.\n\n"
+        "Filling it completely matters more than filling many. A list with no "
+        "way to add a record, or a record with nowhere to open it, is not a "
+        "smaller feature — it is one a user cannot finish a job with. Prefer "
+        "few features a user can complete over many they cannot.\n\n"
+        "Decline a feature when the entity is a join table, a lookup, or "
+        "something only ever edited inside another record — a line item is "
+        "edited on its invoice, not on a page of its own.\n\n"
+        "`reachedThrough` names the entities a feature hangs off, taken from "
+        "its required references. A feature that is reached through another is "
+        "usually written while looking at that one, not visited: default to "
+        "declining it and giving the parent the means to edit it.\n\n"
+        "Except: anything the user asked for is not declinable, however "
+        "lookup-shaped it shows up here. These are their words:\n\n"
+        f"  \u201c{described}\u201d\n\n"
+        "If they named it for NOW, it gets its feature, and it gets it "
+        "complete.\n\n"
+        # NAMED AND DEFERRED ARE NOT THE SAME THING. This said "if they named "
+        # it, it gets its feature" — so a brief that names ten modules and then
+        # says which six to begin with got all ten. The Palestinian Legislative
+        # Council brief ended "Begin with sessions, committees, attendance,
+        # voting, minutes, and document management. Add legislative workflows,
+        # mobile access, analytics, and the public portal in later phases", and
+        # the run planned 44 pages across all ten. The sentence was in the
+        # description and quoted above; the rule discarded it, because naming
+        # phase two is how you get phase two built.
+        "Read the phasing in their words, because most briefs have one. "
+        "\u201cBegin with\u2026\u201d, \u201clater\u201d, \u201cphase "
+        "two\u201d, \u201ceventually\u201d and \u201conce that works\u201d "
+        "all name something AND put it out of scope, and the second half is "
+        "as much a decision as the first. Fill what they said to start with. "
+        "Decline what they deferred, and give the deferral as the reason \u2014 "
+        "it is theirs, not yours.\n\n"
+        "Building the later phases now is not generosity. It is pages nobody "
+        "asked for yet, each one a route to compose, maintain and read past on "
+        "the way to the ones they wanted, and it buries the first release in "
+        "work they explicitly postponed. When the brief names no phases, this "
+        "does not apply and everything they named is in scope.\n\n"
+        "There is no slot for a filtered list, because a filter is not a page. "
+        "Every \u2018only mine\u2019, \u2018overdue\u2019, \u2018unassigned\u2019 or "
+        "\u2018awaiting X\u2019 belongs in that list page\u2019s `views` as "
+        "{key, label, filter}."
+    )

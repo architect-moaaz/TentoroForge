@@ -109,7 +109,17 @@ class TestPurgeCustom:
     def test_flag_on_archetype_field_also_honored(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
     ):
-        # Some planners emit archetype instead of type.
+        """The purge gate must read `archetype` as well as `type`.
+
+        Collection and record authority now default ON, and they are checked
+        BEFORE the purge gate — so a kanban page is claimed by the composer and
+        the LLM is never reached. The test asked whether the LLM ran, and the
+        answer became "no" for a reason that has nothing to do with archetype.
+
+        Turning the collection authority off is what puts the page back in
+        front of the gate this test is about.
+        """
+        monkeypatch.setenv("FORGE_COLLECTION_AUTHORITY", "0")
         monkeypatch.setenv("FORGE_PURGE_CUSTOM", "1")
         calls = {"n": 0}
         monkeypatch.setattr(page_schema_agent, "_generate_schema_for_page", self._stub_gen(calls))
@@ -118,6 +128,20 @@ class TestPurgeCustom:
             str(tmp_path), self._plan(), page,
         ))
         assert calls["n"] == 1
+
+    def test_collection_authority_claims_the_page_before_the_purge_gate(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ):
+        """With the authority on (the default) the composer owns a kanban page
+        and the LLM is not called at all."""
+        monkeypatch.delenv("FORGE_COLLECTION_AUTHORITY", raising=False)
+        monkeypatch.setenv("FORGE_PURGE_CUSTOM", "1")
+        calls = {"n": 0}
+        monkeypatch.setattr(page_schema_agent, "_generate_schema_for_page", self._stub_gen(calls))
+        self._run(page_schema_agent.run_page_schema_agent(
+            str(tmp_path), self._plan(), {"route": "/tasks", "archetype": "kanban"},
+        ))
+        assert calls["n"] == 0
 
 
 class TestPurgeCustomFlagHelper:

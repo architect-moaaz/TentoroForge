@@ -1074,9 +1074,14 @@ def run_smith_agent(
                         f"Refused to run {tool_name!r}: you must call "
                         "understand_ask FIRST so the orchestrator can "
                         "verify your diff against the user's actual ask. "
-                        "Emit understand_ask with {screen, element_label, "
-                        "current_behavior, desired_behavior, target_file}, "
-                        "then retry."
+                        "Emit understand_ask with the VERB you mean and "
+                        "that verb's fields \u2014 rename needs {screen, "
+                        "element_label, current_behavior, "
+                        "desired_behavior, target_file}, compose_route "
+                        "needs {route}, add_widgets needs {route, "
+                        "widgets} \u2014 then retry. Naming the wrong verb "
+                        "is what makes a build request come back as "
+                        "'nothing to change'."
                     ),
                 }),
             })

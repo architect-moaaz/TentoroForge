@@ -48,8 +48,9 @@ import os
 import re
 import sys
 import threading
+from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +66,22 @@ A2UI_REPO = os.environ.get(
 # cost a live run to find ("tentoro.com" vs "tentoroforge.local").
 
 # The composer is a network round trip with up to three validate-and-retry
-# attempts inside it, each generating a whole surface. Measured live at ~4
-# minutes for a first-attempt success, so 240s cut a working composition off
-# mid-flight. A ceiling, not a target — post-gen runs inside a build someone
-# is watching, and the fallback costs nothing.
-DEFAULT_TIMEOUT = int(os.environ.get("FORGE_A2UI_TIMEOUT", "600"))
+# attempts inside it, each generating a whole surface. A ceiling, not a target
+# — post-gen runs inside a build someone is watching, and the fallback costs
+# nothing.
+#
+# LOWERED FROM 600 NOW THAT A DROPPED CALL IS RETRIED. At ten minutes a single
+# hung call spent the whole budget and left the page with no layout at all —
+# /tickets 404'd in a generated app for exactly that reason, one API read
+# timing out at 300s. With three attempts, ten minutes each would be half an
+# hour on one page.
+#
+# 240s because that is well clear of every composition observed finishing:
+# 14s, 21s, 38s, 80s, 88s, 92s, 108s, 133s. A call still running past four
+# minutes has stopped being slow and started being stuck, and the honest
+# response is to ask again rather than keep waiting — which is now something
+# this can do.
+DEFAULT_TIMEOUT = int(os.environ.get("FORGE_A2UI_TIMEOUT", "240"))
 
 SurfaceProvider = Callable[[str, str], dict]
 
@@ -78,18 +90,50 @@ SurfaceProvider = Callable[[str, str], dict]
 # `build_requirement` for why the maquette stopped being sent.
 _JOB = {
     "dashboard": (
+        # "chart", NOT "charting". The A2UI server matches its capability
+        # keywords as WHOLE WORDS (tools/a2ui-mcp/checks.py, ~line 200 — a
+        # substring test read "chart" inside "flowchart"), so "worth charting"
+        # matched nothing and the composer was never told a chart was wanted.
+        # Forge's dashboard floor then required one unconditionally and refused
+        # the surface: `dashboard_no_chart`, after 140 seconds of composition,
+        # deterministically, on every dashboard.
+        #
+        # Two answers to "what must a dashboard contain" that never agreed.
+        # This is the one place they can be made to: the floor is the
+        # authority, so the requirement states what the floor will demand.
+        #
+        # A demand and not an example, unlike the components named elsewhere in
+        # this file — the surrounding comments warn that naming a component
+        # reads as mandatory, and here it IS mandatory. Only for dashboards:
+        # `collection` and the form kinds say nothing about charts and the
+        # floor asks nothing of them.
         "This is the first screen someone sees after signing in. Decide what "
-        "belongs on it: which numbers matter in this domain, what breakdown is "
-        "worth charting, what a person needs to see happened recently, and what "
-        "they are most likely to want to do next. Use the composition your "
-        "judgement of the domain calls for — you are not filling in a template."
+        "belongs on it: which numbers matter in this domain, which breakdown "
+        "deserves a chart, what a person needs to see happened recently, and "
+        "what they are most likely to want to do next. Use the composition "
+        "your judgement of the domain calls for — you are not filling in a "
+        "template."
     ),
     "collection": (
+        # NAMES NO COMPONENTS, DELIBERATELY. The A2UI server scans this text
+        # for capability keywords and makes any match mandatory
+        # (tools/a2ui-mcp/checks.py, _CAPABILITIES) — chart, kpi, metric,
+        # stats, pill, badge, chip, table, data grid, timeline, gantt, kanban,
+        # swimlane. A component named as an *example* reads as a demand.
+        #
+        # "a table, a board, a calendar, a timeline" offered four ways to think
+        # about a list; the checker read two demands, so every collection page
+        # had to carry a Table and a Timeline or be rejected. That is where the
+        # Timeline on a two-entity plant tracker came from, and a table
+        # demanded on a create form. Naming shapes rather than components says
+        # the same thing to a reader and nothing to the scanner.
         "This screen shows many records of one kind. Decide how they are best "
-        "surveyed in this domain — a table, a board, a calendar, a timeline — "
-        "which columns or facets actually help someone find what they came for, "
-        "how they narrow the set down, and what they do to a record once they "
-        "have found it. A list nobody can act on is a reading dead end."
+        "surveyed in this domain: rows of fields, cards on a board, positions "
+        "on a calendar, points along a sequence. Choose the shape the data "
+        "actually has — which fields or facets help someone find what they "
+        "came for, how they narrow the set down, and what they do to a record "
+        "once they have found it. A list nobody can act on is a reading dead "
+        "end."
     ),
     "record": (
         "This screen shows ONE record in detail. Decide what a reader needs to "
@@ -107,20 +151,62 @@ _JOB = {
 }
 
 
-def _family_of(kind: Any) -> str:
-    """Every declared kind reduced to one of the four shapes above."""
-    from services.page_kind_anatomy import page_family
-    fam = page_family(kind)
-    if fam:
-        return fam
-    return "dashboard"
+#: Blueprint page patterns, in the four shapes _JOB describes. page_family
+#: knows the old pipeline's kinds and returns None for every one of these
+#: except `form`, so a create screen was asked to "decide which numbers matter
+#: and what breakdown is worth charting" — the dashboard job, sent verbatim to
+#: /recipes/new. Falling back to dashboard is right for an unknown kind and
+#: wrong for a known one nobody mapped.
+#: The family used when a kind is not classified anywhere. Named rather than
+#: inlined because the value matters: it was `dashboard`, the most demanding
+#: floor there is, so an unrecognised page kind was required to carry KPIs, a
+#: chart and an activity feed. `collection` asks for a list and something to
+#: click, which is the least a screen showing anything can get away with.
+#:
+#: It should be unreachable for a declared pattern — `page_kind_anatomy._FAMILY`
+#: covers the whole enum and a test holds it there. This is for kinds from
+#: outside the Blueprint pipeline.
+UNCLASSIFIED_FAMILY = "collection"
+
+
+def _family_of(kind: Any, route: Any = "") -> str:
+    """Every declared kind reduced to one of the four shapes above.
+
+    ONE TABLE, IN THE MODULE THAT OWNS THE QUESTION. This kept a second,
+    partial copy — seven entries against the enum's eighteen — consulted only
+    when `page_family` had no answer, which was most of the time. The two
+    disagreed by omission rather than by contradiction, so nothing looked
+    wrong: eleven patterns fell past both and defaulted to `dashboard`.
+    """
+    from services.page_kind_anatomy import page_family, route_family
+
+    # THE ROUTE OUTRANKS THE DECLARED PATTERN, and only ever for create and
+    # edit screens, which the eighteen-value pattern enum cannot name. Without
+    # this, `/contacts/new` came through as `record_workspace` -> `record` and
+    # the composer was handed "This screen shows ONE record in detail" for a
+    # page that exists to collect one.
+    return route_family(route) or page_family(kind) or UNCLASSIFIED_FAMILY
 
 
 def is_a2ui_enabled() -> bool:
-    """Off unless asked for. See A2UI-4 for the A/B this flag exists to run."""
-    return (os.environ.get("FORGE_A2UI") or "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    """Always. §34: "The Page Design Agent shall use A2UI MCP as its primary
+    page-generation capability."
+
+    This was off unless FORGE_A2UI was set, for an A/B that has since been
+    decided by the PRD. A flag gating the specified default is the divergence,
+    not the default.
+
+    What is NOT a flag, and stays: `availability()` reports a missing checkout
+    up front, and a composition that does not clear its substance floor returns
+    `applied: False` having written nothing, so the deterministic composer runs
+    untouched. That is a handoff, and it is what keeps an unreachable MCP
+    server from taking down a build.
+
+    Kept as a function rather than deleted: three call sites read it, and a
+    later decision to gate on something real — a per-project setting, a page
+    kind — has somewhere to live.
+    """
+    return True
 
 
 def availability() -> tuple[bool, str]:
@@ -139,6 +225,74 @@ def availability() -> tuple[bool, str]:
 
 
 # ------------------------------------------------------------------ registry
+
+def registry_from_blueprint(doc: dict) -> dict:
+    """The Blueprint's entities in the shape ``a2ui_to_forge`` reads.
+
+    ``registry_for_binder`` adapts ``plan.json``, which is what the old
+    pipeline resolved names against. The Blueprint pipeline has no plan file,
+    so every page declined with "no entities in the plan — every binding would
+    be a guess" and fell through to the authoring agent. The composer was
+    right to refuse: a binder with no entities invents them.
+
+    Not a second source of truth, which is what that docstring warns against —
+    the same adapter, over the source this pipeline actually has. §115: the
+    Blueprint is what the application is.
+    """
+    out: dict[str, Any] = {}
+    for ent in (doc.get("data") or {}).get("entities") or []:
+        name = ent.get("name") or ent.get("id")
+        if not name:
+            continue
+        cols = []
+        for f in ent.get("fields") or []:
+            if not isinstance(f, dict) or not f.get("name"):
+                continue
+            col: dict[str, Any] = {"name": f["name"],
+                                   "type": f.get("type") or "varchar"}
+            if f.get("enumValues"):
+                col["enum"] = list(f["enumValues"])
+            cols.append(col)
+        out[name] = {"slug": ent.get("table") or str(name).lower(),
+                     "columns": cols}
+    # WHICH ENTITY EACH PAGE IS ABOUT, from the page's own contract.
+    #
+    # A2UI names its data after the screen — `{"path": "/team"}` on the /team
+    # page — and the binder resolves pointers by entity name. That works when
+    # the two coincide (/tickets, Ticket) and fails when they do not (/team,
+    # TeamMember): the pointer goes unbound, the page ends with no data source
+    # at all, and the floor then correctly refuses a page whose bindings have
+    # nothing behind them. The seam was working by coincidence of naming.
+    #
+    # This is a declaration, not a guess. `primaryEntity` is what the Page
+    # Contract says the page is for, which is exactly the question the binder
+    # cannot answer from a route-shaped pointer.
+    page_entity: dict[str, str] = {}
+    by_id = {e.get("id"): (e.get("name") or e.get("id"))
+             for e in (doc.get("data") or {}).get("entities") or []}
+    for page in doc.get("pages") or []:
+        want = (page.get("data") or {}).get("primaryEntity")
+        named = by_id.get(want) or (want if want in out else None)
+        if page.get("id") and named:
+            page_entity[str(page["id"])] = str(named)
+
+    return {
+        "entities": out,
+        "pageEntity": page_entity,
+        # Identity, not just a label. The generated route is
+        # `/api/workflows/{id}/execute` (api_derivation._workflow_path), so the
+        # id is what a Button or a Form has to carry; a name reaches nothing.
+        # `launchedFrom` is the workflow agent's own declaration of which pages
+        # start it, which is what scopes this list per page.
+        "workflows": [
+            {"id": w.get("id"), "name": w.get("name"),
+             "purpose": w.get("purpose") or "",
+             "trigger": (w.get("trigger") or {}).get("kind") or "",
+             "launchedFrom": list(w.get("launchedFrom") or [])}
+            for w in doc.get("workflows") or [] if w.get("id")
+        ],
+    }
+
 
 def registry_for_binder(root: Path) -> dict:
     """The plan's entities in the shape ``a2ui_to_forge`` reads.
@@ -176,17 +330,38 @@ def registry_for_binder(root: Path) -> dict:
     # Workflow names, so the binder can tell a real submit target from an
     # invented one. Read from the same plan, for the same reason as the
     # entities: a second source of truth here is how names start to drift.
-    flows: list[str] = []
+    flows: list[dict] = []
     for w in plan.get("workflows") or []:
         nm = w.get("name") if isinstance(w, dict) else w
-        if nm:
-            flows.append(str(nm))
+        if not nm:
+            continue
+        wid = w.get("id") if isinstance(w, dict) else None
+        # The plan predates workflow ids; falling back to the name keeps this
+        # path validating exactly what it validated before.
+        flows.append({"id": str(wid or nm), "name": str(nm),
+                      "purpose": "", "trigger": "manual", "launchedFrom": []})
 
     return {"entities": out, "workflows": flows}
 
 
+def _locale_of(root: Path) -> str:
+    """The application's language tag, or "" when the Blueprint states none."""
+    try:
+        doc = json.loads(
+            (Path(root) / ".forge" / "blueprint" / "current.json")
+            .read_text(encoding="utf-8"))
+        return str((doc.get("product") or {}).get("locale") or "").strip()
+    except Exception:  # noqa: BLE001 — a missing Blueprint is not an error here
+        return ""
+
+
 def build_requirement(root: Path, kind: str = "dashboard",
-                      route: str = "/") -> str:
+                      route: str = "/", shared_context: str = "",
+                      presentation: str = "page") -> str:
+    # `shared_context` is accepted and ignored — it belongs to
+    # `build_domain_context` now. See the note there; in short, this string is
+    # the one the A2UI server scans for feature keywords, and a design system
+    # pasted into it reads as a list of demands.
     """What to ask for — a JOB, not a parts list.
 
     This used to hand over the maquette with "the content has already been
@@ -209,19 +384,64 @@ def build_requirement(root: Path, kind: str = "dashboard",
     actors = [a.get("name") or a.get("role") for a in (plan.get("actors") or [])
               if isinstance(a, dict)]
 
-    parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind)]]
+    parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind, route)]]
+
+    if presentation in ("drawer", "modal"):
+        # A page that opens OVER its caller is not a screen. Composed as one it
+        # arrives with a page container, a heading and a back link — chrome for
+        # a navigation that never happens, wrapped around the form somebody
+        # actually opened. The contract says which it is; without this the
+        # composer cannot know, and /plants/new came back as a full page and
+        # was then declared a modal by the same Blueprint.
+        parts.append(
+            f"\nThis opens as a {presentation} OVER the page that calls it — "
+            "it is not a screen of its own. Compose only what belongs inside "
+            "that surface: no page container, no back link, no heading that "
+            "repeats the title the dialog already shows. The caller stays "
+            "visible behind it and the reader has not gone anywhere."
+        )
+    # THE LANGUAGE IT IS WRITTEN IN. Every label, heading, empty state and
+    # button on the screen is written by the composer, in English, because
+    # nothing ever told it otherwise — an Arabic-first brief produced an
+    # English application and the mismatch was invisible until somebody opened
+    # it. Said in the requirement rather than as a protocol argument: this is
+    # prose the model reads, and it needs no agreement about a parameter the
+    # server may or may not have.
+    #
+    # Only when it is not English. A sentence saying "write this in English"
+    # on every call is noise, and noise is what a model learns to skip.
+    locale = _locale_of(root)
+    if locale and not locale.lower().startswith("en"):
+        parts.append(
+            f"\nLANGUAGE: this application is written in {locale}. Every "
+            f"string you author — labels, headings, column names, button text, "
+            f"empty states, placeholder and helper text — must be in that "
+            f"language, not translated afterwards. Field and column "
+            f"IDENTIFIERS stay as the data model gives them; it is the words a "
+            f"reader sees that change."
+        )
     if purpose:
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
-    guidance = build_composition_guidance(root, _family_of(kind))
+    guidance = build_composition_guidance(root, _family_of(kind, route))
     if guidance:
         parts.append("\n" + guidance)
     parts.append(
+        # "a trend" cost every page an attempt and a chart it did not need.
+        # The A2UI server reads the requirement for words that name a chart —
+        # chart, graph, trend, plot, over time — and rejects any payload
+        # without one (tools/a2ui-mcp/checks.py, _CAPABILITIES). The sentence
+        # forbidding invented trends was itself read as asking for a trend, so
+        # a two-entity plant tracker got a bar chart on all three pages,
+        # including its create form. "proportion" says the same thing and
+        # names no component.
         "\nEvery number, row and category you show must come from the "
-        "entities and columns listed in the domain context. Do not write a "
-        "number, a trend or a comparison as a literal — bind it, or leave it "
-        "out. Inventing one produces a screen that looks finished and is false."
+        "entities and columns listed in the domain context, and every action "
+        "must name one of its workflows. Do not write a number, a proportion "
+        "or a comparison as a literal — bind it, or leave it out. Do not give "
+        "a control an action the domain context does not list. Inventing "
+        "either produces a screen that looks finished and is false."
     )
     return "\n".join(parts)
 
@@ -296,8 +516,26 @@ def build_composition_guidance(root: Path,
     return "\n".join(lines)
 
 
-def build_domain_context(root: Path) -> str:
-    reg = registry_for_binder(root)
+def build_domain_context(root: Path, registry: dict | None = None,
+                         page_id: str = "", shared_context: str = "",
+                         feedback: str = "") -> str:
+    """The entities, columns and workflows a composition may bind to.
+
+    Came back empty for every Blueprint-pipeline page — it read plan.json
+    through registry_for_binder, the same missing file that emptied the
+    registry. A composer told to bind only what exists, and handed nothing,
+    has nothing to bind.
+
+    Then it listed entities and columns and nothing else, which is nouns with
+    no verbs. A composed /plants came back with no button of any kind for an
+    app whose description says marking a plant watered is the only action —
+    correctly, on what it was given: the job asks for "what they do to a
+    record", the closing rule says do not invent, and `Record Watering Today`
+    was sitting in the registry one key over, unmentioned. A2UI knew the action
+    existed (the page purpose says so in prose) and had no id to put in
+    `Button.workflow`, so it left the button out.
+    """
+    reg = registry if registry is not None else registry_for_binder(root)
     lines = []
     for name, ent in (reg.get("entities") or {}).items():
         cols = ", ".join(
@@ -305,13 +543,92 @@ def build_domain_context(root: Path) -> str:
             for c in ent.get("columns") or []
         )
         lines.append(f"- {name}: {cols}")
-    if not lines:
+    flows = [w for w in (reg.get("workflows") or []) if isinstance(w, dict)]
+    # Scoped by two fields the workflow agent already declares: which pages
+    # launch it, and how it is triggered. `trigger.kind` is a required enum —
+    # manual | event | schedule | condition — and only `manual` is something a
+    # user starts. This app declares four workflows and all four name both
+    # pages in `launchedFrom`; listing them unfiltered offers a button for
+    # "Evaluate Plant Watering Status" (a derivation that runs on every read)
+    # and one for "Seed Plant Catalogue" (database initialisation).
+    mine = [w for w in flows
+            if page_id and page_id in (w.get("launchedFrom") or [])
+            and w.get("trigger") == "manual"]
+    # A refusal is worth sending on its own. Without it in this guard, a
+    # composition on an application whose registry came back empty would be
+    # refused and then recomposed knowing nothing — which is the case most
+    # likely to be refused twice.
+    if not lines and not mine and not shared_context and not feedback.strip():
         return ""
-    return (
-        "The application's real entities and columns. Every number and every "
-        "row on this screen comes from these — do not invent fields:\n"
-        + "\n".join(lines)
-    )
+
+    parts = []
+    if lines:
+        parts.append(
+            "The application's real entities and columns. Every number and "
+            "every row on this screen comes from these — do not invent "
+            "fields:\n" + "\n".join(lines)
+        )
+    if shared_context:
+        # THE DESIGN SYSTEM IS CONTEXT, NOT A REQUEST. This used to ride in
+        # the requirement, which is the one string the A2UI server scans for
+        # capability keywords (checks.coverage_findings, called on
+        # `requirement` alone). A design system carries `typography`, and
+        # `radius: {badge, pill}` — so every page was held to have asked for a
+        # chart and a status pill, and every payload without them was
+        # rejected. Whole-word matching fixed `graph` inside `typography`;
+        # `badge` and `pill` are whole words and it could not.
+        #
+        # The fix is structural rather than another keyword: design tokens are
+        # not feature requests, and the field that gets parsed as requests is
+        # not where they belong. The model still sees all of it — the server
+        # emits `DOMAIN CONTEXT:` as its own block (generator.py) — and §35's
+        # reason for sending it is unchanged: navigation presentation and
+        # density are properties of a set, not of one page.
+        parts.append(
+            "\nTHE REST OF THIS APPLICATION — compose this screen so it "
+            "belongs beside them. Reuse a pattern already established rather "
+            "than inventing a second one for the same job, and keep the "
+            "density and the voice consistent with what is here:\n"
+            + shared_context
+        )
+    if mine:
+        parts.append(
+            "\nThe workflows this screen launches. An action on this screen "
+            "runs one of these and nothing else — put the id in `workflow` on "
+            "the Button or Form that runs it:\n"
+            + "\n".join(
+                f"- {w['id']}: {w.get('name') or w['id']}"
+                + (f" — {w['purpose']}" if w.get("purpose") else "")
+                for w in mine
+            )
+        )
+
+    # WHY THE LAST ATTEMPT WAS THROWN AWAY. The orchestrator records the
+    # validator's own message and threads it into the retry's TaskSpec, and the
+    # authoring agent's prompt reads it — but a `page_layouts` retry hands the
+    # page back to A2UI first, and A2UI was told nothing. So a composition
+    # refused for `'items' is a required property` was recomposed by a composer
+    # with no idea it had been refused, which is the definition of a wasted
+    # retry (§102: a retry that is not told what went wrong is the same request
+    # again).
+    #
+    # IN THE DOMAIN CONTEXT, NOT THE REQUIREMENT, and that is the whole reason
+    # it is here rather than in `build_requirement`. The A2UI server scans the
+    # REQUIREMENT for capability keywords and makes every match mandatory
+    # (tools/a2ui-mcp/checks.py — `req = (requirement or "").lower()`; the
+    # domain context is not read). A rejection that happened to say "table" or
+    # "chart" would silently become a demand on the retry, so the message
+    # explaining the last failure would cause the next one.
+    if feedback.strip():
+        parts.append(
+            "\nWHAT WAS WRONG WITH YOUR LAST ATTEMPT AT THIS SCREEN. It was "
+            "composed and then refused for this:\n\n"
+            + feedback.strip()
+            + "\n\nCompose the screen again without that fault. Everything "
+            "else about the screen is still yours to decide — this names one "
+            "thing that was wrong, not a specification."
+        )
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------- MCP client
@@ -341,10 +658,27 @@ def _unwrap_group(exc: BaseException) -> BaseException:
     return exc
 
 
+def _say(progress: Any, text: str) -> None:
+    """Tell the watcher, if there is one. Never at the cost of the work."""
+    if progress is None:
+        return
+    try:
+        progress(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _mcp_surface(requirement: str, domain_context: str,
-                 timeout: int = DEFAULT_TIMEOUT) -> dict:
+                 timeout: int = DEFAULT_TIMEOUT, progress: Any = None,
+                 workflows: Sequence[str] = ()) -> dict:
     """Call ``generate_a2ui_surface`` over stdio MCP. Raises on any failure —
-    the caller turns that into a fallback, never a broken page."""
+    the caller turns that into a fallback, never a broken page.
+
+    ``progress`` receives A2UI's own phase log as readable sentences, read from
+    the child's stderr — see `services.a2ui_progress`. The composer has always
+    reported its attempts and its rejections; the parent simply discarded the
+    stream carrying them.
+    """
     from services.a2ui_catalog import write_a2ui_catalog
 
     # Regenerate the catalog into the server's search path on every call. A
@@ -352,8 +686,24 @@ def _mcp_surface(requirement: str, domain_context: str,
     # Forge no longer has, and it costs nothing to rule out.
     catalog_dir = Path(A2UI_REPO) / "specification" / "v0_9" / "catalogs" / "forge"
     catalog_dir.mkdir(parents=True, exist_ok=True)
-    catalog_path = write_a2ui_catalog(catalog_dir / "catalog.json")
+    # WHAT A CONTROL MAY RUN, as an enum rather than as advice. The composer
+    # was told in prose which workflows a screen launches and still wrote
+    # `createDocument`; the catalog typed `workflow` as free text, so prose
+    # lost to schema. A2UI validates its own output against this catalog, so
+    # an invented id is now caught and retried inside the composer instead of
+    # refusing the page three minutes later.
+    catalog_path = write_a2ui_catalog(catalog_dir / "catalog.json",
+                                      workflows=workflows)
     catalog_id = json.loads(catalog_path.read_text(encoding="utf-8"))["catalogId"]
+
+    # A REAL FILE DESCRIPTOR, because `stdio_client` hands `errlog` to
+    # `anyio.open_process(stderr=...)` and the OS wires the child to it. A
+    # file-like object with a `write` method is not enough; it needs a fileno.
+    #
+    # Both ends, always: the pump forwards to the sink AND re-emits the raw
+    # line, so redirecting the child's stderr never costs the developer the
+    # console output they had before.
+    errlog, pump, closer = _stderr_pump(progress)
 
     async def _go() -> dict:
         from mcp import ClientSession, StdioServerParameters
@@ -364,7 +714,7 @@ def _mcp_surface(requirement: str, domain_context: str,
         env["A2UI_REPO"] = A2UI_REPO
         params = StdioServerParameters(
             command=sys.executable, args=[str(here / "server.py")], env=env)
-        async with stdio_client(params) as (r, w):
+        async with stdio_client(params, errlog=errlog) as (r, w):
             async with ClientSession(r, w) as s:
                 await s.initialize()
                 out = await s.call_tool("generate_a2ui_surface", {
@@ -405,12 +755,52 @@ def _mcp_surface(requirement: str, domain_context: str,
     # one already, and `asyncio.run` inside a live loop raises.
     t = threading.Thread(target=_target, daemon=True)
     t.start()
-    t.join(timeout + 30)
+    pump.start()
+    try:
+        t.join(timeout + 30)
+    finally:
+        # Closing the write end ends the pump's read loop. In a `finally` so a
+        # timeout does not leak the fd or the thread — this runs per page, and
+        # page_layouts fans out over every page in the application.
+        closer()
+        pump.join(5)
     if t.is_alive():
         raise TimeoutError(f"a2ui composition exceeded {timeout}s")
     if "e" in box:
         raise box["e"]
     return box["v"]
+
+
+def _stderr_pump(progress: Any) -> tuple[Any, threading.Thread, Any]:
+    """A pipe for the child's stderr, and a thread turning it into sentences.
+
+    Returns ``(write_end, thread, close)``. The write end is a real file object
+    because `anyio.open_process` gives its fileno to the OS.
+    """
+    import os
+
+    from services.a2ui_progress import phrase
+
+    r_fd, w_fd = os.pipe()
+    write_end = os.fdopen(w_fd, "w", encoding="utf-8", errors="replace")
+
+    def _pump() -> None:
+        try:
+            with os.fdopen(r_fd, "r", encoding="utf-8", errors="replace") as r:
+                for line in r:
+                    # The developer keeps the console output they had before;
+                    # redirecting the child's stderr must not cost it.
+                    sys.stderr.write(line)
+                    said = phrase(line) if progress is not None else None
+                    if said:
+                        try:
+                            progress(said)
+                        except Exception:  # noqa: BLE001 — reporting the work
+                            pass          # must never be able to fail it
+        except Exception:  # noqa: BLE001 — a closed pipe is the normal end
+            pass
+
+    return write_end, threading.Thread(target=_pump, daemon=True), write_end.close
 
 
 # ------------------------------------------------------------------ compose
@@ -421,9 +811,28 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list
     from services.dashboard_anatomy import dashboard_findings
     from services.page_kind_anatomy import page_kind_findings
 
-    if _family_of(kind) == "dashboard":
-        return dashboard_findings(route, schema, registry)
-    return page_kind_findings(kind, route, schema)
+    from services.a2ui_to_forge import dangling_bindings
+
+    if _family_of(kind, route) == "dashboard":
+        findings = dashboard_findings(route, schema, registry)
+    else:
+        findings = page_kind_findings(kind, route, schema)
+
+    # EVERY BINDING NEEDS A SOURCE BEHIND IT. A composed /plants shipped four
+    # stat tiles reading {{plantstracked.value}}, {{overdue.value}},
+    # {{duetoday.value}} and {{neverwatered.value}} against one declared
+    # source, `plants` — A2UI invented a source per metric, the binder passed
+    # names it had never seen straight through, and the page rendered four
+    # blanks. Nothing else catches this: `unresolved` reports pointers the
+    # binder could not bind, and these bound fine, to nothing.
+    #
+    # Named as `ref` so salvage treats it like any other bad widget: drop the
+    # tiles that read phantom data and re-judge. A page missing four tiles is
+    # a page; a page of four blanks reads as broken.
+    findings += [{"rule": f"binding '{name}' has no declared data source",
+                  "ref": name}
+                 for name in dangling_bindings(schema)]
+    return findings
 
 
 def compose_page_via_a2ui(
@@ -432,6 +841,12 @@ def compose_page_via_a2ui(
     kind: str,
     *,
     surface_provider: Optional[SurfaceProvider] = None,
+    shared_context: str = "",
+    page_id: str = "",
+    registry: dict | None = None,
+    presentation: str = "page",
+    progress: Any = None,
+    feedback: str = "",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -443,49 +858,130 @@ def compose_page_via_a2ui(
     root = Path(output_dir)
 
     if not is_a2ui_enabled():
-        return {"applied": False, "route": route, "kind": kind, "reason": "FORGE_A2UI is off"}
+        return {"applied": False, "route": route, "kind": kind,
+                "reason": "A2UI composition is disabled"}
     if surface_provider is None:
         ok, why = availability()
         if not ok:
             return {"applied": False, "route": route, "kind": kind, "reason": why}
-        surface_provider = _mcp_surface
+        # Bound rather than passed at the call site, so an INJECTED provider
+        # keeps the two-argument seam every test uses.
+        surface_provider = partial(
+            _mcp_surface, progress=progress,
+            workflows=[str(w.get("id")) for w in (registry.get("workflows") or [])
+                       if isinstance(w, dict) and w.get("id")])
 
     from services.a2ui_to_forge import translate
 
+    # No schema file is required. This used to decline when
+    # `_schema_path_for_route` found nothing, which made it a post-projection
+    # composer: it could only improve a page `frontend` had already written.
+    # §34 puts A2UI inside the Page Design Agent's own generation step, so it
+    # has to compose before anything is projected — and at that point no file
+    # exists by definition.
     target = _schema_path_for_route(root, route)
-    if target is None:
-        return {"applied": False, "route": route, "kind": kind,
-                "reason": f"no schema file serves {route}"}
 
-    registry = registry_for_binder(root)
+    # A caller that has the entities passes them; the plan.json
+    # adapter remains for the pipeline that has a plan.
+    registry = registry if registry is not None else registry_for_binder(root)
     if not registry.get("entities"):
         return {"applied": False, "route": route, "kind": kind,
                 "reason": "no entities in the plan — every binding would be a guess"}
 
-    try:
-        payload = surface_provider(build_requirement(root, kind, route),
-                                   build_domain_context(root))
-    except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
-        logger.warning("[a2ui] %s composition failed: %s", route, exc)
+    # NO ANSWER IS NOT A REFUSAL. Two of three parallel calls came back with an
+    # empty body on one run — `json.loads("")` raising "Expecting value: line 1
+    # column 1 (char 0)" — while the third answered twice, seconds apart. The
+    # composer had nothing against those pages; the transport dropped them. One
+    # was left with no layout at all and the run still finished.
+    #
+    # Retried, because the same call succeeding moments later is the definition
+    # of worth retrying. Bounded at three: a provider that is actually down
+    # says so three times quickly, and the failures here were instant rather
+    # than slow, so this costs a page nothing when the answer is real.
+    #
+    # A payload with no messages counts as no answer too. It reaches the same
+    # place as an exception — nothing to compose — and only one of the two
+    # shapes was being noticed.
+    payload = None
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            payload = surface_provider(build_requirement(root, kind, route,
+                                                         shared_context,
+                                                         presentation),
+                                       build_domain_context(root, registry,
+                                                            page_id,
+                                                            shared_context,
+                                                            feedback))
+        except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
+            last_exc, payload = exc, None
+        else:
+            if payload and (payload.get("messages") or []):
+                break
+            last_exc = None
+        if attempt < 3:
+            logger.info("[a2ui] %s attempt %d returned nothing (%s) — asking "
+                        "again", route, attempt,
+                        last_exc or "empty surface")
+            # A DROPPED CALL LOOKS LIKE A SLOW ONE from outside. Two of three
+            # parallel calls once came back empty and the retry was invisible,
+            # so the wait read as a single long composition.
+            _say(progress, f"The composer returned nothing for {route} — "
+                           f"asking again ({attempt + 1} of 3).")
+    if not payload or not (payload.get("messages") or []):
+        why = (f"the composer returned nothing after 3 attempts"
+               + (f" ({last_exc})" if last_exc else ""))
+        logger.warning("[a2ui] %s composition failed: %s", route, why)
         return {"applied": False, "route": route, "kind": kind,
-                "reason": f"composition failed: {exc}"}
+                "reason": f"composition failed: {why}"}
 
-    # Keep the raw surface per route, decline or not. When a composition ships
+    # Keep the raw surface per attempt, decline or not. When a composition ships
     # something wrong the first question is always what the composer actually
     # said, and without this the only way to answer it is another LLM call.
+    #
+    # ONE FILE PER ATTEMPT, NEVER OVERWRITTEN. Keyed on the route alone, a
+    # retry replaced the surface of the attempt that shipped: a run made six
+    # compositions and left four files, and /plants stored a one-node tree
+    # while the surface on disk replayed to nine. Every hypothesis about that
+    # collapse was tested against a payload from a different, healthier call,
+    # so each one came back "fine" and the page stayed broken. An artifact
+    # whose whole purpose is to say what the composer said must not be able to
+    # lose the attempt in question.
+    #
+    # `x` rather than a free-index probe: page_layouts fans out over pages, and
+    # exclusive create is decided by the filesystem rather than by a check that
+    # another thread can invalidate between the look and the write.
     try:
         art = root / "src" / "contracts" / "a2ui-surfaces"
         art.mkdir(parents=True, exist_ok=True)
-        (art / f"{_route_slug(route)}.json").write_text(
-            json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
+        slug = _route_slug(route)
+        body = json.dumps(payload, indent=1, ensure_ascii=False)
+        attempt = 1
+        while True:
+            try:
+                with open(art / f"{slug}.{attempt}.json", "x",
+                          encoding="utf-8") as fh:
+                    fh.write(body)
+                break
+            except FileExistsError:
+                attempt += 1
+        # The run log names the page; this names the file it composed from, so
+        # a stored layout can be traced back to the payload behind it without
+        # guessing which attempt won.
+        logger.info("[a2ui] %s attempt %d surface -> %s.%d.json",
+                    page_id or route, attempt, slug, attempt)
     except Exception as exc:  # noqa: BLE001 — debug artifact, never a blocker
         logger.warning("[a2ui] could not persist the %s surface: %s", route, exc)
 
-    try:
-        existing = json.loads(target.read_text(encoding="utf-8"))
-        page_id = str(existing.get("id") or _route_slug(route))
-    except Exception:  # noqa: BLE001
-        page_id = _route_slug(route)
+    # The caller knows the page id — `page_layouts` fans out over them. Read
+    # from an existing schema only when improving one, and fall back to the
+    # route slug when there is neither.
+    if not page_id:
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+            page_id = str(existing.get("id") or _route_slug(route))
+        except Exception:  # noqa: BLE001
+            page_id = _route_slug(route)
 
     # `kind` reaches the binder: a dashboard's Selects and date pickers are
     # filter chrome, not form fields naming missing columns.
@@ -522,36 +1018,39 @@ def compose_page_via_a2ui(
 
     findings = _floor_findings(kind, route, schema, registry)
     pruned: list[str] = []
-    if findings:
-        # SALVAGE BEFORE DECLINE. All-or-nothing cost a real build a 95-node
-        # dashboard over 3 unreadable charts — the app shipped a 13-node stub
-        # titled "Dashboard Page" instead. Drop the widgets the floor named
-        # and re-judge; a dashboard missing one chart is still a dashboard.
-        candidate, pruned = _prune_failing_widgets(schema, findings)
-        if pruned:
-            still = _floor_findings(kind, route, candidate, registry)
-            if not still:
-                logger.info("[a2ui] %s salvaged — dropped %d widget(s) the "
-                            "floor rejected: %s", route, len(pruned),
-                            ", ".join(pruned))
-                schema, findings = candidate, []
-            else:
-                # Pruning did not clear it: what remains is structural, and
-                # shipping a page the floor still rejects would make the gate
-                # meaningless. Report both rounds so the cause is legible.
-                findings = still
+    # NO SALVAGE. This used to drop the widgets the floor named and re-judge,
+    # on the argument that a dashboard missing one chart beats no dashboard.
+    # What it could not tell was the difference between removing a widget and
+    # removing the page: strip everything and nothing fails the floor, so an
+    # empty tree passed and shipped as a success. /tickets rendered blank from
+    # a ten-component composition and no layer reported a problem.
+    #
+    # It was also a post-hoc repair — editing output the floor judged wrong
+    # until it passes, then presenting it as what the composer wrote. A
+    # refused page is refused, and the declining path is not a stub: the
+    # caller falls through to the LLM page author, which composes a real tree
+    # and now receives the reason this one was refused.
     if findings:
         return {"applied": False, "route": route, "kind": kind,
-                "reason": f"composed page failed the {_family_of(kind)} floor: "
+                "reason": f"composed page failed the {_family_of(kind, route)} floor: "
                           + ", ".join(f["rule"] for f in findings),
                 "findings": [f["rule"] for f in findings],
                 "pruned": pruned,
                 "unresolved": result["unresolved"],
                 "warnings": result["warnings"]}
 
-    tmp = target.with_suffix(".json.a2ui-tmp")
-    tmp.write_text(json.dumps(schema, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(target)
+    # Written only when this is improving a page that already exists on disk.
+    # Composing into a `pageLayouts` artifact is the §115 path: the Blueprint
+    # is the source of truth, `frontend` projects it, and every binder built
+    # around that artifact — data_sources, gate_states, bind_workflows — runs
+    # over A2UI's tree exactly as it runs over an agent's. A composer that
+    # writes the output file instead leaves the Blueprint saying something
+    # different, which is the divergence codeMap and the API routes both were.
+    if target is not None:
+        tmp = target.with_suffix(".json.a2ui-tmp")
+        tmp.write_text(json.dumps(schema, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(target)
 
     logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved",
                 route, kind, len(schema.get("dataSources") or []),
@@ -559,7 +1058,12 @@ def compose_page_via_a2ui(
     return {
         "applied": True, "route": route, "kind": kind, "reason": "ok",
         "pruned": pruned,
-        "schema_path": str(target),
+        # The composition itself, for a caller emitting an artifact rather
+        # than reading the file back.
+        "root": schema.get("root"),
+        "schema": schema,
+        "page_id": page_id,
+        "schema_path": str(target) if target is not None else None,
         "data_sources": len(schema.get("dataSources") or []),
         "assumptions": result["assumptions"],
         "unresolved": result["unresolved"],
@@ -701,6 +1205,26 @@ def _resolver_enabled() -> bool:
     return mode not in ("off", "0", "false", "no")
 
 
+def _reads(blob: str, ref: str) -> bool:
+    """Whether serialised JSON binds to the source named `ref`.
+
+    Three shapes, because a binding is written three ways: `{{plants}}` whole,
+    `{{plants.count}}` into a field, and a bare `"plants"` where a prop names
+    its source. Matching only the first let `{{plantstracked.value}}` survive a
+    prune that was supposed to remove it.
+    """
+    # A VALUE, NOT A KEY. The bare-name clause exists for a prop that names
+    # its source — `"rows": "tickets"`. Written as `f'"{ref}"'` it also
+    # matched the *key* `"id"`, which every A2UI node carries as its own
+    # identity, so a finding naming a source called `id` marked every node in
+    # the tree as reading it. One finding pruned a ten-component page to an
+    # empty Stack, and the run reported success.
+    return (f"{{{{{ref}}}}}" in blob
+            or f"{{{{{ref}." in blob
+            or f': "{ref}"' in blob
+            or f':"{ref}"' in blob)
+
+
 def _prune_failing_widgets(schema: dict,
                            findings: list[dict]) -> tuple[dict, list[str]]:
     """Drop the dataSources a floor rejected, and whatever bound to them.
@@ -730,8 +1254,7 @@ def _prune_failing_widgets(schema: dict,
     def binds_to_pruned(node: dict) -> bool:
         """Whether this subtree reads one of the removed sources. Checked over
         the serialised node so a `{{name}}` anywhere in props counts."""
-        blob = json.dumps(node)
-        return any(f"{{{{{r}}}}}" in blob or f'"{r}"' in blob for r in refs)
+        return any(_reads(json.dumps(node), r) for r in refs)
 
     def strip(node: Any) -> Optional[dict]:
         if not isinstance(node, dict):
@@ -751,7 +1274,9 @@ def _prune_failing_widgets(schema: dict,
 
     root = strip(out.get("root") or {})
     out["root"] = root if root is not None else {"type": "Stack", "children": []}
-    return out, [str(s.get("name")) for s in pruned]
+    before = json.dumps(schema)
+    named = {str(s.get("name")) for s in pruned}
+    return out, sorted(r for r in refs if r in named or _reads(before, r))
 
 
 # Leaf types that are worth keeping even with no children — they render their

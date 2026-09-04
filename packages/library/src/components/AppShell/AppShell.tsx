@@ -55,7 +55,7 @@ export function AppShell({ sidebar, topbar, actions, rightRail, children }: AppS
         {sidebar && (
           <aside
             data-appshell-sidebar
-            className="row-span-2 border-r border-border bg-sidebar text-sidebar-foreground overflow-y-auto"
+            className="row-span-2 border-e border-border bg-sidebar text-sidebar-foreground overflow-y-auto"
           >
             {sidebar}
           </aside>
@@ -63,7 +63,7 @@ export function AppShell({ sidebar, topbar, actions, rightRail, children }: AppS
         {(topbar || actions) && (
           <header className="border-b border-border bg-card flex items-center justify-between px-4 py-3 md:px-6">
             <div className="flex-1 min-w-0">{topbar}</div>
-            {actions && <div className="flex-shrink-0 ml-4 flex items-center gap-2">{actions}</div>}
+            {actions && <div className="flex-shrink-0 ms-4 flex items-center gap-2">{actions}</div>}
           </header>
         )}
         <main className="overflow-y-auto overflow-x-hidden bg-background">
@@ -72,7 +72,7 @@ export function AppShell({ sidebar, topbar, actions, rightRail, children }: AppS
         {rightRail && (
           <aside
             data-appshell-right
-            className="row-span-2 border-l border-border bg-card overflow-y-auto p-4"
+            className="row-span-2 border-s border-border bg-card overflow-y-auto p-4"
           >
             {rightRail}
           </aside>

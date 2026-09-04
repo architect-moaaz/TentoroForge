@@ -27,6 +27,7 @@ import {
 // derived from the sum, never stored, so mutating a past row would corrupt
 // the derived history.
 import { isAppendOnly } from "@/lib/append-only-entities";
+import { PUBLIC_RESOURCES } from "@/lib/public-resources";
 
 // Auto-register all entities on first request
 async function ensureInitialized() {
@@ -95,11 +96,44 @@ function errorResponse(error: unknown) {
       { status: 409 }
     );
   }
+  // 22P02 — invalid text representation, i.e. the id in the URL is not the type
+  // the id column is. `/api/data/contacts/new` produced this every time a /new
+  // page failed to compose: `AppNavigator` fell through to its detail branch and
+  // asked for a record named "new", Postgres tried to cast it to uuid, and a
+  // routing mistake surfaced as a 500 with a stack trace.
+  //
+  // AppNavigator no longer does that, and this is the floor underneath it: an id
+  // the column cannot even represent is an id no row can have, so the honest
+  // answer is 404. A malformed id is a client error; it is not the server
+  // failing.
+  if (pgError?.code === "22P02") {
+    return NextResponse.json(
+      { error: { code: "NOT_FOUND", message: "No record with that id" } },
+      { status: 404 }
+    );
+  }
   const message = error instanceof Error ? error.message : "Internal server error";
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message } },
     { status: 500 }
   );
+}
+
+
+/**
+ * Whether this resource is reachable without a session.
+ *
+ * A page declares its own access (§100) and the middleware honours it, so
+ * `/plants` rendered for anyone — and then every fetch it made came back 401
+ * from here, because this route asked for a session regardless. The plant was
+ * in the database and the page that was allowed to show it could not read it.
+ *
+ * The list is generated from the same derivation the middleware uses: the
+ * entities behind a public page's own bindings, and nothing else. An entity
+ * only a gated page touches stays gated.
+ */
+function isPublicResource(entity: string | undefined): boolean {
+  return !!entity && PUBLIC_RESOURCES.includes(entity);
 }
 
 // ─── Route Handlers ───
@@ -110,12 +144,12 @@ export async function GET(
 ) {
   await ensureInitialized();
   const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-  }
 
   const { path } = await params;
   const [entity, ...rest] = path;
+  if (!session?.user && !isPublicResource(entity)) {
+    return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+  }
   const url = new URL(request.url);
   // Slice-4: `?unmask=accountNumber&unmask=ssn` opts one or more sensitive
   // columns out of masking for THIS request. The data-engine only honours
@@ -123,7 +157,10 @@ export async function GET(
   // silently falls back to the mask. Never a 403 (a UI that speculatively
   // asks for unmask shouldn't get treated as an attack).
   const unmaskColumns = url.searchParams.getAll("unmask");
-  const ctx = { user: session.user as any, unmaskColumns };
+  // `session` is null on a public resource — the guard above let it through
+  // deliberately. The data engine takes an anonymous context; what it must not
+  // take is `session.user` off a null.
+  const ctx = { user: (session?.user ?? null) as any, unmaskColumns };
 
   try {
     // GET /api/data/[entity]/stats

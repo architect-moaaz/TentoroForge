@@ -55,7 +55,7 @@ def doc(entity):
                             "aggregation": "count"}},
         ],
         "pages": [],
-        "patternTemplates": [],
+        "pageLayouts": [],
     }
 
 
@@ -203,10 +203,36 @@ def test_plan_produces_a_renderable_page(doc, page, catalog):
 
 
 def test_data_sources_follow_the_bindings_actually_used(doc, page, catalog):
+    """`{name, entity, op}` — the shape the renderer resolves.
+
+    This asserted `source: "/api/job-roles"` for as long as the bug lived:
+    `source` is not a field of the DataSource contract, and that path is the
+    one the API derivation moved to /api/data/. Pinning it meant every
+    generated page shipped `dataSources: []` with the suite green.
+    """
     schema = pp.plan_page(doc, page, list_template(), catalog)
     assert schema["dataSources"] == [
-        {"name": "rows", "source": "/api/job-roles", "op": "list"},
+        {"name": "rows", "entity": "JobRole", "op": "list"},
     ]
+
+
+def test_an_authored_binding_names_its_own_source(doc, page, catalog):
+    """A2UI binds `{{jobRoles}}`, not `{{rows}}`: the binding name is the
+    source name, because that is what the renderer looks up."""
+    template = list_template()
+    table = template["root"]["children"][2]
+    table["props"]["rows"] = "{{jobRoles}}"
+    schema = pp.plan_page(doc, page, template, catalog)
+    assert schema["dataSources"] == [
+        {"name": "jobRoles", "entity": "JobRole", "op": "list"},
+    ]
+
+
+def test_a_page_with_no_bindings_declares_no_sources(doc, page, catalog):
+    template = list_template()
+    template["root"]["children"] = []
+    schema = pp.plan_page(doc, page, template, catalog)
+    assert schema["dataSources"] == []
 
 
 def test_a_page_missing_what_its_pattern_requires_fails_loudly(doc, catalog):
@@ -225,7 +251,7 @@ def test_planning_is_deterministic(doc, page, catalog):
 def test_pages_without_a_template_are_reported_not_silently_dropped(
         doc, page, catalog):
     doc["pages"] = [page]
-    doc["patternTemplates"] = []
+    doc["pageLayouts"] = []
     result = pp.plan_pages(doc, catalog)
     assert result["planned"] == {}
     assert result["skipped"][0]["page"] == "PAGE-001"
@@ -233,7 +259,7 @@ def test_pages_without_a_template_are_reported_not_silently_dropped(
 
 def test_plan_pages_covers_every_page_with_a_template(doc, page, catalog):
     doc["pages"] = [page]
-    doc["patternTemplates"] = [list_template()]
+    doc["pageLayouts"] = [dict(list_template(), page="PAGE-001")]
     result = pp.plan_pages(doc, catalog)
     assert list(result["planned"]) == ["PAGE-001"]
     assert result["failed"] == [] and result["skipped"] == []
@@ -357,10 +383,9 @@ def test_the_digest_marks_required_props_and_bounds(catalog):
 
 # --- per-page authoring ----------------------------------------------------
 
-def test_an_authored_page_overrides_its_pattern(doc, page, catalog):
-    """Switching one page to bespoke must not strand the rest on nothing."""
+def test_an_authored_page_is_what_gets_planned(doc, page, catalog):
+    """The composed tree is the only source; nothing generic sits behind it."""
     doc["pages"] = [page]
-    doc["patternTemplates"] = [list_template()]
     doc["pageLayouts"] = [{
         "page": "PAGE-001",
         "root": {"type": "Stack", "props": {}, "children": [
@@ -371,17 +396,21 @@ def test_an_authored_page_overrides_its_pattern(doc, page, catalog):
     assert root["children"][0]["props"]["content"] == "Bespoke"
 
 
-def test_pages_nobody_authored_still_fall_back_to_the_pattern(doc, page, catalog):
+def test_a_page_nobody_composed_is_reported_not_stubbed(doc, page, catalog):
+    """There used to be a per-pattern template behind every page, so a page
+    nobody composed was planned from the generic shape for its kind. That made
+    "designed" and "defaulted" indistinguishable in the output — §76 silent
+    divergence, reached by fallback rather than by drift."""
     second = dict(page, id="PAGE-002", route="/other", name="Other")
     doc["pages"] = [page, second]
-    doc["patternTemplates"] = [list_template()]
     doc["pageLayouts"] = [{
         "page": "PAGE-001",
         "root": {"type": "Stack", "props": {}, "children": []},
     }]
     result = pp.plan_pages(doc, catalog)
-    assert set(result["planned"]) == {"PAGE-001", "PAGE-002"}
-    assert result["skipped"] == [] and result["failed"] == []
+    assert set(result["planned"]) == {"PAGE-001"}
+    assert [s["page"] for s in result["skipped"]] == ["PAGE-002"]
+    assert "nothing composed" in result["skipped"][0]["reason"]
 
 
 def test_an_authored_page_is_held_to_the_same_catalog(doc, page, catalog):
@@ -442,3 +471,425 @@ def test_the_gate_still_rejects_a_value_the_component_refuses(catalog):
     }}}
     errors = pp.validate_props(schema, catalog)
     assert len(errors) == 1 and "ghost" in errors[0]
+
+
+def test_the_digest_states_nested_array_item_shapes(catalog):
+    """A list inside a list item needs its own shape stated.
+
+    `FilterBar.chips[].options` is a list of {value, label}. Rendered as a bare
+    name, an author wrote a list of plain strings — correct-looking, and
+    rejected by the gate. That one page failed twice and, before fan-out
+    failures were made survivable, took six downstream nodes with it.
+    """
+    digest = pp.catalog_digest(catalog)
+    assert "options*: [{value*, label*}]" in digest
+
+
+def test_the_digest_states_scalar_array_types_too(catalog):
+    """`columnOrder: array<string>` should not read as an array of objects."""
+    digest = pp.catalog_digest(catalog)
+    assert "columnOrder: [string]" in digest or "columnOrder: array<string>" in digest
+
+
+# --- views: a filtered variant is not a page -------------------------------
+
+def _viewed_page(page):
+    return dict(page, views=[
+        {"key": "mine", "label": "Assigned to me",
+         "filter": {"assignee": "$currentUser"}},
+        {"key": "overdue", "label": "Overdue", "filter": {"overdue": "true"},
+         "isDefault": False},
+    ])
+
+
+def test_saved_views_reach_the_component_that_renders_them(doc, page, entity, catalog):
+    """The library could always do this — FilterBar.savedViews and
+    SavedViewsPicker exist — and the contract had no way to ask for it. So a
+    workshop tracker produced /jobs, /jobs/mine, /jobs/unassigned,
+    /jobs/overdue and /jobs/ready-for-collection: six routes over one list.
+    """
+    ctx = pp.build_context(doc, _viewed_page(page), entity)
+    assert ctx["$savedViews"] == [
+        {"id": "mine", "label": "Assigned to me",
+         "filters": {"assignee": "$currentUser"}},
+        {"id": "overdue", "label": "Overdue", "filters": {"overdue": "true"}},
+    ]
+
+
+def test_a_template_can_repeat_over_views(doc, page, entity):
+    items = pp.repeat_items(doc, _viewed_page(page), entity, "views")
+    assert [i["id"] for i in items] == ["mine", "overdue"]
+    assert items[0]["label"] == "Assigned to me"
+
+
+def test_a_page_with_no_views_renders_nothing_extra(doc, page, entity):
+    """Absent views must degrade to nothing, like every other repeat."""
+    assert pp.build_context(doc, page, entity)["$savedViews"] == []
+    assert pp.repeat_items(doc, page, entity, "views") == []
+
+
+def test_the_bound_shape_is_the_one_the_component_accepts(doc, page, entity, catalog):
+    """$savedViews is only useful if FilterBar actually takes it."""
+    schema = {"root": {"type": "FilterBar", "props": {
+        "chips": [{"key": "status", "label": "Status",
+                   "options": [{"value": "open", "label": "Open"}]}],
+        "savedViews": pp.build_context(doc, _viewed_page(page), entity)["$savedViews"],
+    }}}
+    assert pp.validate_props(schema, catalog) == []
+
+
+def test_repeat_over_states_reads_the_array_the_contract_declares():
+    """PageContract.states is z.array(z.enum([...])), not a mapping.
+
+    Reading it as a dict crashed the entire frontend projection the first time
+    a pattern template repeated over it — five nodes lost to `'list' object has
+    no attribute 'items'`.
+    """
+    from services.blueprint.page_planner import repeat_items
+
+    page = {"states": ["loading", "empty", "populated", "error"]}
+    items = repeat_items({}, page, {}, "states")
+    assert [i["id"] for i in items] == ["loading", "empty", "populated", "error"]
+    assert items[0]["value"] == "loading"
+    assert items[1]["label"]
+
+
+def test_repeat_over_states_is_empty_when_none_are_declared():
+    from services.blueprint.page_planner import repeat_items
+
+    assert repeat_items({}, {"states": []}, {}, "states") == []
+    assert repeat_items({}, {}, {}, "states") == []
+
+
+# --- §33: the page declares the process it starts ---------------------------
+
+
+def _wf_doc():
+    return {
+        "workflows": [
+            {"id": "FLOW-001", "name": "Bike Drop-off Intake",
+             "status": "active", "trigger": {"kind": "manual"},
+             # Opens by registering a Customer, though /jobs/new starts it:
+             # this is exactly what an inference over step order gets wrong.
+             "steps": [{"type": "action", "entity": "ENTITY-001"},
+                       {"type": "action", "entity": "ENTITY-002"}]},
+            {"id": "FLOW-006", "name": "Flag a Job Awaiting Parts",
+             "status": "active", "trigger": {"kind": "manual"},
+             "steps": [{"type": "action", "entity": "ENTITY-002"}]},
+        ],
+    }
+
+
+def test_a_page_dispatches_the_workflow_it_declares():
+    page = {"id": "PAGE-010", "route": "/jobs/new", "dispatches": "FLOW-001"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) == "FLOW-001"
+
+
+def test_a_page_that_declares_nothing_dispatches_nothing():
+    """Silence is not a licence to guess."""
+    page = {"id": "PAGE-010", "route": "/jobs/new"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) is None
+
+
+def test_a_declared_workflow_that_does_not_exist_is_refused():
+    page = {"id": "PAGE-010", "route": "/jobs/new", "dispatches": "FLOW-999"}
+    assert pp.workflow_for_page(_wf_doc(), page, {"id": "ENTITY-002"}) is None
+
+
+def test_the_form_carries_the_workflow_and_the_button_does_not():
+    """A twelve-step intake dispatched from a button has nowhere to type."""
+    root = {"type": "Stack", "children": [
+        {"type": "Button", "props": {"label": "New drop-off",
+                                     "navigate": "/jobs/new"}},
+        {"type": "Form", "props": {"fields": [{"name": "x"}]}},
+    ]}
+    out = pp.bind_workflows(root, "FLOW-001")
+    assert out["children"][1]["props"]["workflow"] == "FLOW-001"
+    assert "workflow" not in out["children"][0]["props"]
+
+
+def test_an_authored_workflow_is_not_overwritten():
+    root = {"type": "Form", "props": {"fields": [{"name": "x"}],
+                                      "workflow": "invoice.update"}}
+    assert pp.bind_workflows(root, "FLOW-001")["props"]["workflow"] == "invoice.update"
+
+
+# --- §33: exactly one state renders -----------------------------------------
+
+
+def _state_tree():
+    return {"type": "Stack", "children": [
+        {"type": "Table", "props": {"rows": "{{customers}}"}},
+        {"type": "LoadingState", "props": {"label": "Loading customers"}},
+        {"type": "Skeleton"},
+        {"type": "EmptyState", "props": {"message": "No customers yet"}},
+        {"type": "Alert", "props": {"message": "did not load"}},
+    ]}
+
+
+def test_the_loading_state_is_dropped_not_gated():
+    """Sources resolve server-side, so nothing is ever in flight when a
+    Conditional evaluates. A LoadingState here is a node for a state that
+    cannot occur — which is why "Loading customers" sat under a loaded table."""
+    out = pp.gate_states(_state_tree(), "customers")
+    types = [c["type"] for c in out["children"]]
+    assert "LoadingState" not in str(types)
+    assert "Skeleton" not in str(types)
+
+
+def test_the_empty_state_is_gated_on_an_empty_source():
+    out = pp.gate_states(_state_tree(), "customers")
+    gate = next(c for c in out["children"]
+                if c["type"] == "Conditional"
+                and c["children"][0]["type"] == "EmptyState")
+    assert gate["props"]["when"] == "customers != null and count(customers) == 0"
+
+
+def test_the_error_state_is_gated_on_an_absent_source():
+    """A failed source is absent: schema-page.tsx logs and never sets the key,
+    so one bad source cannot blank a page."""
+    out = pp.gate_states(_state_tree(), "customers")
+    gate = next(c for c in out["children"]
+                if c["type"] == "Conditional"
+                and c["children"][0]["type"] == "Alert")
+    assert gate["props"]["when"] == "customers == null"
+
+
+def test_content_is_left_alone():
+    out = pp.gate_states(_state_tree(), "customers")
+    assert out["children"][0]["type"] == "Table"
+
+
+def test_a_page_with_no_list_source_is_untouched():
+    """Nothing to gate on — a form page has no dataSources at all."""
+    tree = _state_tree()
+    assert pp.gate_states(tree, None) is tree
+
+
+# --- §33: a create form asks about a record that does not exist yet ---------
+
+_ARTICLE = {"fields": [
+    {"name": "title", "type": "text"}, {"name": "url", "type": "text"},
+    {"name": "reason", "type": "text"}, {"name": "isRead", "type": "boolean"},
+    {"name": "takeaway", "type": "text"},
+    {"name": "savedAt", "type": "datetime"}, {"name": "readAt", "type": "datetime"},
+]}
+
+
+def test_a_create_form_does_not_ask_about_the_record_s_afterlife():
+    """A generated /articles/new offered `Is Read`, `Saved At` and `Read At`
+    while its own description said an article "starts unread with no
+    takeaway"."""
+    names = [f["name"] for f in pp.form_fields_for(_ARTICLE, creating=True)]
+    assert "isRead" not in names
+    assert "savedAt" not in names
+    assert "readAt" not in names
+    assert names[:3] == ["title", "url", "reason"]
+
+
+def test_an_edit_form_still_shows_lifecycle_state():
+    """Editing an article that exists may legitimately show whether it is read."""
+    names = [f["name"] for f in pp.form_fields_for(_ARTICLE)]
+    assert "isRead" in names and "readAt" in names
+
+
+def test_a_timestamp_that_is_not_system_stamped_survives():
+    """`publishedAt` is a fact about the article, not a lifecycle stamp."""
+    entity = {"fields": [{"name": "publishedAt", "type": "datetime"}]}
+    assert [f["name"] for f in pp.form_fields_for(entity, creating=True)] == ["publishedAt"]
+
+
+def test_the_default_view_narrows_the_fetch():
+    """/articles offered Unread, Read and All saved, and every one showed the
+    same rows: the view declared a filter and nothing narrowed the query."""
+    page = {"id": "PAGE-001", "route": "/articles", "pattern": "entity_list",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "unread", "filter": {"isRead": "false"},
+                       "isDefault": True},
+                      {"key": "all", "filter": {}, "isDefault": False}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Table", "props": {"rows": "{{articles}}"}}
+    doc = {"data": {"entities": [entity]}}
+    src = pp.data_sources(doc, page, entity, root)[0]
+    assert src["filter"] == {"isRead": "false"}
+
+
+def test_a_view_that_is_not_the_default_does_not_narrow_the_load():
+    page = {"id": "PAGE-001", "route": "/articles",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "all", "filter": {"x": "1"}, "isDefault": False}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Table", "props": {"rows": "{{articles}}"}}
+    src = pp.data_sources({"data": {"entities": [entity]}}, page, entity, root)[0]
+    assert "filter" not in src
+
+
+def test_a_detail_source_is_never_filtered_by_a_view():
+    """A view narrows a list; a record is fetched by id."""
+    page = {"id": "PAGE-002", "route": "/articles/[id]",
+            "data": {"primaryEntity": "E1"},
+            "views": [{"key": "unread", "filter": {"isRead": "false"},
+                       "isDefault": True}]}
+    entity = {"id": "E1", "name": "Article"}
+    root = {"type": "Text", "props": {"value": "{{record}}"}}
+    src = pp.data_sources({"data": {"entities": [entity]}}, page, entity, root)[0]
+    assert src["op"] == "get" and "filter" not in src
+
+
+# --- a legal node and a contracted node are different questions -------------
+
+
+def _tpl(root):
+    return {"pattern": "entity_list", "root": root}
+
+
+def test_a_structural_node_is_legal_without_a_catalog_entry(catalog):
+    """Repeat is declared in NodeV2 (page.ts:332) and dispatched by the
+    renderer, and has no catalog entry because it is not a component. It was
+    reported as unregistered, which rejected the page A2UI composed."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Repeat", "props": {"source": "plants", "as": "p"},
+         "children": [{"type": "Text", "props": {"content": "x"}}]}), catalog)
+    assert not [e for e in errs if "Repeat" in e]
+
+
+def test_an_unknown_component_is_still_rejected(catalog):
+    """The point of the check. Widening it to let Repeat through must not let
+    a phantom through — `Kanbam` was the name that motivated the catalog."""
+    errs = pp.validate_template(_tpl({"type": "Kanbam", "props": {}}), catalog)
+    assert any("Kanbam" in e for e in errs)
+
+
+def test_children_of_a_structural_node_are_still_checked(catalog):
+    """The half a guarded early-return loses. `entry is None` answered "is
+    this legal" with "do I have a contract", so a subtree under a structural
+    node went entirely unwalked."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Stack", "props": {}, "children": [
+            {"type": "Repeat", "props": {}, "children": [
+                {"type": "Kanbam", "props": {}}]}]}), catalog)
+    assert any("Kanbam" in e for e in errs), "the subtree was not walked"
+
+
+def test_an_unknown_node_stops_its_own_subtree(catalog):
+    """Nothing under an unregistered type can be judged against a contract
+    that does not exist, so it reports once rather than cascading."""
+    errs = pp.validate_template(_tpl(
+        {"type": "Kanbam", "props": {}, "children": [
+            {"type": "AlsoFake", "props": {}}]}), catalog)
+    assert any("Kanbam" in e for e in errs)
+    assert not any("AlsoFake" in e for e in errs)
+
+
+# ---------------------------------------------------------------------------
+# The projection must not manufacture a divergence the composer already closed.
+#
+# A shipped /plants rendered the literal text "{{overdue.value}}" in four stat
+# tiles. The composer was clean: its schema declared all seven sources its tree
+# read, and its own dangling check found nothing. The projection then rebuilt
+# the set by matching binding names against entity names, kept the one that
+# happened to be an entity, and shipped the tree that read the other six.
+# ---------------------------------------------------------------------------
+
+def _counted(page_id="PAGE-001"):
+    return {
+        "page": page_id,
+        "dataSources": [
+            {"name": "plants", "entity": "Plant", "op": "list"},
+            {"name": "overdue", "entity": "Plant", "op": "aggregate",
+             "metrics": {"value": {"fn": "count"}}},
+        ],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "Stat", "props": {"label": "Overdue",
+                                       "value": "{{overdue.value}}"},
+             "children": []},
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []},
+        ]},
+    }
+
+
+def test_the_composers_data_sources_are_carried_not_rederived(doc, page, catalog):
+    """`overdue` is an aggregate over Plant, not an entity. Re-derivation drops
+    it; the binder resolved it in the pass that rewrote the pointer."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [_counted()]
+    result = pp.plan_pages(doc, catalog)
+    planned = result["planned"]["PAGE-001"]
+    assert {s["name"] for s in planned["dataSources"]} == {"plants", "overdue"}
+    assert next(s for s in planned["dataSources"]
+                if s["name"] == "overdue")["op"] == "aggregate"
+
+
+def test_a_binding_that_names_no_fetchable_data_stops_the_page(doc, page, catalog):
+    """Shipping it means the literal text "{{overdue.value}}" on screen.
+
+    Refused where the resolution actually fails — `data_sources` used to
+    `continue` past a name it could not match, so the tree kept the binding
+    and the page lost the fetch with nothing reporting either.
+    """
+    layout = _counted()
+    # No carried sources, so the projection derives — and `overdue` is an
+    # aggregate over Plant, not an entity, so derivation cannot reach it.
+    layout.pop("dataSources")
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [layout]
+
+    result = pp.plan_pages(doc, catalog)
+    assert result["planned"] == {}
+    assert result["failed"][0]["page"] == "PAGE-001"
+    assert "{{overdue}} names no data" in result["failed"][0]["reason"]
+
+
+def test_a_layout_with_no_carried_sources_still_derives_them(doc, page, catalog):
+    """Agent-authored trees carry none, and must keep projecting."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{rows}}"},
+             "children": []}]},
+    }]
+    result = pp.plan_pages(doc, catalog)
+    assert list(result["planned"]) == ["PAGE-001"]
+    assert result["planned"]["PAGE-001"]["dataSources"]
+
+
+def test_a_carried_source_naming_an_entity_id_is_resolved_to_its_name(
+        doc, page, catalog):
+    """The engine resolves a source by entity NAME. The composer's binder
+    writes "Plant" because its registry is keyed by name; an authoring agent
+    writes "ENTITY-001" because that is how a page references an entity
+    everywhere else in the Blueprint. Carried through unnormalised, the second
+    shipped a page whose every source named ENTITY-001 — the engine resolved
+    nothing, returned [], and the page rendered its empty state over a
+    database with rows in it."""
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "dataSources": [{"name": "plants", "entity": "ENTITY-001",
+                         "op": "list"}],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []}]},
+    }]
+    planned = pp.plan_pages(doc, catalog)["planned"]["PAGE-001"]
+    assert planned["dataSources"][0]["entity"] == "JobRole"
+
+
+def test_a_carried_source_already_naming_the_entity_is_left_alone(
+        doc, page, catalog):
+    doc["pages"] = [page]
+    doc["pageLayouts"] = [{
+        "page": "PAGE-001",
+        "dataSources": [{"name": "plants", "entity": "JobRole", "op": "list"}],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "TableSortable",
+             "props": {"columns": "$columns", "rows": "{{plants}}"},
+             "children": []}]},
+    }]
+    planned = pp.plan_pages(doc, catalog)["planned"]["PAGE-001"]
+    assert planned["dataSources"][0]["entity"] == "JobRole"

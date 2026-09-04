@@ -51,6 +51,17 @@ const TYPE_BADGE_COLORS: Record<RuleType, string> = {
   ai_enrichment: "bg-cyan-100 text-cyan-700",
 };
 
+/**
+ * Whether this rule is the Blueprint's rather than a hand-authored row.
+ *
+ * `config.blueprintId` is set by services/blueprint_to_editor.py for exactly
+ * this question, so the answer travels with the record instead of costing a
+ * second request.
+ */
+function fromBlueprint(rule: Rule): boolean {
+  return Boolean((rule.config as { blueprintId?: string })?.blueprintId);
+}
+
 export function RulesPanel({ projectId, orgId }: RulesPanelProps) {
   const [subTab, setSubTab] = useState<SubTab>("rules");
   const [search, setSearch] = useState("");
@@ -269,10 +280,35 @@ export function RulesPanel({ projectId, orgId }: RulesPanelProps) {
                   {filteredRules.map((rule) => (
                     <tr
                       key={rule.id}
-                      className="cursor-pointer border-b hover:bg-muted/30"
-                      onClick={() => handleEdit(rule)}
+                      // OWNED BY THE BLUEPRINT, SO NOT EDITABLE HERE. The row
+                      // exists because the Blueprint declares it, not because
+                      // anything wrote it to project_rules — so opening the
+                      // dialog would collect an edit that has nowhere to go
+                      // and fail on save. The backend refuses it with a 409;
+                      // this stops it being offered in the first place.
+                      className={
+                        fromBlueprint(rule)
+                          ? "border-b"
+                          : "cursor-pointer border-b hover:bg-muted/30"
+                      }
+                      onClick={
+                        fromBlueprint(rule)
+                          ? undefined
+                          : () => handleEdit(rule)
+                      }
                     >
-                      <td className="px-3 py-2 font-medium">{rule.name}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {rule.name}
+                        {fromBlueprint(rule) && (
+                          <Badge
+                            variant="outline"
+                            className="ml-2 text-[10px] font-normal"
+                            title="Defined in the Blueprint — ask Smith to change it"
+                          >
+                            Blueprint
+                          </Badge>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <Badge
                           variant="secondary"

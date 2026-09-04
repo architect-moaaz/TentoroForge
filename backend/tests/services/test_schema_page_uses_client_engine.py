@@ -12,8 +12,18 @@ def test_renders_via_client_engine_not_server_renderer():
     src = _SP.read_text()
     assert 'from "@tentoroforge/engine"' in src
     assert "<Engine" in src
-    # the server-side renderer must NOT be imported/used (it can't run client hooks)
-    assert 'from "@tentoroforge/renderer"' not in src
+    # The hazard is the server-side SchemaRenderer COMPONENT, which cannot run
+    # client hooks — not the renderer package. This banned the whole module,
+    # and the file legitimately imports `resolveCrumbHrefs` from it: a pure
+    # function in runtime/crumbHrefs.ts with no hooks and no rendering. So the
+    # ban now names the component.
+    #
+    # Matched as import/JSX rather than by substring: the file explains in a
+    # comment why it does not use SchemaRenderer, and a bare `in src` test
+    # would trip over the explanation.
+    assert "import { SchemaRenderer" not in src
+    assert "<SchemaRenderer" not in src
+    assert "SchemaRenderer," not in src
 
 
 def test_keeps_workflow_dispatch_wrapper_and_registry():

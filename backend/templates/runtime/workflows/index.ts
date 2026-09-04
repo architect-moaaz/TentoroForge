@@ -84,7 +84,15 @@ export async function loadWorkflows(
 ): Promise<Map<string, WorkflowDefinition>> {
   if (workflowsLoaded) return workflowCache;
 
-  const dir = workflowsDir || path.join(process.cwd(), "workflows");
+  // WHERE THE PROJECTION ACTUALLY WRITES. This read `<cwd>/workflows`, which
+  // nothing creates: `project_workflow_definitions` writes
+  // `src/lib/workflows/definitions/*.json`. So `readdir` threw, the catch
+  // below marked loading complete, and the cache stayed empty — every
+  // `triggerWorkflow` answered "Workflow not found" for every workflow, by
+  // every key. A generated app could not run a single workflow, and the only
+  // symptom was a form that did nothing.
+  const dir =
+    workflowsDir || path.join(process.cwd(), "src/lib/workflows/definitions");
 
   let files: string[] = [];
   try {
@@ -103,8 +111,26 @@ export async function loadWorkflows(
     try {
       const content = await fs.readFile(path.join(dir, file), "utf-8");
       const definition = JSON.parse(content) as WorkflowDefinition;
+      // Three keys, because three things legitimately name this workflow and
+      // each is what some caller already has:
+      //
+      //   definition.id     the slug this file is named after
+      //   definition.name   the human name
+      //   blueprintId       FLOW-001 — what the Blueprint calls it, and what a
+      //                     composed page binds into Button.workflow
+      //
+      // The last one was written into every definition and indexed by none, so
+      // a page bound to FLOW-001 answered "Workflow not found: FLOW-001" and a
+      // form that looked entirely correct did nothing when submitted.
+      //
+      // The Blueprint id is the identity worth binding: the slug is derived
+      // from the name, so a rename silently rewrites it and every stored
+      // binding that used it. FLOW-001 does not move.
       workflowCache.set(definition.id, definition);
       workflowCache.set(definition.name, definition);
+      if (definition.blueprintId) {
+        workflowCache.set(definition.blueprintId, definition);
+      }
     } catch (err) {
       console.warn(`[workflow] failed to load ${file}:`, err);
     }

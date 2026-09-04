@@ -39,47 +39,15 @@ QueryFn = Callable[[str, list[dict], list[dict]], Iterable[dict]]
 _TERMINAL = "__terminal__"
 _MAX_UNKNOWN_STREAK = 2  # two consecutive unknown-tool calls → force ask_user
 
-# Extended-thinking gating — Sonnet 4.5+, Opus 4+, Fable 5+ support the
-# ``thinking={"type":"enabled",…}`` request block. Older sonnet/opus/haiku
-# models silently ignore it (or reject on newer server-side gates), so we
-# prefix-match here rather than sending it unconditionally.
-_THINKING_MODEL_PREFIXES: tuple[str, ...] = (
-    "claude-sonnet-4-5",
-    "claude-sonnet-4-6",
-    "claude-sonnet-5",
-    "claude-opus-4",
-    "claude-opus-5",
-    "claude-fable-5",
+# Extended thinking — WHICH BLOCK A MODEL ACCEPTS is a fact about the
+# transport, and `services.llm_client` owns it. This module used to keep its
+# own prefix table; two tables drift the first time one is updated for a new
+# release, and the symptom is a 400 from whichever call site was missed.
+from services.llm_client import (  # noqa: E402
+    THINKING_HEADROOM_TOKENS,
+    supports_thinking as _model_supports_thinking,
+    thinking_block_for as _thinking_block,
 )
-
-
-def _model_supports_thinking(model: str) -> bool:
-    """Return True when ``model`` is an Anthropic model in the family
-    that supports the extended-thinking request block. Prefix match so
-    dated variants (``…-20260215``) all pass."""
-    if not isinstance(model, str) or not model:
-        return False
-    m = model.strip()
-    return any(m.startswith(p) for p in _THINKING_MODEL_PREFIXES)
-
-
-def _thinking_budget() -> int:
-    """Read the FORGE_SMITH_THINKING_BUDGET env var. 0 disables thinking.
-    Malformed / negative values fall back to the OFF default.
-
-    Default is 0 (thinking OFF). Extended thinking adds several seconds of
-    serial reasoning-token generation to every ReAct turn — with the loop
-    capped at 8-16 turns, that's tens of seconds of latency per user ask
-    for a modest quality bump. Opt IN via env for hard cases; leave off for
-    the interactive baseline that keeps chat responsive."""
-    raw = os.environ.get("FORGE_SMITH_THINKING_BUDGET")
-    if raw is None or raw == "":
-        return 0
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, n)
 
 
 def run_fix_agent(
@@ -614,10 +582,9 @@ def _default_query(
     executes it and appends the result as the next user message. This keeps
     the loop identical in shape to the injected test seam.
 
-    When ``reasoning_callback`` is given AND the target model + budget
-    combination supports Anthropic's extended thinking, each thinking
-    block in the response is forwarded to the callback verbatim BEFORE
-    the tool-call JSON is parsed. This lets the caller (e.g. the SSE
+    When ``reasoning_callback`` is given and the target model supports
+    Anthropic's extended thinking, each thinking block in the response is
+    forwarded to the callback verbatim BEFORE the tool-call JSON is parsed. This lets the caller (e.g. the SSE
     stream in ``routers/generate.py``) surface Smith's reasoning to the
     UI without changing the parsed-tool-call return shape.
 
@@ -638,8 +605,8 @@ def _default_query(
     convo = list(messages)
 
     model = "claude-sonnet-4-6"
-    budget = _thinking_budget()
-    thinking_on = budget > 0 and _model_supports_thinking(model)
+    thinking = _thinking_block(model)
+    thinking_on = thinking is not None
 
     def _next_turn() -> Optional[dict]:  # noqa: ANN001
         last_user_pos = max(
@@ -668,7 +635,7 @@ def _default_query(
             # Response budget stays 1500 tokens; when thinking is on we
             # add the thinking budget on top so the model has room for
             # both the internal reasoning tokens and the tool-call JSON.
-            "max_tokens": 1500 + (budget if thinking_on else 0),
+            "max_tokens": 1500 + (THINKING_HEADROOM_TOKENS if thinking_on else 0),
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
         }
@@ -676,10 +643,7 @@ def _default_query(
             # Extended thinking requires temperature=1.0; the API rejects
             # other values when the thinking block is present.
             create_kwargs["temperature"] = 1.0
-            create_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": budget,
-            }
+            create_kwargs["thinking"] = thinking
 
         msg = client.messages.create(**create_kwargs)
 

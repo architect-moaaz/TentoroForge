@@ -6,7 +6,8 @@ import { useElevation, useRadiusScale } from "../../theme/tokens-context";
 
 type Action = {
   label: string;
-  workflow: string;
+  workflow?: string;
+  navigate?: string;
 };
 
 type Props = {
@@ -70,16 +71,30 @@ export function EmptyState({ message, icon, action, style }: Props) {
         {message}
       </p>
       {action && (
-        <span
-          data-workflow={action.workflow}
-          style={{
-            color: `var(${tokenToCssVar("primary.500")})`,
-            fontSize: `var(${tokenToCssVar("typography.sm")})`,
-            cursor: "pointer",
-          }}
-        >
-          {action.label}
-        </span>
+        // An anchor when it navigates, a dispatch target when it does not:
+        // a link the keyboard cannot reach is not a link.
+        action.navigate ? (
+          <a
+            href={action.navigate}
+            style={{
+              color: `var(${tokenToCssVar("primary.500")})`,
+              fontSize: `var(${tokenToCssVar("typography.sm")})`,
+            }}
+          >
+            {action.label}
+          </a>
+        ) : (
+          <span
+            data-workflow={action.workflow}
+            style={{
+              color: `var(${tokenToCssVar("primary.500")})`,
+              fontSize: `var(${tokenToCssVar("typography.sm")})`,
+              cursor: "pointer",
+            }}
+          >
+            {action.label}
+          </span>
+        )
       )}
     </div>
   );

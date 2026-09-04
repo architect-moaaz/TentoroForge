@@ -471,8 +471,12 @@ def test_filter_strips_absolute_positioning():
     assert "relative" not in filtered
     # z-index stripped
     assert "z-10" not in _filter_position_classes("flex z-10 bg-white")
-    # w-[Npx] stripped only when absolute is present
-    assert "w-[200px]" not in _filter_position_classes("absolute w-[200px] h-[40px]")
+    # The POSITION goes and the SIZE stays, whether or not absolute is present.
+    # Stripping the size too left absolutely-positioned image cards with
+    # neither offsets nor dimensions, and a thirty-card dashboard frame
+    # rendered three of them — see
+    # tests/services/test_a_designed_card_keeps_its_size.py.
+    assert "w-[200px]" in _filter_position_classes("absolute w-[200px] h-[40px]")
     assert "w-[200px]" in _filter_position_classes("flex w-[200px] gap-4")
     # bg-[rgb(...)] preserved even when absolute is present
     assert "bg-[rgb(132,16,19)]" in _filter_position_classes("absolute bg-[rgb(132,16,19)] left-0")
@@ -529,11 +533,18 @@ def test_filter_empty_string():
     assert _filter_position_classes("") == ""
 
 
-def test_filter_h_px_stripped_only_with_absolute():
-    # h-[40px] stripped when absolute present
-    assert "h-[40px]" not in _filter_position_classes("absolute h-[40px] bg-white")
-    # h-[40px] kept when no absolute present
+def test_filter_keeps_h_px_with_or_without_absolute():
+    """A fixed height survives the position filter either way.
+
+    This asserted the reverse — that `absolute h-[40px]` lost its height. That
+    rule is what emptied Figma pages: the offsets are re-inferred as a flex
+    flow by `_infer_absolute_flow`, but a dimension cannot be re-inferred from
+    an image, so removing both left nothing to draw.
+    """
+    assert "h-[40px]" in _filter_position_classes("absolute h-[40px] bg-white")
     assert "h-[40px]" in _filter_position_classes("flex h-[40px] bg-white")
+    # The position itself is still stripped — only the size was rescued.
+    assert "absolute" not in _filter_position_classes("absolute h-[40px] bg-white")
 
 
 # ── Integration: no absolute classes in fixture schema ──

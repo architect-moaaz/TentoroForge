@@ -57,7 +57,7 @@ def test_describe_register_returns_string_for_all():
 
 def _run(coro):
     """Helper: run an async test body without needing pytest-asyncio."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def test_llm_classifier_falls_back_to_rules_when_no_api_key(monkeypatch):

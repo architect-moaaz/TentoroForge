@@ -267,6 +267,13 @@ export type WorkflowTriggerContract =
 export interface WorkflowDefinition {
   id: string;
   name: string;
+  /**
+   * What the Blueprint calls this workflow — `FLOW-001`. Written by the
+   * projection and indexed by `loadWorkflows`, because it is the id a composed
+   * page binds into `Button.workflow` / `Form.workflow`. Stable across a
+   * rename, unlike `id`, which is a slug of `name`.
+   */
+  blueprintId?: string;
   description?: string;
   /** Optional event/schedule trigger contract — see WorkflowTriggerContract. */
   trigger?: WorkflowTriggerContract;

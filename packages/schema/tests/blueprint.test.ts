@@ -15,7 +15,7 @@ const minimal = {
 describe("Living Blueprint (PRD §9-25)", () => {
   it("parses from application identity alone; every other section defaults", () => {
     const bp = Blueprint.parse(minimal);
-    expect(Object.keys(bp)).toHaveLength(30);
+    expect(Object.keys(bp)).toHaveLength(34);
     expect(bp.state).toBe("DISCOVERY");
     expect(bp.version).toBe(1);
     expect(bp.requirements).toEqual([]);
@@ -87,7 +87,7 @@ describe("Living Blueprint (PRD §9-25)", () => {
 
   it("emits a JSON Schema contract for the Python side", () => {
     const js = blueprintJsonSchema() as { properties?: Record<string, unknown> };
-    expect(Object.keys(js.properties ?? {})).toHaveLength(30);
+    expect(Object.keys(js.properties ?? {})).toHaveLength(34);
   });
 
   it("makes a data-less widget unrepresentable (§35)", () => {

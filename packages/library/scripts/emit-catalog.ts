@@ -89,10 +89,22 @@ const STRUCTURAL: Array<[string, string, boolean]> = [
   ["Image", "ImageNode", false],
 ];
 
-/** `*Node` schemas describe a whole node; the props live one level in. */
+/** `*Node` schemas describe a whole node; the props live one level in.
+ *
+ * `props` is optional on every structural node, so this returned a ZodOptional
+ * and zodToJsonSchema produced an object with no properties. Stack, Row,
+ * Container, Box and Text all shipped propless, and anything a composer put on
+ * them read as an unexpected property — `Stack.props.wrap` is declared right
+ * there in V2StackNode and was rejected as unknown. Unwrap before descending,
+ * the same way the node itself is unwrapped above.
+ */
 function propsOf(node: any): any {
   const inner = typeof node?.innerType === "function" ? node.innerType() : node;
-  return inner?.shape?.props ?? null;
+  let props = inner?.shape?.props ?? null;
+  while (props && !props.shape && typeof props.unwrap === "function") {
+    props = props.unwrap();
+  }
+  return props?.shape ? props : null;
 }
 
 const structural = STRUCTURAL.flatMap(([name, exportName, acceptsChildren]) => {

@@ -113,7 +113,7 @@ export function MoneyInput({
       {label && (
         <label className="text-sm font-medium text-foreground">
           {label}
-          {required ? <span className="ml-0.5 text-danger">*</span> : null}
+          {required ? <span className="ms-0.5 text-danger">*</span> : null}
         </label>
       )}
       <div className="inline-flex items-stretch rounded-md border border-input focus-within:ring-1 focus-within:ring-ring">
@@ -130,7 +130,7 @@ export function MoneyInput({
           max={max}
           step={step}
           onChange={(e) => setAmount(e.target.value)}
-          className="flex-1 bg-transparent px-3 py-1.5 text-right text-sm tabular-nums focus-visible:outline-none disabled:opacity-50"
+          className="flex-1 bg-transparent px-3 py-1.5 text-end text-sm tabular-nums focus-visible:outline-none disabled:opacity-50"
           data-testid="money-input-amount"
         />
         {currencyEditable ? (
@@ -139,7 +139,7 @@ export function MoneyInput({
             value={ccy}
             disabled={disabled || readOnly}
             onChange={(e) => setCurrency(e.target.value)}
-            className="border-l border-input bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground focus-visible:outline-none disabled:opacity-50"
+            className="border-s border-input bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground focus-visible:outline-none disabled:opacity-50"
             data-testid="money-input-currency-select"
           >
             {options.map((c) => (
@@ -149,7 +149,7 @@ export function MoneyInput({
         ) : (
           <>
             <span
-              className="flex items-center border-l border-input bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground"
+              className="flex items-center border-s border-input bg-muted px-2 py-1.5 text-xs font-medium text-muted-foreground"
               data-testid="money-input-currency-chip"
             >
               {ccy}
@@ -185,7 +185,7 @@ export function MoneyDisplay({
   const hasValue = decimal !== "" && decimal !== "-";
   const rootClass = [
     "tabular-nums",
-    align === "right" ? "text-right" : "text-left",
+    align === "right" ? "text-end" : "text-start",
     className,
   ]
     .filter(Boolean)

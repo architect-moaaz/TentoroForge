@@ -16,6 +16,7 @@ import { Engine } from "@tentoroforge/engine";
 import { resolveCrumbHrefs } from "@tentoroforge/renderer";
 import { dataEngine, resolveAggregate, resolveSeries } from "./data-engine-bridge";
 import { LiveRefresh } from "./LiveRefresh";
+import { FigmaCanvas } from "./FigmaCanvas";
 import { WorkflowDispatchProvider } from "./WorkflowDispatchProvider";
 import { WizardShell } from "./WizardShell";
 import { SchemaPageBoundary } from "./SchemaPageBoundary";
@@ -315,6 +316,13 @@ export async function renderSchemaPage(
   const bgIsDark =
     !!bgHex && (parseInt(bgHex.slice(0, 2), 16) || 0) + (parseInt(bgHex.slice(2, 4), 16) || 0) + (parseInt(bgHex.slice(4, 6), 16) || 0) < 300;
   const rootText = textMatch?.[0] ?? (bgIsDark || rootBg === "bg-black" ? "text-white" : "");
+  // The frame's own dimensions, recorded at extraction and carried through
+  // `figma_layout.compose`. Present only on a page built FROM a design, so
+  // every other page renders exactly as before.
+  const figmaCanvas = (page as any)?._figmaCanvas as
+    | { width: number; height: number }
+    | undefined;
+
   const mainClass = figmaDerived
     ? `fixed inset-0 z-[60] overflow-auto ${rootBg} ${rootText}`.trim()
     : undefined;
@@ -336,7 +344,13 @@ export async function renderSchemaPage(
           {(liveEntities.length > 0 || _filterable.size > 0) && (
             <LiveRefresh entities={liveEntities} />
           )}
-          {rendered}
+          {figmaCanvas?.width ? (
+            <FigmaCanvas width={figmaCanvas.width} height={figmaCanvas.height}>
+              {rendered}
+            </FigmaCanvas>
+          ) : (
+            rendered
+          )}
         </main>
       </SchemaPageBoundary>
     </WorkflowDispatchProvider>

@@ -32,6 +32,8 @@ threshold is refused rather than applied with a warning.
 """
 from __future__ import annotations
 
+import copy
+
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -47,9 +49,9 @@ ASK_USER = 0.40
 WRITABLE_SECTIONS: frozenset[str] = frozenset(
     set(ARTIFACT_SECTIONS)
     | {"data.entities", "data.relationships", "data.constraints",
-       "navigation", "designSystem", "uiRegistry", "security",
+       "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "patternTemplates", "pageLayouts", "completeness"}
+       "pageLayouts", "completeness"}
 )
 
 
@@ -121,15 +123,24 @@ _READS: dict[str, set[str]] = {
     "data_model": {"requirements"},
 
     # Design language: the product and what the UI already uses.
-    "accessibility": {"requirements", "pages", "uiRegistry"},
+    "accessibility": {"requirements", "pages"},
     "figma_intelligence": {"requirements", "pages"},
 
     # §30 verbatim — page design may compose pages and select patterns, and may
     # NOT touch business rules, database schema, security rules or role
     # permissions. It still needs to *see* roles and entities to address a page
     # to a role and bind it to an entity; it cannot write either.
+    # `designSources` is here so a page can say WHICH FRAME it is. The contract
+    # already carries `pages[].figmaFrame` and `page_design` could already write
+    # it — but the frames live in `designSources`, which this agent could not
+    # see, so it was being asked to name a node id it had never been shown. The
+    # field existed, the author had the pen, and the paper was missing.
+    #
+    # Read-only, and it stays that way: the extraction is evidence (§48), and an
+    # agent that could edit what the design says could make the design agree
+    # with the app it just invented.
     "page_design": {"requirements", "modules", "data", "designSystem",
-                    "roles", "permissions"},
+                    "roles", "permissions", "designSources"},
 
     # Behaviour: what the business does, over the data it does it to.
     "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
@@ -175,34 +186,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "components", "widgets", "uiRegistry", "navigation"},
+        {"pages", "widgets", "navigation"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "ui_registry:write", "mcp:a2ui"},
-    ),
-    # §34 — A2UI as the composition authority, narrowed to one job. It authors
-    # the *structure* of each pattern the app uses, against the real component
-    # catalog; the planner instantiates that structure per page with no model
-    # call. Composing every page with a model is what made the old platform's
-    # page schemas expensive and inconsistent, and forced the component library
-    # to loosen its own prop schemas to absorb the misses.
-    "a2ui_patterns": _cap(
-        "a2ui_patterns",
-        {"patternTemplates"},
-        # Narrow on purpose. This agent authors structure per pattern, so it
-        # needs the page contracts and the design language and nothing else —
-        # not entities, not endpoints, not workflows. Handing it the whole
-        # Blueprint costs ~80k tokens a call for context it cannot use, and
-        # §101 scopes context precisely so an agent cannot reach past its job.
-        # Widened deliberately. Scoped to structure alone, this agent designed
-        # pages without ever seeing what the user asked for — it could read the
-        # page contracts but not the requirements behind them, and not the
-        # entities whose fields its forms and tables are made of. Designing
-        # completely means seeing the intent, not just the outline.
-        reads={"requirements", "pages", "data", "widgets", "roles",
-               "permissions", "designSystem", "uiRegistry", "navigation",
-               "modules"},
-        tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "component_catalog:read", "mcp:a2ui"},
+               "mcp:a2ui"},
     ),
     # §20 + §23. Derived by deterministic code rather than authored, but it
     # still needs a declared owner: §74 routes a repair task to whoever may
@@ -214,14 +200,14 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         reads={"*"},
         tools={"blueprint:read"},
     ),
-    # §34 — the same authority as a2ui_patterns, aimed at one page at a time.
-    # Kept as a separate agent rather than a mode of the other so the §30
-    # boundary stays legible: this one writes page trees and nothing else.
+    # §34 — A2UI as the composition authority, one page at a time. It composes
+    # against the real component catalog, so what it authors is renderable by
+    # construction rather than by a repair pass.
     "a2ui_pages": _cap(
         "a2ui_pages",
         {"pageLayouts"},
         reads={"requirements", "pages", "data", "widgets", "roles",
-               "permissions", "designSystem", "uiRegistry", "navigation",
+               "permissions", "designSystem", "navigation",
                "modules", "workflows", "apis"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
@@ -263,10 +249,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     #   apis             derived from entities + workflows + widgets by
     #                    api_derivation; anything authored here is overwritten
     #                    on the next derivation, so writing it is a lie.
-    #   patternTemplates validated against the real component catalog, which is
-    #                    injected into the a2ui_patterns prompt and not into
+    #   pageLayouts      validated against the real component catalog, which is
+    #                    injected into the a2ui_pages prompt and not into
     #                    Smith's. Authoring blind would fail
-    #                    check_pattern_templates anyway.
+    #                    check_page_layout anyway.
     #   codeMap          projection output. A model asked for file paths
     #                    produces plausible ones, and Blueprint↔Implementation
     #                    then goes green against files nobody wrote.
@@ -280,14 +266,14 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
          "pages", "components", "widgets", "data.entities",
          "data.relationships", "data.constraints", "workflows",
          "businessRules", "integrations", "roles", "permissions", "security",
-         "uiRegistry", "designSystem"},
+         "designSystem"},
         tools={"blueprint:read", "blueprint:write"},
     ),
     # §31/§34 — the Figma Intelligence Agent contributes evidence, not design
     # decisions; it may not author pages.
     "figma_intelligence": _cap(
         "figma_intelligence",
-        {"requirements", "designSystem", "uiRegistry"},
+        {"requirements", "designSystem"},
         tools={"mcp:figma", "design:extract", "blueprint:evidence"},
     ),
 }
@@ -425,7 +411,47 @@ class InvalidPatternTemplate(ValueError):
     """A2UI proposed a template the component registry cannot render."""
 
 
-def check_pattern_templates(result: AgentResult) -> None:
+def _blamed(exc: Exception, svc: Any) -> Exception:
+    """The same failure, saying whose fault it is.
+
+    THE WHOLE DOCUMENT IS VALIDATED ON EVERY COMMIT, so a Blueprint that is
+    already invalid refuses every write — and the error names the section that
+    is broken, which is rarely the section being written. It reads exactly like
+    a rejected proposal.
+
+    Measured: a 50-page application carried `runtime.placeholders`, an empty
+    list left by a since-removed producer. Every write to that project had
+    failed ever since, and a composition that was demonstrably valid — it
+    passed `check_pattern_templates` — was reported refused. Two rounds of
+    investigation went into the composition before anyone validated the
+    untouched document, which fails in one line.
+
+    Nothing is repaired here and nothing is loosened. The document is still
+    invalid and the write still refused; the message stops pointing at the
+    wrong thing.
+    """
+    from services.blueprint.service import BlueprintInvalid
+
+    if not isinstance(exc, BlueprintInvalid):
+        return exc
+    try:
+        svc.validate()          # the restored document, as it was before
+    except BlueprintInvalid as prior:
+        # `BlueprintInvalid` takes the error LIST, not a message — its own
+        # __init__ builds the prose. Handing it a string makes each character
+        # an error, which is a 310-error report of one sentence.
+        return BlueprintInvalid([
+            "this Blueprint was ALREADY invalid before the change, so every "
+            "write to it fails. Nothing about the proposed change caused it.",
+            *list(getattr(prior, "errors", None) or [str(prior)]),
+        ])
+    except Exception:  # noqa: BLE001 — never mask the original failure
+        return exc
+    return exc
+
+
+def check_pattern_templates(result: AgentResult,
+                            doc: dict | None = None) -> None:
     """Reject templates that do not compose against the real catalog.
 
     The alternative — accepting them and repairing later — is what produced the
@@ -435,8 +461,7 @@ def check_pattern_templates(result: AgentResult) -> None:
     does not exist, or breaks a container's positional contract, is rejected
     here so the agent is asked again rather than the schema loosened.
     """
-    proposals = [p for p in result.proposals
-                 if p.section in ("patternTemplates", "pageLayouts")]
+    proposals = [p for p in result.proposals if p.section == "pageLayouts"]
     if not proposals:
         return
 
@@ -456,6 +481,36 @@ def check_pattern_templates(result: AgentResult) -> None:
         if errors:
             pattern = proposal.body.get("pattern") or proposal.body.get("page", "?")
             problems.extend(f"{pattern}: {e}" for e in errors)
+    # WOULD IT DO ANYTHING. The checks above ask whether the tree renders; this
+    # asks whether it works. A Button with a label and no action renders
+    # perfectly and does nothing, an action naming a workflow that does not
+    # exist answers "Workflow not found" on click, and a binding with no source
+    # renders its own template text — all valid trees, all shipped, all found
+    # by somebody using the application.
+    #
+    # Raised here rather than reported later because this is the one place the
+    # composer can still be told. §73 exists to close the loop and the
+    # orchestrator already re-asks a node when its output is refused; a control
+    # with no action is a page composed wrongly, not a page to repair.
+    #
+    # Needs the doc for the workflow list, and is skipped without one — a
+    # caller that cannot say which workflows exist would otherwise reject every
+    # real binding as invented.
+    if doc is not None:
+        from services.blueprint.functional_completeness import (
+            functional_findings,
+        )
+
+        pages = {p.get("id"): p for p in (doc.get("pages") or [])}
+        for proposal in proposals:
+            page_id = proposal.body.get("page")
+            findings = functional_findings({
+                "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
+                "workflows": doc.get("workflows") or [],
+                "pageLayouts": [proposal.body],
+            })
+            problems.extend(f["detail"] for f in findings)
+
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))
 
@@ -483,8 +538,23 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
-    check_pattern_templates(result)
+    check_pattern_templates(result, svc.doc)
     check_workflow_steps(result)
+
+    # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
+    #
+    # Two composers write pageLayouts — A2UI, and the LLM page author that runs
+    # when A2UI declines or fails — and they emit the same shape. So a page
+    # composed well and a page nobody could compose properly were
+    # indistinguishable in the Blueprint, answerable only from run logs that
+    # age out. The same argument removed the deterministic pattern stub: a
+    # stubbed page and a designed one looking alike was judged unacceptable.
+    #
+    # `_compose_via_a2ui` stamps its own; anything arriving here unstamped came
+    # from an agent, and this is the one place every layout passes through.
+    for proposal in result.proposals:
+        if proposal.section == "pageLayouts" and not proposal.body.get("composedBy"):
+            proposal.body["composedBy"] = "agent"
 
     if result.status != "completed":
         return AgentApplication(
@@ -493,12 +563,41 @@ def apply_agent_result(
         )
 
     if result.confidence < ASK_USER:
+        # WHAT IT WANTS TO BE TOLD, NOT JUST THAT IT STOPPED. §17's band is
+        # named ASK_USER, and the only thing recorded here was the arithmetic:
+        # "confidence 0.10 is below the §17 clarification threshold of 0.40".
+        # A build died on that line, thirteen nodes were skipped, and the user
+        # was shown a number — while the agent's `change_requests` held the
+        # actual questions, in its own words, and were dropped on the floor.
+        #
+        # Measured on a real EMR build: the agent asked whether paying a
+        # supplier invoice should also post an expense transaction, since
+        # REQ-019 and REQ-023/024 disagree and answering it either way changes
+        # the schema. That is a question a person answers in one sentence, and
+        # it never reached them.
+        #
+        # The questions travel in `reason` because that is what the ledger,
+        # `RunReport.blocked_because` and the chat surface all read. They are
+        # already on `change_requests` for a caller that wants them structured.
+        asks = [
+            str(getattr(cr, "reason", "") or "").strip()
+            for cr in result.change_requests
+        ]
+        asks = [a for a in asks if a]
+        if not asks:
+            # Nothing to ask means nothing to answer, and the run stops on a
+            # number the user cannot act on. Say that plainly rather than
+            # implying a question exists.
+            asks = [str(i) for i in (result.issues or [])][:2]
+        detail = (" — needs: " + " | ".join(a[:400] for a in asks[:3])) if asks else (
+            " — and raised no question, so there is nothing to answer"
+        )
         return AgentApplication(
             applied=False, result=result, change_requests=list(result.change_requests),
             needs_clarification=True,
             reason=(
                 f"confidence {result.confidence:.2f} is below the §17 clarification "
-                f"threshold of {ASK_USER:.2f}"
+                f"threshold of {ASK_USER:.2f}{detail}"
             ),
         )
 
@@ -536,21 +635,40 @@ def apply_agent_result(
         [(p.section, p.natural_key, p.body) for p in result.proposals], allocated
     )
 
-    ids: list[str] = []
-    for p in result.proposals:
-        art = svc.upsert(p.section, p.body, natural_key=p.natural_key)
-        # Singleton sections (database, security, …) carry no id — there is
-        # nothing to reference, so there is nothing to collect.
-        if art.get("id"):
-            ids.append(art["id"])
-    result.artifacts = ids
+    # Upsert mutates the shared document and `validate` raises after it, so a
+    # rejected proposal used to stay in memory: the next node validated against
+    # someone else's bad artifact and failed for it. A fresh run lost fourteen
+    # nodes that way — `page_contracts` proposed a widget with `unit: "jobs"`,
+    # was rightly rejected, and `security`, which writes no widgets at all,
+    # failed on the same five errors moments later because it shared the
+    # document. The forecast then counted 29 pages that were never saved.
+    #
+    # Level waves made this load-bearing rather than causing it: siblings in a
+    # wave share one document, so a rejection reaches further than the node
+    # that earned it. Rejecting has to leave the Blueprint exactly as it was.
+    snapshot = copy.deepcopy(svc.doc)
+    try:
+        ids: list[str] = []
+        for p in result.proposals:
+            art = svc.upsert(p.section, p.body, natural_key=p.natural_key)
+            # Singleton sections (database, security, …) carry no id — there is
+            # nothing to reference, so there is nothing to collect.
+            if art.get("id"):
+                ids.append(art["id"])
+        result.artifacts = ids
 
-    # §17 middle band: proceed, but the assumption must be on the record.
-    recorded: list[str] = []
-    if result.confidence < AUTO_DECIDE and result.assumptions:
-        recorded = list(result.assumptions)
+        # §17 middle band: proceed, but the assumption must be on the record.
+        recorded: list[str] = []
+        if result.confidence < AUTO_DECIDE and result.assumptions:
+            recorded = list(result.assumptions)
 
-    svc.validate()
+        svc.validate()
+    except Exception as exc:
+        # Restored in place: callers and the orchestrator hold this dict, so
+        # rebinding the attribute would leave them on the poisoned copy.
+        svc.doc.clear()
+        svc.doc.update(snapshot)
+        raise _blamed(exc, svc) from exc
 
     if commit:
         svc.commit(

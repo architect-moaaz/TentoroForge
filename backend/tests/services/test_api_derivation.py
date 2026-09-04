@@ -34,9 +34,9 @@ def paths(apis):
 
 def test_every_entity_gets_a_list_and_a_fetch():
     got = paths(derive_apis(doc()))
-    assert ("GET", "/api/candidates") in got
-    assert ("GET", "/api/candidates/{id}") in got
-    assert ("GET", "/api/job-roles") in got, "camelCase pluralises to a slug"
+    assert ("GET", "/api/data/candidates") in got
+    assert ("GET", "/api/data/candidates/{id}") in got
+    assert ("GET", "/api/data/job-roles") in got, "camelCase pluralises to a slug"
 
 
 def test_pluralisation_is_deterministic():
@@ -53,8 +53,8 @@ def test_a_workflow_step_that_writes_an_entity_implies_its_endpoints():
                         "steps": [{"key": "s", "name": "save", "type": "action",
                                    "entity": "ENTITY-001"}]}])
     got = paths(derive_apis(d))
-    assert ("POST", "/api/candidates") in got
-    assert ("PUT", "/api/candidates/{id}") in got
+    assert ("POST", "/api/data/candidates") in got
+    assert ("PUT", "/api/data/candidates/{id}") in got
 
 
 def test_a_manual_workflow_gets_a_launch_endpoint():
@@ -68,7 +68,7 @@ def test_a_non_mutating_step_implies_nothing():
                         "trigger": {"kind": "event"},
                         "steps": [{"key": "s", "name": "email",
                                    "type": "notification", "entity": "ENTITY-001"}]}])
-    assert ("POST", "/api/candidates") not in paths(derive_apis(d))
+    assert ("POST", "/api/data/candidates") not in paths(derive_apis(d))
 
 
 # --- analytics come from widgets -------------------------------------------
@@ -78,14 +78,14 @@ def test_an_aggregate_widget_implies_a_metrics_endpoint():
                       "label": "Open", "dataSource": {
                           "op": "aggregate", "entity": "ENTITY-001",
                           "aggregation": "count"}}])
-    assert ("GET", "/api/candidates/metrics") in paths(derive_apis(d))
+    assert ("GET", "/api/data/candidates/stats") in paths(derive_apis(d))
 
 
 def test_a_list_widget_needs_no_extra_endpoint():
     d = doc(widgets=[{"id": "WIDGET-001", "page": "PAGE-001", "kind": "list",
                       "label": "Recent", "dataSource": {
                           "op": "list", "entity": "ENTITY-001"}}])
-    assert ("GET", "/api/candidates/metrics") not in paths(derive_apis(d))
+    assert ("GET", "/api/data/candidates/stats") not in paths(derive_apis(d))
 
 
 # --- the edges become true by construction ---------------------------------
@@ -115,7 +115,7 @@ def test_a_declared_permission_is_attached():
                     "actions": ["create"],
                     "data": {"primaryEntity": "ENTITY-001"}}])
     post = next(a for a in derive_apis(d)
-                if (a["method"], a["path"]) == ("POST", "/api/candidates"))
+                if (a["method"], a["path"]) == ("POST", "/api/data/candidates"))
     assert post["permission"] == "PERM-001"
 
 
@@ -126,7 +126,7 @@ def test_an_undeclared_permission_is_not_invented():
                     "actions": ["create"],
                     "data": {"primaryEntity": "ENTITY-001"}}])
     post = next(a for a in derive_apis(d)
-                if (a["method"], a["path"]) == ("POST", "/api/candidates"))
+                if (a["method"], a["path"]) == ("POST", "/api/data/candidates"))
     assert "permission" not in post
     d["apis"] = derive_apis(d)
     assert not verify(d, edges=("API↔Permission",)).passed
@@ -155,6 +155,66 @@ def test_the_same_endpoint_implied_twice_merges_provenance():
                 "actions": ["create"], "requirements": ["REQ-002"],
                 "data": {"primaryEntity": "ENTITY-001"}}])
     post = [a for a in derive_apis(d)
-            if (a["method"], a["path"]) == ("POST", "/api/candidates")]
+            if (a["method"], a["path"]) == ("POST", "/api/data/candidates")]
     assert len(post) == 1, "one endpoint, not two"
     assert set(post[0]["requirements"]) == {"REQ-001", "REQ-002"}
+
+
+# ---------------------------------------------------------------------------
+# §76 — the contract names endpoints the runtime actually serves
+# ---------------------------------------------------------------------------
+
+#: Taken from `app-foundation`'s catch-all header, which is the authority on
+#: what the assembled app answers.
+RUNTIME_ROUTES = (
+    "/api/data/{entity}", "/api/data/{entity}/{id}", "/api/data/{entity}/stats",
+    "/api/workflows/{id}/execute",
+)
+
+
+def _doc():
+    return {
+        "data": {"entities": [{"id": "ENTITY-001", "name": "Bike",
+                               "requirements": []}]},
+        "workflows": [{"id": "WF-001", "name": "Quote job", "steps": [],
+                       "trigger": {"kind": "manual"}, "status": "active"}],
+        "pages": [], "widgets": [], "permissions": [],
+    }
+
+
+def test_entity_reads_go_through_the_data_engine():
+    from services.blueprint.api_derivation import derive_apis
+
+    paths = {a["path"] for a in derive_apis(_doc())}
+    assert "/api/data/bikes" in paths
+    assert "/api/data/bikes/{id}" in paths
+
+
+def test_no_endpoint_is_derived_at_a_bare_entity_path():
+    """`/api/bikes` is what the Blueprint used to claim; no file answers it."""
+    from services.blueprint.api_derivation import derive_apis
+
+    for api in derive_apis(_doc()):
+        assert not api["path"].startswith("/api/bikes"), api["path"]
+
+
+def test_a_manual_workflow_launches_at_the_route_the_scaffold_serves():
+    from services.blueprint.api_derivation import derive_apis
+
+    paths = {a["path"] for a in derive_apis(_doc())}
+    assert "/api/workflows/WF-001/execute" in paths
+
+
+def test_every_derived_path_matches_a_runtime_route_shape():
+    """The check that would have caught this: shape-match every derivation."""
+    import re
+
+    from services.blueprint.api_derivation import derive_apis
+
+    shapes = [re.compile("^" + re.escape(r)
+                         .replace(r"\{entity\}", "[a-z0-9-]+")
+                         .replace(r"\{id\}", r"\{id\}") + "$")
+              for r in RUNTIME_ROUTES]
+    for api in derive_apis(_doc()):
+        path = re.sub(r"/WF-[0-9]+/", "/{id}/", api["path"])
+        assert any(s.match(path) for s in shapes), api["path"]

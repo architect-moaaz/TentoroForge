@@ -63,7 +63,7 @@ class TestCreateBuild:
             '"artifacts":{"buildUrl":null},"buildLogsUrl":"https://expo.dev/logs/abc"}]'
         )
         run = make_runner(stdout=stdout)
-        state = asyncio.get_event_loop().run_until_complete(
+        state = asyncio.run(
             create_build(
                 "/tmp/mobile",
                 profile="preview",
@@ -82,7 +82,7 @@ class TestCreateBuild:
     def test_records_expected_argv(self):
         recorder: list = []
         run = make_runner(stdout='[{"id":"x","status":"pending"}]', recorder=recorder)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             create_build(
                 "/tmp/mobile",
                 profile="production",
@@ -108,7 +108,7 @@ class TestCreateBuild:
     def test_apple_env_only_on_ios(self):
         recorder: list = []
         run = make_runner(stdout='[{"id":"x","status":"pending"}]', recorder=recorder)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             create_build(
                 "/tmp/mobile",
                 profile="production",
@@ -129,7 +129,7 @@ class TestCreateBuild:
     def test_non_zero_exit_raises_with_stderr(self):
         run = make_runner(rc=1, stderr="EAS auth failed")
         with pytest.raises(EasClientError, match="EAS auth failed"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 create_build(
                     "/tmp/mobile",
                     profile="preview",
@@ -143,7 +143,7 @@ class TestCreateBuild:
     def test_empty_stdout_raises(self):
         run = make_runner(stdout="")
         with pytest.raises(EasClientError, match="empty stdout"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 create_build(
                     "/tmp/mobile",
                     profile="preview",
@@ -156,7 +156,7 @@ class TestCreateBuild:
 
     def test_invalid_platform_raises(self):
         with pytest.raises(EasClientError, match="platform must be"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 create_build(
                     "/tmp/mobile",
                     profile="preview",
@@ -169,7 +169,7 @@ class TestCreateBuild:
 
     def test_invalid_profile_raises(self):
         with pytest.raises(EasClientError, match="unknown build profile"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 create_build(
                     "/tmp/mobile",
                     profile="not-a-profile",
@@ -182,7 +182,7 @@ class TestCreateBuild:
 
     def test_missing_token_raises(self):
         with pytest.raises(EasClientError, match="expo_token is required"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 create_build(
                     "/tmp/mobile",
                     profile="preview",
@@ -205,7 +205,7 @@ class TestPollBuild:
             '"artifacts":{"buildUrl":"https://expo.dev/artifacts/abc.apk"},'
             '"buildLogsUrl":"https://expo.dev/logs/abc"}'
         )
-        state = asyncio.get_event_loop().run_until_complete(
+        state = asyncio.run(
             poll_build("/tmp/mobile", "abc-123", expo_token="tok",
                        run=make_runner(stdout=stdout)),
         )
@@ -218,7 +218,7 @@ class TestPollBuild:
             '{"id":"x","status":"errored",'
             '"error":{"message":"Fastlane crashed: cert expired"}}'
         )
-        state = asyncio.get_event_loop().run_until_complete(
+        state = asyncio.run(
             poll_build("/tmp/mobile", "x", expo_token="tok",
                        run=make_runner(stdout=stdout)),
         )
@@ -227,7 +227,7 @@ class TestPollBuild:
 
     def test_missing_build_id_raises(self):
         with pytest.raises(EasClientError, match="build_id is required"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 poll_build("/tmp/mobile", "", expo_token="tok",
                            run=make_runner()),
             )
@@ -239,7 +239,7 @@ class TestPollBuild:
             "npm warn deprecated foo@1.2.3\n"
             '{"id":"abc","status":"pending"}'
         )
-        state = asyncio.get_event_loop().run_until_complete(
+        state = asyncio.run(
             poll_build("/tmp/mobile", "abc", expo_token="tok",
                        run=make_runner(stdout=stdout)),
         )

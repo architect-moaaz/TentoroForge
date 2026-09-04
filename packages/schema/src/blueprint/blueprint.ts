@@ -68,6 +68,28 @@ export const Product = z.object({
   /** Domain vocabulary. Drives generated copy so labels match the business. */
   terminology: z.record(z.string(), z.string()).default({}),
   capabilities: z.array(Capability).default([]),
+  /**
+   * The language this application is written in, as a BCP-47 tag.
+   *
+   * §11 has always listed language beside purpose and personas and nothing
+   * carried it: `<html lang="en">` is hardcoded in the scaffold, the composer
+   * is called with `locale=en`, and every generated label is English. A brief
+   * asking for an Arabic-first platform produced an English one and said
+   * nothing about it.
+   *
+   * Defaults to "en" because that is what every existing application is, and
+   * a default of "unknown" would make each of them look like a question.
+   */
+  locale: z
+    .string()
+    .describe(
+      "BCP-47 tag for the language the INTERFACE is written in — 'ar', " +
+      "'ar-PS', 'fr'. Set it when the request says what language the UI " +
+      "should be in; every string a reader sees is then authored in it and " +
+      "the document is laid out right-to-left where the script requires. A " +
+      "country, currency or market is not a language. Defaults to 'en'.",
+    )
+    .default("en"),
 });
 
 // ===========================================================================
@@ -115,6 +137,16 @@ export const PagePattern = z.enum([
   "entity_list",
   "master_detail",
   "record_workspace",
+  // A CREATE OR EDIT SCREEN, which this enum could not name. The note below on
+  // per-page authoring already records the cost: `record_workspace` covered
+  // nine pages that were really two jobs, five of them create/edit forms.
+  // `page_planner.ENTITY_SLOTS` has always called the create slot `form`, so
+  // the deterministic planner emitted a pattern the contract rejected, and the
+  // authoring agent — which can only pick from this list — labelled every
+  // create page `record_workspace` and was then handed the record job:
+  // "This screen shows ONE record in detail", for a page that exists to
+  // collect one. `wizard` is the multi-step case and is not the same thing.
+  "form",
   "wizard",
   "approval_inbox",
   "kanban",
@@ -161,6 +193,168 @@ export const PageContract = z.object({
 
   /** Roles for whom this page is meaningful; required by `role_restricted`. */
   users: z.array(RoleId).default([]),
+
+  /**
+   * Whether this page is where its audience arrives.
+   *
+   * An application has as many front doors as it has audiences, and `access`
+   * already says which audience a page serves — so the entry is per-access,
+   * not one global landing page. A survey tool has two: the author signs in
+   * and lands on a dashboard, while a respondent follows a link straight to
+   * `/survey/[slug]` and must never meet a login screen or an app shell for a
+   * product they cannot reach.
+   *
+   * Nothing recorded this, so every consumer guessed. `nav-flow.json` had no
+   * entry at all; the error page's "back to the application" link took the
+   * first route in the list and produced `/survey/[slug]` — a route PATTERN,
+   * which Next refuses as an href and which threw at runtime. That was fixed
+   * by refusing to link a pattern, which treated the symptom: the real fault
+   * is that the gated entry was never stated, and a gated entry is by
+   * definition a concrete URL.
+   */
+  entry: z
+    .boolean()
+    .default(false)
+    .describe("This page is where its audience (see `access`) arrives"),
+
+  /**
+   * The pages this page leads to — the arrows, not the list.
+   *
+   * `nav-flow.json` has carried a `transitions` field since it was written and
+   * the projection has always emitted `[]`, so navigation was an index of six
+   * pages with no statement of how anyone moves between them. A list of pages
+   * is not a flow: it cannot answer "where does Add Survey go", cannot render
+   * a breadcrumb, and gives §113's Blueprint↔Preview linking nothing to link
+   * along.
+   *
+   * Page ids rather than routes, so a route rename does not silently break
+   * every arrow pointing at it.
+   */
+  navigatesTo: z
+    .array(PageId)
+    .default([])
+    .describe("Pages reachable from this one, by id"),
+
+  /**
+   * What must already be true for this page to mean anything.
+   *
+   * An approval screen is not a page you can look at; it is a page you can
+   * look at once something has been submitted. Against an empty or freshly
+   * seeded application it renders its empty state, and every reviewer of it —
+   * a person, a screenshot, a vision critique — sees a correct rendering of
+   * nothing and has no way to tell that from the page being broken.
+   *
+   * The contract had no way to say this. `states` is the render states
+   * (loading, empty, populated, error) and `dispatches` is the workflow this
+   * page *launches*, not one it waits on. So a page could not declare its own
+   * precondition, and anything wanting to satisfy one had to guess: run
+   * workflows until something looked right, or infer a state from a field
+   * being called `status`. Both are the guessing this architecture exists to
+   * refuse, and neither is checkable.
+   *
+   * Said here, it is checkable. Verification can ask whether the state is one
+   * the entity actually declares and whether `producedBy` is a workflow that
+   * exists; the preview sweep can open the page against a record in that state
+   * rather than whichever row came back first, and say precisely what is
+   * missing when there is none.
+   *
+   * Only for a page that genuinely has one. Most pages do not: a list is a
+   * list whether or not anything has happened yet, and declaring a
+   * precondition it does not have makes it unreviewable for no reason.
+   */
+  requires: z
+    .object({
+      entity: EntityId.describe("The entity a record must exist of"),
+      state: z
+        .string()
+        .describe(
+          "The value that record must hold — one of the entity's own " +
+            "enumValues, not a state invented here",
+        ),
+      producedBy: WorkflowId.optional().describe(
+        "The workflow that puts a record into that state, when one does. " +
+          "Without it the precondition can be checked and waited on but not " +
+          "satisfied.",
+      ),
+    })
+    .optional()
+    .describe(
+      "A precondition this page needs before it shows anything (§107). " +
+        "Omit unless the page genuinely has one.",
+    ),
+
+  /**
+   * How this page is shown when something opens it.
+   *
+   * A detail view is not always a route. "Click the row, see the record in a
+   * side panel" and "click the row, go to a page" are different applications,
+   * and the contract could only express the second — so every detail became a
+   * route with its own schema, its own URL and a full navigation away from the
+   * list the user was reading.
+   *
+   * `page` stays the default because a URL is shareable and a drawer is not;
+   * being modal has to be chosen.
+   */
+  presentation: z
+    .enum(["page", "drawer", "modal"])
+    .default("page")
+    .describe("page = its own route; drawer/modal = opened over the caller"),
+
+  /**
+   * Saved views over this page's data — the same list, filtered differently.
+   *
+   * Without this a filtered variant has nowhere to live, so the only way to
+   * express "recruiters need to see overdue jobs" is another page. A workshop
+   * tracker came back with `/jobs`, `/jobs/mine`, `/jobs/unassigned`,
+   * `/jobs/overdue`, `/jobs/ready-for-collection` and
+   * `/jobs/awaiting-decision` — six routes, one list, six page authorings.
+   * The component library could always do this: `FilterBar.savedViews` and
+   * `SavedViewsPicker` exist and went unused because the contract had no way
+   * to ask for them.
+   *
+   * A page earns its route when it has a different job, a different primary
+   * entity, or a different audience. A different filter over the same list is
+   * a view.
+   */
+  views: z
+    .array(
+      z.object({
+        /** Stable within the page; becomes the saved view's id. */
+        key: z.string(),
+        /** What a user calls it: "Overdue", "Assigned to me". */
+        label: z.string(),
+        /**
+         * Field -> value the list is narrowed by.
+         *
+         * String values, because that is what `FilterBar.savedViews[].filters`
+         * accepts — a boolean here validates in the Blueprint and is rejected
+         * at render, which is the split that has cost most of the debugging on
+         * this path. Write "true", not true.
+         */
+        filter: z.record(z.string(), z.string()).default({}),
+        /** The view shown when the page opens, if any. */
+        isDefault: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+  /**
+   * The workflow this page starts, when it starts one.
+   *
+   * Not inferable from the workflow's steps. `Bike Drop-off Intake` begins by
+   * searching for the owner and registering a Customer, so its first mutating
+   * step names Customer while the page that starts it is `/jobs/new` — a rule
+   * over step order binds the drop-off wizard to whichever flow happens to
+   * touch Job first. The workflow knows its own entry point and says so in
+   * prose ("started from the New Drop-off wizard (/jobs/new)"), which no later
+   * stage can read.
+   *
+   * Declared here because the agent writing the page contract already knows
+   * which process it opens. A form on this page dispatches it on submit; the
+   * button that navigates here does not, since a twelve-step intake needs the
+   * fields filled first.
+   */
+  dispatches: WorkflowId.optional(),
+
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
 
@@ -310,6 +504,8 @@ export const RepeatSource = z.enum([
   "columns",
   "formFields",
   "states",
+  /** The saved views this page declares — one control per view. */
+  "views",
 ]);
 
 /**
@@ -399,12 +595,112 @@ export const PatternTemplate = z.object({
  * `$columns` gets the entity's real columns rather than its recollection of
  * them, so the mechanical parts stay correct by construction even here.
  */
+/**
+ * One fetch this page's tree binds to.
+ *
+ * Carried on the layout rather than re-derived at projection time. The
+ * composer's binder rewrites each pointer into a `{{name}}` and emits the
+ * source behind it in the same pass, so it is the only place the tree and its
+ * fetches are known together. Re-deriving them from the tree meant matching
+ * binding names against entity names, which kept `plants` and silently dropped
+ * four aggregate counts and two further lists — and shipped the tree that read
+ * all seven, so a real page rendered the literal text "{{overdue.value}}".
+ */
+export const PageDataSource = z.object({
+  name: z.string(),
+  entity: z.string(),
+  /**
+   * WHAT THE APPLICATION CAN ACTUALLY FETCH. This was list|get|aggregate, and
+   * `series` — the grouped aggregate every chart binds to — was missing.
+   *
+   * Measured on a real 50-page application: 130 committed dataSources and not
+   * one `series`. `schema_prompt.ts`'s CHART DATA block instructs the page
+   * author to emit exactly {op:"series", groupBy, bucket, agg}, the runtime
+   * has a full resolver for it (SeriesSource in data-engine.ts), eight modules
+   * produce it, and `PageDataSource` right here refused it:
+   *
+   *   BlueprintInvalid: pageLayouts/36/dataSources/4:
+   *     Additional properties are not allowed ('agg', 'groupBy' were unexpected)
+   *
+   * The pipeline asked for a shape and then refused it, and the page carrying
+   * it was lost — four of fourteen 404ing routes on that application. It is
+   * also why `dashboard_no_chart` could not be satisfied by composing better:
+   * a dashboard cannot have a chart if a chart's source cannot be committed.
+   *
+   * `../page.ts` has described the full shape all along; this is the second
+   * copy, and it fell behind. Kept narrower than that one on purpose — the
+   * Blueprint requires name+entity+op and does not carry the mutation ops —
+   * so the two are not merged, but the read ops must agree.
+   */
+  op: z.enum(["list", "get", "aggregate", "series"]),
+  filter: z.record(z.unknown()).optional(),
+  metrics: z.record(z.unknown()).optional(),
+  limit: z.number().int().optional(),
+  orderBy: z.record(z.unknown()).optional(),
+  /** op:"series" — the GROUP BY column. Ignored when agg.fn is running_sum. */
+  groupBy: z.string().optional(),
+  /** Set when groupBy is a date/timestamp column. */
+  bucket: z.enum(["day", "week", "month"]).optional(),
+  agg: z
+    .object({
+      fn: z.enum(["count", "sum", "avg", "min", "max", "running_sum"]),
+      field: z.string().optional(),
+    })
+    .optional(),
+  /** Order column for running_sum only; defaults to createdAt. */
+  orderByCol: z.string().optional(),
+  sort: z.enum(["label", "value"]).optional(),
+});
+
 export const PageLayout = z.object({
   /** Natural key — the page this tree renders. */
   page: PageId,
   /** Why this structure, for this page, in terms of what the user asked for. */
   rationale: z.string().default(""),
   root: TemplateNode,
+  /** The fetches `root` binds to, as the composer's binder resolved them. */
+  dataSources: z.array(PageDataSource).default([]),
+  /**
+   * Which composer produced this tree.
+   *
+   * Two can: A2UI, and the LLM page author that runs when A2UI declines or
+   * fails. They emit the same shape, so a page nobody could compose properly
+   * and a page composed well were indistinguishable in the Blueprint —
+   * answerable only from run logs, which age out. §76 asks for divergence to
+   * be legible, and "who designed this screen" is exactly that question.
+   *
+   * The same argument removed the deterministic pattern stub: a stubbed page
+   * and a designed one looking alike was judged unacceptable. This closes the
+   * remaining half of it.
+   *
+   * Empty on layouts written before this was recorded, which is honest — it
+   * means unknown, not "the fallback".
+   *
+   * `deterministic` names a composer that NO LONGER EXISTS.
+   * `blueprint/landing_page` assembled the entry point from the navigation
+   * tree when nothing else composed it. It was deleted: it ran once against a
+   * real Blueprint, emitted props no component has, and turned one dead route
+   * into an application that would not compile — and a second composer is a
+   * second answer to "what does this screen look like", which is the argument
+   * that removed the deterministic pattern stub already.
+   *
+   * THE WORD STAYS. Documents written while it existed carry it, and every
+   * commit validates the whole document — so dropping the value would refuse
+   * every later write to those projects, on a section nobody is touching.
+   * That failure has already cost this codebase two separate investigations
+   * (`runtime.placeholders`, and this very field before it knew the word).
+   *
+   * An enum here is a vocabulary for what WAS written, not only for what can
+   * be written now.
+   */
+  // `figma` — built from the frame it was designed as, rather than composed
+  // from the catalog. A page carrying `figmaFrame` takes this route and
+  // every other page takes A2UI, so the two are genuinely different
+  // provenance and the distinction is worth keeping: a screen that came
+  // from a drawing and a screen a model invented are not the same claim.
+  composedBy: z
+    .enum(["a2ui", "agent", "deterministic", "figma", ""])
+    .default(""),
   ...artifactBase,
 });
 
@@ -506,6 +802,22 @@ export const Field = z.object({
   enumValues: z.array(z.string()).optional(),
   /** Marks PII / financial data so security rules can act on it structurally. */
   sensitive: z.boolean().default(false),
+  /**
+   * The entity this field points at, when it is a foreign key.
+   *
+   * Relations were real but unwritten: PartUsage carried `jobId: uuid` with
+   * "Job the part was consumed on." in its description and nothing structural,
+   * so every consumer re-derived them from the `Id` suffix or from English.
+   * The page planner could not tell PartUsage — a row only ever written while
+   * looking at a job — from Customer, and gave both a full list/detail/create
+   * feature. Six of thirty-two pages on one run existed for records nobody
+   * navigates to.
+   *
+   * Declaring it makes "reachable only through another entity" a fact rather
+   * than an inference, which the seed order, cascade rules and the Data Engine
+   * all currently guess at too.
+   */
+  references: EntityId.optional(),
   description: z.string().default(""),
 });
 
@@ -586,7 +898,33 @@ export const WorkflowStep = z.object({
   entity: EntityId.optional(),
   /** Keys this step hands to. On a branching node the first is the then-branch, the second the else-branch. */
   next: z.array(z.string()).default([]),
-  config: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Free-form per-step settings, EXCEPT `sets`, which has a consumer.
+   *
+   * `projection.project_workflows` reads `config.sets` as column-to-value pairs
+   * — it is where a workflow states what a person never types, `status: "Open"`
+   * — and called `.items()` on it. Nothing typed it, so one run emitted all 56
+   * as lists of prose (`["status = in_triage", "lastActionAt = now"]`), which
+   * validated against `z.unknown()`, raised AttributeError, and killed the
+   * `integration` node along with thirty workflow definitions and `testing`
+   * downstream.
+   *
+   * Scalars, because a column holds one value; the constraint that matters is
+   * that this is a MAP and not a list. Typing the values as strings instead
+   * rejected 33 existing Blueprints on `closedAt: null` and `isCurrent: true`,
+   * which is what those columns actually hold.
+   */
+  config: z
+    .object({
+      sets: z
+        .record(
+          z.string(),
+          z.union([z.string(), z.number(), z.boolean(), z.null()]),
+        )
+        .optional(),
+    })
+    .catchall(z.unknown())
+    .default({}),
 });
 
 export const Workflow = z.object({
@@ -657,6 +995,71 @@ export const Security = z.object({
 // ===========================================================================
 // §37 · design system
 // ===========================================================================
+
+/**
+ * §41–§45 — a design the user connected, recorded so citations into it resolve.
+ *
+ * The design itself is not here. A Figma extraction carries generated TSX per
+ * screen and a rendered PNG per frame; §91 snapshots the whole Blueprint on
+ * every accepted change, so putting it in the document would copy megabytes
+ * into every version and pollute every `blueprintDiff` (§92). It lives beside
+ * the Blueprint, and this is the record that says which file it was.
+ *
+ * What this *does* carry is what the rest of the document needs to make sense:
+ * §14 evidence cites `source: "FIGMA-001"`, and `PageContract.figmaFrame`
+ * names a node id. Neither means anything without knowing which file the id
+ * belongs to. That is this record's job.
+ */
+export const DesignSourceFrame = z.object({
+  nodeId: z.string(),
+  name: z.string(),
+  /** False for covers, icon sheets and styleguide boards — recorded rather
+   *  than filtered, because the naming convention is the file author's, not
+   *  ours, and a wrong guess silently deletes evidence (§49). */
+  looksLikeScreen: z.boolean().default(true),
+});
+
+export const DesignSource = z.object({
+  /** `FIGMA-001`. Its own sequence — a design source is evidence, not a
+   *  Blueprint artifact, so it is deliberately outside ID_PREFIXES. */
+  id: z.string().regex(/^FIGMA-\d{3,}$/),
+  type: z.literal("figma").default("figma"),
+  fileKey: z.string(),
+  /** Set when the user linked one frame rather than the whole file (§41). */
+  nodeId: z.string().optional(),
+  url: z.string().default(""),
+  name: z.string().default(""),
+  extractedAt: z.string().default(""),
+  frames: z.array(DesignSourceFrame).default([]),
+  /**
+   * WHETHER THIS DESIGN IS EVIDENCE OR THE SPECIFICATION.
+   *
+   * §48 is right that a design is normally evidence: a screen proves a
+   * capability is reachable and says nothing about who may use it or what
+   * happens when it is refused. That is `evidence`, and it stays the default —
+   * one connected dashboard legitimately implies a sign-in, the lists behind
+   * its numbers, and the forms that create them.
+   *
+   * `specification` is the other thing a person means: build these screens and
+   * no others. `page_planner.page_slots` then asks its question frame by frame
+   * instead of entity by entity, so the answer space is the design rather than
+   * the cross-product of the data model.
+   *
+   * Its own docstring is why this is a source property and not a heuristic:
+   * pruning was considered and rejected because "the obvious signals do not
+   * discriminate" — every entity carries requirements, and matching names
+   * against the description is "string-matching a heuristic into a rule". A
+   * frame list is neither. It is an enumeration the user connected on purpose.
+   *
+   * Per source, because a project may connect a specification and a reference
+   * and mean different things by them.
+   */
+  treatAs: z.enum(["evidence", "specification"]).default("evidence"),
+  /** §102 — what the design could not answer, so a thin reference looks thin
+   *  instead of passing for a complete one. Each is a clarification owed to
+   *  the user before the DAG builds against it (§48, §50). */
+  gaps: z.array(z.string()).default([]),
+});
 
 export const DesignSystem = z.object({
   visualPersonality: z.string().default(""),
@@ -730,6 +1133,45 @@ export const Decision = z.object({
   status: ArtifactStatus.default("PROPOSED"),
 });
 
+/**
+ * §25 + §95 — a user approval at one of the four gates.
+ *
+ * Deliberately not a `Decision`. §20 decisions are constraints on the
+ * application that future agents must respect ("use left navigation, because
+ * there are multiple modules"); an approval is a fact about the process ("the
+ * user saw the definition at version 3 and accepted it"). Filing approvals in
+ * `decisions` would make every gate crossing a binding design constraint, and
+ * artifacts cite decisions by id — a page would end up citing a consent event
+ * as its rationale.
+ *
+ * `digest` is what makes the record mean anything. Without it "approved" is
+ * unfalsifiable: the Blueprint moves on and the approval still reads as
+ * current. With it, an approval whose digest no longer matches what the
+ * Blueprint now says is *stale*, and §76's rule that the document must not
+ * silently diverge from what was agreed applies to consent too.
+ */
+export const ApprovalGate = z.enum([
+  "understanding", // §95 Gate 1 — is this what you want to build?
+  "blueprint",     // §95 Gate 2 — are the modules, users and behaviour right?
+  "plan",          // §95 Gate 3 — should Smith proceed with this build?
+  "deployment",    // §95 Gate 4 — the checks passed; deploy?
+]);
+
+export const Approval = z.object({
+  gate: ApprovalGate,
+  /** §25's three answers: accept, modify, discuss. */
+  outcome: z.enum(["accepted", "changes_requested", "discussed"]),
+  /** Blueprint version this answer was given against (§91). */
+  version: z.number().int().min(1),
+  at: z.string().describe("ISO-8601 timestamp"),
+  /** Stable hash of exactly what was shown. See the note above. */
+  digest: z.string().default(""),
+  /** The message the user answered with, in the transcript (§14). */
+  message: z.string().default(""),
+  /** What they asked to change, when the outcome was `changes_requested`. */
+  note: z.string().default(""),
+});
+
 // ===========================================================================
 // §11 · tests  (§77)
 // ===========================================================================
@@ -764,6 +1206,53 @@ export const Runtime = z.object({
   language: z.literal("typescript").default("typescript"),
   packageManager: z.string().default("npm"),
   nodeVersion: z.string().default(">=20.19"),
+  /**
+   * What happened the last time the application was assembled — the install
+   * and build exit codes and a verdict (§70).
+   *
+   * The `preview` projection has written this since it was built and the
+   * contract did not declare it, so `additionalProperties: false` rejected
+   * every Blueprint the engine produced. The document was written by the
+   * engine and refused by the engine: the next `save()` raised, which made a
+   * generated application permanently unmodifiable — Smith's move died before
+   * it started, on every project.
+   */
+  build: z
+    .object({
+      install: z.number().optional(),
+      build: z.number().optional(),
+      status: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Substitution markers still in the assembled tree, `[]` when none.
+   *
+   * THE SAME OMISSION AS `build`, one field along. `_project_preview` has
+   * written this since it was added and the contract never declared it, so
+   * every Blueprint carrying it failed validation on the next `save()` —
+   * five generated applications in `output/` are unmodifiable for this reason
+   * alone, and the error names `placeholders` rather than the projection that
+   * wrote it.
+   */
+  placeholders: z.array(z.string()).optional(),
+  /**
+   * Planned pages against pages the application actually serves (§72).
+   *
+   * A run that plans N pages and ships fewer reports success: composition
+   * fails per subject, every projection downstream faithfully projects what
+   * survived, `next build` compiles it, and the missing routes are found by a
+   * person clicking on them. Two real builds went 53 -> 27 and 38 -> 23 that
+   * way. Recorded on every run, `complete` included — a missing key would mean
+   * the check did not run, which is a different fact from no shortfall.
+   */
+  pages: z
+    .object({
+      planned: z.number(),
+      served: z.number(),
+      missing: z.array(z.string()).default([]),
+      status: z.enum(["complete", "short"]),
+    })
+    .optional(),
 });
 
 export const Database = z.object({
@@ -881,6 +1370,9 @@ export const Blueprint = z.object({
   integrations: z.array(Integration).default([]),
   security: Security.default({}),
 
+  /** §41–§45 — designs the user connected. Empty for a prompt-only app,
+   *  which is also what tells the orchestrator there is no Figma work to do. */
+  designSources: z.array(DesignSource).default([]),
   designSystem: DesignSystem.default({}),
   uiRegistry: UiRegistry.default({}),
   /** §34 — one per distinct page pattern the app uses. Authored by A2UI. */
@@ -892,6 +1384,8 @@ export const Blueprint = z.object({
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
   decisions: z.array(Decision).default([]),
+  /** §25/§95 — what the user was shown at each gate, and what they answered. */
+  approvals: z.array(Approval).default([]),
   tests: z.array(Test).default([]),
 
   runtime: Runtime.default({}),

@@ -33,6 +33,7 @@ def booted_app(
     base_url: str = "http://localhost:3000",
     boot_timeout_s: int = 90,
     log_sink: Path | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> Iterator[dict]:
     """Context manager that guarantees a reachable app at `base_url`.
 
@@ -47,6 +48,9 @@ def booted_app(
     port = _port_of(base_url)
 
     if _reachable(base_url, timeout_s=2):
+        # `booted=False` matters to more than logging now: an app we did not
+        # start does not have `env_extra`, so a caller that needs it must be
+        # able to tell.
         yield {"booted": False, "url": base_url, "pid": None, "log": None}
         return
 
@@ -56,7 +60,12 @@ def booted_app(
     log_path = log_sink or (output_dir / ".journey-boot.log")
     logf = log_path.open("w", buffering=1)
 
-    env = {**os.environ, "PORT": str(port), "NODE_ENV": "development"}
+    # `env_extra` last, so a caller that needs the app booted a particular way
+    # — a known NEXTAUTH_SECRET, so a session cookie can be minted for it —
+    # wins over the ambient environment rather than being silently overridden
+    # by whatever the developer happens to have exported.
+    env = {**os.environ, "PORT": str(port), "NODE_ENV": "development",
+           **(env_extra or {})}
     # Suppress open-browser-on-start etc. — the harness drives the app,
     # not a human.
     env.setdefault("BROWSER", "none")

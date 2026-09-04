@@ -373,6 +373,8 @@ def apply_change(
     executor: Callable[[Any], Any] | None = None,
     app_root: str | None = None,
     run_agents: bool = True,
+    regenerate: bool = True,
+    observer: Callable[[dict], None] | None = None,
 ) -> ChangeResult:
     """§114 steps 3–7: analyse, update the Blueprint, then run the sub-DAG.
 
@@ -382,10 +384,22 @@ def apply_change(
     is worse than a refused one, because the next impact analysis is computed
     against a document nobody believes.
 
+    ``regenerate`` is False while the application is still being defined. §72's
+    incremental plan answers "what must be rebuilt", and before there is a
+    definition the answer is nothing — the requirements have just been written
+    and the authoring pass has not run yet, so a plan computed here would
+    re-run seventeen nodes to regenerate an application that does not exist.
+    The write still goes through the Blueprint and is still versioned; only the
+    regeneration is skipped.
+
     ``executor`` is injected, exactly as :func:`orchestrator.run` takes it, so
     this is testable without a model. With ``run_agents=False`` the change lands
     in the Blueprint and the plan is reported but not executed — which is what
     §114 step 4 ("proposes change if necessary") needs in order to ask first.
+
+    ``observer`` is passed to the run's ledger, so a caller with somewhere to
+    show progress — the virtual office — sees the sub-DAG unfold live instead
+    of waiting for one report at the end.
     """
     from services.blueprint.agent_contract import AgentResult, apply_agent_result
 
@@ -439,6 +453,12 @@ def apply_change(
     # Newly-created artifacts change the graph, so the plan is recomputed
     # against the committed document. Computing it once before the write would
     # plan against a Blueprint that did not yet contain the change.
+    if not regenerate:
+        impact.plan = []
+        return ChangeResult(
+            impact=impact, version=version, committed=committed, applied=True,
+        )
+
     written = {p.section for p in proposals}
     impact.plan = incremental_plan(
         svc.doc,
@@ -457,7 +477,7 @@ def apply_change(
 
         report = run_dag(
             svc, executor, plan=impact.plan, commit=False,
-            user_request=request, app_root=app_root,
+            user_request=request, app_root=app_root, observer=observer,
         )
 
     return ChangeResult(

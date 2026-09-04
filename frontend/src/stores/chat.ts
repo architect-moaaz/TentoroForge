@@ -51,29 +51,37 @@ const QUEST_TO_OFFICE_PHASE: Record<string, string> = {
   index: "indexing",
 };
 
-/** Map [Tag] prefixes in log messages to office agent IDs */
+/** Map `[Tag]` prefixes in log messages to office agent IDs.
+ *
+ *  The office cast is the Blueprint agent registry, so the relay's older tags
+ *  land on the agent that does that job today — the same aliasing
+ *  `backend/services/office_events.py` applies to the relay's own office
+ *  frames, kept here because these tags never went through it. */
 const LOG_TAG_TO_AGENT: Record<string, string> = {
-  Contract: "contract_writer",
-  Schema: "schema_designer",
-  Auth: "auth_agent",
-  API: "api_generator",
-  BizLogic: "bizlogic_agent",
-  Component: "component_builder",
-  Page: "page_assembler",
-  Style: "ui_styler",
-  Nav: "navigator",
-  Seed: "seed_generator",
-  QA: "qa_tester",
-  Validate: "validator",
-  Index: "indexer",
-  Plan: "planner",
-  Discovery: "discovery",
-  Workflow: "workflow_agent",
-  Rules: "rules_writer",
-  Export: "export_agent",
-  Figma: "figma_importer",
-  Refine: "chat_refiner",
-  Agent: "agent_builder",
+  Plan: "product_analysis",
+  Discovery: "requirement",
+  Refine: "smith",
+  Contract: "solution_architecture",
+  Nav: "solution_architecture",
+  Portal: "integration",
+  Schema: "data_model",
+  Seed: "backend",
+  API: "api",
+  Auth: "security",
+  Rules: "business_rules",
+  BizLogic: "business_rules",
+  Workflow: "workflow",
+  Component: "a2ui_pages",
+  Page: "a2ui_pages",
+  Style: "accessibility",
+  Design: "accessibility",
+  Figma: "figma_intelligence",
+  QA: "testing",
+  Validate: "verification",
+  Index: "memory",
+  Agent: "memory",
+  Export: "deployment",
+  Ship: "deployment",
 };
 
 /** A single before→after change entry in a fix proposal / result. Shape is
@@ -518,7 +526,7 @@ export const useChatStore = create<ChatState>((set) => ({
                   officeStore.handleEvent({
                     type: "agent_start",
                     agent: agentId,
-                    room: info?.room ?? "planning",
+                    room: info?.room ?? "discovery",
                     action: bubbleText || "Working...",
                   });
                 } else {
@@ -595,7 +603,7 @@ export const useChatStore = create<ChatState>((set) => ({
                   officeStore.handleEvent({
                     type: "agent_start",
                     agent: agentId,
-                    room: info?.room ?? "planning",
+                    room: info?.room ?? "discovery",
                     action: bubbleText || "Working...",
                   });
                 } else {

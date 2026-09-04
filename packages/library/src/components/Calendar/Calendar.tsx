@@ -234,14 +234,14 @@ export function Calendar(props: CalendarProps) {
 
       {eventMode && view === "month" && (
         <div className="grid grid-cols-7">
-          {blanks.map((_, i) => <div key={`b-${i}`} className="min-h-[84px] border-b border-r border-border bg-muted/20" />)}
+          {blanks.map((_, i) => <div key={`b-${i}`} className="min-h-[84px] border-b border-e border-border bg-muted/20" />)}
           {days.map((day) => {
             const isToday = sameYmd(tYmd, year, month, day);
             const isSel = sameYmd(selected, year, month, day);
             const dayEvents = events.filter((ev) => coversDay(ev, year, month, day));
             return (
               <button key={day} type="button" onClick={() => clickDay(day)} data-testid={`cal-day-${day}`}
-                className={`min-h-[84px] border-b border-r border-border p-1 text-left align-top transition-colors hover:bg-muted/40 ${isSel ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""}`}>
+                className={`min-h-[84px] border-b border-e border-border p-1 text-start align-top transition-colors hover:bg-muted/40 ${isSel ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""}`}>
                 <span className={`mb-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : "text-foreground"}`}>{day}</span>
                 <div className="space-y-0.5">
                   {dayEvents.slice(0, 3).map((ev, k) => chip(ev, `${ev.id}-${k}`))}
@@ -261,7 +261,7 @@ export function Calendar(props: CalendarProps) {
             const dayEvents = events.filter((ev) => coversDay(ev, y, m, dd));
             return (
               <button key={i} type="button" onClick={() => { setSelected({ year: y, month: m, day: dd }); setDisplayed({ year: y, month: m }); }}
-                className={`min-h-[220px] border-b border-r border-border p-1.5 text-left align-top hover:bg-muted/40 ${sameYmd(selected, y, m, dd) ? "bg-primary/5" : ""}`}>
+                className={`min-h-[220px] border-b border-e border-border p-1.5 text-start align-top hover:bg-muted/40 ${sameYmd(selected, y, m, dd) ? "bg-primary/5" : ""}`}>
                 <span className={`mb-1 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-sm ${isToday ? "bg-primary font-semibold text-primary-foreground" : "text-foreground"}`}>{dd}</span>
                 <div className="space-y-1">{dayEvents.map((ev, k) => chip(ev, `${ev.id}-${k}`))}</div>
               </button>
@@ -377,7 +377,7 @@ function EventPopover({
         <div className="p-3.5">
           <div className="flex items-start justify-between gap-2">
             <h3 className="text-sm font-semibold leading-snug text-foreground">{ev.title}</h3>
-            <button type="button" aria-label="Close" onClick={onClose} className="-mr-1 -mt-1 rounded p-1 text-muted-foreground hover:bg-muted">✕</button>
+            <button type="button" aria-label="Close" onClick={onClose} className="-me-1 -mt-1 rounded p-1 text-muted-foreground hover:bg-muted">✕</button>
           </div>
           <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: ev.color }} />
@@ -389,7 +389,7 @@ function EventPopover({
               {keys.slice(0, 8).map((k) => (
                 <div key={k} className="flex items-start justify-between gap-3 text-xs">
                   <dt className="shrink-0 text-muted-foreground">{humanize(k)}</dt>
-                  <dd className="text-right text-card-foreground">{fmtValue(rec[k])}</dd>
+                  <dd className="text-end text-card-foreground">{fmtValue(rec[k])}</dd>
                 </div>
               ))}
             </dl>

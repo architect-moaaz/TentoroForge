@@ -17,7 +17,7 @@ export function Slider({ name, label, min = 0, max = 100, step = 1, range = fals
   const base = "w-full accent-primary cursor-pointer";
   return (
     <div className="flex flex-col gap-1" data-slider="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
-      {label && <label className="text-sm font-medium text-foreground">{label}{showValue && !range && <span className="ml-2 text-muted-foreground">{single}</span>}</label>}
+      {label && <label className="text-sm font-medium text-foreground">{label}{showValue && !range && <span className="ms-2 text-muted-foreground">{single}</span>}</label>}
       {range ? (
         <div className="flex flex-col gap-1">
           <input type="range" aria-label={`${label ?? name} minimum`} min={min} max={max} step={step} value={pair[0]} className={base}

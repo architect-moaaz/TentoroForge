@@ -116,6 +116,7 @@ async def build_schema_from_jsx(
     route: str | None = None,
     title: str | None = None,
     schema_filename: str | None = None,
+    canvas: tuple[float, float] | None = None,
 ) -> tuple[dict, dict[str, str]]:
     """Build PageV2 schema from Figma MCP JSX source with local asset caching.
 
@@ -149,7 +150,7 @@ async def build_schema_from_jsx(
         if urls
         else {}
     )
-    schema = transform_jsx_to_schema(jsx_source, asset_paths)
+    schema = transform_jsx_to_schema(jsx_source, asset_paths, canvas=canvas)
 
     # Stamp a marker so downstream (renderer/shell) can identify pages that
     # came from Figma and skip its own chrome + theme override. The Figma
@@ -157,6 +158,10 @@ async def build_schema_from_jsx(
     # paint over it or wrap it in a sidebar that never existed in the design.
     if isinstance(schema, dict):
         schema["_figmaDerived"] = True
+        # The frame's own dimensions, so the renderer can scale the canvas to
+        # whatever width it is given instead of cropping it.
+        if canvas is not None:
+            schema["_figmaCanvas"] = {"width": canvas[0], "height": canvas[1]}
 
     # ── Auto-binding pass ─────────────────────────────────────────────
     # Attach dataSources + Repeat wrappers + {{item.field}} bindings by

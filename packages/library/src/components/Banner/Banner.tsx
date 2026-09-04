@@ -26,7 +26,7 @@ export function Banner({ variant = "info", title, message, dismissible, style, o
   if (!open) return null;
   return (
     <div role="alert" data-banner="" data-variant={variant}
-      className="flex items-start gap-3 border-l-4 px-4 py-3 text-sm"
+      className="flex items-start gap-3 border-s-4 px-4 py-3 text-sm"
       style={{ ...(VARIANT[variant] ?? VARIANT.info), ...resolveStyle(style) }} {...useMotion(style?.motion)}>
       <div className="flex-1">
         {title && <div className="font-semibold">{formatValue(title as unknown)}</div>}

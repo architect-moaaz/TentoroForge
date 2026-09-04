@@ -42,7 +42,7 @@
               "props": {"workflow": "ScanProductWorkflow"},
               "children": [
                 {"type": "Stack", "props": {"gap": "tokens.spacing.4"}, "children": [
-                  {"type": "Camera", "props": {"name": "imageUrl", "label": "Take photo"}},
+                  {"type": "CameraCapture", "props": {"name": "imageUrl", "label": "Take photo"}},
                   {"type": "FileUpload", "props": {"name": "imageUrl", "label": "Or upload image", "accept": "image/*"}},
                   {"type": "Button", "props": {"label": "Scan", "variant": "primary", "submit": true}}
                 ]}

@@ -36,9 +36,9 @@ const DENSITY_INPUT: Record<"compact" | "comfortable" | "spacious", string> = {
 const DENSITY_PAD: Record<"compact" | "comfortable" | "spacious", {
   noIcon: string; left: string; right: string;
 }> = {
-  compact:     { noIcon: "px-2", left: "pl-7  pr-2", right: "pl-2 pr-7"  },
-  comfortable: { noIcon: "px-3", left: "pl-9  pr-3", right: "pl-3 pr-9"  },
-  spacious:    { noIcon: "px-4", left: "pl-11 pr-4", right: "pl-4 pr-11" },
+  compact:     { noIcon: "px-2", left: "ps-7  pe-2", right: "ps-2 pe-7"  },
+  comfortable: { noIcon: "px-3", left: "ps-9  pe-3", right: "ps-3 pe-9"  },
+  spacious:    { noIcon: "px-4", left: "ps-11 pe-4", right: "ps-4 pe-11" },
 };
 const DENSITY_ICON_PX: Record<"compact" | "comfortable" | "spacious", number> = {
   compact: 14, comfortable: 16, spacious: 18,
@@ -46,7 +46,7 @@ const DENSITY_ICON_PX: Record<"compact" | "comfortable" | "spacious", number> = 
 
 const FIELD_BASE = "flex flex-col gap-1.5";
 const LABEL_BASE = "text-caption font-medium leading-none text-foreground";
-const REQUIRED_MARK = "ml-0.5 text-destructive";
+const REQUIRED_MARK = "ms-0.5 text-destructive";
 const INPUT_STATIC =
   "flex w-full border border-input bg-background py-2 " +
   "ring-offset-background placeholder:text-muted-foreground " +
@@ -62,7 +62,7 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
   const LeftIconComp = iconLeft ? resolveIcon(iconLeft) : null;
   const RightIconComp = iconRight ? resolveIcon(iconRight) : null;
   const padCls = LeftIconComp && RightIconComp
-    ? `pl-9 pr-9` // both — keep the comfortable spacing on each side
+    ? `ps-9 pe-9` // both — keep the comfortable spacing on each side
     : LeftIconComp
       ? DENSITY_PAD[density].left
       : RightIconComp
@@ -96,7 +96,7 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
             <LeftIconComp
               size={iconSize}
               aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               data-input-icon="left"
             />
           )}
@@ -117,7 +117,7 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
             <RightIconComp
               size={iconSize}
               aria-hidden="true"
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               data-input-icon="right"
             />
           )}

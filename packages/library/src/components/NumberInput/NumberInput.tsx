@@ -19,7 +19,7 @@ function clamp(n: number, min?: number, max?: number): number {
 
 export function NumberInput({ name, label, min, max, step = 1, showSteppers = true, prefix, suffix, disabled, align, tabularNums, style, value: valueProp, onChange }: NumberInputProps) {
   const numClass = [
-    align === "right" ? "text-right" : "",
+    align === "right" ? "text-end" : "",
     tabularNums ? "tabular-nums" : "",
   ].filter(Boolean).join(" ");
   // Controlled when a parent supplies onChange; otherwise self-manage state so the
@@ -40,23 +40,23 @@ export function NumberInput({ name, label, min, max, step = 1, showSteppers = tr
         <div className="inline-flex items-center rounded-md border border-input">
           <button type="button" aria-label="decrement" disabled={disabled} onClick={() => set(value - step)}
             className="px-2 py-1 text-foreground disabled:opacity-50">−</button>
-          {prefix && <span className="pl-1 text-sm text-muted-foreground">{prefix}</span>}
+          {prefix && <span className="ps-1 text-sm text-muted-foreground">{prefix}</span>}
           <input
             type="number" role="spinbutton" name={name} value={value} min={min} max={max} step={step} disabled={disabled}
             onChange={(e) => set(Number(e.target.value))}
             className="w-16 border-x border-input bg-transparent px-2 py-1 text-center text-sm focus-visible:outline-none" />
-          {suffix && <span className="pr-1 text-sm text-muted-foreground">{suffix}</span>}
+          {suffix && <span className="pe-1 text-sm text-muted-foreground">{suffix}</span>}
           <button type="button" aria-label="increment" disabled={disabled} onClick={() => set(value + step)}
             className="px-2 py-1 text-foreground disabled:opacity-50">+</button>
         </div>
       ) : (
         <div className="inline-flex items-center rounded-md border border-input px-2 py-1">
-          {prefix && <span className="pr-1 text-sm text-muted-foreground">{prefix}</span>}
+          {prefix && <span className="pe-1 text-sm text-muted-foreground">{prefix}</span>}
           <input
             type="text" inputMode="decimal" name={name} value={value} disabled={disabled}
             onChange={(e) => set(Number(e.target.value))}
             className={`w-full bg-transparent text-sm focus-visible:outline-none ${numClass}`.trim()} />
-          {suffix && <span className="pl-1 text-sm text-muted-foreground">{suffix}</span>}
+          {suffix && <span className="ps-1 text-sm text-muted-foreground">{suffix}</span>}
         </div>
       )}
     </div>

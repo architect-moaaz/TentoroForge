@@ -145,12 +145,23 @@ def test_a_thin_composition_is_discarded_not_written(tmp_path):
     assert _page(root) == before, "a rejected composition must not touch the page"
 
 
-def test_the_flag_off_is_a_no_op(tmp_path, monkeypatch):
+def test_a2ui_composes_by_default(tmp_path, monkeypatch):
+    """§34: "The Page Design Agent shall use A2UI MCP as its primary
+    page-generation capability."
+
+    This asserted the opposite — that composition was a no-op unless
+    FORGE_A2UI was set — for an A/B the PRD has since decided. A flag gating
+    the specified default is the divergence, not the default.
+
+    What still protects a build is not a flag: a composition that does not
+    clear its substance floor writes nothing and the deterministic composer
+    runs, which the two tests either side of this one cover.
+    """
     monkeypatch.delenv("FORGE_A2UI", raising=False)
     root = _app(tmp_path)
     res = compose_dashboard_via_a2ui(str(root), surface_provider=GOOD)
-    assert res["applied"] is False and "off" in res["reason"]
-    assert _page(root) == THIN_PAGE
+    assert res["applied"] is True, res.get("reason")
+    assert _page(root) != THIN_PAGE, "the composition should have been written"
 
 
 def test_a_failing_composer_never_fails_the_build(tmp_path):
@@ -561,3 +572,467 @@ def test_an_app_with_no_dashboard_attempts_nothing_by_default(tmp_path, monkeypa
         _plan_app(tmp_path, [{"route": "/sessions", "kind": "list"}]),
         surface_provider=lambda **kw: None)
     assert res["attempted"] == 0, res
+
+
+# --- §35: a screen is composed as part of a set -----------------------------
+
+
+def test_the_domain_context_carries_the_rest_of_the_application(tmp_path):
+    """Navigation presentation and density are properties of a set. Composed
+    alone, a bike shop rendered its heading twice and wrote its empty states
+    in three voices.
+
+    Carried by the domain context rather than the requirement: the A2UI server
+    scans the requirement alone for capability keywords, and a design system
+    carries `typography` and `radius: {badge, pill}`, so every page was held
+    to have asked for a chart and a status pill.
+    """
+    from services.a2ui_authority import build_domain_context
+
+    ctx = build_domain_context(
+        tmp_path, {"entities": {}},
+        shared_context='{"pages": ["/articles/[id]"]}')
+    assert "/articles/[id]" in ctx
+    assert "belongs beside them" in ctx
+
+
+def test_the_requirement_does_not_carry_the_design_system(tmp_path):
+    """The requirement is the string that gets parsed as a list of demands."""
+    from services.a2ui_authority import build_requirement
+
+    root = _app(tmp_path)
+    req = build_requirement(root, "entity_list", "/articles",
+                            shared_context='{"radius": {"badge": "999px"}}')
+    assert "badge" not in req
+
+
+def test_without_a_shared_context_the_requirement_is_unchanged(tmp_path):
+    """A composer with no siblings to know about asks exactly what it did."""
+    from services.a2ui_authority import build_requirement
+
+    root = _app(tmp_path)
+    assert build_requirement(root, "entity_list", "/articles") == \
+        build_requirement(root, "entity_list", "/articles", shared_context="")
+
+
+def test_the_sibling_pages_are_context_not_a_specification(tmp_path):
+    """The maquette was sent as "render exactly these" and A2UI obeyed,
+    which constrained away the second opinion the step exists for. The page
+    set must not repeat that mistake."""
+    from services.a2ui_authority import build_domain_context
+
+    ctx = build_domain_context(tmp_path, {"entities": {}},
+                               shared_context='{"pages": ["/x"]}')
+    assert "Reuse a pattern already established" in ctx
+    assert "render exactly" not in ctx
+
+
+# --- §34: compose before projection, return the surface ---------------------
+
+
+def test_a_page_composes_without_a_schema_file(tmp_path):
+    """It used to decline when no file served the route, which made it a
+    post-projection composer — it could only improve a page `frontend` had
+    already written. §34 puts A2UI inside the generation step, where by
+    definition nothing has been projected yet."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/nowhere-on-disk", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-007")
+    assert "no schema file" not in (res.get("reason") or "")
+
+
+def test_the_composition_comes_back_for_a_caller_to_emit(tmp_path):
+    """`page_layouts` emits a pageLayouts artifact; it cannot read a file the
+    composer wrote, because at wave 7 there is none."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-001")
+    assert res["applied"] is True, res.get("reason")
+    assert res["root"], "the tree the caller turns into an artifact"
+    assert res["page_id"] == "PAGE-001"
+
+
+def test_the_caller_s_page_id_wins_over_the_file(tmp_path):
+    """Blueprint ids are allocated by the pipeline, not read back off disk."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD, page_id="PAGE-042")
+    assert res["page_id"] == "PAGE-042"
+
+
+def test_an_existing_page_is_still_written_in_place(tmp_path):
+    """Improving a projected page keeps working — the write did not move, it
+    became conditional on there being something to write to."""
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    before = _page(root)
+    res = compose_page_via_a2ui(str(root), "/", "dashboard",
+                                surface_provider=GOOD)
+    assert res["applied"] is True
+    assert _page(root) != before
+    assert res["schema_path"]
+
+
+# --- §115: the Blueprint is where this pipeline's entities live -------------
+
+
+def test_the_registry_can_come_from_the_blueprint():
+    """registry_for_binder adapts plan.json, which the Blueprint pipeline does
+    not have. Every page declined with "no entities in the plan — every
+    binding would be a guess" and fell through to the authoring agent. The
+    composer was right to refuse; it was reading the wrong source."""
+    from services.a2ui_authority import registry_from_blueprint
+
+    doc = {"data": {"entities": [
+        {"id": "E1", "name": "Habit", "table": "habits", "fields": [
+            {"name": "id", "type": "uuid"},
+            {"name": "name", "type": "string"},
+            {"name": "cadence", "type": "string",
+             "enumValues": ["daily", "weekly"]},
+        ]},
+    ]}, "workflows": [{"id": "FLOW-001", "name": "Tick a habit off",
+                       "trigger": {"kind": "manual"}}]}
+    reg = registry_from_blueprint(doc)
+    habit = reg["entities"]["Habit"]
+    assert habit["slug"] == "habits"
+    assert {c["name"] for c in habit["columns"]} == {"id", "name", "cadence"}
+    assert habit["columns"][2]["enum"] == ["daily", "weekly"]
+    # Carried by id, because that is what the generated route resolves.
+    assert [w["id"] for w in reg["workflows"]] == ["FLOW-001"]
+    assert reg["workflows"][0]["name"] == "Tick a habit off"
+
+
+def test_an_entity_without_a_table_falls_back_to_its_name():
+    from services.a2ui_authority import registry_from_blueprint
+
+    reg = registry_from_blueprint({"data": {"entities": [{"name": "Habit"}]}})
+    assert reg["entities"]["Habit"]["slug"] == "habit"
+
+
+def test_a_caller_supplied_registry_is_used_over_the_plan(tmp_path):
+    """The plan.json adapter stays for the pipeline that has a plan."""
+    import inspect
+
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    assert "registry" in inspect.signature(compose_page_via_a2ui).parameters
+    src = inspect.getsource(compose_page_via_a2ui)
+    assert "registry if registry is not None else registry_for_binder" in src
+
+
+# --- the job asked for must match the screen --------------------------------
+
+
+def test_blueprint_patterns_map_to_their_job_family():
+    """page_family knows the old pipeline's kinds and returns None for every
+    Blueprint pattern but `form`, so a create screen was handed the dashboard
+    job: "decide which numbers matter and what breakdown is worth charting",
+    sent verbatim to /recipes/new."""
+    from services.a2ui_authority import _family_of
+
+    assert _family_of("entity_list") == "collection"
+    assert _family_of("record_workspace") == "record"
+    assert _family_of("master_detail") == "record"
+    assert _family_of("form") == "form"
+    assert _family_of("wizard") == "form"
+    assert _family_of("dashboard") == "dashboard"
+
+
+def test_an_unknown_kind_falls_back_to_the_mildest_floor():
+    """It fell back to `dashboard`, and this test said that was right for a
+    kind nobody declared. It was not.
+
+    `dashboard` is the most demanding floor there is — KPIs, a chart and an
+    activity feed — so an unrecognised kind was required to be a dashboard.
+    That is the wrong direction to guess in: a screen nobody has classified
+    should be held to the least that any screen showing something owes, which
+    is a list and something to click.
+
+    It also stopped being reachable for a declared pattern. All eighteen are
+    classified in `page_kind_anatomy._FAMILY` now, held there by
+    `test_every_declared_pattern_has_a_family`.
+    """
+    from services.a2ui_authority import UNCLASSIFIED_FAMILY, _family_of
+
+    assert _family_of("something-nobody-declared") == UNCLASSIFIED_FAMILY
+    assert UNCLASSIFIED_FAMILY == "collection"
+
+
+def test_the_domain_context_can_come_from_a_supplied_registry():
+    """It read plan.json through registry_for_binder — the same missing file
+    that emptied the registry — so `domainContext` reached the server blank."""
+    from services.a2ui_authority import build_domain_context
+
+    reg = {"entities": {"Recipe": {"slug": "recipes", "columns": [
+        {"name": "name", "type": "varchar"},
+        {"name": "minutes", "type": "integer"}]}}}
+    ctx = build_domain_context(None, reg)
+    assert "Recipe" in ctx and "minutes" in ctx
+
+
+# ---------------------------------------------------------------------------
+# The domain context carries verbs, not only nouns.
+#
+# A composed /plants came back with no button of any kind, for an app whose
+# description says marking a plant watered is the only action. Correctly, on
+# what it was given: the job asks "what they do to a record", the closing rule
+# says do not invent, and the context listed entities and columns alone.
+# ---------------------------------------------------------------------------
+
+def _watering_doc():
+    return {
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Plant", "table": "plants",
+             "fields": [{"name": "id", "type": "uuid"},
+                        {"name": "name", "type": "varchar"}]},
+        ]},
+        "workflows": [
+            {"id": "FLOW-001", "name": "Record Watering Today",
+             "purpose": "Append one watering event dated today.",
+             "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-001", "PAGE-002"]},
+            {"id": "FLOW-002", "name": "Evaluate Plant Watering Status",
+             "purpose": "Derivation that runs on every read.",
+             "trigger": {"kind": "condition"},
+             "launchedFrom": ["PAGE-001", "PAGE-002"]},
+            {"id": "FLOW-004", "name": "Seed Plant Catalogue",
+             "purpose": "Database initialisation.",
+             "trigger": {"kind": "event"}, "launchedFrom": []},
+        ],
+    }
+
+
+def test_the_registry_carries_workflow_ids_not_only_names(tmp_path):
+    from services.a2ui_authority import registry_from_blueprint
+
+    flows = registry_from_blueprint(_watering_doc())["workflows"]
+    # The generated route is /api/workflows/{id}/execute, so the id is the only
+    # value a Button or Form can carry that reaches anything.
+    assert {w["id"] for w in flows} == {"FLOW-001", "FLOW-002", "FLOW-004"}
+    assert {w["trigger"] for w in flows} == {"manual", "condition", "event"}
+
+
+def test_the_page_is_told_the_workflows_it_launches(tmp_path):
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-001")
+    assert "FLOW-001" in ctx
+    assert "Record Watering Today" in ctx
+    assert "`workflow`" in ctx
+
+
+def test_only_workflows_a_user_can_start_are_offered(tmp_path):
+    """`trigger.kind` is a required enum — manual | event | schedule |
+    condition — and only `manual` is something a user starts. All three of this
+    app's page-launched workflows name the page in `launchedFrom`; offering
+    them unfiltered invites a button for a derivation that runs on every read.
+    """
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-001")
+    assert "FLOW-002" not in ctx
+    assert "FLOW-004" not in ctx
+
+
+def test_a_page_that_launches_nothing_is_told_about_no_workflows(tmp_path):
+    from services.a2ui_authority import (
+        build_domain_context, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_watering_doc())
+    ctx = build_domain_context(tmp_path, reg, "PAGE-009")
+    assert "The workflows this screen launches" not in ctx
+    assert "Plant: id, name" in ctx
+
+
+def test_the_closing_rule_scopes_actions_as_well_as_numbers(tmp_path):
+    """Without this the context can list workflows and the requirement still
+    reads as entities-and-columns-only."""
+    from services.a2ui_authority import build_requirement
+
+    req = build_requirement(tmp_path, "entity_list", "/plants", "")
+    assert "every action must name one of its workflows" in req
+
+
+def test_the_closing_rule_does_not_read_as_a_chart_request(tmp_path):
+    """The A2UI server rejects a payload with no chart when the requirement
+    names one (tools/a2ui-mcp/checks.py, _CAPABILITIES). "Do not write a
+    number, a trend or a comparison as a literal" was read as asking for a
+    trend, so a two-entity plant tracker got a bar chart on all three pages,
+    including its create form, and every page lost a retry to it.
+    """
+    import re
+    from services.a2ui_authority import build_requirement
+
+    req = build_requirement(tmp_path, "entity_list", "/plants", "").lower()
+    for word in ("chart", "graph", "trend", "distribution", "histogram",
+                 "funnel", "sparkline", "plot", "over time"):
+        assert not re.search(rf"\b{re.escape(word)}\b", req), word
+
+
+#: The only component demands a job statement is allowed to make, and the floor
+#: rule that justifies each one.
+#:
+#: THE RULE IS NOT "NAME NO COMPONENTS", it is "demand nothing the floor does
+#: not require". Those read the same until they disagree, and they disagreed
+#: here: `dashboard_findings` raises `dashboard_no_chart` for any dashboard
+#: without a chart, while the brief said "worth charting" — which A2UI's
+#: whole-word matcher does not read as "chart". So the composer was never told,
+#: composed no chart, and was refused. 140 seconds, every dashboard, every time.
+#:
+#: A demand belongs here only when the floor requires that capability
+#: unconditionally AND accepts nothing else in its place. `dashboard_no_activity`
+#: takes a Table, List, Timeline, Kanban or Calendar, so naming any one of them
+#: would over-constrain a choice the floor leaves open — which is exactly the
+#: harm the original blanket rule was written about.
+_JUSTIFIED_DEMANDS: dict[str, set[str]] = {
+    "dashboard": {"chart"},   # dashboard_anatomy.dashboard_findings, no_chart
+}
+
+
+def test_no_job_text_demands_a_component_the_floor_does_not_require():
+    """The A2UI server scans the requirement for capability keywords and makes
+    any match mandatory. "a table, a board, a calendar, a timeline" offered
+    four ways to think about a list; the checker read two demands, so every
+    collection page carried a Table and a Timeline or was rejected — a Timeline
+    on a two-entity plant tracker, a table on a create form.
+
+    Pinned across every family, so a future rewrite cannot put an unjustified
+    component name into any of them without this failing.
+    """
+    import re
+    from services.a2ui_authority import _JOB
+
+    # The server's own list, restated here so the test fails if the prose
+    # drifts back even when the vendored copy is unavailable.
+    keywords = (
+        "chart", "graph", "trend", "distribution", "histogram", "funnel",
+        "sparkline", "plot", "over time", "by hour", "by week", "by stage",
+        "kpi", "metric", "stat tile", "stats", "scorecard", "key figure",
+        "status pill", "pill", "badge", "chip", "table", "data grid",
+        "datagrid", "timeline", "gantt", "kanban", "swimlane", "board column",
+    )
+    for family, text in _JOB.items():
+        hits = {k for k in keywords
+                if re.search(rf"\b{re.escape(k)}\b", text.lower())}
+        unjustified = hits - _JUSTIFIED_DEMANDS.get(family, set())
+        assert not unjustified, f"{family}: {sorted(unjustified)}"
+
+
+def test_every_justified_demand_is_one_the_floor_actually_makes():
+    """The other half. An entry here that the floor does not require is a
+    component demanded of every page of that family for no reason — the
+    original defect, arrived at through the exemption list instead."""
+    from services.dashboard_anatomy import _CHART_TYPES
+
+    assert _JUSTIFIED_DEMANDS["dashboard"] == {"chart"}
+    assert _CHART_TYPES, "the floor no longer requires a chart; drop the demand"
+
+
+def test_every_composition_attempt_keeps_its_own_surface(tmp_path):
+    """A retry must not erase the surface of the attempt that shipped.
+
+    Keyed on the route alone, the artifact overwrote itself: one run made six
+    compositions and left four files, and a page stored a one-node tree while
+    the surface on disk replayed to nine. Every hypothesis about that collapse
+    was then tested against a payload from a different call, so each came back
+    "fine" while the page stayed broken.
+    """
+    root = _app(tmp_path)
+    for _ in range(3):
+        compose_page_via_a2ui(str(root), "/plants", "entity_list",
+                              surface_provider=GOOD, page_id="PAGE-001")
+
+    art = root / "src" / "contracts" / "a2ui-surfaces"
+    assert sorted(f.name for f in art.glob("plants.*.json")) == [
+        "plants.1.json", "plants.2.json", "plants.3.json"]
+
+
+# --- a dropped call is not a refusal ---------------------------------------
+
+def test_an_empty_surface_is_retried(tmp_path):
+    """Two of three parallel calls came back empty on one run while the third
+    answered twice seconds apart. The composer had nothing against those pages
+    — the transport dropped them, and one shipped with no layout at all."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def flaky(req, ctx):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=flaky)
+    assert calls["n"] == 3, "the call was not retried"
+    assert res["applied"] is True, res.get("reason")
+
+
+def test_a_provider_that_never_answers_declines_with_a_reason(tmp_path):
+    """And says the composer returned nothing, rather than reporting whatever
+    the JSON parser said about an empty string."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def silent(req, ctx):
+        calls["n"] += 1
+        return {"messages": []}
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=silent)
+    assert calls["n"] == 3
+    assert res["applied"] is False
+    assert "returned nothing" in res["reason"], res["reason"]
+
+
+def test_a_healthy_provider_is_asked_once(tmp_path):
+    """Retry must cost a working composition nothing."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def fine(req, ctx):
+        calls["n"] += 1
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    compose_dashboard_via_a2ui(str(root), surface_provider=fine)
+    assert calls["n"] == 1
+
+
+def test_a_timed_out_call_is_retried(tmp_path):
+    """A hung call is the expensive kind of no-answer: it spends the whole
+    budget and leaves the page with no layout. /tickets 404'd in a generated
+    app for exactly that — one read timing out at 300s."""
+    root = _app(tmp_path)
+    calls = {"n": 0}
+
+    def slow_then_fine(req, ctx):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("a2ui composition exceeded 240s")
+        return GOOD(req, ctx) if callable(GOOD) else GOOD
+
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=slow_then_fine)
+    assert calls["n"] == 3
+    assert res["applied"] is True, res.get("reason")
+
+
+def test_the_ceiling_leaves_room_for_three_attempts():
+    """Ten minutes made a single hung call spend the whole budget, and three
+    of those would be half an hour on one page. Every observed composition
+    finished inside 133s."""
+    from services.a2ui_authority import DEFAULT_TIMEOUT
+
+    assert DEFAULT_TIMEOUT <= 300, (
+        f"{DEFAULT_TIMEOUT}s x 3 attempts is longer than anyone will wait")

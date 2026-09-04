@@ -300,11 +300,42 @@ class _Parser:
         ch = self.src[self.pos]
         if ch in ('"', "'"):
             return self._read_quoted_string(ch)
+        if ch == "`":
+            return self._read_style_template()
         # Numeric or unquoted value — read until comma or }
         start = self.pos
         while not self._eof() and self.src[self.pos] not in ",}":
             self.pos += 1
         return self.src[start: self.pos].strip()
+
+    def _read_style_template(self) -> str:
+        """A `...` value inside a style object, with ${vars} resolved.
+
+        `maskImage: `url("${imgGroup1}")`` was read by the unquoted branch,
+        which stops at the first `,` or `}` — and the first `}` it meets is the
+        one closing `${imgGroup1}`. The value stored was the fragment
+        '`url("${imgGroup1' : not a URL, not valid CSS, and as a mask-image it
+        hides the element it is applied to.
+
+        That is why inline styles looked like something to strip. Eighty masks
+        on one real dashboard, every one of them truncated, and applying them
+        collapsed the page. Resolved against the same const table `src` already
+        uses, they are what clips the design's shapes correctly.
+        """
+        self._expect("`")
+        start = self.pos
+        while not self._eof() and self.src[self.pos] != "`":
+            self.pos += 1
+        raw = self.src[start:self.pos]
+        if not self._eof():
+            self._expect("`")
+        # ${name} -> the const's value, leaving an unknown name in place rather
+        # than emitting an empty url() that would mask everything away.
+        def sub(match):
+            name = match.group(1).strip()
+            return self.consts.get(name, match.group(0))
+
+        return re.sub(r"\$\{([^}]*)\}", sub, raw)
 
     def _read_template_literal_expr(self) -> str:
         """Read a `...` template literal inside {}. pos is at the backtick."""
@@ -488,6 +519,9 @@ _POSITION_PATTERNS: list[re.Pattern] = [
 # Matches w-[Npx] or h-[Npx] — explicit pixel sizing used only for absolute layout.
 _PX_SIZE_RE = re.compile(r'^[wh]-\[\d+px\]$')
 
+# A retained explicit pixel WIDTH, which must be capped at the viewport.
+_WIDTH_PX_RE = re.compile(r'(?:^| )w-\[\d+(?:\.\d+)?px\](?: |$)')
+
 # Matches size-[Npx], w-[Npx], h-[Npx], w-[N.Mpx] — fixed pixel sizes that
 # indicate a "decorative" node whose absolute children compose into a shape.
 _FIXED_PX_SIZE_RE = re.compile(r'^(size|w|h)-\[\d+(\.\d+)?px\]$')
@@ -503,9 +537,22 @@ _PCT_OFFSET_RE = re.compile(r'^(inset(-[xy])?|left|top|right|bottom)-(\[.*%|1/[2
 _LEADING_ZERO_RE = re.compile(r'^leading-\[0(px)?\]$')
 
 
+#: Canvas mode. A page built FROM a Figma frame is a fixed-size drawing, not a
+#: flowed document: its nodes say `absolute inset-0 size-full` inside boxes that
+#: the frame's own dimensions bound. Reflowing it has nothing to work with — one
+#: real dashboard export carried 534 absolute nodes and five pixel offsets — so
+#: in this mode every node keeps its composition and the root is given the
+#: frame's true size. Set only by `transform_jsx_to_schema`, always restored.
+_CANVAS_MODE = False
+
+
 def _is_decorative_positioned(cn: str) -> bool:
-    """Return True when a node has BOTH 'absolute' (or 'fixed') AND uses
-    percentage-based offsets (inset-[%], left-1/2, top-[8.33%], etc.).
+    """Return True when a node is an absolutely-positioned COMPOSITION layer
+    rather than a node abusing absolute for flow layout.
+
+    Two shapes qualify: percentage-based offsets (inset-[%], left-1/2,
+    top-[8.33%]) — Figma icon SVG layers — and fill-parent layers (inset-0,
+    size-full), which is how Dev Mode expresses most of a frame.
 
     Percentage offsets are the hallmark of Figma icon SVG layers that compose
     overlapping vector shapes — they must be preserved or the icon fragments
@@ -515,6 +562,31 @@ def _is_decorative_positioned(cn: str) -> bool:
     tokens = cn.split() if cn else []
     if not any(t in ("absolute", "fixed") for t in tokens):
         return False
+    # On a sized canvas every absolute node is composition, because there is a
+    # box for it to resolve against. That box is the whole difference: the same
+    # `inset-0` that fills a frame fills nothing in a reflowed page, which is
+    # why this is a mode and not a new default.
+    #
+    # EXCEPT A `contents` WRAPPER, WHICH HAS NO BOX TO BE. Figma wraps each
+    # card in `absolute contents left-[x] top-[y]`, and `display: contents`
+    # generates no box at all — so it cannot be the containing block its
+    # percentage-inset children need, and they resolve against zero. Measured
+    # in the browser: 625 of 632 elements were 0x0 with the canvas itself
+    # correctly 3902x1975. Such a wrapper must become transparent instead
+    # (see `_filter_position_classes`), letting its children resolve against
+    # the frame, which is the coordinate space their percentages are in.
+    if _CANVAS_MODE:
+        return "contents" not in tokens
+    # TRIED AND REVERTED: also treating `inset-0` / `size-full` as composition.
+    # It is true that Dev Mode writes most of a frame that way — one real
+    # dashboard had 534 absolute nodes, 251 `size-full`, 160 `inset-0` and only
+    # 5 pixel offsets — but preserving them made the page WORSE, not better:
+    # every layer left the flow, so its ancestors had no height for `inset-0`
+    # to fill, and a page that rendered three cards rendered none.
+    #
+    # `inset-0` only means something inside a box with a size. In a reflowed
+    # layout there is no such box, which is the honest limit of reflowing this
+    # kind of frame at all — see the note in `_filter_position_classes`.
     return any(_PCT_OFFSET_RE.match(t) for t in tokens)
 
 
@@ -527,8 +599,21 @@ def _filter_position_classes(cn: str, preserve_absolute: bool = False) -> str:
     Removes:
     - absolute / relative / fixed / sticky
     - left-*, top-*, right-*, bottom-*, inset-*, translate-*, transform*, z-*
-    - w-[Npx] / h-[Npx] ONLY when 'absolute' or 'fixed' is also present on the node
     - leading-[0] / leading-[0px] — collapses line-height causing text overlap
+
+    NOT removed: w-[Npx] / h-[Npx]. It used to strip those whenever the node
+    also carried `absolute`, and that is what emptied a design of its content.
+    Figma positions a card with `absolute left-[x] top-[y] w-[w] h-[h]`; drop
+    the offsets AND the size and an absolutely-positioned image layer has
+    neither position nor dimensions left, so it renders as nothing. A real
+    dashboard frame of ~30 cards came out as three: the header, one ring and
+    one chart, with the rest of the page blank.
+
+    The size is the half worth keeping. Offsets are re-inferred as a flex flow
+    by `_infer_absolute_flow`; dimensions cannot be re-inferred from anything,
+    because the content is images. `_attach_style_passthrough` caps a retained
+    pixel width with `max-w-full` so a 3902px frame cannot force the viewport
+    sideways.
 
     Preserves flex/grid/bg/border/text/padding/margin/sizing utilities.
     """
@@ -536,7 +621,19 @@ def _filter_position_classes(cn: str, preserve_absolute: bool = False) -> str:
         return cn
 
     tokens = cn.split()
-    has_absolute = any(t in ("absolute", "fixed") for t in tokens)
+
+    # A `contents` wrapper is dissolved on a canvas: the class goes, and so do
+    # the offsets it carried, which `display: contents` was already ignoring.
+    # What remains is a static div — it establishes no containing block, so an
+    # absolutely-positioned descendant resolves against the frame itself.
+    if _CANVAS_MODE and "contents" in tokens:
+        tokens = [t for t in tokens if t != "contents"]
+        return " ".join(
+            t for t in tokens
+            if t not in ("absolute", "fixed", "relative")
+            and not any(pat.search(t) for pat in _POSITION_PATTERNS)
+            and not _LEADING_ZERO_RE.match(t)
+        )
 
     if preserve_absolute:
         # Only strip leading-[0] — keep all positioning intact
@@ -547,9 +644,6 @@ def _filter_position_classes(cn: str, preserve_absolute: bool = False) -> str:
     for t in tokens:
         # Check all position patterns
         if any(p.search(t) for p in _POSITION_PATTERNS):
-            continue
-        # Strip explicit pixel sizing only when the node uses absolute/fixed positioning
-        if has_absolute and _PX_SIZE_RE.match(t):
             continue
         # Strip leading-[0] / leading-[0px] — Figma Dev Mode artifact
         if _LEADING_ZERO_RE.match(t):
@@ -581,7 +675,9 @@ def _infer_absolute_flow(children: list) -> tuple:
     Returns ("col", gap_px) if children are stacked vertically via
     ``absolute top-[Npx]`` with monotonically increasing top values,
     ("row", gap_px) if horizontally via ``absolute left-[Npx]``,
-    or (None, 0) if the children weren't laid out by absolute offsets.
+    ("wrap", gap_px) if they spread on BOTH axes — a 2D grid of cards, which
+    is what a dashboard frame is — or (None, 0) if the children weren't laid
+    out by absolute offsets at all.
 
     Heuristic:
     - Need at least 2 absolute-positioned children
@@ -626,11 +722,46 @@ def _infer_absolute_flow(children: list) -> tuple:
     top_flowing = len(tops) >= 2 and top_spread >= THRESH
     left_flowing = len(lefts) >= 2 and left_spread >= THRESH
 
-    if left_flowing and left_spread > top_spread * 1.5:
+    # HOW MANY DISTINCT POSITIONS, NOT HOW FAR APART.
+    #
+    # Comparing spreads cannot tell a grid from a row: a 2x2 of cards 500px
+    # apart across and 300px down has a WIDER left-spread than top-spread, so a
+    # "left dominates" rule calls it one row and puts four cards in a line.
+    #
+    # What actually separates the three cases is how many distinct offsets an
+    # axis has. A row has one top and many lefts. A column has one left and
+    # many tops. A grid has several of both — that is what being a grid means.
+    # Values are clustered at the same 8px tolerance used above, because Figma
+    # rounds and two cards in a row are rarely at the identical pixel.
+    def _clusters(vals):
+        out = []
+        for v in sorted(vals):
+            if not out or v - out[-1] > THRESH:
+                out.append(v)
+        return len(out)
+
+    rows_of = _clusters(tops)
+    cols_of = _clusters(lefts)
+
+    if rows_of <= 1 and left_flowing:
         return ("row", 16)
-    if top_flowing and top_spread > left_spread * 1.5:
+    if cols_of <= 1 and top_flowing:
         return ("col", 16)
-    # Both axes spread comparably → treat as grid-ish, let className win.
+
+    # SEVERAL OF BOTH IS A GRID, AND IT USED TO BE THE DEAD BRANCH.
+    #
+    # This said "treat as grid-ish, let className win" and returned no flow —
+    # but by the time a browser sees the node, `_filter_position_classes` has
+    # taken `absolute`, `left-` and `top-` out of that very className. There
+    # was nothing left for it to win with, so a page whose cards are laid out
+    # on a 2D grid got neither positions nor a flow, and stacked or vanished.
+    #
+    # A dashboard frame is precisely this case: ~30 cards over several rows and
+    # several columns. Wrapping is the honest reflow — cards keep their own
+    # size (see `_filter_position_classes`) and fill rows in reading order,
+    # which is the arrangement the design had, minus its exact coordinates.
+    if rows_of >= 2 and cols_of >= 2:
+        return ("wrap", 16)
     return (None, 0)
 
 
@@ -811,6 +942,12 @@ def _attach_style_passthrough(props: dict, attrs: dict, preserve_absolute: bool 
     if cn:
         tokens = [t for t in cn.split() if t not in _FIGMA_COLLAPSE_HINTS]
         cn = " ".join(tokens)
+    # A KEPT PIXEL WIDTH IS CAPPED, NOT DROPPED. Figma frames are authored far
+    # wider than any viewport (3902px here), so a bare `w-[3902px]` would put
+    # the page on a horizontal scrollbar. `max-w-full` keeps the design size as
+    # the intent and the viewport as the limit.
+    if cn and _WIDTH_PX_RE.search(cn) and "max-w-" not in cn:
+        cn = cn + " max-w-full"
     if cn:
         props["className"] = cn
     style = attrs.get("style")
@@ -832,10 +969,17 @@ def _transform_node(element: JSXElement) -> dict | None:
         src = attrs.get("src", "")
         if src:
             props["src"] = src
-        alt = attrs.get("alt", "")
-        if alt:
-            props["alt"] = alt
-        _attach_style_passthrough(props, attrs)
+        # ALWAYS PRESENT, EVEN WHEN EMPTY. Figma writes `alt=""` on every
+        # decorative vector, and dropping the attribute is not the same fact:
+        # an absent `alt` is an image nobody described, an empty one is an
+        # image deliberately hidden from assistive technology. The component
+        # catalog requires the prop for exactly that reason, so omitting it
+        # refused every Figma page carrying an icon — 249 of them on one real
+        # dashboard.
+        props["alt"] = attrs.get("alt", "") or ""
+        _attach_style_passthrough(
+            props, attrs,
+            preserve_absolute=_is_decorative_positioned(attrs.get("className", "")))
         return _make_node("Image", props)
 
     # ── 2. <p> → Heading or Text ─────────────────────────────────────────────
@@ -929,7 +1073,9 @@ def _transform_node(element: JSXElement) -> dict | None:
             src = img_el.attrs.get("src", "")
             if src:
                 props["src"] = src
-        _attach_style_passthrough(props, attrs)
+        _attach_style_passthrough(
+            props, attrs,
+            preserve_absolute=_is_decorative_positioned(attrs.get("className", "")))
         return _make_node("Image", props)
 
     # 3c. Primitive.label via data-name
@@ -1044,7 +1190,20 @@ def _transform_node(element: JSXElement) -> dict | None:
     # If this node has any absolutely-positioned immediate children, add
     # `relative` to its own className so the children resolve against it.
     # Only add when not already carrying a position keyword.
-    if _children_have_absolute(element.children):
+    # A DISSOLVED `contents` WRAPPER MUST NOT BECOME THE CONTAINING BLOCK.
+    #
+    # Making a parent of absolute children `relative` is right in a flowed
+    # page: the children's offsets are meant to be read against it. On a
+    # canvas they are not — the percentages Figma wrote are in FRAME
+    # coordinates, and the wrapper carried `display: contents` precisely so it
+    # would never be anyone's reference box.
+    #
+    # Adding `relative` here made each dissolved wrapper a 3902x48 box, and a
+    # card asking for `inset-[6.23%_93.93%_88%_3.08%]` against 48px of height
+    # computed `inset: 0px 3902px 48px 0px` — zero by zero. Left static, the
+    # wrapper establishes nothing and the frame stays the reference.
+    _was_contents = _CANVAS_MODE and "contents" in (cn or "").split()
+    if _children_have_absolute(element.children) and not _was_contents:
         existing_cn = props.get("className", "")
         existing_tokens = existing_cn.split() if existing_cn else []
         position_keywords = {"absolute", "relative", "fixed", "sticky"}
@@ -1089,10 +1248,12 @@ def _transform_node(element: JSXElement) -> dict | None:
     # When Figma used absolute top-[Npx] / left-[Npx] to position children and
     # C.4 will strip those offsets, we promote the parent to Stack/Row and inject
     # the replacement gap so children breathe instead of collapsing.
-    if inferred_flow in ("col", "row"):
+    if inferred_flow in ("col", "row", "wrap"):
         flow_class = (
             f"flex flex-col gap-[{inferred_gap}px]"
             if inferred_flow == "col"
+            else f"flex flex-wrap gap-[{inferred_gap}px]"
+            if inferred_flow == "wrap"
             else f"flex gap-[{inferred_gap}px]"
         )
         existing = props.get("className", "")
@@ -1118,7 +1279,13 @@ def _transform_node(element: JSXElement) -> dict | None:
     # and render at the SVG's natural size. Give such wrapper Containers a
     # `relative w-full h-full` default so descendants size against the
     # nearest bounded ancestor.
-    if not props.get("className"):
+    # NOT ON A CANVAS. This default exists because a flowed page has no bounded
+    # ancestor for a `size-full` descendant to resolve against. A canvas HAS
+    # one — the frame — and giving an emptied wrapper `relative w-full h-full`
+    # makes it the containing block instead, which is the same collapse that
+    # `display: contents` caused: percentages meant for the frame resolve
+    # against a wrapper that is only as tall as its own flow content.
+    if not props.get("className") and not _CANVAS_MODE:
         props["className"] = "relative w-full h-full"
     children = _transform_children(element.children)
     return _make_node("Container", props, children)
@@ -1152,6 +1319,7 @@ def _rewrite_asset_paths(node: dict, asset_paths: dict[str, str]) -> None:
 def transform_jsx_to_schema(
     jsx_source: str,
     asset_paths: dict[str, str] | None = None,
+    canvas: tuple[float, float] | None = None,
 ) -> dict:
     """Parse the JSX source and convert to PageV2 schema. When asset_paths
     is supplied (output of figma_asset_downloader), every img src that
@@ -1160,8 +1328,13 @@ def transform_jsx_to_schema(
     Returns a PageV2-shaped dict: {schemaVersion: '2.0', id, title,
     dataSources: [], children: [<root_node>]}.
     """
+    global _CANVAS_MODE
     root_element = parse_jsx_tree(jsx_source)
-    root_node = _transform_node(root_element)
+    _CANVAS_MODE = canvas is not None
+    try:
+        root_node = _transform_node(root_element)
+    finally:
+        _CANVAS_MODE = False
 
     # The MCP root commonly carries `size-full` which collapses to zero
     # height when its scaffold parent isn't bounded — the entire design
@@ -1170,7 +1343,24 @@ def transform_jsx_to_schema(
     if isinstance(root_node, dict):
         root_props = root_node.get("props") or {}
         root_cn = root_props.get("className", "")
-        if "size-full" in root_cn:
+        if canvas is not None:
+            # THE BOX THE DESIGN WAS DRAWN IN. `size-full` means "be my
+            # parent", and the parent here is the page — so without this the
+            # frame is whatever the viewport is, and every child positioned
+            # against 3902px lands somewhere else. Substituting
+            # `min-h-screen w-full` (what this did before) gives the root a
+            # viewport width, which is the one width the design was NOT drawn
+            # at.
+            width, height = canvas
+            root_props["className"] = " ".join(
+                t for t in root_cn.split() if t not in ("size-full",)
+            ).strip()
+            style = dict(root_props.get("style") or {})
+            style.update({"width": f"{width:g}px", "height": f"{height:g}px",
+                          "position": "relative"})
+            root_props["style"] = style
+            root_node["props"] = root_props
+        elif "size-full" in root_cn:
             root_props["className"] = root_cn.replace("size-full", "min-h-screen w-full").strip()
             root_node["props"] = root_props
 

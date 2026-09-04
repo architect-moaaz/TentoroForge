@@ -95,18 +95,32 @@ _MEASURED_PROPS = frozenset({
     "delta", "change", "comparison", "deltaLabel",
 })
 
-# Last-resort prop reconciliation.
+# A FLOOR, AND NO LONGER A SILENT ONE.
 #
-# The catalog is only as truthful as `library_manifest.key_props`, and that list
-# is empty for some components — Text among them. Given no properties to work
-# from the composer invents plausible ones ("text", "variant"), which then fail
-# Forge's strict schema node ({content, as}). That is the very drift A2UI's
-# closed catalog is supposed to prevent, reappearing one layer up.
+# These rewrite `Text.text` to `Text.content`, `Alert.text` to `Alert.message`
+# and four more. They described themselves as "a stopgap, not the fix. The fix
+# is to make the catalog generator fall back to the schema node when the
+# manifest has no key_props… Every entry here marks a component whose manifest
+# entry is thin."
 #
-# These aliases are a stopgap, not the fix. The fix is to make the catalog
-# generator fall back to the schema node when the manifest has no key_props, so
-# the contract is complete at authoring time instead of patched at translation
-# time. Every entry here marks a component whose manifest entry is thin.
+# That fix has happened. `_PRIMITIVE_PROPS` supplies the fallback, and every
+# one of these seven now points at a canonical prop the catalog already
+# carries — measured, not assumed. With `unevaluatedProperties` on every
+# component, A2UI's own validator rejects `{"component": "Text", "text": …}`
+# and retries, so in the ordinary case the wrong prop never arrives here.
+# Verified against A2UI's validator rather than an approximation of it.
+#
+# KEPT ANYWAY, because "unnecessary in the happy path" and "safe to delete" are
+# different claims. A rejection costs A2UI a retry out of three, shared with
+# whatever else is wrong with that surface; if it cannot self-correct, a page
+# that used to ship is lost. A prop name is not worth a page.
+#
+# What was actually wrong with them was the silence. `translate` reported no
+# warning and nothing dropped, so the composer emitted `text` forever while
+# this table quietly fixed it — a repair nobody could see is a repair nobody
+# removes. Each rename now says so through `warnings`, which is the same
+# channel an unknown prop already uses, so a rename that keeps happening is
+# visible as a catalog defect rather than absorbed as a habit.
 _PROP_ALIASES: dict[str, dict[str, str]] = {
     "Text": {"text": "content"},
     "Heading": {"text": "content"},
@@ -121,6 +135,24 @@ _PROP_ALIASES: dict[str, dict[str, str]] = {
 _ENUM_SYNONYMS: dict[str, dict[str, str]] = {
     "direction": {"column": "vertical", "row": "horizontal"},
 }
+# The same floor, for a required prop the composer left out.
+#
+# `MetricTile.format` decides how the number reads — a count, a currency, a
+# percentage — and the node is `.strict()` about having one. Without it the tile
+# rendered blank: schema-valid to A2UI at the time, rejected by Forge's node,
+# and silently empty on the page.
+#
+# Redundant in the happy path now, for the same two reasons as the aliases: the
+# catalog marks `format` required (`required=['component','format','label',
+# 'value']`) and A2UI's own validator refuses a MetricTile without one —
+# verified against that validator, not an approximation. Kept for the same
+# reason too: a rejection costs a retry out of three, and a page is worth more
+# than a default nobody had to guess at.
+#
+# WARNED, LIKE THE ALIASES. Injecting a value the composer did not choose is a
+# decision, and one made silently is one nobody can review. "number" is a
+# reasonable default and it is still a guess — a count and a currency read very
+# differently, and this module has no idea which it is looking at.
 _REQUIRED_DEFAULTS: dict[str, dict[str, Any]] = {
     "MetricTile": {"format": "number"},
 }
@@ -323,6 +355,26 @@ class _Binder:
                     return lit
         return ""
 
+    def _add_source(self, spec: dict) -> str:
+        """Register a fetch, reusing an identical one. Returns its name.
+
+        `_by_path` is keyed on the POINTER, so two pointers resolving to the
+        same entity and the same operation each minted their own source: one
+        page declared `books`, `books2` and `books3` — three identical list
+        queries against one table, with the tree reading all three.
+
+        Sameness is the whole spec apart from its name. An aggregate with
+        different metrics, or a list carrying a filter, is a different fetch
+        and keeps its own; nothing is merged that would return different rows.
+        """
+        without_name = {k: v for k, v in spec.items() if k != "name"}
+        for existing in self.sources:
+            if {k: v for k, v in existing.items() if k != "name"} == without_name:
+                return str(existing["name"])
+        spec = {**spec, "name": self._unique(str(spec["name"]))}
+        self.sources.append(spec)
+        return str(spec["name"])
+
     def _unique(self, base: str) -> str:
         name, n = base, 2
         while name in self._names:
@@ -371,6 +423,20 @@ class _Binder:
                 f'{comp.get("id")}.{prop}: "{path}" (label {label!r}) names no '
                 f"entity; assumed {entity} — the dominant entity on this surface."
             )
+        if not entity:
+            # THE PAGE SAYS WHAT IT IS ABOUT. A2UI names its data after the
+            # screen and this resolves by entity name, so `/team` on a page
+            # whose entity is `TeamMember` matched nothing and the page ended
+            # with no sources at all. Reading `primaryEntity` off the Page
+            # Contract is not the guess this refuses to make — it is the
+            # declaration the pointer failed to reach.
+            declared = getattr(self, "page_entity", "")
+            if declared and declared in (self.registry.get("entities") or {}):
+                entity = declared
+                self.assumptions.append(
+                    f'{comp.get("id")}.{prop}: "{path}" names no entity; used '
+                    f"{entity} — what this page's contract says it is about."
+                )
         if not entity:
             self.warnings.append(
                 f'{comp.get("id")}.{prop}: could not resolve "{path}" to an entity '
@@ -455,12 +521,44 @@ class _Binder:
             # choice through rather than binding it.
             return "__literal__"
         else:
-            name = self._unique(slug)
-            self.sources.append({"name": name, "entity": entity, "op": "list", "limit": 10})
+            name = self._add_source({"name": slug, "entity": entity,
+                                     "op": "list", "limit": 10})
             binding = f"{{{{{name}}}}}"
 
         self._by_path[key] = binding
         return binding
+
+    def is_record_page(self) -> bool:
+        """Whether this page is about one record.
+
+        `_family_of` rather than `page_family` directly: page_family knows
+        nothing about `record_workspace` and answers None, and the authority's
+        map is the one covering every declared kind.
+        """
+        try:
+            from services.a2ui_authority import _family_of
+            return _family_of(getattr(self, "page_kind", "")) == "record"
+        except Exception:  # noqa: BLE001 — a lookup must not fail a binding
+            return False
+
+    def record_source(self, entity: str) -> str:
+        """The page's single `get` source for `entity`, created once.
+
+        One source, however many fields read from it — a detail page that
+        minted a source per field would fetch the same record six times and
+        bind each field to a different name.
+
+        `get` is the runtime's own word: data-engine-bridge resolves the URL id
+        and calls findById for any source that is not a list, so this needs no
+        URL template and no key.
+        """
+        existing = getattr(self, "_record_src", None)
+        if existing:
+            return str(existing)
+        name = self._add_source({"name": _slug_for(entity, self.registry),
+                                 "entity": entity, "op": "get"})
+        self._record_src = name
+        return name
 
     def measure_from_label(self, comp: dict, prop: str) -> str | None:
         """A measured value that arrived as a bare LITERAL → a real aggregate.
@@ -724,6 +822,230 @@ class _Binder:
 
 
 
+def _enum_members(kind: str, prop: str) -> set[str]:
+    """The values `kind.prop` accepts, or an empty set when it is not an enum.
+
+    Read from the generated component contracts, so this knows what the
+    renderer knows rather than restating it — a second list here would drift
+    from the Zod components the way the A2UI catalog did.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return set()
+    try:
+        spec = props_for(kind, load_contracts()).get(prop) or {}
+    except Exception:  # noqa: BLE001
+        return set()
+    members = spec.get("enum")
+    return {str(m) for m in members} if isinstance(members, list) else set()
+
+
+#: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
+#: them among the props and the binder lifts them out afterwards, so they are
+#: not unknown — they are early.
+_NODE_SIBLINGS = frozenset({"style", "bind", "visibleIf", "id"})
+
+
+def _unknown_props(kind: str, props: dict) -> list[str]:
+    """Props `kind` does not accept, per the generated component contracts.
+
+    Reported, not dropped. The catalog is generated from the Zod components
+    and should be authoritative, but "should be" is the wrong footing on which
+    to delete a value a composer meant: if the catalog's entry for a component
+    is thin, dropping would silently strip props the renderer does accept.
+    Naming them puts the diagnosis in front of whoever reads the run, and the
+    prop still reaches the schema exactly as it did before.
+
+    An empty entry means the catalog knows nothing about this component, which
+    is a different problem — every prop would be "unknown" and the message
+    would say nothing.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+
+        known = set(props_for(kind, load_contracts()) or {})
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return []
+    if not known:
+        return []
+    return sorted(k for k in props if k not in known and k not in _NODE_SIBLINGS)
+
+
+def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
+    """Every `workflow` under `node` naming something outside `known`.
+
+    Walks rather than reads one key, because a workflow reference is nested as
+    often as it is top-level: `Table.rowActions[]`, `emptyAction`, and whatever
+    action-bearing shape a component adds next. Clears each in place — a
+    binding that resolves to nothing renders as a working control and fails on
+    click, which is worse than the control not being there.
+    """
+    found: list[tuple[str, str]] = []
+    if isinstance(node, list):
+        for i, item in enumerate(node):
+            found += _dangling_workflows(item, known, f"{path}[{i}]")
+        return found
+    if not isinstance(node, dict):
+        return found
+    for key, value in list(node.items()):
+        if key == "workflow" and isinstance(value, str) and value:
+            if value not in known:
+                found.append((f"{path}.{key}", value))
+                node.pop(key, None)
+        elif isinstance(value, (dict, list)):
+            found += _dangling_workflows(value, known, f"{path}.{key}")
+    return found
+
+
+def _adopt_table_bindings(schema: dict, binder: Any, registry: dict) -> None:
+    """Declare a source for every dangling binding that names a real table.
+
+    The composer writes `{{blocs}}`; the application has a `Bloc` entity whose
+    table is `blocs`. That is not an invention to refuse, it is a fetch to
+    declare — and declaring it is what the pointer path already does.
+
+    Mutates `schema["dataSources"]` in place. Silent when nothing matches, so
+    a genuinely invented name reaches `dangling_bindings` exactly as before.
+    """
+    dangling = dangling_bindings(schema)
+    if not dangling:
+        return
+
+    # table -> entity, and slug -> entity. Both are names the binder itself
+    # mints sources under, so both are names a composer can reasonably use.
+    by_name: dict[str, str] = {}
+    for ent_name, ent in (registry.get("entities") or {}).items():
+        for alias in (ent.get("table"), ent.get("slug"), ent.get("camel"),
+                      ent_name.lower()):
+            if isinstance(alias, str) and alias:
+                by_name.setdefault(alias, ent_name)
+
+    for name in dangling:
+        # Only the head of a dotted path: `{{votes.total}}` asks for `votes`.
+        head = str(name).split(".")[0].strip()
+        entity = by_name.get(head)
+        if not entity:
+            continue
+        # Named exactly as the composer wrote it, or the binding still dangles
+        # — `_add_source` would otherwise dedupe it onto an existing source
+        # under a different name and leave the tree pointing at nothing.
+        if any(s.get("name") == head for s in binder.sources):
+            continue
+        binder.sources.append({"name": head, "entity": entity,
+                               "op": "list", "limit": 50})
+    schema["dataSources"] = binder.sources
+
+
+def dangling_bindings(schema: dict) -> list[str]:
+    """`{{name}}` in the tree with no dataSource named `name`.
+
+    A composed /plants carried four stat tiles bound to
+    {{plantstracked.value}}, {{overdue.value}}, {{duetoday.value}} and
+    {{neverwatered.value}} against a single declared source, `plants`. A2UI
+    invented a source per metric and nothing checked, so the page rendered
+    four em-dashes — or the raw placeholder, which is worse, because it looks
+    like a template that failed rather than a number that is missing.
+
+    The binder rewrites the pointers it recognises and reports what it could
+    not resolve; a name it never saw is neither. This is the check that says
+    the two halves agree — every binding backed by a source that will actually
+    be fetched.
+    """
+    import re
+
+    declared = {s.get("name") for s in (schema.get("dataSources") or [])}
+    found: set[str] = set()
+
+    def _repeat_var(node: dict) -> str:
+        """The loop variable a `Repeat` introduces, if it iterates a real source.
+
+        THIS MODULE MINTS THE NODE AND DID NOT RECOGNISE IT. `_repeat_from`
+        emits `{"type": "Repeat", "props": {"source": <name>, "as": "item"}}`
+        and its children bind `{{item.titleAr}}` — so a page composed here was
+        refused by the floor over `binding 'item' has no declared data source`,
+        after A2UI had spent 140 seconds on it.
+
+        `_row_scope` below looks for a `repeat` KEY, or for `rows`/`items`/
+        `data` holding `{{…}}` syntax. A Repeat has neither: the prop is
+        `source` and its value is a bare source name. Two spellings of "this is
+        a row scope", with the checker attached to neither of the ones the
+        translator actually produces.
+
+        The variable is read from `as` rather than assumed to be `item`, and
+        only a source the page really declares opens the scope — a Repeat over
+        an invented collection is still a dangling binding and must still be
+        reported.
+        """
+        if node.get("type") != "Repeat":
+            return ""
+        props = node.get("props")
+        props = props if isinstance(props, dict) else {}
+        source = str(props.get("source") or "").strip().split(".")[0]
+        if not source or source not in declared:
+            return ""
+        return str(props.get("as") or "item").strip()
+
+    def _row_scope(node: dict) -> bool:
+        """Whether this node renders once per item of a declared collection.
+
+        A ROW IS NOT THE PAGE. Inside one, `{{id}}` means this row's id and the
+        renderer resolves it against the row — there is no page-level source
+        called `id`, and there should not be. Read as a page binding it looked
+        dangling, and /tickets was refused over `rowHref: "/tickets/{{id}}"`
+        on a Table whose `rows` was bound to a declared source.
+
+        Decided structurally, from what the node binds rather than from what
+        it is called: a collection prop carrying a binding to a source the page
+        declares. `repeat` is the planner's own form of the same thing.
+        """
+        if node.get("repeat"):
+            return True
+        props = node.get("props")
+        props = props if isinstance(props, dict) else {}
+        for prop in ("rows", "items", "data"):
+            value = props.get(prop)
+            if not isinstance(value, str):
+                continue
+            names = [m.split(".")[0].strip()
+                     for m in re.findall(r"\{\{([^}]+)\}\}", value)]
+            if any(n in declared for n in names):
+                return True
+        return False
+
+    def walk(node: Any, in_row: bool = False,
+             bound: frozenset[str] = frozenset()) -> None:
+        if isinstance(node, list):
+            for n in node:
+                walk(n, in_row, bound)
+            return
+        if not isinstance(node, dict):
+            return
+        # The collection binding itself is page-level — it is what opens the
+        # row scope — so the node is judged before the scope is entered.
+        row = in_row or _row_scope(node)
+        var = _repeat_var(node)
+        # NAMED, NOT BLANKET. `row` suppresses every unknown name inside it,
+        # which is right when the row's fields are unknowable. A Repeat says
+        # exactly what its variable is called, so only that one is bound and
+        # anything else inside it is still reported.
+        inner = bound | {var} if var else bound
+        for value in node.values():
+            if isinstance(value, str):
+                # `{{plants}}` and `{{record.title}}` both name `plants`/`record`.
+                names = [m.split(".")[0].strip()
+                         for m in re.findall(r"\{\{([^}]+)\}\}", value)]
+                # Within a row, only a name the page actually declares is a
+                # page binding; anything else is a field of the row.
+                found.update(n for n in names
+                             if n not in bound and (not row or n in declared))
+            else:
+                walk(value, row, inner)
+
+    walk(schema.get("root"))
+    return sorted(n for n in found if n and n not in declared)
+
+
 def translate(payload: dict, registry: dict, route: str = "/",
               page_id: str = "home", kind: str = "",
               entity_hints: dict | None = None) -> dict:
@@ -738,6 +1060,10 @@ def translate(payload: dict, registry: dict, route: str = "/",
 
     binder = _Binder(registry, data_model)
     binder.page_kind = str(kind or "").strip().lower()
+    # The entity this page's own contract says it is about — the last thing
+    # tried before a pointer is left unbound.
+    binder.page_entity = str(
+        (registry.get("pageEntity") or {}).get(str(page_id)) or "")
     binder.entity_hints = dict(entity_hints or {})
 
     # Which entity does this surface mostly talk about? Counted over every path
@@ -806,7 +1132,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # relative to the row becomes a relative binding, not a source.
                 clone[k] = f'{{{{item.{str(v["path"]).lstrip("/")}}}}}'
         comps[clone_id] = clone
-        inner = build(clone_id)
+        inner = build(clone_id, scope="item")
         if not inner:
             return None
         return {"type": "Repeat", "props": {"source": source, "as": "item"},
@@ -883,7 +1209,15 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 out.append(node)
         return out
 
-    def build(cid: str) -> dict | None:
+    def build(cid: str, scope: str = "") -> dict | None:
+        """``scope`` is the name the current row is bound under, inside a
+        Repeat — "" when this node is not in one.
+
+        Threaded rather than inferred because only the caller knows: the same
+        component id is built as a standalone widget in one place and as a
+        Repeat's template in another, and a pointer means a different thing in
+        each.
+        """
         c = comps.get(cid)
         if not c:
             return None
@@ -898,6 +1232,13 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 return None
             new_kind, field_props = resolved
             node: dict[str, Any] = {"type": new_kind, "props": field_props}
+            # Same lift as the general builder below. c051f6f patched only
+            # that one, and a form field composed through this path still
+            # arrived with `style` inside props — the identical rejection, in
+            # a branch the synthetic tree I verified against never reached.
+            style = field_props.pop("style", None)
+            if style is not None:
+                node["style"] = style
             if c.get("id"):
                 node["id"] = c["id"]
             return node
@@ -964,6 +1305,56 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"— rows the page did not read from anywhere.")
                     continue
                 resolved = resolve(val, c, k)
+            elif (isinstance(val, dict) and "path" not in val and val
+                  and any(isinstance(v, dict) and "path" in v
+                          for v in val.values())):
+                # A DICT OF POINTERS — `Button.args`, the inputs a dispatched
+                # workflow acts on. The branch below reads a prop that IS a
+                # pointer; this is a prop whose VALUES are, so it matched
+                # neither and the raw {"path": ...} dicts rode into the schema.
+                # `interpolateDeep` resolves `{{...}}` strings and nothing
+                # else, so the click posted {"ticketId": {"path": "/ticket/id"}}
+                # and the workflow received an object where an id belongs —
+                # the same null-column failure the args channel was opened to
+                # fix.
+                #
+                # A BINDING, NEVER A LITERAL. The copy branch may read a value
+                # out of the sample model, which is right for a heading and
+                # wrong here: baking "TCK-1042" into args sends every click the
+                # same id. The pointer names where the value lives, and that is
+                # what has to survive to dispatch time.
+                resolved = {}
+                for k2, v in val.items():
+                    if not (isinstance(v, dict) and "path" in v):
+                        resolved[k2] = v
+                        continue
+                    raw2 = str(v["path"])
+                    segs2 = [x for x in raw2.strip("/").split("/") if x]
+                    if (binder.is_record_page() and len(segs2) >= 2
+                            and binder.dominant
+                            and isinstance(at_path("/" + segs2[0]), dict)):
+                        # The record this page shows — the same rule the copy
+                        # branch uses, so args and the fields around it name
+                        # one source rather than two.
+                        src2 = binder.record_source(binder.dominant)
+                        resolved[k2] = f"{{{{{src2}.{segs2[-1]}}}}}"
+                    elif scope and segs2 and not raw2.startswith("/"):
+                        # Inside a repeat the row is bound under its `as` name,
+                        # so a row-relative pointer follows the row — which is
+                        # what a per-row action needs.
+                        resolved[k2] = f"{{{{{scope}.{segs2[-1]}}}}}"
+                    else:
+                        # No source and no row: any binding here would name
+                        # something nothing fetches. Dropped with a reason,
+                        # because a missing input fails at the workflow where
+                        # it can be read, and an unresolvable pointer fails
+                        # silently as an object.
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}.{k2}: "{raw2}" resolves to no '
+                            f"source on this page — dropped rather than sent "
+                            f"as a pointer the renderer cannot read.")
+                if not resolved:
+                    continue
             elif isinstance(val, dict) and "path" in val:
                 # A pointer on a non-data prop is COPY — a header title, a card
                 # heading. Reading it off the sample model is the one honest use
@@ -972,14 +1363,86 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # where a `.strict()` string field rejects it and the whole page
                 # fails to parse.
                 raw = str(val["path"])
-                resolved = at_path(raw)
+                # A RECORD'S FIELDS ARE NOT COPY. This branch reads a pointer
+                # off the sample data model, which is right for a card heading
+                # and ruinous for the record the page exists to show: every
+                # `/ticket/subject` became the sample string, so /tickets/[id]
+                # shipped one hardcoded fictional ticket and rendered it
+                # whichever ticket you opened. Nothing reported it, because a
+                # page full of plausible text looks exactly like a page that
+                # works.
+                #
+                # Bound when the page is about one record AND the pointer
+                # names a field of an object in the sample — `/ticket/subject`
+                # yes, `/ticketDetails` (a list) no, `/heading` no. The
+                # resulting string passes the literal check below untouched,
+                # so the repair chain stays for the cases it was written for.
+                segs = [seg for seg in raw.strip("/").split("/") if seg]
+                if (binder.is_record_page() and len(segs) >= 2
+                        and binder.dominant
+                        and isinstance(at_path("/" + segs[0]), dict)):
+                    src = binder.record_source(binder.dominant)
+                    resolved = f"{{{{{src}.{segs[-1]}}}}}"
+                    binder.assumptions.append(
+                        f'{c.get("id")}.{k}: "{raw}" names a field of the '
+                        f"record this page shows — bound to {resolved!r} "
+                        f"rather than read out of the sample.")
+                else:
+                    resolved = at_path(raw)
                 if not isinstance(resolved, (str, int, float, bool)):
-                    if not raw.startswith("/") and raw.strip("/"):
+                    field = raw.strip("/").split("/")[-1]
+                    members = _enum_members(kind, k)
+                    if scope and field and not raw.startswith("/"):
+                        # THE ROW IS IN SCOPE, SO SAY SO. A relative pointer
+                        # means "this row's field", and inside a Repeat the
+                        # renderer can read exactly that: `Repeat` binds each
+                        # element into the render data under its `as` name, so
+                        # `{{item.statusVariant}}` resolves per row.
+                        #
+                        # `expand_records` has always emitted this for the
+                        # props it rewrites on the way into a Repeat; the
+                        # generic path could not, because it did not know
+                        # whether it was inside one. So the same pointer became
+                        # a bare field name — right for `Kanban.cardTitle`,
+                        # which names a field, and wrong for `Badge.variant`,
+                        # which takes one of five values and got the literal
+                        # "statusVariant".
+                        #
+                        # Safe on an enum prop: the A2UI catalog admits a
+                        # binding beside the members, and `validate_props`
+                        # defers a binding string because the renderer supplies
+                        # the value later.
+                        resolved = f"{{{{{scope}.{field}}}}}"
+                        binder.assumptions.append(
+                            f'{c.get("id")}.{k}: "{raw}" is row-relative and '
+                            f"this node is inside a repeat — bound to "
+                            f"{resolved!r}, so it follows the row.")
+                    elif members and field not in members:
+                        # AN ENUM PROP TAKES A MEMBER, NOT A FIELD NAME. The
+                        # rule below is right for `Kanban.cardTitle`, which
+                        # names the field to read — but `Badge.variant` takes
+                        # one of five fixed values, and A2UI's
+                        # `{"path": "statusVariant"}` became the literal
+                        # "statusVariant", which is not one of them. The page
+                        # failed validation and did not ship.
+                        #
+                        # Dropped, so the prop falls back to its default and
+                        # the badge renders in a neutral style. A row-relative
+                        # binding is a real intent this contract cannot express
+                        # — losing the colour is the small half of that, and
+                        # losing the page was the large one.
+                        resolved = None
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}: "{raw}" is row-relative and '
+                            f"{k!r} takes one of {sorted(members)} — dropped, "
+                            f"so the default applies rather than failing the "
+                            f"page.")
+                    elif not raw.startswith("/") and raw.strip("/"):
                         # A relative pointer is scoped to the row, so on a prop
                         # like Kanban's `cardTitle` it names a FIELD, and the
                         # field name is the literal Forge wants. Dropping it
                         # (as this did) left the cards with no title.
-                        resolved = raw.strip("/").split("/")[-1]
+                        resolved = field
                         binder.assumptions.append(
                             f'{c.get("id")}.{k}: "{raw}" is row-relative; read '
                             f"as the field name {resolved!r}.")
@@ -994,9 +1457,35 @@ def translate(payload: dict, registry: dict, route: str = "/",
             if isinstance(resolved, str):
                 resolved = _ENUM_SYNONYMS.get(k, {}).get(resolved, resolved)
             if resolved is not None:
-                props[aliases.get(k, k)] = resolved
-        if kind == "Form" and props.get("workflow"):
-            known = {str(w) for w in (binder.registry.get("workflows") or [])}
+                canonical = aliases.get(k, k)
+                if canonical != k:
+                    # Said out loud. The catalog already offers the right name,
+                    # so a rename reaching here means the composer was told and
+                    # wrote something else anyway — worth seeing, not worth
+                    # losing the page over.
+                    binder.warnings.append(
+                        f'{c.get("id")}.{k}: {kind} has no {k!r} prop; '
+                        f"renamed to {canonical!r}. The catalog offers "
+                        f"{canonical!r} — the composer should be writing it."
+                    )
+                props[canonical] = resolved
+        # EVERY workflow reference, not the one on the component itself. A
+        # `workflow` also lives inside `Table.rowActions[]`, `emptyAction`, and
+        # any other action object a component accepts — and a composed /plants
+        # shipped rowActions[0].workflow = "markPlantWatered", an id no
+        # workflow has, which reached the browser and answered "Workflow not
+        # found" on click. Six sibling bindings on the same page were correct
+        # FLOW ids; this one was invented, and the check that exists to catch
+        # exactly that only looked at the top level.
+        if kind in ("Form", "Button") and props.get("workflow"):
+            # By id, because `/api/workflows/{id}/execute` is what the renderer
+            # POSTs to. This compared against workflow *names*, so the only
+            # value that reaches a live route was the one it rejected.
+            #
+            # Buttons were never checked at all — the composer had no workflow
+            # vocabulary to get wrong, so nothing exercised it. It has one now.
+            known = {str(w.get("id")) if isinstance(w, dict) else str(w)
+                     for w in (binder.registry.get("workflows") or [])}
             if known and str(props["workflow"]) not in known:
                 # A submit pointed at a workflow that does not exist fails on
                 # click. Dropping it leaves the form for the existing post-gen
@@ -1004,27 +1493,75 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 # already the authority on submit targets — better than this
                 # module inventing a second opinion.
                 binder.unresolved.append(
-                    f'{c.get("id")}: submit targets workflow '
+                    f'{c.get("id")}: {kind} targets workflow '
                     f'"{props["workflow"]}", which this app does not define. '
                     f"Cleared for the submit-authority pass to resolve.")
                 props.pop("workflow", None)
 
         for req, default in _REQUIRED_DEFAULTS.get(kind, {}).items():
-            props.setdefault(req, default)
+            if req not in props:
+                props[req] = default
+                binder.warnings.append(
+                    f'{c.get("id")}.{req}: {kind} requires a {req!r} and none '
+                    f"was given; defaulted to {default!r}. The catalog marks "
+                    f"it required — the composer should be choosing it."
+                )
         props.update(binder.extra_props.get(str(c.get("id")), {}))
 
+        # AFTER THE ALIASES AND THE BINDER'S OWN PROPS, so `Badge.label` is
+        # already `content` and nothing this module attaches is reported as
+        # the composer's invention.
+        #
+        # A prop no component accepts does not fail here — it rides into
+        # `props` and meets a `.strict()` field downstream, where the whole
+        # page fails to parse and the message names a schema path rather than
+        # the component that carried it. This says which component and which
+        # prop, at the point where that is still cheap to know.
+        for bad in _unknown_props(kind, props):
+            binder.warnings.append(
+                f'{c.get("id")}.{bad}: {kind} does not accept a {bad!r} prop. '
+                f"Passed through unchanged — it may be rejected downstream.")
+
+        # AFTER EVERY PROP IS ON. This walk ran above the `extra_props` merge,
+        # so it inspected a dict that did not yet hold the props the binder
+        # attaches — `Table.rowActions` among them, which is where three
+        # invented ids shipped on one run while the check passed its own tests.
+        # Correct helper, wrong position: it was looking for something that
+        # arrived a few lines later.
+        known_ids = {str(w.get("id")) if isinstance(w, dict) else str(w)
+                     for w in (binder.registry.get("workflows") or [])}
+        if known_ids:
+            for where, bad in _dangling_workflows(props, known_ids):
+                binder.unresolved.append(
+                    f'{c.get("id")}: {where} targets workflow "{bad}", which '
+                    f"this app does not define. Cleared for the "
+                    f"submit-authority pass to resolve.")
+
         node: dict[str, Any] = {"type": kind, "props": props}
+        # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
+        # not a prop. A2UI emits it inside props, its own catalog accepts that,
+        # and ours rejected the same tree:
+        #
+        #   InvalidPatternTemplate: root.children[0].props.(root):
+        #   {'style': {'maxWidth': ...}} is not valid under any of the schemas
+        #
+        # Lifted here rather than widening NodeV2 to accept both placements:
+        # two spellings of one thing in the Blueprint is the drift this whole
+        # binder exists to close.
+        style = props.pop("style", None)
+        if style is not None:
+            node["style"] = style
         if c.get("id"):
             node["id"] = c["id"]
 
         kids: list[dict] = []
         raw = c.get("children")
         if isinstance(raw, list):
-            kids = [n for n in (build(str(r)) for r in raw) if n]
+            kids = [n for n in (build(str(r), scope) for r in raw) if n]
         elif isinstance(raw, dict) and raw.get("componentId"):
             kids = expand_template(c, raw)
         elif isinstance(c.get("child"), str):
-            n = build(c["child"])
+            n = build(c["child"], scope)
             if n:
                 kids = [n]
         if kids:
@@ -1049,11 +1586,35 @@ def translate(payload: dict, registry: dict, route: str = "/",
     # binds nothing" indistinguishable from "this page predates the field".
     schema["dataSources"] = binder.sources
 
+    # A LITERAL BINDING THAT NAMES A REAL TABLE IS A REQUEST FOR THAT TABLE.
+    #
+    # A2UI can express a data reference two ways: as a pointer into the data
+    # model, which this binder walks and mints a source for, or as a literal
+    # `{{name}}` written straight into a prop, which it passes through
+    # untouched. Only the first declared a source, so a composition that named
+    # the right table the second way was refused for binding data the page
+    # "will never fetch".
+    #
+    # Measured on the legislative platform: 14 of 50 routes went unbuilt, and
+    # EVERY name in the rejections — audit_logs, blocs, document_signatures,
+    # recordings, attendance_records, votes — is a real table in that
+    # application's own schema. The composer was right and the binder had no
+    # opinion. `/` was among the fourteen, so the app opened on a 404.
+    #
+    # So a dangling name that matches an entity's table or slug gets the same
+    # source the pointer path would have minted. A name matching nothing is
+    # still dangling and still refused: this completes the binder, it does not
+    # loosen the check.
+    _adopt_table_bindings(schema, binder, registry)
+
     return {
         "schema": schema,
         "dominant_entity": binder.dominant,
         "assumptions": binder.assumptions,
         "unresolved": binder.unresolved,
+        # Bindings with no source behind them: the composition names data the
+        # page will never fetch.
+        "dangling": dangling_bindings(schema),
         # What a resolver could still answer — every place the binder had to
         # guess an entity, in a shape the next pass can act on. Empty when
         # every binding resolved on its own.

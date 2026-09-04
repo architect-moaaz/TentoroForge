@@ -11,6 +11,80 @@
       "port": 3000,
       "cwd": "generated/chain-app",
       "autoPort": true
+    },
+    {
+      "name": "forge-api",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--port",
+        "6500"
+      ],
+      "cwd": "backend",
+      "port": 6500,
+      "autoPort": false
+    },
+    {
+      "name": "generated-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3210,
+      "cwd": "output/l0a0tgi6/app",
+      "autoPort": true
+    },
+    {
+      "name": "reading-list",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3220,
+      "cwd": "output/6vaj13oh/app",
+      "autoPort": true
+    },
+    {
+      "name": "forge-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "cwd": "frontend",
+      "port": 6501,
+      "autoPort": false
+    },
+    {
+      "name": "figma-dash",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6514"
+      ],
+      "cwd": "output/figma-dash/app",
+      "port": 6514,
+      "autoPort": false
+    },
+    {
+      "name": "figma-spec",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6515"
+      ],
+      "cwd": "output/wzja848q/app",
+      "port": 6515
     }
   ]
 }

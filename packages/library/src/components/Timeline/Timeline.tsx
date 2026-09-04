@@ -35,8 +35,8 @@ export function Timeline({ entries, orientation = "vertical" }: Props) {
     return (
       <ol className="flex items-start gap-3 overflow-x-auto pb-2">
         {list.map((e) => (
-          <li key={e.id} className="flex-shrink-0 w-48 border-l-2 border-border pl-3">
-            <div className={`h-2 w-2 rounded-full ${STATUS_DOT[e.status ?? "info"] ?? STATUS_DOT.info} -ml-4 mb-1`} />
+          <li key={e.id} className="flex-shrink-0 w-48 border-s-2 border-border ps-3">
+            <div className={`h-2 w-2 rounded-full ${STATUS_DOT[e.status ?? "info"] ?? STATUS_DOT.info} -ms-4 mb-1`} />
             <p className="text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleString("en-US")}</p>
             <p className="text-sm font-medium">{e.title}</p>
             {e.actor && <p className="text-xs text-muted-foreground">{e.actor}</p>}

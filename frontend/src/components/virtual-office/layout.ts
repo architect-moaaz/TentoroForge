@@ -1,14 +1,22 @@
 // ── Static Office Layout Definition ─────────────────────────────────────────
 //
 // 3x3 grid of rooms, each ~8x6 tiles, with corridors connecting them.
-// Total grid: 30 wide x 22 tall. Tile size: 48px.
+// Total grid: 28 wide x 22 tall. Tile size: 48px.
 //
-//  Row 0:  Planning (0,0)   | Design Studio (1,0) | Security (2,0)
-//  Row 1:  Dev API  (0,1)   | Dev UI        (1,1) | Dev Logic (2,1)
-//  Row 2:  QA Lab   (0,2)   | Shipping      (1,2) | Library   (2,2)
+// The floor is laid out the way §28's DAG runs, so work moves in one
+// direction instead of ping-ponging across the office:
+//
+//  Row 0:  Discovery (0,0) | Architecture (1,0) | Design Studio (2,0)
+//  Row 1:  Data      (0,1) | Composition  (1,1) | Logic         (2,1)
+//  Row 2:  Security   (0,2) | Verification (1,2) | Shipping     (2,2)
+//
+// Discovery feeds Architecture, which forks into Data (down the left wall)
+// and Design Studio → Composition (down the right). Security sits under Data
+// because permissions guard entities, and everything converges on
+// Verification before Shipping.
 
 import type { OfficeLayout, Room, Position, DeskPosition, FurniturePlacement } from "./types";
-import { AGENT_REGISTRY } from "./types";
+import { AGENT_REGISTRY, DEPARTMENT_BY_ID } from "./types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -25,12 +33,15 @@ function desksForRoom(
 ): DeskPosition[] {
   const agents = agentsInRoom(roomId);
   const desks: DeskPosition[] = [];
-  // Place desks in two columns inside the room, offset from walls
+  // Two columns, and every other row. Characters are drawn at 1.5 tiles, so
+  // desks one row apart put the person behind on top of the person in front —
+  // which is exactly what a full department looked like before.
   const cols = [2, 5];
-  const startRow = 2;
+  const startRow = 1;
+  const rowStep = 2;
   agents.forEach((agent, i) => {
     const col = cols[i % cols.length];
-    const row = startRow + Math.floor(i / cols.length);
+    const row = startRow + Math.floor(i / cols.length) * rowStep;
     desks.push({
       x: roomX + col,
       y: roomY + row,
@@ -61,95 +72,107 @@ function roomOrigin(col: number, row: number): { x: number; y: number } {
 
 // ── Room definitions ───────────────────────────────────────────────────────
 
+// Label, colour and description come from DEPARTMENTS in types.ts — the same
+// list the backend seats agents against — so a room can't drift from the
+// department it is drawing.
 function makeRoom(
   id: string,
-  label: string,
   col: number,
   row: number,
   floorTile: string,
-  color: string,
-  description: string,
   furniture: FurniturePlacement[],
 ): Room {
   const o = roomOrigin(col, row);
+  const dept = DEPARTMENT_BY_ID[id];
+  if (!dept) throw new Error(`office layout: no department declared for room "${id}"`);
   return {
     id,
-    label,
+    label: dept.label,
     x: o.x,
     y: o.y,
     w: ROOM_W,
     h: ROOM_H,
     floorTile,
-    color,
-    description,
+    color: dept.color,
+    description: dept.description,
     furniture,
     desks: desksForRoom(o.x, o.y, id),
   };
 }
 
+// The department pill is drawn at each room's top centre, so nothing sits at
+// x=3 or x=4 on the top wall — furniture there covers the name of the room.
 const rooms: Room[] = [
-  // Row 0
-  makeRoom("planning", "Planning", 0, 0, "floor_wood", "#3B82F6", "Architecture & planning room", [
-    { type: "whiteboard", x: 3, y: 0 },
-    { type: "whiteboard", x: 4, y: 0 },
+  // Row 0 — what the application is, and how it is shaped
+  makeRoom("discovery", 0, 0, "floor_wood", [
+    { type: "whiteboard", x: 1, y: 0 },
+    { type: "whiteboard", x: 6, y: 0 },
     { type: "plant", x: 0, y: 0 },
     { type: "plant", x: 7, y: 0 },
     { type: "coffee_machine", x: 7, y: 5 },
     { type: "bookshelf", x: 0, y: 5 },
   ]),
-  makeRoom("design_studio", "Design Studio", 1, 0, "floor_tile", "#8B5CF6", "Schema & design workspace", [
-    { type: "monitor_large", x: 3, y: 0 },
-    { type: "monitor_large", x: 4, y: 0 },
+  makeRoom("architecture", 1, 0, "floor_tile", [
+    { type: "whiteboard", x: 1, y: 0 },
+    { type: "whiteboard", x: 6, y: 0 },
+    { type: "cork_board", x: 0, y: 0 },
+    { type: "plant", x: 7, y: 0 },
+    { type: "monitor_large", x: 7, y: 5 },
+    { type: "plant", x: 0, y: 5 },
+  ]),
+  makeRoom("design_studio", 2, 0, "floor_tile", [
+    { type: "monitor_large", x: 1, y: 0 },
+    { type: "monitor_large", x: 6, y: 0 },
     { type: "bookshelf", x: 0, y: 0 },
     { type: "plant", x: 7, y: 0 },
     { type: "plant", x: 7, y: 5 },
     { type: "whiteboard", x: 0, y: 5 },
   ]),
-  makeRoom("security", "Security", 2, 0, "floor_dark", "#DC2626", "Auth & security operations", [
-    { type: "server_rack", x: 6, y: 0 },
+
+  // Row 1 — the two branches that build it
+  makeRoom("data", 0, 1, "floor_wood", [
     { type: "server_rack", x: 7, y: 0 },
     { type: "server_rack", x: 7, y: 1 },
-    { type: "monitor_large", x: 0, y: 0 },
-    { type: "plant", x: 0, y: 5 },
-    { type: "coffee_machine", x: 6, y: 5 },
+    { type: "whiteboard", x: 1, y: 0 },
+    { type: "monitor_large", x: 6, y: 0 },
+    { type: "filing_cabinet", x: 0, y: 0 },
+    { type: "coffee_machine", x: 0, y: 5 },
   ]),
-
-  // Row 1
-  makeRoom("dev_api", "Dev API", 0, 1, "floor_wood", "#EA580C", "API development lab", [
-    { type: "whiteboard", x: 3, y: 0 },
-    { type: "monitor_large", x: 4, y: 0 },
-    { type: "coffee_machine", x: 7, y: 5 },
-    { type: "plant", x: 0, y: 0 },
-    { type: "bookshelf", x: 0, y: 5 },
-    { type: "server_rack", x: 7, y: 0 },
-  ]),
-  makeRoom("dev_ui", "Dev UI", 1, 1, "floor_tile", "#EC4899", "UI component workshop", [
-    { type: "monitor_large", x: 3, y: 0 },
-    { type: "monitor_large", x: 4, y: 0 },
+  makeRoom("composition", 1, 1, "floor_tile", [
+    { type: "monitor_large", x: 1, y: 0 },
+    { type: "monitor_large", x: 6, y: 0 },
     { type: "whiteboard", x: 0, y: 0 },
     { type: "plant", x: 7, y: 0 },
     { type: "plant", x: 0, y: 5 },
     { type: "coffee_machine", x: 7, y: 5 },
   ]),
-  makeRoom("dev_logic", "Dev Logic", 2, 1, "floor_wood", "#4F46E5", "Business logic development", [
-    { type: "whiteboard", x: 3, y: 0 },
-    { type: "whiteboard", x: 4, y: 0 },
+  makeRoom("logic", 2, 1, "floor_wood", [
+    { type: "whiteboard", x: 1, y: 0 },
+    { type: "whiteboard", x: 6, y: 0 },
     { type: "bookshelf", x: 7, y: 0 },
     { type: "plant", x: 0, y: 0 },
     { type: "coffee_machine", x: 0, y: 5 },
     { type: "monitor_large", x: 7, y: 5 },
   ]),
 
-  // Row 2
-  makeRoom("qa_lab", "QA Lab", 0, 2, "floor_tile", "#0891B2", "Testing & validation lab", [
-    { type: "server_rack", x: 0, y: 0 },
-    { type: "server_rack", x: 0, y: 1 },
-    { type: "monitor_large", x: 3, y: 0 },
-    { type: "monitor_large", x: 4, y: 0 },
-    { type: "whiteboard", x: 7, y: 0 },
+  // Row 2 — what guards it, what checks it, what ships it
+  makeRoom("security", 0, 2, "floor_dark", [
+    { type: "server_rack", x: 6, y: 0 },
+    { type: "server_rack", x: 7, y: 0 },
+    { type: "server_rack", x: 7, y: 1 },
+    { type: "monitor_large", x: 0, y: 0 },
+    { type: "filing_cabinet", x: 0, y: 5 },
+    { type: "plant", x: 6, y: 5 },
+  ]),
+  makeRoom("qa", 1, 2, "floor_tile", [
+    { type: "test_bench", x: 0, y: 0 },
+    { type: "test_bench", x: 0, y: 1 },
+    { type: "monitor_large", x: 1, y: 0 },
+    { type: "monitor_large", x: 6, y: 0 },
+    { type: "bookshelf", x: 7, y: 0 },
     { type: "plant", x: 7, y: 5 },
   ]),
-  makeRoom("shipping", "Shipping", 1, 2, "floor_dark", "#16A34A", "Build & deployment center", [
+  makeRoom("shipping", 2, 2, "floor_dark", [
     { type: "conveyor", x: 2, y: 5 },
     { type: "conveyor", x: 3, y: 5 },
     { type: "crate", x: 5, y: 5 },
@@ -157,15 +180,6 @@ const rooms: Room[] = [
     { type: "crate", x: 7, y: 5 },
     { type: "monitor_large", x: 0, y: 0 },
     { type: "plant", x: 7, y: 0 },
-  ]),
-  makeRoom("library", "Library", 2, 2, "floor_wood", "#92400E", "Knowledge & indexing archive", [
-    { type: "bookshelf", x: 0, y: 0 },
-    { type: "bookshelf", x: 1, y: 0 },
-    { type: "bookshelf", x: 6, y: 0 },
-    { type: "bookshelf", x: 7, y: 0 },
-    { type: "plant", x: 0, y: 5 },
-    { type: "plant", x: 7, y: 5 },
-    { type: "coffee_machine", x: 3, y: 0 },
   ]),
 ];
 
