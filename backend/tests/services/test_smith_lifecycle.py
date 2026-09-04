@@ -425,7 +425,7 @@ def test_a_change_after_preview_enters_iteration(ats, tmp_path):
         "section": "workflows", "natural_key": "Manager Offer Approval",
         "body": json.dumps({
             "name": "Manager Offer Approval", "purpose": "Approve before send.",
-            "trigger": {"kind": "event", "detail": "offer.prepared"},
+            "trigger": {"kind": "api_event", "detail": "offer.prepared"},
             "confidence": 0.9}),
     }]))
     assert turn.state_after == "ITERATION"
