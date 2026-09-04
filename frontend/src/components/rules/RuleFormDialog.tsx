@@ -25,6 +25,7 @@ import { RULE_TYPES, type Rule, type RuleType, type RuleConfig } from "@/types/r
 import type { AppModel } from "@/types/app-model";
 import { ValidationRuleForm } from "./ValidationRuleForm";
 import { AccessControlRuleForm } from "./AccessControlRuleForm";
+import { RowAccessRuleForm } from "./RowAccessRuleForm";
 import { BusinessRuleForm } from "./BusinessRuleForm";
 import { ComputedFieldRuleForm } from "./ComputedFieldRuleForm";
 import { StateMachineEditor } from "./StateMachineEditor";
@@ -216,6 +217,18 @@ export function RuleFormDialog({
             <AccessControlRuleForm
               orgId={orgId}
               modelNames={modelNames}
+              config={config}
+              modelName={modelName}
+              onConfigChange={setConfig}
+              onModelChange={setModelName}
+            />
+          )}
+
+          {ruleType === "row_access" && (
+            <RowAccessRuleForm
+              orgId={orgId}
+              modelNames={modelNames}
+              fieldNames={fieldNames}
               config={config}
               modelName={modelName}
               onConfigChange={setConfig}

@@ -2736,7 +2736,7 @@ def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
 # import cycle with the router.
 _SYNC_VALID_RULE_TYPES = {
     "validation", "access", "business", "computed", "state_machine", "trigger",
-    "condition_action", "decision_table",
+    "condition_action", "decision_table", "row_access",
 }
 
 

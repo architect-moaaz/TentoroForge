@@ -21,4 +21,8 @@ doc = json.load(open('$DIR/ownership-fixture.blueprint.json'))
 print(project_ownership_rules(doc, '$OUT'), file=sys.stderr)
 "
 
-node --experimental-strip-types "$DIR/ownership-scope.test.mts" "$OUT/src/lib/ownership-rules.ts"
+# --experimental-transform-types, not --experimental-strip-types: feel-lite's
+# tokenizer declares a TypeScript `enum`, which has to be transformed rather
+# than erased. Transform mode is a superset, so both tests run under it.
+node --experimental-transform-types "$DIR/ownership-scope.test.mts" "$OUT/src/lib/ownership-rules.ts"
+node --experimental-transform-types "$DIR/row-access-sql.test.mts"

@@ -172,8 +172,10 @@ def test_every_read_path_applies_the_scope():
     src = (RUNTIME / "data-engine.ts").read_text()
     for fn in ("create", "query", "findById", "stats", "update", "remove"):
         assert f"export async function {fn}(" in src
-    # scopeConditions is applied, not merely defined.
-    assert src.count("scopeConditions(") >= 7
+    # The predicate is applied, not merely defined. Call sites go through
+    # accessConditions, which folds the declared and the authored halves
+    # together — see test_both_halves_land_in_one_where.
+    assert src.count("accessConditions(") >= 9
 
 
 def test_the_route_hands_stats_the_same_context_as_the_list():
@@ -253,3 +255,75 @@ def test_ats_does_not_fill_the_interviewer_domain_fk():
     cols = {r["column"] for rules in m.values() for r in rules}
     assert "scheduledByUserId" in cols
     assert "interviewerUserId" not in cols
+
+
+# ── row_access: the configurable half ──────────────────────────────────────
+
+
+def test_row_access_is_a_rule_type_the_api_accepts():
+    # Without this the builder cannot save one and the API rejects it, so the
+    # whole configurable half is unreachable.
+    from routers.rules import VALID_RULE_TYPES
+
+    assert "row_access" in VALID_RULE_TYPES
+
+    from services.runtime_injector import _SYNC_VALID_RULE_TYPES
+
+    assert "row_access" in _SYNC_VALID_RULE_TYPES, (
+        "the sync helper keeps its own copy of the list; a rule type missing "
+        "from it is dropped on the way into the DB"
+    )
+
+
+def test_the_runtime_declares_the_rule_type_and_its_config():
+    types = (RUNTIME / "rules" / "types.ts").read_text()
+    assert '| "row_access"' in types
+    assert "RowAccessRuleConfig" in types
+    # Named for the convention condition_action already set, not a new one.
+    assert "whenFeel" in types
+
+
+def test_the_rules_engine_exposes_row_rules_without_evaluating_them():
+    engine = (RUNTIME / "rules" / "engine.ts").read_text()
+    assert "export async function rowAccessRulesFor(" in engine
+    index = (RUNTIME / "rules" / "index.ts").read_text()
+    assert "rowAccessRulesFor" in index, "not exported = not reachable from the data engine"
+
+
+def test_a_row_rule_is_compiled_to_sql_not_applied_per_row():
+    # The distinction is the point: a row removed after the query still counted
+    # towards total, still paged, and still summed into every aggregate.
+    compiler = (RUNTIME / "rules" / "row-access-sql.ts").read_text()
+    assert "export function compileRowAccess(" in compiler
+    for op in ("inArray", "isNull", "isNotNull", "gte", "lte"):
+        assert op in compiler, f"{op} is not compiled"
+    engine = (RUNTIME / "data-engine.ts").read_text()
+    assert "compileRowAccess" in engine
+    assert "async function rowAccessConditions(" in engine
+
+
+def test_both_halves_land_in_one_where():
+    # A declared ownership column and an authored row rule have to end up in
+    # the same predicate, or one of them is not in the count.
+    src = (RUNTIME / "data-engine.ts").read_text()
+    assert "async function accessConditions(" in src
+    assert "...scopeConditions(entityName, entity, ctx)," in src
+    assert "await rowAccessConditions(entityName, entity, ctx)" in src
+    # Every read and write path goes through the combined form.
+    assert src.count("accessConditions(") >= 9
+
+
+def test_an_uncompilable_rule_returns_no_rows():
+    src = (RUNTIME / "data-engine.ts").read_text()
+    where = src[src.index("async function rowAccessConditions("):]
+    where = where[: where.index("async function accessConditions(")]
+    assert "cannot be enforced" in where
+    assert "sql`false`" in where
+
+
+def test_the_builder_offers_the_new_type():
+    types = (Path(__file__).resolve().parents[3]
+             / "frontend" / "src" / "types" / "rules.ts").read_text()
+    assert '| "row_access"' in types
+    assert '{ value: "row_access", label: "Row Access" }' in types
+    assert "whenFeel" in types

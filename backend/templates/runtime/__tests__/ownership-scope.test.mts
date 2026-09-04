@@ -17,11 +17,10 @@
  * Run via __tests__/run-ownership-tests.sh. Exits non-zero on any failure.
  */
 
-import { registerHooks } from "node:module";
+import { installHarness, ok, eqJson, throwsNamed, done } from "./_harness.mts";
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MANIFEST = process.argv[2];
@@ -39,20 +38,28 @@ const FIXTURE = JSON.parse(
 // and "it was applied correctly" at the same time.
 
 type Cond =
-  | { op: "eq"; col: string; val: unknown }
+  | { op: "eq" | "ne" | "gte" | "gt" | "lte" | "lt"; col: string; val: unknown }
   | { op: "ilike"; col: string; pat: string }
+  | { op: "in"; col: string; vals: unknown[] }
+  | { op: "isNull" | "isNotNull"; col: string }
   | { op: "and"; conds: Cond[] }
   | { op: "or"; conds: Cond[] }
-  | { op: "gte"; col: string; val: unknown }
-  | { op: "lt"; col: string; val: unknown }
+  | { op: "not"; cond: Cond }
   | { op: "raw"; text: string };
 
 function matches(row: any, c: Cond | undefined): boolean {
   if (!c) return true;
   switch (c.op) {
     case "eq": return row[c.col] === c.val;
+    case "ne": return row[c.col] !== c.val;
     case "gte": return row[c.col] >= (c.val as any);
+    case "gt": return row[c.col] > (c.val as any);
+    case "lte": return row[c.col] <= (c.val as any);
     case "lt": return row[c.col] < (c.val as any);
+    case "in": return c.vals.includes(row[c.col]);
+    case "isNull": return row[c.col] == null;
+    case "isNotNull": return row[c.col] != null;
+    case "not": return !matches(row, c.cond);
     case "ilike": {
       const needle = c.pat.replace(/%/g, "").toLowerCase();
       return String(row[c.col] ?? "").toLowerCase().includes(needle);
@@ -195,9 +202,15 @@ const fakeDb = {
 
 const DRIZZLE = `
 export const eq = (col, val) => ({ op: "eq", col: col.__col, val });
+export const ne = (col, val) => ({ op: "ne", col: col.__col, val });
 export const gte = (col, val) => ({ op: "gte", col: col.__col, val });
+export const gt = (col, val) => ({ op: "gt", col: col.__col, val });
+export const lte = (col, val) => ({ op: "lte", col: col.__col, val });
 export const lt = (col, val) => ({ op: "lt", col: col.__col, val });
 export const ilike = (col, pat) => ({ op: "ilike", col: col.__col, pat });
+export const isNull = (col) => ({ op: "isNull", col: col.__col });
+export const isNotNull = (col) => ({ op: "isNotNull", col: col.__col });
+export const not = (cond) => ({ op: "not", cond });
 export const and = (...conds) => ({ op: "and", conds: conds.filter(Boolean) });
 export const or = (...conds) => ({ op: "or", conds: conds.filter(Boolean) });
 export const desc = (c) => c;
@@ -235,30 +248,28 @@ const STUBS: Record<string, string> = {
   "@/lib/rules":
     "export const filterFields = async (_e, r) => r;\n" +
     "export const validateEntity = async () => ({ valid: true, errors: [] });\n" +
-    "export const evaluateRuleSet = async () => ({ errors: [], patches: {}, sideEffects: [] });\n",
+    "export const evaluateRuleSet = async () => ({ errors: [], patches: {}, sideEffects: [] });\n" +
+    // Stands in for the rules store the builder writes. The rules it returns
+    // are real ProjectRule shapes; what happens to them afterwards is the
+    // shipped compiler and the shipped engine.
+    "export const rowAccessRulesFor = async (model) => {\n" +
+    "  const all = globalThis.__ROW_RULES__ || {};\n" +
+    "  const k = String(model ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');\n" +
+    "  return all[k.endsWith('s') ? k.slice(0, -1) : k] || [];\n" +
+    "};\n",
   "./events/bus": "export const emitEventAndProcess = async () => {};\n",
 };
 
 (globalThis as any).__FAKE_DB__ = fakeDb;
 
-registerHooks({
-  resolve(spec: string, ctx: any, next: any) {
-    if (spec in STUBS) return { url: "stub:" + spec, shortCircuit: true };
-    // The generated manifest, rendered by the real projection.
-    if (spec === "./ownership-rules") {
-      return { url: pathToFileURL(resolvePath(MANIFEST)).href, shortCircuit: true };
-    }
-    // Extensionless relative imports the engine makes into files that do exist.
-    if (spec === "./data-engine/aggregate-window") {
-      return { url: pathToFileURL(join(HERE, "..", "data-engine", "aggregate-window.ts")).href, shortCircuit: true };
-    }
-    return next(spec, ctx);
-  },
-  load(url: string, ctx: any, next: any) {
-    if (url.startsWith("stub:")) {
-      return { format: "module", source: STUBS[url.slice(5)], shortCircuit: true };
-    }
-    return next(url, ctx);
+// `@/lib/rules/row-access-sql` is NOT stubbed — the real compiler runs against
+// the real FEEL-lite parser, so a row rule below is exercised the whole way
+// from the text an author would type to the rows that come back.
+installHarness({
+  stubs: STUBS,
+  redirect: {
+    "./ownership-rules": MANIFEST,
+    "@/lib/rules/row-access-sql": join(HERE, "..", "rules", "row-access-sql.ts"),
   },
 });
 
@@ -269,25 +280,6 @@ engine.registerEntity(announcements.__name, announcements, { slug: announcements
 engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
-
-let failed = 0;
-function ok(cond: unknown, name: string): void {
-  if (cond) { console.log(`  ✓ ${name}`); return; }
-  console.error(`  ✗ ${name}`); failed++;
-}
-function eqJson(actual: unknown, expected: unknown, name: string): void {
-  const same = JSON.stringify(actual) === JSON.stringify(expected);
-  if (same) { console.log(`  ✓ ${name}`); return; }
-  console.error(`  ✗ ${name}\n      expected: ${JSON.stringify(expected)}\n      actual:   ${JSON.stringify(actual)}`);
-  failed++;
-}
-async function throwsNotFound(fn: () => Promise<unknown>, name: string): Promise<void> {
-  try { await fn(); console.error(`  ✗ ${name} (expected NotFoundError)`); failed++; }
-  catch (e: any) {
-    if (e?.name === "NotFoundError") console.log(`  ✓ ${name}`);
-    else { console.error(`  ✗ ${name} — got ${e?.name}: ${e?.message}`); failed++; }
-  }
-}
 
 const asAlice = { user: { id: ALICE, role: "member" } };
 const asBob = { user: { id: BOB, role: "member" } };
@@ -355,20 +347,23 @@ console.log("findById(): another user's row is Not Found, not Forbidden");
 {
   const own = await engine.findById(invoices.__name, "i1", asAlice);
   ok(own?.id === "i1", "Alice reads her own invoice by id");
-  await throwsNotFound(
+  await throwsNamed(
     () => engine.findById(invoices.__name, "i3", asAlice),
+    "NotFoundError",
     "Alice cannot read Bob's invoice by id",
   );
 }
 
 console.log("update()/remove(): another user's row cannot be written either");
 {
-  await throwsNotFound(
+  await throwsNamed(
     () => engine.update(invoices.__name, "i3", { title: "hijacked" }, asAlice),
+    "NotFoundError",
     "Alice cannot update Bob's invoice",
   );
-  await throwsNotFound(
+  await throwsNamed(
     () => engine.remove(invoices.__name, "i3", asAlice),
+    "NotFoundError",
     "Alice cannot delete Bob's invoice",
   );
   ok(ROWS[invoices.__name].some((r) => r.id === "i3" && r.title === "Bob roofing"),
@@ -493,5 +488,71 @@ console.log("query(): search and filter apply together");
   eqJson(ids(scoped.data), [], "and both AND with the ownership predicate");
 }
 
-console.log(failed === 0 ? "\nAll ownership-scope tests passed." : `\n${failed} failure(s).`);
-process.exit(failed === 0 ? 0 : 1);
+// ── row_access rules — the configurable half ───────────────────────────────
+//
+// Everything above is what the Blueprint declares structurally. These are
+// rules as somebody would author them in the rules builder: a condition in
+// text, compiled by the shipped compiler into the same WHERE the manifest
+// predicates land in.
+
+const RULES = (map: Record<string, any[]>) => { (globalThis as any).__ROW_RULES__ = map; };
+const rule = (name: string, condition: string, roles?: string[]) =>
+  ({ id: name, name, rule_type: "row_access", model_name: "Announcement",
+     is_active: true, config: { whenFeel: condition, ...(roles ? { roles } : {}) } });
+
+console.log("row_access: an authored condition becomes the WHERE clause");
+{
+  RULES({ announcement: [rule("own posts", "postedByUserId = user.id")] });
+  const alice = await engine.query(announcements.__name, {}, asAlice);
+  eqJson(ids(alice.data), ["a1"], "Alice sees the announcement she posted");
+  eqJson(alice.total, 1, "and the total is the scoped count, not the table's");
+  const bob = await engine.query(announcements.__name, {}, asBob);
+  eqJson(ids(bob.data), ["a2"], "Bob sees his");
+}
+
+console.log("row_access: the ats-live hiring-manager shape, end to end");
+{
+  // Two grants for one role, unioned — "while it is still open, OR where I
+  // posted it" — which is the shape ownershipRules[5] actually has.
+  RULES({ announcement: [
+    rule("open ones", 'title = "Office closed Monday"', ["member"]),
+    rule("my own", "postedByUserId = user.id", ["member"]),
+  ] });
+  const bob = await engine.query(announcements.__name, {}, asBob);
+  eqJson(ids(bob.data), ["a1", "a2"], "Bob reaches a1 by condition and a2 by authorship");
+  const alice = await engine.query(announcements.__name, {}, asAlice);
+  eqJson(ids(alice.data), ["a1"], "Alice reaches a1 twice over, and still only a1");
+}
+
+console.log("row_access: a role no rule addresses reaches nothing");
+{
+  RULES({ announcement: [rule("managers only", "true", ["manager"])] });
+  const alice = await engine.query(announcements.__name, {}, asAlice);
+  eqJson(ids(alice.data), [], "rules exist, none addressed to member → no rows");
+  const mgr = await engine.query(announcements.__name, {}, { user: { id: "m", role: "manager" } });
+  eqJson(ids(mgr.data), ["a1", "a2"], "and the role the rule names reaches every row");
+}
+
+console.log("row_access: a rule that cannot become SQL is refused, not ignored");
+{
+  // Post-filtering this in memory would hide rows the count still counted.
+  RULES({ announcement: [rule("unenforceable", 'upper(title) = "X"')] });
+  const alice = await engine.query(announcements.__name, {}, asAlice);
+  eqJson(ids(alice.data), [], "no rows rather than every row");
+  eqJson(alice.total, 0, "and the total agrees, because it is the same WHERE");
+}
+
+console.log("row_access: a rule ANDs with the ownership predicate, never replaces it");
+{
+  RULES({ invoice: [{ id: "r", name: "paid only", rule_type: "row_access",
+                      model_name: "Invoice", is_active: true,
+                      config: { whenFeel: 'status = "paid"' } }] });
+  const alice = await engine.query(invoices.__name, {}, asAlice);
+  eqJson(ids(alice.data), ["i1"], "Alice's own invoices, narrowed to the paid one");
+  const bob = await engine.query(invoices.__name, {}, asBob);
+  eqJson(ids(bob.data), [], "Bob's invoice is his, but it is not paid");
+}
+
+RULES({});
+
+done("ownership-scope");

@@ -306,6 +306,93 @@ function scopeConditions(
   return conds;
 }
 
+/**
+ * The conditions contributed by `row_access` rules — the configurable half.
+ *
+ * `scopeConditions` above covers what the Blueprint declares structurally: a
+ * column that equals the actor. This covers what somebody authored in the
+ * rules builder, which is where a rule with a shape nobody anticipated belongs
+ * — "readable while it is at offer stage and still active, or where this
+ * manager recorded the decision" is not an ownership column, and hard-coding a
+ * predicate for it would make the next such rule another code change.
+ *
+ * Each rule is a GRANT, and grants union: an actor reaches a row if ANY rule
+ * addressed to them admits it. A model with rules but none addressed to this
+ * actor yields FALSE — the same fail-closed reading `canAccessField` uses, so
+ * a role is never handed every row by having been left out.
+ *
+ * A rule whose condition will not compile to SQL also yields FALSE, loudly. It
+ * is the one honest option: evaluating it per row would hide rows from the
+ * page while `total`, the pager and every aggregate still counted them.
+ */
+async function rowAccessConditions(
+  entityName: string,
+  entity: { table: PgTableWithColumns<any> },
+  ctx: DataEngineContext,
+): Promise<SQL[]> {
+  let rules: Array<{ name?: string; config?: any }>;
+  try {
+    const { rowAccessRulesFor } = await import("@/lib/rules");
+    rules = await rowAccessRulesFor(entityName);
+  } catch (e: any) {
+    // No rules module is a legitimate app shape — it can hold no row rules, so
+    // there is nothing to enforce. A module that THREW is a broken app, and
+    // must not be read as one that simply has no rules.
+    rethrowIfRulesEngineFailed(e, entityName, "row access");
+    return [];
+  }
+  if (!rules || rules.length === 0) return [];
+
+  const role = ctx.user?.role;
+  const applicable = rules.filter((r) => {
+    const roles: string[] = r.config?.roles ?? [];
+    return roles.length === 0 || (!!role && roles.includes(role));
+  });
+  if (applicable.length === 0) {
+    console.info(
+      `[data-engine] ${entityName} has row_access rules but none addressed to ` +
+      `role "${role ?? "(none)"}" — no rows.`,
+    );
+    return [sql`false`];
+  }
+
+  const { compileRowAccess } = await import("@/lib/rules/row-access-sql");
+  const grants: SQL[] = [];
+  for (const rule of applicable) {
+    const compiled = compileRowAccess(
+      String(rule.config?.whenFeel ?? ""),
+      entity.table as any,
+      ctx.user as any,
+    );
+    if (!compiled.ok) {
+      console.error(
+        `[data-engine] row_access rule "${rule.name ?? "(unnamed)"}" on ` +
+        `${entityName} cannot be enforced: ${compiled.reason}. Returning no ` +
+        `rows rather than every row.`,
+      );
+      return [sql`false`];
+    }
+    grants.push(compiled.where);
+  }
+  return [grants.length === 1 ? grants[0] : (or(...grants) as SQL)];
+}
+
+/**
+ * Everything that narrows a read of `entityName` for this actor: what the
+ * Blueprint declares as ownership, and what the rules builder declares as row
+ * access. One list, so both end up in the same WHERE and the same count.
+ */
+async function accessConditions(
+  entityName: string,
+  entity: { table: PgTableWithColumns<any> },
+  ctx: DataEngineContext,
+): Promise<SQL[]> {
+  return [
+    ...scopeConditions(entityName, entity, ctx),
+    ...(await rowAccessConditions(entityName, entity, ctx)),
+  ];
+}
+
 /** Fold conditions into one WHERE, or undefined when there are none. */
 function allOf(conds: SQL[]): SQL | undefined {
   if (conds.length === 0) return undefined;
@@ -709,7 +796,7 @@ export async function update(
   // rather than editable. The same predicate is reused on the UPDATE below:
   // checking here and writing unscoped would leave a race between them.
   const where = allOf([eq(entity.table.id, id),
-                       ...scopeConditions(entityName, entity, ctx)])!;
+                       ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
 
@@ -769,7 +856,7 @@ export async function remove(
   if (!entity) throw new Error(`Unknown entity: ${entityName}`);
 
   const where = allOf([eq(entity.table.id, id),
-                       ...scopeConditions(entityName, entity, ctx)])!;
+                       ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
 
@@ -795,7 +882,8 @@ export async function findById(
   // else is NotFound rather than Forbidden — the caller cannot tell an id that
   // does not exist from one they may not see, which is what stops a detail
   // route from being an existence oracle.
-  const where = allOf([eq(entity.table.id, id), ...scopeConditions(entityName, entity, ctx)])!;
+  const where = allOf([eq(entity.table.id, id),
+                       ...await accessConditions(entityName, entity, ctx)])!;
   const [record] = await db.select().from(entity.table).where(where).limit(1);
   if (!record) throw new NotFoundError(entityName, id);
 
@@ -828,7 +916,7 @@ export async function query(
   // form — .where(search) then .where(filters) — silently dropped the search
   // whenever a filter was also present. Collecting the conditions and applying
   // them once removes the failure mode rather than ordering around it.
-  const conditions: SQL[] = scopeConditions(entityName, entity, ctx);
+  const conditions: SQL[] = await accessConditions(entityName, entity, ctx);
 
   // Search — the OR across search fields is ONE condition, so it ANDs with the
   // filters and with the ownership predicate instead of competing with them.
@@ -903,7 +991,7 @@ export async function stats(
 
   // Scoped like the list it summarises. An unscoped count is a row count of
   // everyone's data wearing a number badge.
-  const where = allOf(scopeConditions(entityName, entity, ctx));
+  const where = allOf(await accessConditions(entityName, entity, ctx));
   let q: any = db.select({ total: count() }).from(entity.table);
   if (where) q = q.where(where);
   const [result] = await q;
@@ -994,7 +1082,7 @@ async function computeSimple(
   // Accumulate WHERE conditions (ownership + window / explicit range + filters).
   // A KPI tile is a read like any other: "12 open invoices" computed over every
   // tenant's invoices is the same leak as listing them, one integer at a time.
-  const conds: SQL[] = scopeConditions(entityName, entity, ctx);
+  const conds: SQL[] = await accessConditions(entityName, entity, ctx);
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
@@ -1140,7 +1228,7 @@ export async function resolveSeries(
   // A chart is a read. A revenue-by-month series over every tenant's rows
   // leaks the same data a list would, aggregated into a shape that looks
   // harmless.
-  const scope = scopeConditions(source.entity, entity, ctx);
+  const scope = await accessConditions(source.entity, entity, ctx);
 
   const fn = source.agg?.fn || "count";
 
@@ -1349,7 +1437,7 @@ export async function resolveSearch(
     // not read hands them the contents a snippet at a time.
     const conds: SQL[] = [
       sql`${vectorExpr} @@ ${tsq}`,
-      ...scopeConditions(entityName, entity, ctx),
+      ...await accessConditions(entityName, entity, ctx),
     ];
     for (const [k, v] of Object.entries(source.filter || {})) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
