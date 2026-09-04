@@ -58,15 +58,15 @@ export function Scanner({
 
         {status === "success" && (
           <div style={{ color: STATUS_COLORS.success }}>
-            <span className="mr-1">✓</span>
-            {value && <span className="font-mono font-semibold mr-2">{value}</span>}
+            <span className="me-1">✓</span>
+            {value && <span className="font-mono font-semibold me-2">{value}</span>}
             {statusMessage && <span>{statusMessage}</span>}
           </div>
         )}
 
         {status === "error" && (
           <div style={{ color: STATUS_COLORS.error }}>
-            <span className="mr-1">✗</span>
+            <span className="me-1">✗</span>
             {statusMessage && <span>{statusMessage}</span>}
           </div>
         )}

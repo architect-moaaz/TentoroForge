@@ -114,6 +114,12 @@ class TestPageSchemaAgentSkip:
 
     def test_unowned_route_still_runs_llm(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FORGE_COMPOSITION_RECIPES", "warn")
+        # Same reason the sibling test below disables the dashboard authority:
+        # this is about recipe ownership, and the page under test is a `list`,
+        # which the collection authority — also default ON, also checked before
+        # the recipe path — claims for its composer. The LLM then does not run
+        # for a reason that has nothing to do with recipes.
+        monkeypatch.setenv("FORGE_COLLECTION_AUTHORITY", "0")
         _write_brief(tmp_path, {"/home": "member_home"})
 
         from agents.page_schema_agent import run_page_schema_agent

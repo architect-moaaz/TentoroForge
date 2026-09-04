@@ -146,3 +146,135 @@ def test_everything_a_projection_writes_is_protected_from_the_scaffold(tmp_path)
     unprotected = [f for f in written
                    if not any(f.startswith(p) for p in assembly.PROJECTED_PATHS)]
     assert not unprotected, f"scaffold would overwrite: {unprotected}"
+
+
+# ---------------------------------------------------------------------------
+# The build is what makes an assembled tree an application
+# ---------------------------------------------------------------------------
+
+
+def test_a_failing_build_raises_with_the_compiler_message(tmp_path, monkeypatch):
+    """The reason must name the module, not just say the node failed."""
+    import subprocess
+
+    from services.blueprint import assembly
+
+    def fake_run(cmd, **kw):
+        rc = 0 if "install" in cmd else 1
+        return subprocess.CompletedProcess(
+            cmd, rc, stdout="", stderr="Module not found: Can't resolve '@/db/schema/user'")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    try:
+        assembly.verify_build(tmp_path)
+        raise AssertionError("expected BuildFailed")
+    except assembly.BuildFailed as exc:
+        assert "@/db/schema/user" in str(exc)
+        assert "npm build failed" in str(exc)
+
+
+def test_a_failing_install_stops_before_the_build(tmp_path, monkeypatch):
+    import subprocess
+
+    from services.blueprint import assembly
+
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="ENOENT")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    try:
+        assembly.verify_build(tmp_path)
+    except assembly.BuildFailed:
+        pass
+    assert len(seen) == 1, "build ran after install failed"
+
+
+def test_a_passing_build_reports_both_exit_codes(tmp_path, monkeypatch):
+    import subprocess
+
+    from services.blueprint import assembly
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert assembly.verify_build(tmp_path) == {"install": 0, "build": 0}
+
+
+def test_the_runtime_injector_installs_around_projected_files_not_over_them():
+    """Two copiers share `src/lib/workflows`, and only one read PROJECTED_PATHS.
+
+    copy_scaffold skipped the directory correctly; inject_runtime rmtree'd it to
+    install the engine and took the 13 projected workflow definitions with it.
+    Ownership has to be decided once, so the preserved list is handed in.
+    """
+    import inspect
+
+    from services.blueprint.assembly import PROJECTED_PATHS, inject_runtime_layer
+
+    src = inspect.getsource(inject_runtime_layer)
+    assert "preserve=PROJECTED_PATHS" in src
+    assert "src/lib/workflows/definitions" in PROJECTED_PATHS
+
+
+def test_remove_except_keeps_preserved_paths_and_clears_the_rest(tmp_path):
+    from services.runtime_injector import _remove_except
+
+    (tmp_path / "src/lib/workflows/definitions").mkdir(parents=True)
+    (tmp_path / "src/lib/workflows/definitions/a.json").write_text("{}")
+    (tmp_path / "src/lib/workflows/engine.ts").write_text("//")
+
+    _remove_except(tmp_path / "src/lib/workflows", tmp_path,
+                   ("src/lib/workflows/definitions",))
+
+    assert (tmp_path / "src/lib/workflows/definitions/a.json").exists()
+    assert not (tmp_path / "src/lib/workflows/engine.ts").exists()
+
+
+def test_assembly_reports_placeholders_that_survived_into_jsx(tmp_path):
+    """`{{app_name}}` in JSX text is an object literal, not inert text — it
+    compiles, passes both gates, and throws ReferenceError at prerender. The
+    guard that recognises it existed for a year with only a legacy-router
+    caller, so the pipeline that builds today never ran it.
+
+    Both directions matter. A clean app must still write the report, because
+    "found nothing" and "never ran" have to stay distinguishable.
+    """
+    app = tmp_path / "app"
+    doc = {"application": {"name": "T"}}
+
+    clean = assembly.assemble(doc, app, project_short_id="t")
+    assert clean["residualPlaceholders"] == []
+    assert (app / "contracts" / "placeholder-report.json").is_file()
+
+    planted = app / "src" / "app" / "planted.tsx"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(
+        "export default function P() {\n"
+        "  return <div style={{ height }}>Return to {{app_name}}</div>;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    dirty = assembly.assemble(doc, app, project_short_id="t")
+    hits = dirty["residualPlaceholders"]
+    assert [h["token"] for h in hits] == ["app_name"], hits
+    assert hits[0]["file"].endswith("planted.tsx")
+
+
+def test_assembly_substitutes_the_interface_language(tmp_path):
+    """§11 — an Arabic Blueprint has to reach <html lang/dir>. layout.tsx is a
+    plain .tsx, so the .tmpl copy step never reads it and the placeholder
+    would ship literally."""
+    app = tmp_path / "app"
+    assembly.assemble({"application": {"name": "T"},
+                       "product": {"locale": "ar"}}, app, project_short_id="t")
+    layout = (app / "src" / "app" / "layout.tsx").read_text()
+    assert '<html lang="ar" dir="rtl"' in layout
+    assert "__APP_" not in layout
+
+    other = tmp_path / "other"
+    assembly.assemble({"application": {"name": "T"}}, other, project_short_id="t")
+    assert '<html lang="en" dir="ltr"' in (
+        other / "src" / "app" / "layout.tsx").read_text()

@@ -30,7 +30,7 @@ const DENSITY_INPUT: Record<"compact" | "comfortable" | "spacious", string> = {
 
 const FIELD_BASE = "flex flex-col gap-1.5";
 const LABEL_BASE = "text-sm font-medium leading-none text-foreground";
-const REQUIRED_MARK = "ml-0.5 text-destructive";
+const REQUIRED_MARK = "ms-0.5 text-destructive";
 const INPUT_STATIC =
   "flex w-full border border-input bg-background py-2 " +
   "ring-offset-background focus-visible:outline-none focus-visible:ring-2 " +

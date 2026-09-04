@@ -29,7 +29,7 @@ from services.blueprint.agent_contract import ASK_USER, AUTO_DECIDE, RECORD_ASSU
 #: is a consequence of one.
 DECIDABLE_SECTIONS: tuple[str, ...] = (
     "modules", "pages", "components", "widgets", "workflows",
-    "businessRules", "apis", "integrations", "patternTemplates",
+    "businessRules", "apis", "integrations", "pageLayouts",
 )
 
 

@@ -172,7 +172,10 @@ class TestSurfaceTreatment:
 
 class TestFormPatterns:
     def test_all_ten_patterns_load(self):
-        root = Path("backend/forms/patterns")
+        # Anchored to this file, not the cwd. `Path("backend/forms/patterns")`
+        # only resolves when pytest is invoked from the repo root, so the test
+        # reported a missing index for a directory that has always been there.
+        root = Path(__file__).resolve().parents[2] / "forms" / "patterns"
         index = json.loads((root / "index.json").read_text(encoding="utf-8"))
         assert len(index["patterns"]) == 10
         for entry in index["patterns"]:

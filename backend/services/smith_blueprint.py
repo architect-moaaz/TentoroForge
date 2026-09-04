@@ -111,7 +111,27 @@ class Blueprint:
         overwrite or bail); unknown top-level fields are preserved."""
         path = BlueprintPath(output_dir).file
         if not path.exists():
+            # THE ENGINE'S BLUEPRINT, IF THERE IS ONE. Two stores exist: the
+            # DAG writes .forge/blueprint/current.json, this class reads
+            # .forge/blueprint.json, and nothing writes the second. So Smith
+            # loaded an empty blueprint on a project with a fully generated
+            # application, decided there was nothing to reason about, and
+            # routed every message to bootstrap — which is why a rename
+            # answered with the bootstrap seam message even once the iteration
+            # seams were wired.
+            #
+            # Read, not copied. The engine's document stays authoritative and
+            # this is a projection of it, so the two cannot drift into
+            # disagreeing about what the application is.
+            from services.smith.engine_blueprint_adapter import (
+                load_engine_doc, to_smith_fields,
+            )
+
+            doc = load_engine_doc(output_dir)
             bp = cls(project_id=project_id)
+            if doc:
+                for key, value in to_smith_fields(doc).items():
+                    setattr(bp, key, value)
             bp._output_dir = output_dir
             return bp
 

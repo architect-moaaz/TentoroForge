@@ -103,12 +103,12 @@ export function DataGrid({
         {columns.map((col) => {
           const alignClass =
             col.align === "right"
-              ? "text-right"
+              ? "text-end"
               : col.align === "center"
                 ? "text-center"
                 : "";
           const frozenClass = col.frozen
-            ? "sticky left-0 bg-card z-[1]"
+            ? "sticky start-0 bg-card z-[1]"
             : "";
           return (
             <td
@@ -148,12 +148,12 @@ export function DataGrid({
             {selectable && <th className="w-10" />}
             {columns.map((col) => {
               const frozenClass = col.frozen
-                ? "sticky left-0 bg-muted/40 z-10"
+                ? "sticky start-0 bg-muted/40 z-10"
                 : "";
               return (
                 <th
                   key={col.key}
-                  className={`px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${frozenClass}`}
+                  className={`px-3 py-2 text-start text-xs font-semibold uppercase tracking-wide text-muted-foreground ${frozenClass}`}
                   style={{ width: col.width }}
                 >
                   {col.sortable ? (

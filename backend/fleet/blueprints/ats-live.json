@@ -9375,692 +9375,6 @@
       ]
     }
   ],
-  "patternTemplates": [
-    {
-      "confidence": 0.7,
-      "pattern": "dashboard",
-      "rationale": "Landing-surface shape: a headline band naming the page and its purpose, a metric band that expands to one tile per widget (10 on Workspace Overview, none on a leaner dashboard), then a 2:1 split where the wide side carries the primary entity's recent records and the narrow rail carries every page action as a jump-off list. No action buttons in the headline, so the rail is the single home for actions and nothing is rendered twice.",
-      "requires": {
-        "primaryEntity": true,
-        "widgets": true
-      },
-      "root": {
-        "children": [
-          {
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "format": "number",
-                  "importance": "primary",
-                  "label": "$item.label",
-                  "value": "$item.value"
-                },
-                "repeat": "widgets",
-                "type": "MetricTile"
-              }
-            ],
-            "props": {
-              "columns": 4,
-              "equalRows": true,
-              "gap": "md"
-            },
-            "type": "Grid"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "columns": "$columns",
-                      "pageSize": 8,
-                      "rows": "{{records}}",
-                      "stickyHeader": true,
-                      "striped": true
-                    },
-                    "type": "Table"
-                  }
-                ],
-                "props": {
-                  "elevation": "sm",
-                  "title": "$entity.plural"
-                },
-                "type": "Card"
-              },
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "children": [
-                          {
-                            "props": {
-                              "label": "$item.label",
-                              "size": "sm",
-                              "variant": "secondary",
-                              "workflow": "$item.value"
-                            },
-                            "repeat": "actions",
-                            "type": "Button"
-                          }
-                        ],
-                        "type": "Stack"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "Jump to"
-                    },
-                    "type": "Card"
-                  }
-                ],
-                "type": "Stack"
-              }
-            ],
-            "props": {
-              "breakpoint": "lg",
-              "ratio": "2:1"
-            },
-            "type": "Split"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.75,
-      "pattern": "entity_list",
-      "rationale": "Collection shape shared by Roles, Candidate Directory and Upcoming Interviews: headline with the page's primary CTAs, an optional single-row metric strip (each of these pages carries exactly one count widget, and the repeat emits nothing if a future list page carries none), then the collection itself in a titled card. Table is configured searchable so per-page search/filter actions have a home without the template inventing a search endpoint it cannot know.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "md",
-                      "variant": "primary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "primaryActions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "label": "$item.label",
-                  "value": "$item.value"
-                },
-                "repeat": "widgets",
-                "type": "Stat"
-              }
-            ],
-            "props": {
-              "columns": 3,
-              "equalRows": true,
-              "gap": "md"
-            },
-            "type": "Grid"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "columns": "$columns",
-                  "pageSize": 25,
-                  "rows": "{{records}}",
-                  "searchable": true,
-                  "stickyHeader": true,
-                  "striped": true
-                },
-                "type": "Table"
-              }
-            ],
-            "props": {
-              "elevation": "sm",
-              "title": "$entity.plural"
-            },
-            "type": "Card"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "columns": "$item.columns",
-                  "pageSize": 10,
-                  "rows": "$item.value",
-                  "stickyHeader": true
-                },
-                "type": "Table"
-              }
-            ],
-            "props": {
-              "elevation": "sm",
-              "title": "$item.label"
-            },
-            "repeat": "relatedCollections",
-            "type": "Card"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.7,
-      "pattern": "master_detail",
-      "rationale": "Two-pane record shape: headline with the record's primary actions, then SplitView honouring its exact master/detail child contract. Master is the browsable collection of the primary entity; detail is the selected record's summary followed by one card per related collection (attached candidates, applications), which is how Role Detail earns its second pane. Detail panes degrade to the SplitView empty text when nothing is selected.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "md",
-                      "variant": "primary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "primaryActions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "columns": "$columns",
-                      "pageSize": 20,
-                      "rows": "{{records}}",
-                      "searchable": true,
-                      "stickyHeader": true
-                    },
-                    "type": "Table"
-                  }
-                ],
-                "props": {
-                  "elevation": "sm",
-                  "title": "$entity.plural"
-                },
-                "type": "Card"
-              },
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "emptyText": "Nothing selected",
-                          "items": "$summaryFields",
-                          "orientation": "vertical"
-                        },
-                        "type": "DescriptionList"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "Details"
-                    },
-                    "type": "Card"
-                  },
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "columns": "$item.columns",
-                          "pageSize": 10,
-                          "rows": "$item.value",
-                          "stickyHeader": true
-                        },
-                        "type": "Table"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "$item.label"
-                    },
-                    "repeat": "relatedCollections",
-                    "type": "Card"
-                  }
-                ],
-                "type": "Stack"
-              }
-            ],
-            "props": {
-              "emptyText": "Select a record to see its details",
-              "masterWidth": 360,
-              "responsive": true,
-              "syncKey": "selected"
-            },
-            "type": "SplitView"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.65,
-      "pattern": "record_workspace",
-      "rationale": "One shape for both halves of this group: the pure create/edit forms (Post a Role, Add Candidate, Schedule Interview, the two edit pages) and the read-heavy workspaces (Candidate Record, Application Workspace, Interview Detail, Offer Review). Every page here has a primary entity, so the headline carries the full action set as a wrapping cluster (Application Workspace needs nine of them and none may be hidden), the wide column carries the declarative Form over the page's own form fields followed by one card per related collection (CV history, applications, interviews, stage history), and the narrow rail carries the record summary so identifying facts stay visible while editing. A create form simply has no related collections and an empty summary, and a read-only page simply has no form fields.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "sm",
-                      "variant": "secondary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "actions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "fields": "$formFields",
-                          "submitLabel": "Save"
-                        },
-                        "type": "Form"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "$entity.name"
-                    },
-                    "type": "Card"
-                  },
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "columns": "$item.columns",
-                          "pageSize": 10,
-                          "rows": "$item.value",
-                          "stickyHeader": true
-                        },
-                        "type": "Table"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "$item.label"
-                    },
-                    "repeat": "relatedCollections",
-                    "type": "Card"
-                  }
-                ],
-                "type": "Stack"
-              },
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "emptyText": "No details recorded yet",
-                          "items": "$summaryFields",
-                          "orientation": "vertical"
-                        },
-                        "type": "DescriptionList"
-                      }
-                    ],
-                    "props": {
-                      "elevation": "sm",
-                      "title": "Summary"
-                    },
-                    "type": "Card"
-                  }
-                ],
-                "type": "Stack"
-              }
-            ],
-            "props": {
-              "breakpoint": "lg",
-              "ratio": "2:1"
-            },
-            "type": "Split"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.6,
-      "pattern": "kanban",
-      "rationale": "Board shape: headline with the board-level actions (attach candidate, toggle rejected), then a single full-width card hosting Kanban over the primary entity, with card title and description drawn from the entity's own title and subtitle fields. Per-card stage moves are the Kanban component's own affordance rather than template structure, so no action rail competes with the board.",
-      "requires": {
-        "primaryEntity": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "md",
-                      "variant": "primary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "primaryActions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "cardDescription": "$subtitleField",
-                  "cardTitle": "$titleField",
-                  "data": "{{records}}",
-                  "emptyText": "Nothing at this stage yet"
-                },
-                "type": "Kanban"
-              }
-            ],
-            "props": {
-              "elevation": "sm",
-              "title": "$entity.plural"
-            },
-            "type": "Card"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.7,
-      "pattern": "approval_inbox",
-      "rationale": "Queue shape: headline with the queue's own controls, a metric strip for the waiting counts the page carries as widgets, then the queue itself as a titled table over the primary entity ordered by the page's own query. Related collections (already-decided items) append as further cards, so a decided view needs no second template. Row-level decide affordances belong to the row actions the planner supplies, keeping the template free of role-specific buttons that must not render for recruiters.",
-      "requires": {
-        "primaryEntity": true,
-        "widgets": true
-      },
-      "root": {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "md",
-                      "variant": "primary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "primaryActions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "format": "number",
-                  "importance": "secondary",
-                  "label": "$item.label",
-                  "value": "$item.value"
-                },
-                "repeat": "widgets",
-                "type": "MetricTile"
-              }
-            ],
-            "props": {
-              "columns": 3,
-              "equalRows": true,
-              "gap": "md"
-            },
-            "type": "Grid"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "columns": "$columns",
-                  "pageSize": 20,
-                  "rows": "{{records}}",
-                  "searchable": true,
-                  "stickyHeader": true
-                },
-                "type": "Table"
-              }
-            ],
-            "props": {
-              "elevation": "sm",
-              "title": "$entity.plural"
-            },
-            "type": "Card"
-          },
-          {
-            "children": [
-              {
-                "props": {
-                  "columns": "$item.columns",
-                  "pageSize": 10,
-                  "rows": "$item.value",
-                  "stickyHeader": true
-                },
-                "type": "Table"
-              }
-            ],
-            "props": {
-              "elevation": "sm",
-              "title": "$item.label"
-            },
-            "repeat": "relatedCollections",
-            "type": "Card"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    },
-    {
-      "confidence": 0.6,
-      "pattern": "configuration",
-      "rationale": "Built for both pages in the group, one of which (Entry Redirect, /) has no primary entity at all, so nothing here reads $entity.*, $titleField, $columns or $formFields as a bare value. Structure is a narrow single-column body: a headline stating what the page is for, then one card whose contents are a focus-managed form whose inputs come from a repeat over the page's form fields (two on Sign In, none on the redirect route) and a trailing action cluster. On the redirect route the repeat emits nothing and the card degrades to the page's single action, which is the correct non-visual fallback rather than a blank screen.",
-      "requires": {},
-      "root": {
-        "children": [
-          {
-            "props": {
-              "role": "headline",
-              "subtitle": "$page.purpose",
-              "title": "$page.name",
-              "variant": "plain"
-            },
-            "type": "Section"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "props": {
-                          "label": "$item.label",
-                          "name": "$item.value",
-                          "type": "text"
-                        },
-                        "repeat": "formFields",
-                        "type": "Input"
-                      }
-                    ],
-                    "props": {
-                      "submitLabel": "Continue"
-                    },
-                    "type": "Form"
-                  }
-                ],
-                "props": {
-                  "delayed": true,
-                  "enabled": true
-                },
-                "type": "AutoFocus"
-              },
-              {
-                "props": {
-                  "orientation": "horizontal"
-                },
-                "type": "Divider"
-              },
-              {
-                "children": [
-                  {
-                    "props": {
-                      "label": "$item.label",
-                      "size": "sm",
-                      "variant": "secondary",
-                      "workflow": "$item.value"
-                    },
-                    "repeat": "actions",
-                    "type": "Button"
-                  }
-                ],
-                "props": {
-                  "align": "center",
-                  "gap": "sm",
-                  "justify": "end"
-                },
-                "type": "Cluster"
-              }
-            ],
-            "props": {
-              "elevation": "md",
-              "title": "$page.name"
-            },
-            "type": "Card"
-          }
-        ],
-        "type": "Stack"
-      },
-      "status": "PROPOSED"
-    }
-  ],
   "permissions": [
     {
       "action": "execute",
@@ -14731,5 +14045,1717 @@
         "kind": "manual"
       }
     }
-  ]
+  ],
+  "pageLayouts": [
+    {
+      "page": "PAGE-017",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-001",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-002",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-003",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-004",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-005",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-006",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-007",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-008",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-009",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-010",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-011",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-012",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-013",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-014",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-015",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-016",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    },
+    {
+      "page": "PAGE-018",
+      "root": {
+        "children": [
+          {
+            "props": {
+              "role": "headline",
+              "subtitle": "$page.purpose",
+              "title": "$page.name",
+              "variant": "plain"
+            },
+            "type": "Section"
+          },
+          {
+            "children": [
+              {
+                "props": {
+                  "format": "number",
+                  "importance": "primary",
+                  "label": "$item.label",
+                  "value": "$item.value"
+                },
+                "repeat": "widgets",
+                "type": "MetricTile"
+              }
+            ],
+            "props": {
+              "columns": 4,
+              "equalRows": true,
+              "gap": "md"
+            },
+            "type": "Grid"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "props": {
+                      "columns": "$columns",
+                      "pageSize": 8,
+                      "rows": "{{records}}",
+                      "stickyHeader": true,
+                      "striped": true
+                    },
+                    "type": "Table"
+                  }
+                ],
+                "props": {
+                  "elevation": "sm",
+                  "title": "$entity.plural"
+                },
+                "type": "Card"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "props": {
+                              "label": "$item.label",
+                              "size": "sm",
+                              "variant": "secondary",
+                              "workflow": "$item.value"
+                            },
+                            "repeat": "actions",
+                            "type": "Button"
+                          }
+                        ],
+                        "type": "Stack"
+                      }
+                    ],
+                    "props": {
+                      "elevation": "sm",
+                      "title": "Jump to"
+                    },
+                    "type": "Card"
+                  }
+                ],
+                "type": "Stack"
+              }
+            ],
+            "props": {
+              "breakpoint": "lg",
+              "ratio": "2:1"
+            },
+            "type": "Split"
+          }
+        ],
+        "type": "Stack"
+      }
+    }
+  ],
+  "designSystem": {
+    "colors": {
+      "primary": "#125E8A",
+      "surface": "#FFFFFF",
+      "textPrimary": "#1A1A1A"
+    },
+    "spacing": {
+      "unit": "4px",
+      "md": "12px"
+    },
+    "typography": {
+      "baseSize": "16px",
+      "weightRegular": "400"
+    },
+    "radius": {
+      "md": "10px"
+    }
+  }
 }

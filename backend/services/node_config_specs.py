@@ -406,6 +406,48 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- Figma (design source) --------------------------------------- #
+    # A synthetic "action type" like `__mcp__` above: no workflow calls
+    # "figma", but the credential it needs shares the registry shape, so it
+    # surfaces on the same /settings/integrations page, uses the same
+    # per-provider HKDF subkey, and is read through the same API.
+    #
+    # WHY IT BELONGS HERE RATHER THAN IN .env. `services.figma.credentials`
+    # says a Figma token is never a value this platform holds — it holds a
+    # *reference*, and the raw secret is resolved at the moment of the call.
+    # `EnvSecretResolver` was written as the developer stand-in "so a developer
+    # can drive a live extraction without a secrets backend existing yet". The
+    # secrets backend exists: this table, encrypted at rest and per-org. A
+    # token in a shared .env is a token every project and every developer on
+    # the machine holds, which is how the one in this repository came to be
+    # annotated as leaked.
+    #
+    # `kind="password"` matters: the settings API never echoes those back, so
+    # the value goes in and cannot be read out through the UI.
+    "__figma__": [
+        ConfigKey(
+            key="FIGMA_TOKEN",
+            provider="figma",
+            label="Figma personal access token",
+            kind="password",
+            required=True,
+            help_url="https://www.figma.com/developers/api#access-tokens",
+        ),
+        # The desktop app's Dev Mode server (http://127.0.0.1:3845/mcp) only
+        # exists while Figma is open on the developer's own machine, so it is
+        # not a default a backend can rely on. Left blank, the remote endpoint
+        # is used and the token above is what authenticates.
+        ConfigKey(
+            key="FIGMA_MCP_URL",
+            provider="figma",
+            label="Figma MCP endpoint",
+            kind="url",
+            required=False,
+            default="https://mcp.figma.com/mcp",
+            help_url="https://help.figma.com/hc/en-us/articles/32132100833559",
+        ),
+    ],
+
     # --- Mobile builds (MOBILE-B) ------------------------------------ #
     # Synthetic "action type": no workflow ever calls "mobile_build", but
     # the credentials it needs share the registry shape so they surface

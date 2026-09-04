@@ -197,7 +197,7 @@ export function MetricTile({
               <dt data-metric-breakdown-label className="truncate">{row.label}</dt>
               <dd
                 data-metric-breakdown-value
-                className="text-right tabular-nums text-foreground/80 font-medium"
+                className="text-end tabular-nums text-foreground/80 font-medium"
               >
                 {typeof row.value === "number"
                   ? new Intl.NumberFormat("en-US").format(row.value)
@@ -236,7 +236,7 @@ export function MetricTile({
         if (!IconComp) return null;
         return (
           <span
-            className="absolute right-4 top-4 text-muted-foreground/70"
+            className="absolute end-4 top-4 text-muted-foreground/70"
             data-icon={icon}
             aria-hidden="true"
           >

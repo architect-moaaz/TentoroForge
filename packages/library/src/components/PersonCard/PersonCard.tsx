@@ -42,7 +42,7 @@ export function PersonCard({ name, role, department, avatarUrl, avatarInitials, 
         )}
         {status && (
           <span
-            className={`absolute bottom-0 right-0 ${expanded ? "h-4 w-4" : "h-2.5 w-2.5"} rounded-full ring-2 ring-card ${STATUS_DOT[status]}`}
+            className={`absolute bottom-0 end-0 ${expanded ? "h-4 w-4" : "h-2.5 w-2.5"} rounded-full ring-2 ring-card ${STATUS_DOT[status]}`}
             aria-label={STATUS_LABEL[status]}
           />
         )}

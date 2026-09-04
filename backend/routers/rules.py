@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from typing import Any
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -69,8 +70,45 @@ async def list_rules(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all rules for a project, optionally filtered by type or model."""
-    await get_project_with_auth(project_id, user, db)
+    """Every rule for a project — the Blueprint's, then any authored by hand.
+
+    THE BLUEPRINT IS THE LIVING DOCUMENT. `project_rules` is a table the
+    Blueprint engine has never written, so a generated application answered
+    `200 []` here while its Blueprint held thirteen business rules. The panel
+    rendered an empty state, which is what an application with no rules also
+    looks like, so nothing anywhere reported a problem.
+
+    Read rather than synced. Copying the Blueprint into this table would give
+    rules two homes and let them drift apart the moment either changed, which
+    is the divergence §76 forbids — and `_sync_pages_from_app_model` next door
+    is what that costs: a legacy bridge reachable from one router, leaving rows
+    that are correct only until the Blueprint moves.
+
+    Rows still answer for anything a person authored through POST. They come
+    second so a hand-written rule can never be hidden by a generated one.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+
+    blueprint_rules: list[dict] = []
+    if project.output_dir:
+        try:
+            from services.blueprint.service import BlueprintService
+            from services.blueprint_to_editor import rules_from_blueprint
+            svc = BlueprintService.load(output_dir=str(project.output_dir))
+            blueprint_rules = rules_from_blueprint(
+                svc.doc, project_id, project.output_dir)
+        except FileNotFoundError:
+            # No Blueprint — a legacy project, and the rows below are all it
+            # ever had.
+            pass
+        # Filters apply to both sources or they mean different things
+        # depending on where a rule came from.
+        if rule_type:
+            blueprint_rules = [r for r in blueprint_rules
+                               if r["rule_type"] == rule_type]
+        if model_name:
+            blueprint_rules = [r for r in blueprint_rules
+                               if r["model_name"] == model_name]
 
     stmt = select(ProjectRule).where(ProjectRule.project_id == project_id)
     if rule_type:
@@ -80,7 +118,9 @@ async def list_rules(
     stmt = stmt.order_by(ProjectRule.created_at.desc())
 
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return blueprint_rules + [
+        RuleResponse.model_validate(r) for r in result.scalars().all()
+    ]
 
 
 @router.post("/api/projects/{project_id}/rules", response_model=RuleResponse, status_code=201)
@@ -136,6 +176,38 @@ async def get_rule(
     return rule
 
 
+def _blueprint_rule(project: Any, project_id: Any,
+                    rule_id: uuid.UUID) -> str | None:
+    """The Blueprint rule this id stands for, or None if it is a real row.
+
+    Writing to `project_rules` cannot change a rule the Blueprint owns: the
+    row does not exist, so a PUT would 404 and read as "that rule is gone"
+    rather than "that rule lives somewhere else". §76 asks for divergence to
+    be named rather than silently resolved, and a 404 names nothing.
+    """
+    if not getattr(project, "output_dir", None):
+        return None
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.blueprint_to_editor import derived_ids
+        svc = BlueprintService.load(output_dir=str(project.output_dir))
+        return derived_ids(svc.doc, project_id, "businessRules").get(rule_id)
+    except FileNotFoundError:
+        return None
+
+
+def _refuse_blueprint_edit(artifact_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=(
+            f"{artifact_id} is defined in the Blueprint, which is the living "
+            f"record of what this application is. Editing it here would write "
+            f"a copy that the next generation overwrites. Ask Smith to change "
+            f"it instead — the change lands in the Blueprint and the "
+            f"application is rebuilt from it."
+        ),
+    )
+
 @router.put("/api/projects/{project_id}/rules/{rule_id}", response_model=RuleResponse)
 async def update_rule(
     project_id: uuid.UUID,
@@ -145,7 +217,11 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
 ):
     """Update an existing rule."""
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+
+    owned = _blueprint_rule(project, project_id, rule_id)
+    if owned:
+        raise _refuse_blueprint_edit(owned)
 
     result = await db.execute(
         select(ProjectRule).where(
@@ -173,7 +249,11 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a rule."""
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+
+    owned = _blueprint_rule(project, project_id, rule_id)
+    if owned:
+        raise _refuse_blueprint_edit(owned)
 
     result = await db.execute(
         select(ProjectRule).where(

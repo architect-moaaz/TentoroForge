@@ -58,6 +58,18 @@ async def publish(project_id: str, event: dict[str, Any]) -> None:
     bus is for real-time UX push, where losing a stale update is
     better than blocking the producer.
     """
+    publish_nowait(project_id, event)
+
+
+def publish_nowait(project_id: str, event: dict[str, Any]) -> None:
+    """The same fan-out, callable from synchronous code.
+
+    Nothing here ever awaits — every path is ``put_nowait`` — so the
+    async ``publish`` above is this function with a coroutine wrapper
+    for callers already in async context. Synchronous producers (the
+    Blueprint DAG run, for one) call this one directly rather than
+    having to find an event loop to schedule onto.
+    """
     subs = _subscribers.get(project_id)
     if not subs:
         return

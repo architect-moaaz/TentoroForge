@@ -91,16 +91,34 @@ def _model(dry_run: bool, model_name: str) -> Any:
     return AnthropicModel(model=model_name)
 
 
-def _open(blueprint: Path, output_dir: Path, **kw: Any) -> Smith:
-    """Adopt the Blueprint into a working directory, or resume one.
+def _open(
+    blueprint: Path, output_dir: Path, *, new: str = "", domain: str = "",
+    **kw: Any,
+) -> Smith:
+    """Adopt the Blueprint into a working directory, resume one, or start empty.
 
     Resuming is the interesting half: the conversation, the versions and the
     ids are all on disk, so a second run continues rather than restarts (§118).
+
+    ``new`` starts from nothing — §107 step 1, the case Smith could not handle
+    at all until the lifecycle was wired: no artifacts, no impact, nothing to
+    be incremental about.
     """
     current = output_dir / ".forge" / "blueprint" / "current.json"
     if current.exists():
         print(f"resuming {output_dir}")
         return Smith.load(output_dir, **kw)
+
+    if new:
+        from services.blueprint.service import BlueprintService
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"new application {new!r} ({domain or 'unknown domain'}) in {output_dir}")
+        svc = BlueprintService.create(
+            output_dir=output_dir, app_id=new.lower().replace(" ", "-"),
+            name=new, domain=domain or "unknown",
+        )
+        return Smith(svc, **kw)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     doc = json.loads(blueprint.read_text("utf-8"))
@@ -111,6 +129,18 @@ def _open(blueprint: Path, output_dir: Path, **kw: Any) -> Smith:
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
+
+def show_greeting(smith: Smith) -> None:
+    """§107 step 1. Printed before the first prompt, not on request."""
+    g = smith.greet()
+    print(f"\nSmith: {g.headline}")
+    if g.detail:
+        print(f"  {g.detail}")
+    for opener in g.openers:
+        print(f"    · {opener.kind} — {opener.example}")
+    if g.next_act:
+        print(f"  {g.next_act}")
+
 
 def show_status(smith: Smith) -> None:
     s = smith.status()
@@ -146,6 +176,65 @@ def show_questions(smith: Smith) -> None:
     print("\n" + worded.render())
 
 
+def _print_domain(summary: dict) -> None:
+    """§107 step 8's gate — what Smith understood, in a shape a person reads.
+
+    Prose rather than counts, because this is the gate where the user is asked
+    whether Smith has the problem right, and "4 personas" is not something
+    anyone can agree or disagree with.
+    """
+    print("\n  --- what I understood (§107 step 8) ---")
+    if summary.get("application"):
+        print(f"  {summary['application']}")
+
+    for objective in summary.get("objectives") or []:
+        print(f"    · {objective}")
+
+    for person in summary.get("personas") or []:
+        line = person.get("name", "")
+        if person.get("description"):
+            line += f" — {person['description']}"
+        print(f"    who: {line}")
+
+    for term, meaning in (summary.get("terminology") or {}).items():
+        print(f"    word: {term} = {meaning}")
+
+    if summary.get("capabilities"):
+        print(f"    does: {', '.join(summary['capabilities'])}")
+
+    reqs, assumed = summary.get("requirements") or [], summary.get("assumed") or []
+    print(f"  {len(reqs)} requirements", end="")
+    # The assumptions are the reason to read the rest, so they are named rather
+    # than counted: a user can only correct a guess they can see.
+    print(f", {len(assumed)} I assumed — {', '.join(assumed)}" if assumed else "")
+
+
+def _print_design(summary: dict) -> None:
+    """The half of §26's plan that is not a count.
+
+    The palette is the one thing at this gate a person judges at a glance, and
+    the first thing they notice is wrong. Printed as the swatch names beside
+    their values, because "primary" and "#0f766e" mean something together and
+    neither means much alone.
+    """
+    if not any(summary.get(k) for k in
+               ("personality", "colors", "density", "navigation")):
+        return
+
+    print("\n  --- design language ---")
+    if summary.get("personality"):
+        print(f"  {summary['personality']}")
+    for role, value in (summary.get("colors") or {}).items():
+        print(f"    {role:14} {value}")
+    for label, key in (("density", "density"), ("navigation", "navigation")):
+        if summary.get(key):
+            print(f"    {label:14} {summary[key]}")
+    if summary.get("referencesShown"):
+        # Shown, not used. Whether the palette came off them is a claim only
+        # `visualPersonality` can make.
+        print(f"    shown          {', '.join(summary['referencesShown'])}")
+
+
 def show_turn(smith: Smith, turn: Any) -> None:
     if not turn.ok:
         print(f"\n[rejected] {turn.rejected}")
@@ -157,6 +246,35 @@ def show_turn(smith: Smith, turn: Any) -> None:
         print(f"  intent {turn.plan.intent}  confidence {turn.plan.confidence:.2f}")
         if turn.plan.summary:
             print(f"  read as: {turn.plan.summary}")
+
+    if turn.moved:
+        print(f"  §94 state: {turn.state_before} -> {turn.state_after}")
+
+    if turn.command:
+        result = turn.command_result or {}
+        if "refused" in result:
+            print(f"  {turn.command}: refused — {result['refused']}")
+        else:
+            print(f"  {turn.command}: " + ", ".join(
+                f"{k}={v}" for k, v in result.items() if not isinstance(v, dict)))
+
+    if turn.domain_summary:
+        _print_domain(turn.domain_summary)
+
+    if turn.plan_summary:
+        print("\n  --- build plan (§26) ---")
+        for key, count in turn.plan_summary.items():
+            print(f"  {count:5}  {key}")
+
+    if turn.design_summary:
+        _print_design(turn.design_summary)
+
+    if turn.run and not turn.command_result.get("refused"):
+        r = turn.run
+        print(f"  ran {len(r.completed)} nodes, {len(r.skipped)} skipped, "
+              f"{len(r.blocked)} blocked, {len(r.failed)} failed")
+        if r.failed:
+            print(f"  failed: {', '.join(r.failed)}")
 
     for rec in turn.recorded:
         kind = "delegated to Smith" if rec.delegated else "your decision"
@@ -175,6 +293,17 @@ def show_turn(smith: Smith, turn: Any) -> None:
                 r = change.run
                 print(f"  ran {len(r.completed)} nodes, "
                       f"{len(r.skipped)} skipped, {len(r.failed)} failed")
+                # Naming them matters more than counting them: a skipped node
+                # leaves the Blueprint holding whatever it held before, which
+                # is indistinguishable from a node that ran and changed nothing.
+                for node in r.skipped:
+                    why = getattr(r, "skipped_because", {}).get(node, "")
+                    print(f"    skipped: {node}" + (f" (unmet: {why})" if why else ""))
+                for node in r.blocked:
+                    print(f"    blocked: {node}")
+                for node in r.failed:
+                    why = getattr(r, "failed_because", {}).get(node, "")
+                    print(f"    failed:  {node}" + (f" — {why}" if why else ""))
 
     if turn.trace:
         print("\n  --- traceability (§18) ---")
@@ -243,7 +372,12 @@ def handle(smith: Smith, line: str, *, run_agents: bool) -> None:
 
 
 def repl(smith: Smith, *, run_agents: bool) -> None:
+    # §107 step 1, before anything is asked of the user. A returning session
+    # opens on where the application actually is rather than on a prompt.
+    show_greeting(smith)
     print("\nType a request, or: status | ask | trace REQ-017 | explain <q>")
+    print("Lifecycle (§107): describe it, then \"draft the blueprint\", "
+          "\"looks good\", \"build it\".")
     print("§69 preview selection: /page PAGE-009 /cmp CMP-033 make this compact")
     print("Ctrl-D to leave. Everything is saved as you go.\n")
     while True:
@@ -261,6 +395,12 @@ def repl(smith: Smith, *, run_agents: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A run that takes half an hour and prints nothing is a run nobody can
+    # review. Unbuffered so the report survives however the process ends.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001 - not worth failing a run over
+        pass
     parser = argparse.ArgumentParser(
         prog="services.smith.cli", description="Talk to Smith about an application.",
     )
@@ -269,6 +409,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT,
                         help="Working directory. Resumed if it already exists.")
     parser.add_argument("--model", default="claude-opus-5")
+    parser.add_argument("--app-root", type=Path, default=None,
+                        help="Where the generated application is written. "
+                             "Defaults to <output-dir>/app, beside the "
+                             "Blueprint it is projected from.")
+    parser.add_argument("--new", default="", metavar="NAME",
+                        help="Start an empty application instead of adopting a "
+                             "Blueprint (§107 step 1).")
+    parser.add_argument("--domain", default="",
+                        help="Domain for --new: ATS, CRM, HRMS, … (§96).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the prompt that would be sent, then stop.")
     parser.add_argument("--fresh", action="store_true",
@@ -280,20 +429,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("say", nargs="*", help="One request, then exit.")
     args = parser.parse_args(argv)
 
-    if not args.blueprint.exists():
+    if not args.new and not args.blueprint.exists():
         parser.error(f"no Blueprint at {args.blueprint}")
     if args.fresh and args.output_dir.exists():
         shutil.rmtree(args.output_dir)
+
+    # Every projection node blocks without somewhere to write, and a blocked
+    # projection takes its dependents with it — an incremental change planned
+    # eighteen nodes and silently ran a handful, because `integration` had
+    # nowhere to project to and `testing`, `memory` and `verification` all hang
+    # off it. Defaulting this beside the Blueprint means a change regenerates
+    # the application by default rather than only the definition of it.
+    app_root = str(args.app_root or (args.output_dir / "app"))
 
     model = _model(args.dry_run, args.model)
     executor = None
     if args.run_agents and not args.dry_run:
         from services.blueprint.executors import make_executor
 
-        smith = _open(args.blueprint, args.output_dir, model=model)
+        smith = _open(args.blueprint, args.output_dir, model=model,
+                      new=args.new, domain=args.domain, app_root=app_root)
         smith.executor = make_executor(smith.blueprint, model)
     else:
-        smith = _open(args.blueprint, args.output_dir, model=model, executor=executor)
+        smith = _open(args.blueprint, args.output_dir, model=model,
+                      executor=executor, new=args.new, domain=args.domain,
+                      app_root=app_root)
 
     show_status(smith)
 

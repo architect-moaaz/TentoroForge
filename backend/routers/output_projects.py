@@ -8,6 +8,7 @@ Note: these coexist with the database-backed /api/projects/{uuid} endpoints;
       UUID validation on those routes disambiguates between the two.
 """
 
+import asyncio
 import json
 import time
 
@@ -83,13 +84,37 @@ async def list_projects_endpoint():
 # Pages (schema discovery)
 # ---------------------------------------------------------------------------
 
-@router.get("/{project_id}/pages")
-async def list_pages(project_id: str):
-    """List all schema files for a project (paths relative to src/schemas, no extension)."""
+@router.get("/{project_id}/schemas")
+async def list_schemas(project_id: str):
+    """Schema files for a project — paths under src/schemas, no extension.
+
+    THIS WAS REGISTERED AS `/pages` AND SHADOWED THE REAL ONE. Both this
+    router and routers/pages.py claimed `/api/projects/{id}/pages`, and this
+    one is included first, so FastAPI matched it every time and the endpoint
+    backed by PageDefinition was unreachable for every project. Two callers
+    then wanted different things from one URL: the workflow node panel asks
+    for `PageDefinition[]` and got `{paths}` it cannot use, and the visual
+    editor grew a union type to accept whichever arrived.
+
+    Named for what it returns. A list of schema files is not a list of pages,
+    and `/schemas` was already being requested by the frontend — answering 404,
+    because the handler for it was sitting on the other name.
+    """
     root = await _resolve_root(project_id)
 
-    schemas_dir = root / "src" / "schemas"
-    if not schemas_dir.exists():
+    # THE GENERATED APP IS A SUBDIRECTORY, same as _debug/project-file next
+    # door. The Blueprint's projections write `app/src/schemas/*.json`; this
+    # looked in `<output_dir>/src/schemas`, which for a Blueprint-built project
+    # does not exist, and returned an empty list rather than saying so.
+    #
+    # The output root is tried first so legacy projects, which are the only
+    # thing that ever wrote there, keep resolving exactly as before.
+    schemas_dir = next(
+        (d for d in (root / "src" / "schemas", root / "app" / "src" / "schemas")
+         if d.is_dir()),
+        None,
+    )
+    if schemas_dir is None:
         return {"paths": []}
 
     paths: list[str] = []
@@ -304,18 +329,168 @@ async def record_editor_edit(project_id: str, req: EditorMirrorRequest):
 # (counts + intent) that the UI can also display verbatim if it wants.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Smith turn — the conversational layer, over HTTP (PRD §6, §108-§112)
+#
+# Everything Smith needs already existed; what did not was a way to reach it
+# from a browser, so the Blueprint DAG only ever ran from `services.smith.cli`
+# and the virtual office had nothing to draw. This is that entry point.
+#
+# The turn is synchronous and slow (one model call to interpret, then a
+# sub-DAG of them to regenerate), so it runs on a worker thread while the
+# office narrates itself to the project's SSE stream. The browser is already
+# subscribed to that stream, so the animation plays *during* this request
+# rather than after it.
+# ---------------------------------------------------------------------------
+
+#: One turn at a time per project. Two concurrent turns would both read the
+#: Blueprint, both commit, and the second would version a document it never
+#: saw — §91's "an accepted change" recorded against the wrong parent.
+_turn_locks: dict[str, asyncio.Lock] = {}
+
+
+def _turn_lock(project_id: str) -> asyncio.Lock:
+    lock = _turn_locks.get(project_id)
+    if lock is None:
+        lock = _turn_locks[project_id] = asyncio.Lock()
+    return lock
+
+
+class SmithTurnRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="What the user said")
+    page: str | None = Field(None, description="§69 preview anchor, e.g. PAGE-009")
+    component: str | None = Field(None, description="§69 preview anchor, e.g. CMP-033")
+    run_agents: bool = Field(
+        True,
+        description=("Execute the incremental DAG after the change (§72). "
+                     "Off means the Blueprint is updated and the plan reported, "
+                     "but nothing is regenerated."),
+    )
+    model: str = Field("claude-opus-5", description="Model for Smith and the agents")
+
+
+def _smith_model(model_name: str):
+    """The model Smith and its agents run on, or a 503 explaining why not."""
+    from config import ANTHROPIC_API_KEY
+
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY is not configured, so Smith cannot take a turn.",
+        )
+    from services.blueprint.executors import AnthropicModel
+
+    return AnthropicModel(model=model_name)
+
+
+@router.post("/{project_id}/smith/turn", summary="One conversational turn with Smith")
+async def smith_turn(project_id: str, req: SmithTurnRequest):
+    """Interpret the request, update the Blueprint, run the impacted sub-DAG.
+
+    The office animation is a side effect of the run rather than a separate
+    endpoint: ``office_sink`` publishes to ``/api/projects/{id}/events``, which
+    the chat panel already holds open.
+
+    ``project_id`` is therefore passed to the sink **verbatim** — the bus keys
+    on it, so it has to be the same string the browser opened the stream with.
+    Note that ``/events`` declares ``project_id: uuid.UUID``: called with a
+    short_id, this turn still runs correctly but publishes to a channel nobody
+    can subscribe to, and the office simply does not move.
+    """
+    from services.office_bridge import office_sink
+    from services.smith.smith import Smith
+
+    root = await _resolve_root(project_id)
+    if not (root / ".forge" / "blueprint" / "current.json").exists():
+        raise HTTPException(
+            status_code=409,
+            detail=("this project has no Living Blueprint yet — generate the app "
+                    "first, or adopt a Blueprint into its output directory"),
+        )
+
+    model = _smith_model(req.model)
+    preview = (
+        {k: v for k, v in (("page", req.page), ("component", req.component)) if v}
+        or None
+    )
+
+    # Captured on the loop thread, used from the worker thread — see
+    # services.office_bridge for why that distinction matters.
+    sink = office_sink(project_id, loop=asyncio.get_running_loop())
+
+    def _run() -> dict:
+        smith = Smith.load(root, model=model)
+        if req.run_agents:
+            from services.blueprint.executors import make_executor
+
+            smith.executor = make_executor(smith.blueprint, model)
+        turn = smith.turn(
+            req.text, preview=preview, run_agents=req.run_agents,
+            observer=sink,
+        )
+        return _turn_payload(turn)
+
+    async with _turn_lock(project_id):
+        try:
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # A failed turn leaves the Blueprint untouched (apply_change commits
+            # before the run, and a refused proposal is never written), so this
+            # is a report, not a corrupted application.
+            raise HTTPException(
+                status_code=500,
+                detail=f"{type(exc).__name__}: {exc}",
+            ) from exc
+
+
+def _turn_payload(turn) -> dict:
+    """What the client gets back. The office already showed the run; this is
+    the record of it."""
+    change = getattr(turn, "change", None)
+    run = getattr(change, "run", None) if change else None
+    return {
+        "reply": getattr(turn, "reply", "") or "",
+        "rejected": getattr(turn, "rejected", "") or "",
+        "intent": getattr(getattr(turn, "plan", None), "intent", "") or "",
+        "version": getattr(change, "version", None) if change else None,
+        "applied": bool(getattr(change, "applied", False)) if change else False,
+        "committed": list(getattr(change, "committed", []) or []) if change else [],
+        "reason": getattr(change, "reason", "") if change else "",
+        "run": {
+            "completed": list(run.completed),
+            "skipped": list(run.skipped),
+            "failed": list(run.failed),
+            "blocked": list(run.blocked),
+            "artifacts": list(run.artifacts),
+        } if run else None,
+    }
+
+
 @router.post("/{project_id}/smith/warmup", summary="Preload Smith's app-map for this project")
 async def smith_warmup(project_id: str):
     """Build and cache the app-map for this project. Safe to call
     repeatedly — subsequent calls are cache hits."""
     root = await _resolve_root(project_id)
+
+    # Whether this project has a Living Blueprint decides which conversation
+    # the client is having: with a Blueprint, a message is a change Smith can
+    # reason about (`/smith/turn`); without one, the project still has to be
+    # discovered, planned and built, which is the streaming front door's job.
+    # Reported here rather than probed separately because the chat panel
+    # already fires this call on mount — one fact, no extra round trip.
+    has_blueprint = (root / ".forge" / "blueprint" / "current.json").exists()
+
     from services.app_map import get_app_map
     try:
         m = get_app_map(str(root))
     except Exception as exc:  # noqa: BLE001 — warmup must never 5xx
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "blueprint": has_blueprint,
+                "error": f"{type(exc).__name__}: {exc}"}
     return {
         "ok": True,
+        "blueprint": has_blueprint,
         "intent":    m.get("intent") or "",
         "counts": {
             "entities":  len(m.get("entities") or {}),

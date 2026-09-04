@@ -300,11 +300,42 @@ class _Parser:
         ch = self.src[self.pos]
         if ch in ('"', "'"):
             return self._read_quoted_string(ch)
+        if ch == "`":
+            return self._read_style_template()
         # Numeric or unquoted value — read until comma or }
         start = self.pos
         while not self._eof() and self.src[self.pos] not in ",}":
             self.pos += 1
         return self.src[start: self.pos].strip()
+
+    def _read_style_template(self) -> str:
+        """A `...` value inside a style object, with ${vars} resolved.
+
+        `maskImage: `url("${imgGroup1}")`` was read by the unquoted branch,
+        which stops at the first `,` or `}` — and the first `}` it meets is the
+        one closing `${imgGroup1}`. The value stored was the fragment
+        '`url("${imgGroup1' : not a URL, not valid CSS, and as a mask-image it
+        hides the element it is applied to.
+
+        That is why inline styles looked like something to strip. Eighty masks
+        on one real dashboard, every one of them truncated, and applying them
+        collapsed the page. Resolved against the same const table `src` already
+        uses, they are what clips the design's shapes correctly.
+        """
+        self._expect("`")
+        start = self.pos
+        while not self._eof() and self.src[self.pos] != "`":
+            self.pos += 1
+        raw = self.src[start:self.pos]
+        if not self._eof():
+            self._expect("`")
+        # ${name} -> the const's value, leaving an unknown name in place rather
+        # than emitting an empty url() that would mask everything away.
+        def sub(match):
+            name = match.group(1).strip()
+            return self.consts.get(name, match.group(0))
+
+        return re.sub(r"\$\{([^}]*)\}", sub, raw)
 
     def _read_template_literal_expr(self) -> str:
         """Read a `...` template literal inside {}. pos is at the backtick."""
@@ -832,9 +863,14 @@ def _transform_node(element: JSXElement) -> dict | None:
         src = attrs.get("src", "")
         if src:
             props["src"] = src
-        alt = attrs.get("alt", "")
-        if alt:
-            props["alt"] = alt
+        # ALWAYS PRESENT, EVEN WHEN EMPTY. Figma writes `alt=""` on every
+        # decorative vector, and dropping the attribute is not the same fact:
+        # an absent `alt` is an image nobody described, an empty one is an
+        # image deliberately hidden from assistive technology. The component
+        # catalog requires the prop for exactly that reason, so omitting it
+        # refused every Figma page carrying an icon — 249 of them on one real
+        # dashboard.
+        props["alt"] = attrs.get("alt", "") or ""
         _attach_style_passthrough(props, attrs)
         return _make_node("Image", props)
 

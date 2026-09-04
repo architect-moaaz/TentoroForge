@@ -80,8 +80,23 @@ def _initial(app_name: str) -> str:
     return "•"
 
 
+def _is_linkable(route: object) -> bool:
+    """Whether `route` is a URL, not a route pattern.
+
+    `/survey/[slug]` is a template — Next's app router refuses it as a `Link`
+    href and throws at runtime ("Dynamic href found in <Link> while using the
+    /app router"). It reached an error page because it was simply the first
+    route in nav-flow, and this function took the first route it found.
+
+    An app whose only pages are detail routes has no home to point at, so the
+    caller falls back to `/` rather than linking to a pattern.
+    """
+    return (isinstance(route, str) and route.startswith("/")
+            and "[" not in route and "]" not in route)
+
+
 def _derive_home_route(output_dir: Path) -> str:
-    """First real route from nav-flow, or the shell's home entry, or ``/``."""
+    """First LINKABLE route from nav-flow, or the shell's home entry, or ``/``."""
     nav = _read_json(output_dir / "src/contracts/nav-flow.json")
     if isinstance(nav, dict):
         for candidate in (
@@ -89,16 +104,15 @@ def _derive_home_route(output_dir: Path) -> str:
             nav.get("entry"),
             nav.get("root"),
         ):
-            if isinstance(candidate, str) and candidate.startswith("/"):
-                return candidate
+            if _is_linkable(candidate):
+                return str(candidate)
         entries = nav.get("entries") or nav.get("pages")
         if isinstance(entries, list):
             for e in entries:
                 if isinstance(e, dict):
                     for k in ("route", "path", "href"):
-                        v = e.get(k)
-                        if isinstance(v, str) and v.startswith("/"):
-                            return v
+                        if _is_linkable(e.get(k)):
+                            return str(e[k])
     shell = _read_json(output_dir / "src/schemas/shell.json")
     if isinstance(shell, dict):
         menu = shell.get("menu") or []
@@ -106,8 +120,8 @@ def _derive_home_route(output_dir: Path) -> str:
             for item in menu:
                 if isinstance(item, dict):
                     v = item.get("navigate") or item.get("route")
-                    if isinstance(v, str) and v.startswith("/"):
-                        return v
+                    if _is_linkable(v):
+                        return str(v)
     return "/"
 
 

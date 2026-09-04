@@ -11,7 +11,7 @@ import { normalizeDelta } from "./delta";
  * Workday-register MetricTile variant.
  *
  * Visual language:
- *   - Left-edge navy primary border (border-l-4 border-l-primary)
+ *   - Left-edge navy primary border (border-s-4 border-s-primary)
  *   - Hard border + no shadow (elevation.bordered + radius.sharp)
  *   - Tabular numerics with bigger weight contrast
  *   - Status sparkline below value (when trend present) gets stronger stroke
@@ -23,7 +23,7 @@ export interface WorkdayMetricTileProps extends MetricTilePropsType {
 }
 
 const TILE =
-  "relative flex flex-col gap-1.5 border-l-4 border-l-primary border border-border " +
+  "relative flex flex-col gap-1.5 border-s-4 border-s-primary border border-border " +
   "bg-card px-4 py-4 sm:px-5 text-card-foreground transition-colors overflow-hidden";
 const LABEL =
   "text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
@@ -76,7 +76,7 @@ export function MetricTileWorkday({
     <div
       data-metric-tile=""
       data-importance={importance ?? "secondary"}
-      className={TILE + (primary ? " border-l-[6px]" : "")}
+      className={TILE + (primary ? " border-s-[6px]" : "")}
       style={resolveStyle(style)}
       {...motionProps}
     >
@@ -84,7 +84,7 @@ export function MetricTileWorkday({
         const IconComp = resolveIcon(icon);
         if (!IconComp) return null;
         return (
-          <span data-icon={icon} className="absolute right-4 top-4 text-muted-foreground/70" aria-hidden="true">
+          <span data-icon={icon} className="absolute end-4 top-4 text-muted-foreground/70" aria-hidden="true">
             <IconComp size={16} strokeWidth={2} />
           </span>
         );

@@ -10,11 +10,14 @@ So these tests care most about restraint: unmet dependencies skip rather than
 attempt, illegal state transitions raise, and an incremental change re-runs the
 sub-DAG rather than everything.
 """
+import time
+
 import pytest
 
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal
 from services.blueprint.ids import entity_key, page_key
 from services.blueprint.orchestrator import (
+    completed_nodes,
     ALLOWED_TRANSITIONS,
     DAG,
     STATES,
@@ -46,7 +49,10 @@ def svc(tmp_path) -> BlueprintService:
 
 def test_dag_is_acyclic_and_layered():
     lv = levels()
-    assert lv[0] == ["requirements"], "requirements come first (§28)"
+    # §28's first tier is everything with no upstream. `figma_intelligence`
+    # joins it because §51 places design extraction upstream of requirement,
+    # entity and page inference — it is evidence those work from.
+    assert set(lv[0]) == {"requirements", "figma_intelligence"}
     flat = [k for level in lv for k in level]
     assert sorted(flat) == sorted(DAG)
 
@@ -250,10 +256,10 @@ def test_a_node_with_unmet_dependencies_is_skipped_not_attempted(svc):
             raise RuntimeError("page agent is down")
         return page_agent_result(spec)
 
-    report = run(svc, executor, plan=["page_contracts", "page_designs"], max_attempts=1)
+    report = run(svc, executor, plan=["page_contracts", "page_layouts"], max_attempts=1)
     assert "page_contracts" in report.failed
-    assert "page_designs" in report.skipped
-    assert "page_designs" not in attempted
+    assert "page_layouts" in report.skipped
+    assert "page_layouts" not in attempted
 
 
 def test_failed_tasks_are_retried(svc):
@@ -286,9 +292,9 @@ def test_low_confidence_blocks_the_node_and_its_dependents(svc):
         r.confidence = 0.2
         return r
 
-    report = run(svc, unsure, plan=["page_contracts", "page_designs"])
+    report = run(svc, unsure, plan=["page_contracts", "page_layouts"])
     assert "page_contracts" in report.blocked
-    assert "page_designs" in report.skipped
+    assert "page_layouts" in report.skipped
     assert svc.doc.get("pages", []) == []
 
 
@@ -456,7 +462,7 @@ def test_a_rejected_proposal_is_re_asked_with_the_reason(svc):
 
     report = RunReport()
     _run_agent_subject(
-        svc, executor, "patterns", DAG["patterns"], "",
+        svc, executor, "page_layouts", DAG["page_layouts"], "",
         max_attempts=2, commit=False, user_request="", report=report,
     )
     assert len(seen) == 2, "the subject must actually be retried"
@@ -542,7 +548,7 @@ def test_dropping_a_frame_node_does_not_hide_what_sits_behind_it(ats):
     that are dropped."""
     plan = incremental_plan(ats, ["PAGE-009"])
     assert "design_system" not in plan
-    assert "patterns" in plan
+    assert "page_layouts" in plan
 
 
 def test_the_plan_still_reaches_the_implementation(ats):
@@ -614,7 +620,468 @@ def test_a_plan_is_seeded_by_what_changed_not_by_what_it_touches(ats):
 
 
 def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
-    """A component change still has to reach composition and the projections."""
-    plan = incremental_plan(ats, ["CMP-033"])
-    for required in ("patterns", "frontend", "integration", "verification", "preview"):
+    """A page change still has to reach composition and the projections.
+
+    Anchored on a component before: `components` was authored by `page_designs`
+    and read by the composer. Nothing authors it now — the frontend projection
+    derives it from the trees A2UI composed — so a component id is no longer a
+    change anything upstream can respond to.
+    """
+    plan = incremental_plan(ats, ["PAGE-009"])
+    for required in ("page_layouts", "frontend", "integration", "verification", "preview"):
         assert required in plan, required
+
+
+def test_a_skipped_node_records_which_dependency_stopped_it(svc):
+    """A plan that quietly drops nodes reads exactly like one that ran them.
+
+    During an incremental change the `apis` node was skipped for an unmet
+    dependency, so the Blueprint kept the 51 endpoints it already had while the
+    data model had gained two entities — and nothing in the output said the
+    derivation never ran. Counting skips is not enough; the reason is the part
+    that makes it actionable.
+    """
+    def fails(spec):
+        raise RuntimeError("no")
+
+    report = run(svc, fails, plan=["page_contracts", "page_layouts"],
+                 max_attempts=1)
+    # `skipped` stays node keys, so membership tests keep working.
+    assert report.skipped == ["page_layouts"]
+    assert report.skipped_because["page_layouts"] == "page_contracts"
+
+
+def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
+    report = run(svc, lambda spec: None, plan=[])
+    assert report.skipped == [] and report.skipped_because == {}
+
+
+def _layout_result(spec: TaskSpec) -> AgentResult:
+    """One authored page tree, keyed to the subject the node fanned out to."""
+    return AgentResult(
+        task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+        proposals=[ArtifactProposal(
+            section="pageLayouts", natural_key=spec.subject,
+            body={"page": spec.subject,
+                  "root": {"type": "Stack", "props": {}, "children": []}},
+        )],
+    )
+
+
+def _fanout_svc(svc, pages=3):
+    svc.doc["pages"] = [
+        {"id": f"PAGE-{i:03d}", "route": f"/p{i}", "name": f"P{i}",
+         "purpose": f"Page {i}."}
+        for i in range(1, pages + 1)
+    ]
+    return svc
+
+
+def test_one_failed_subject_does_not_take_the_whole_node(svc):
+    """One page of twenty-four failed on a live run and `page_layouts` failed
+    with it, skipping frontend, integration, testing, memory, verification and
+    preview. One bad page cost the entire application.
+
+    The hole was the thing to close, not the node: the failure is named, and a
+    page with no authored tree still falls back to its pattern.
+    """
+    _fanout_svc(svc)
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.subject)
+        if spec.subject == "PAGE-002":
+            raise RuntimeError("this one is broken")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    # every subject was attempted, not abandoned at the first failure
+    assert seen == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    assert "page_layouts" in report.completed
+    assert any("PAGE-002" in f for f in report.failed)
+
+
+def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
+    """Partial results are usable; no result is not."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        raise RuntimeError("all broken")
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert "page_layouts" not in report.completed
+    assert len(report.failed) == 3
+
+
+def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
+    """The point of the change: downstream work proceeds on partial input."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        if spec.subject == "PAGE-002":
+            raise RuntimeError("broken")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts", "frontend"],
+                 max_attempts=1, app_root="/tmp/forge-partial-test")
+    assert "frontend" not in report.skipped, (
+        "a partial page_layouts must not skip the projection behind it")
+
+
+def test_a_failed_node_records_why(svc):
+    """`failed: ["data_model"]` and nothing else made a rate limit and a
+    malformed envelope indistinguishable. Four nodes failed consecutively on
+    one live run and the report could not say whether the cause was transport
+    or content — the reason was being computed for the retry's feedback and
+    then discarded."""
+    def boom(spec):
+        raise TimeoutError("upstream timed out")
+
+    report = run(svc, boom, plan=["requirements"], max_attempts=1)
+    assert report.failed == ["requirements"]
+    assert "TimeoutError" in report.failed_because["requirements"]
+    assert "upstream timed out" in report.failed_because["requirements"]
+
+
+def test_a_rejected_proposal_records_the_contract_error(svc):
+    """A rejection is a different kind of failure from a transport fault, and
+    the report has to be able to tell them apart."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+
+    def bad_shape(spec):
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="pages", natural_key="p",
+                body={"name": "No route or purpose"},
+            )],
+        )
+
+    report = run(svc, bad_shape, plan=["page_contracts"], max_attempts=1)
+    assert report.failed == ["page_contracts"]
+    why = report.failed_because["page_contracts"]
+    assert "BlueprintInvalid" in why or "required" in why
+
+
+def test_the_reason_is_one_readable_line(svc):
+    def boom(spec):
+        raise RuntimeError("line one\nline two\n" + "x" * 900)
+
+    report = run(svc, boom, plan=["requirements"], max_attempts=1)
+    why = report.failed_because["requirements"]
+    assert "\n" not in why and len(why) <= 400
+
+
+def test_the_fanout_runs_subjects_concurrently(svc):
+    """§28: "independent work may execute concurrently." Pages are genuinely
+    independent — each call gets one page's brief and reads nothing another
+    page wrote — and serially they were the dominant cost of a run."""
+    import threading
+    import time
+
+    from services.blueprint.orchestrator import FANOUT_CONCURRENCY
+
+    _fanout_svc(svc, pages=6)
+    inflight, peak = 0, 0
+    lock = threading.Lock()
+
+    def executor(spec):
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        time.sleep(0.05)
+        with lock:
+            inflight -= 1
+        return _layout_result(spec)
+
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert peak > 1, "subjects ran one at a time"
+    assert peak <= FANOUT_CONCURRENCY
+
+
+def test_applies_happen_in_the_given_order_whatever_order_calls_return(svc):
+    """The split is the design: calls parallel, applies serial and ordered.
+
+    `apply_agent_result` allocates ids and saves one shared document, so
+    concurrent applies would race — and id allocation is order-dependent, so a
+    re-projection meant to be byte-identical would stop being one.
+    """
+    import time
+
+    _fanout_svc(svc, pages=4)
+    applied: list[str] = []
+
+    def executor(spec):
+        # later subjects return first, so completion order is reversed
+        time.sleep(0.05 * (4 - int(spec.subject[-1])))
+        return _layout_result(spec)
+
+    original = svc.upsert
+
+    def tracking(section, body, **kw):
+        if section == "pageLayouts":
+            applied.append(body["page"])
+        return original(section, body, **kw)
+
+    svc.upsert = tracking
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    svc.upsert = original
+    assert applied == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
+
+
+def test_a_retry_still_carries_its_own_feedback(svc):
+    """Concurrency must not lose §102's feedback: a retry that is not told what
+    went wrong is just the same request again."""
+    _fanout_svc(svc, pages=3)
+    seen: dict[str, list[str]] = {}
+
+    def executor(spec):
+        seen.setdefault(spec.subject, []).append(spec.feedback)
+        if spec.subject == "PAGE-002" and spec.attempt == 1:
+            raise RuntimeError("bad page tree")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=2)
+    assert seen["PAGE-002"][0] == ""
+    assert "bad page tree" in seen["PAGE-002"][1]
+    assert report.failed == []
+    # subjects that succeeded first time are not called again
+    assert len(seen["PAGE-001"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Resume skips what is already authored
+# ---------------------------------------------------------------------------
+
+
+def test_completed_nodes_reports_sections_with_content():
+    """A node whose produced sections are populated has already run."""
+    doc = {"requirements": [{"id": "REQ-001"}], "product": {"objectives": ["x"]}}
+    done = completed_nodes(doc)
+    assert "requirements" in done
+    assert "application_model" in done
+    # `data_model` produces data.entities, which this document does not have.
+    assert "data_model" not in done
+
+
+def test_completed_nodes_resolves_dotted_paths():
+    """`data.entities` is nested, not a top-level key."""
+    assert "data_model" not in completed_nodes({"data": {}})
+    assert "data_model" in completed_nodes({"data": {"entities": [{"id": "E1"}]}})
+
+
+def test_completed_nodes_treats_empty_sections_as_unrun():
+    """An empty list is what an un-run node leaves behind, not an answer."""
+    assert "requirements" not in completed_nodes({"requirements": []})
+
+
+def test_completed_nodes_never_skips_projections():
+    """Projections cost no tokens and are how a fixed projection reaches disk.
+
+    `backend` produces codeMap; a populated codeMap must not stop it re-running,
+    or a repaired projection would preserve the output it was meant to replace.
+    """
+    doc = {"codeMap": [{"artifact": "PAGE-001"}], "runtime": {"port": 3000}}
+    done = completed_nodes(doc)
+    assert "backend" not in done
+    assert "frontend" not in done
+    assert "preview" not in done
+
+
+def test_completed_nodes_empty_for_a_fresh_document():
+    assert completed_nodes({}) == set()
+# --- §28: independent *nodes*, not just independent subjects ----------------
+
+#: Four nodes with no dependency between them — §28's own example of work that
+#: "may execute concurrently", and the level the DAG spends longest in.
+_WAVE = ["data_model", "design_system", "integrations", "ux_architecture"]
+
+#: One valid proposal per node of that wave, so the ordering claim below is
+#: about applies that really happened rather than about rejected ones.
+_WAVE_PROPOSAL = {
+    "data_model": ("data.entities", "Candidate",
+                   {"name": "Candidate", "table": "candidates",
+                    "fields": [{"name": "id", "type": "uuid"}]}),
+    "design_system": ("designSystem", "designSystem",
+                      {"visualPersonality": "calm",
+                       "informationDensity": "comfortable"}),
+    "integrations": ("integrations", "Slack", {"name": "Slack", "kind": "webhook"}),
+    "ux_architecture": ("modules", "Hiring", {"name": "Hiring", "description": "x"}),
+}
+
+
+def _wave_result(spec: TaskSpec) -> AgentResult:
+    section, natural_key, body = _WAVE_PROPOSAL[spec.node]
+    return AgentResult(
+        task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+        proposals=[ArtifactProposal(section=section, natural_key=natural_key,
+                                    body=body)],
+    )
+
+
+def test_a_wave_of_independent_nodes_runs_concurrently(svc):
+    """The graph already declared these four independent and we ran them one
+    after another. Fifteen agent nodes at a level apiece is most of the wall
+    time of a run, and none of it was work that had to wait."""
+    import threading
+    import time
+
+    from services.blueprint.orchestrator import WAVE_CONCURRENCY
+
+    inflight, peak = 0, 0
+    lock = threading.Lock()
+
+    def executor(spec):
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        time.sleep(0.05)
+        with lock:
+            inflight -= 1
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    assert report.ok
+    assert sorted(report.completed) == sorted(_WAVE)
+    assert peak > 1, "independent nodes ran one at a time"
+    assert peak <= WAVE_CONCURRENCY
+
+
+def test_a_wave_applies_node_by_node_whatever_order_calls_return(svc):
+    """The node-level half of the same rule the fan-out obeys.
+
+    Four nodes calling at once means four nodes applying into one shared
+    document, and ``apply_agent_result`` allocates stable ids (§12) in the order
+    it is called. If applies interleaved by whichever call returned first, a
+    re-projection meant to be byte-identical would stop being one — and
+    ``project_frontend`` is idempotent by design.
+
+    A lock would not fix this. It would make the applies safe against
+    corruption and leave the order nondeterministic, which is the half that
+    matters.
+    """
+    import time
+
+    applied: list[str] = []
+
+    def executor(spec):
+        # last node returns first, so completion order is exactly reversed
+        time.sleep(0.05 * (len(_WAVE) - 1 - _WAVE.index(spec.node)))
+        return _wave_result(spec)
+
+    from services.blueprint import orchestrator
+
+    real_apply = orchestrator.apply_agent_result
+
+    def tracking(service, result, **kw):
+        applied.append(result.task_id.split("-")[1])
+        return real_apply(service, result, **kw)
+
+    orchestrator.apply_agent_result = tracking
+    try:
+        report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    finally:
+        orchestrator.apply_agent_result = real_apply
+
+    assert report.ok
+    assert applied == _WAVE
+
+
+def test_a_node_retried_inside_a_wave_still_carries_its_feedback(svc):
+    """§102 survives the widening, at node level as well as subject level: a
+    retry that is not told what went wrong is just the same request again."""
+    seen: dict[str, list[str]] = {}
+
+    def executor(spec):
+        seen.setdefault(spec.node, []).append(spec.feedback)
+        if spec.node == "integrations" and spec.attempt == 1:
+            raise RuntimeError("provider list was empty")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=2)
+    assert report.ok
+    assert seen["integrations"][0] == ""
+    assert "provider list was empty" in seen["integrations"][1]
+    # nodes that succeeded first time are not called again
+    assert len(seen["data_model"]) == 1
+
+
+def test_a_failed_node_does_not_stop_its_neighbours_in_the_wave(svc):
+    """Independence cuts both ways: a node that fails takes its own dependents
+    with it and nothing else."""
+    def executor(spec):
+        if spec.node == "data_model":
+            raise RuntimeError("entity agent is down")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE, max_attempts=1)
+    assert report.failed == ["data_model"]
+    assert sorted(report.completed) == ["design_system", "integrations",
+                                        "ux_architecture"]
+
+
+def test_a_wave_never_starts_a_node_whose_dependency_failed(svc):
+    """§28's restraint is unchanged by the widening: a dependent of a failed
+    node is skipped, not attempted on missing inputs."""
+    attempted: list[str] = []
+
+    def executor(spec):
+        attempted.append(spec.node)
+        if spec.node == "data_model":
+            raise RuntimeError("entity agent is down")
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=_WAVE + ["database"], max_attempts=1)
+    assert "database" in report.skipped
+    assert report.skipped_because["database"] == "data_model"
+    assert "database" not in attempted
+
+
+def test_one_node_cannot_spend_the_whole_wave_budget(svc):
+    """A wave of fanning-out nodes multiplies, and the multiplication is what
+    finds the provider's rate limit rather than the machine's.
+
+    Two caps, and they answer different questions: how wide one node may go,
+    and how wide the run may go. `page_layouts` here has more subjects than
+    either budget, so it would take every slot if only the wave cap existed.
+    """
+    import threading
+
+    from services.blueprint.orchestrator import (
+        FANOUT_CONCURRENCY, WAVE_CONCURRENCY,
+    )
+
+    _fanout_svc(svc, pages=24)
+    lock = threading.Lock()
+    inflight: dict[str, int] = {}
+    total = peak_total = 0
+    peak_node: dict[str, int] = {}
+
+    def executor(spec):
+        nonlocal total, peak_total
+        with lock:
+            total += 1
+            peak_total = max(peak_total, total)
+            inflight[spec.node] = inflight.get(spec.node, 0) + 1
+            peak_node[spec.node] = max(peak_node.get(spec.node, 0),
+                                       inflight[spec.node])
+        time.sleep(0.02)
+        with lock:
+            total -= 1
+            inflight[spec.node] -= 1
+        if spec.node == "page_layouts":
+            return _layout_result(spec)
+        return _wave_result(spec)
+
+    # `page_layouts` depends on `patterns`, which is not in this plan — so all
+    # three nodes are ready at once and share one wave.
+    plan = ["page_layouts", "data_model", "integrations"]
+    report = run(svc, executor, plan=plan, max_attempts=1)
+
+    assert report.ok
+    assert sorted(report.completed) == sorted(plan)
+    assert peak_total <= WAVE_CONCURRENCY, "the wave budget was exceeded"
+    assert peak_node["page_layouts"] <= FANOUT_CONCURRENCY, (
+        "one node took more than its own width out of the shared budget")

@@ -201,7 +201,8 @@ def _frontend_doc():
             "actions": ["create_candidate", "search_candidates"],
         }],
         "widgets": [],
-        "patternTemplates": [{
+        "pageLayouts": [{
+            "page": "PAGE-001",
             "pattern": "entity_list", "requires": {"primaryEntity": True},
             "root": {"type": "Stack", "props": {}, "children": [
                 {"type": "Heading", "props": {"content": "$entity.plural"},
@@ -228,8 +229,11 @@ def test_frontend_projection_writes_a_renderable_schema_per_page(tmp_path):
     # The columns are real definitions, derived from the entity's own fields.
     table = schema["root"]["children"][1]
     assert [c["key"] for c in table["props"]["columns"]] == ["fullName", "stage"]
+    # {name, entity, op} — what the renderer resolves. `source` was never a
+    # field of the DataSource contract, and /api/candidates is the path the
+    # API derivation moved to /api/data/.
     assert schema["dataSources"] == [
-        {"name": "rows", "source": "/api/candidates", "op": "list"}]
+        {"name": "rows", "entity": "Candidate", "op": "list"}]
 
 
 def test_frontend_projection_is_idempotent(tmp_path):
@@ -268,10 +272,32 @@ def test_frontend_projection_records_every_file_in_code_map(tmp_path):
     result = apply_frontend_projection(svc, tmp_path / "app")
 
     entry = next(e for e in svc.doc["codeMap"] if e["artifact"] == "PAGE-001")
-    assert entry["service"] == ["src/schemas/candidates.json"]
-    assert (tmp_path / "app" / entry["service"][0]).exists(), (
+    # §21 files a page's implementation under `frontend`; a page schema is
+    # what the UI engine renders, so it is the page's frontend here.
+    assert entry["frontend"] == ["src/schemas/candidates.json"]
+    assert "service" not in entry
+    assert (tmp_path / "app" / entry["frontend"][0]).exists(), (
         "codeMap must point at a file that exists — the whole point of §21")
     assert result["pages"] == 1
+
+
+def test_a_pages_implementation_is_reachable_as_its_frontend(tmp_path):
+    """The reason the facet matters, not just which key it is. `code_intel.where`
+    answers §21's "where does this page live" off typed facets — filed under
+    `service` a page reported no frontend at all, while claiming a service
+    layer it does not have."""
+    from services.blueprint.projection import apply_frontend_projection
+    from services.smith.code_intel import where
+
+    svc = BlueprintService.create(output_dir=tmp_path / "bp", app_id="a",
+                                  name="n", domain="d")
+    svc.doc.update(_frontend_doc())
+    apply_frontend_projection(svc, tmp_path / "app")
+
+    located = where(svc.doc, "PAGE-001")
+    assert located.frontend == ("src/schemas/candidates.json",)
+    assert located.service == ()
+    assert located.mapped
 
 
 def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):
@@ -282,8 +308,8 @@ def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):
     project_frontend(doc, tmp_path / "app")
     assert (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
 
-    # The pattern's template is withdrawn; the page can no longer be planned.
-    doc["patternTemplates"] = []
+    # The composed tree is withdrawn; the page can no longer be planned.
+    doc["pageLayouts"] = []
     result = project_frontend(doc, tmp_path / "app")
     assert result["pages"] == 0
     assert result["removed"] == ["candidates.json"]
@@ -457,31 +483,53 @@ def test_the_auth_flow_is_never_caught_by_its_own_gate(tmp_path):
     assert "api/auth" in _matcher(tmp_path / "app")
 
 
-def test_the_root_route_is_projected_not_guessed(tmp_path):
+def test_the_root_route_is_owned_inside_the_shell(tmp_path):
     """`[...slug]` is a required catch-all and never matches "/", so the root
-    always needs its own file. The scaffold's hardcoded `redirect("/home")` sent
-    it to a route the app did not have — the root 404d, and the 404 redirected
-    into the login gate."""
+    needs a page of its own — and it has to be the one INSIDE `(dashboard)`,
+    because that group carries the layout with the sidebar.
+
+    This used to write `src/app/page.tsx`, on the grounds that the scaffold's
+    root redirected to a hardcoded `/home`. The scaffold stopped doing that and
+    now ships `(dashboard)/page.tsx`, which renders the `/` schema exactly as
+    the catch-all would — so this was writing a SECOND handler for a route that
+    already had one, outside the group. Both resolved to `/`, route groups not
+    affecting the URL, and the one outside rendered without the shell.
+
+    Every page in the application had a sidebar except the one everybody lands
+    on, with identical content either way, which reads as a styling bug rather
+    than a routing one.
+    """
     from services.blueprint.projection import project_root_route
 
+    def _scaffolded(root):
+        (root / "src" / "app" / "(dashboard)").mkdir(parents=True)
+        (root / "src" / "app" / "(dashboard)" / "page.tsx").write_text(
+            "// scaffold: renders / from the registry\n")
+        return root
+
+    a = _scaffolded(tmp_path / "a")
     claimed = {"pages": [{"id": "PAGE-001", "route": "/", "name": "Entry"},
                          {"id": "PAGE-002", "route": "/overview"}]}
-    r = project_root_route(claimed, tmp_path / "a")
+    r = project_root_route(claimed, a)
     assert r["claimedBy"] == "PAGE-001"
-    body = (tmp_path / "a" / "src" / "app" / "page.tsx").read_text()
-    assert "renderSchemaPage" in body and "redirect(" not in body
+    assert r["files"] == [], "the scaffold's page already renders /"
+    assert not (a / "src" / "app" / "page.tsx").exists(), (
+        "a root page outside (dashboard) resolves to / without the shell")
 
+    b = _scaffolded(tmp_path / "b")
+    (b / "src" / "app" / "page.tsx").write_text("// stale from an older build\n")
     unclaimed = {"pages": [{"id": "PAGE-002", "route": "/sign-in"},
                            {"id": "PAGE-003", "route": "/overview"}]}
-    r = project_root_route(unclaimed, tmp_path / "b")
-    body = (tmp_path / "b" / "src" / "app" / "page.tsx").read_text()
+    r = project_root_route(unclaimed, b)
     assert r["redirectsTo"] == "/overview"
+    assert r["removedStaleRoot"] is True
+    assert not (b / "src" / "app" / "page.tsx").exists()
+    body = (b / "src" / "app" / "(dashboard)" / "page.tsx").read_text()
     assert 'redirect("/overview")' in body
     # Only the *statement* matters — the comment explains the old bug and
     # legitimately names the route it used to hardcode.
     code = "\n".join(l for l in body.splitlines() if not l.strip().startswith("//"))
-    assert '"/home"' not in code, "never a route the Blueprint did not declare"
-
+    assert "/home" not in code
 
 def test_the_root_never_forwards_to_a_login_screen(tmp_path):
     from services.blueprint.projection import landing_route
@@ -489,3 +537,250 @@ def test_the_root_never_forwards_to_a_login_screen(tmp_path):
     doc = {"pages": [{"route": "/login"}, {"route": "/sign-up"},
                      {"route": "/dashboard"}]}
     assert landing_route(doc) == "/dashboard"
+
+
+# ---------------------------------------------------------------------------
+# Design tokens — the whole system, in the format the scaffold consumes
+# ---------------------------------------------------------------------------
+
+_DESIGN = {
+    "designSystem": {
+        "colors": {"primary": "#125E8A", "background": "#F7F8F9",
+                   "foreground": "#16202A", "danger": "#A8261F",
+                   "focusRing": "#0B72C4", "statusPaid": "#1B6B3A"},
+        "radius": {"md": "6px", "card": "8px", "pill": "999px"},
+        "typography": {"baseSize": "15px", "fontFamilyBase": "'Inter', sans-serif"},
+        "spacing": {"md": "16px"},
+    }
+}
+
+
+def test_the_whole_design_system_reaches_the_stylesheet(tmp_path):
+    """Four of thirteen sections used to survive, so apps looked unstyled."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    assert "--status-paid: #1B6B3A;" in css       # a role shadcn never names
+    assert "--radius-card: 8px;" in css           # radius is an object
+    assert "--font-size-base: 15px;" in css       # typography was never read
+    assert "--space-md: 16px;" in css
+
+
+def test_names_the_scaffold_wraps_are_emitted_as_hsl_triplets(tmp_path):
+    """`hsl(var(--primary))` with a hex is invalid and silently drops."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    assert "--primary: 202 77% 31%;" in css
+    assert "--primary: #125E8A;" not in css
+    # Roles the scaffold does not wrap keep their hex.
+    assert "--focus-ring: #0B72C4;" in css
+
+
+def test_a_shadcn_name_the_blueprint_omits_falls_back_to_a_declared_role(tmp_path):
+    """The Blueprint says `danger`; components ask for `--destructive`."""
+    from services.blueprint.projection import project_design_tokens
+
+    project_design_tokens(_DESIGN, tmp_path)
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    # Aliases are triplets too: the scaffold wraps these in hsl() as well.
+    assert "--destructive: 3 69% 39%;" in css
+    assert "--ring: 207 89% 41%;" in css
+
+
+def test_the_scaffold_imports_the_tokens_and_defines_none_of_them_itself():
+    """Nothing imported tokens.css for the life of the file, and globals.css
+    held __CSS_*__ placeholders nothing substituted — which won by source
+    order, because Tailwind flattens @layer base instead of emitting a layer."""
+    from pathlib import Path
+
+    globals_css = Path(__file__).resolve().parents[2] / (
+        "templates/app-foundation/src/app/globals.css")
+    text = globals_css.read_text()
+    assert '@import "./tokens.css";' in text
+    assert "__CSS_" not in text
+
+
+# ---------------------------------------------------------------------------
+# A public page is only public if what it fetches is reachable.
+#
+# /plants was public and rendered for anyone; /api/data/plants and
+# /api/workflows/FLOW-002/execute were not. The table came up empty and adding
+# a plant did nothing, with no error anywhere — a 307 to /login is a perfectly
+# successful HTTP exchange.
+# ---------------------------------------------------------------------------
+
+def _access_doc(access="public"):
+    return {
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Plant", "table": "plants"},
+            {"id": "ENTITY-002", "name": "WateringEvent", "table": "waterings"},
+        ]},
+        "pages": [
+            {"id": "PAGE-001", "name": "Plants", "route": "/plants",
+             "access": access, "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-009", "name": "Admin", "route": "/admin",
+             "access": "authenticated", "data": {"primaryEntity": "ENTITY-002"}},
+        ],
+        "pageLayouts": [
+            {"page": "PAGE-001",
+             "dataSources": [{"name": "waterings", "entity": "WateringEvent",
+                              "op": "list"}],
+             "root": {"type": "Stack", "props": {}, "children": []}},
+        ],
+        "workflows": [
+            {"id": "FLOW-001", "name": "Record Watering",
+             "trigger": {"kind": "manual"}, "launchedFrom": ["PAGE-001"]},
+            {"id": "FLOW-009", "name": "Purge", "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-009"]},
+        ],
+    }
+
+
+def test_a_public_page_opens_the_data_and_workflows_it_uses():
+    from services.blueprint.projection import public_apis
+
+    apis = public_apis(_access_doc())
+    # Its own entity, and the entity its tree binds through a carried source.
+    assert "api/data/plants" in apis
+    assert "api/data/waterings" in apis
+    assert "api/workflows/FLOW-001" in apis
+
+
+def test_a_gated_pages_data_and_workflows_stay_gated():
+    """Opening `/api/data` wholesale because one page is public would expose
+    every entity in the application."""
+    from services.blueprint.projection import public_apis
+
+    apis = public_apis(_access_doc())
+    assert "api/workflows/FLOW-009" not in apis
+
+
+def test_an_app_with_no_public_page_opens_nothing():
+    from services.blueprint.projection import public_apis
+
+    assert public_apis(_access_doc(access="authenticated")) == []
+
+
+def test_the_matcher_excludes_the_apis_a_public_page_needs(tmp_path):
+    from services.blueprint.projection import project_middleware
+
+    result = project_middleware(_access_doc(), tmp_path / "app")
+    written = (tmp_path / "app" / "src" / "middleware.ts").read_text("utf-8")
+    assert "api/data/plants" in written
+    assert "api/workflows/FLOW-001" in written
+    assert "api/workflows/FLOW-009" not in written
+    assert result["publicApis"]
+
+
+# ---------------------------------------------------------------------------
+# nav-flow is a graph, not an index.
+# ---------------------------------------------------------------------------
+
+def _nav_doc():
+    return {"pages": [
+        {"id": "PAGE-001", "name": "Dashboard", "route": "/",
+         "access": "authenticated", "entry": True, "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "name": "Surveys", "route": "/surveys",
+         "access": "authenticated", "navigatesTo": ["PAGE-003"]},
+        {"id": "PAGE-003", "name": "Survey", "route": "/surveys/[id]",
+         "access": "authenticated", "presentation": "drawer"},
+        {"id": "PAGE-004", "name": "Fill", "route": "/survey/[slug]",
+         "access": "public", "entry": True},
+    ]}
+
+
+def _nav(tmp_path):
+    import json
+    from services.blueprint.projection import project_nav_flow
+
+    project_nav_flow(_nav_doc(), tmp_path / "app")
+    return json.loads(
+        (tmp_path / "app" / "src" / "contracts" / "nav-flow.json").read_text())
+
+
+def test_each_audience_gets_its_own_entry(tmp_path):
+    """An application has as many front doors as it has audiences. A survey
+    author signs in and lands on a dashboard; a respondent opens a link."""
+    nav = _nav(tmp_path)
+    assert nav["entries"] == {"authenticated": "/", "public": "/survey/[slug]"}
+
+
+def test_the_gated_entry_is_named_for_what_it_is(tmp_path):
+    """Calling it `initialPage` claimed a neutrality it does not have: it is
+    the gated entry, chosen because a login redirect and a "back to the
+    application" link both need one and both need a concrete URL."""
+    assert _nav(tmp_path)["gatedEntry"] == "/"
+
+
+def test_initial_page_stays_a_page_id_for_the_editor(tmp_path):
+    """VisualEditorWorkspace reads `initialPage` and falls back to
+    `pages[0].id`, so it wants an id. A route there is something it cannot
+    look up — and the field was carrying one."""
+    nav = _nav(tmp_path)
+    assert nav["initialPage"] in {p["id"] for p in nav["pages"]}
+
+
+def test_public_and_gated_routes_are_disjoint(tmp_path):
+    """Both keys were written from the same list, so one route was at once
+    reachable without a session and requiring one — and the middleware read
+    that contradiction."""
+    nav = _nav(tmp_path)
+    assert nav["public_routes"] == ["/survey/[slug]"]
+    assert "/survey/[slug]" not in nav["auth_routes"]
+    assert set(nav["auth_routes"]) == {"/", "/surveys", "/surveys/[id]"}
+
+
+def test_the_arrows_come_from_the_pages(tmp_path):
+    """`transitions` shipped as [] on every application ever generated: it read
+    a `navigation` section nobody authors. Pages are authored."""
+    edges = {(t["from"], t["to"]) for t in _nav(tmp_path)["transitions"]}
+    assert edges == {("/", "/surveys"), ("/surveys", "/surveys/[id]")}
+
+
+def test_a_public_page_renders_without_the_app_shell(tmp_path):
+    """Navigation into a product the visitor cannot reach is worse than none."""
+    pages = {p["route"]: p for p in _nav(tmp_path)["pages"]}
+    assert pages["/survey/[slug]"]["shell"] is False
+    assert pages["/"]["shell"] is True
+
+
+def test_presentation_survives_into_the_contract(tmp_path):
+    """A detail opened beside its list is a different application from one that
+    navigates away, and only the second could be expressed."""
+    pages = {p["route"]: p for p in _nav(tmp_path)["pages"]}
+    assert pages["/surveys/[id]"]["presentation"] == "drawer"
+    assert pages["/"]["presentation"] == "page"
+
+
+def test_a_status_field_is_seeded_with_its_own_states():
+    """The contract's name is `enumValues` and the field object is
+    `additionalProperties: false`, so the `values`/`enum` this used to look for
+    could not appear on a valid Blueprint. A status field seeded as "Status 1"
+    is a value the app's own enum does not allow — and it is what stopped a
+    page that only means something once something is submitted from ever having
+    a record to show."""
+    from services.blueprint.projection import _seed_value
+
+    field = {"name": "status", "type": "text",
+             "enumValues": ["draft", "submitted", "approved"]}
+    seeded = [_seed_value(field, "Application", row) for row in (1, 2, 3)]
+    assert seeded == ["draft", "submitted", "approved"]
+
+
+def test_a_select_offers_the_values_the_entity_declares():
+    """The same wrong key degraded every enum field in every generated form to
+    a free-text box, because a select with no options cannot be filled."""
+    from services.blueprint.page_planner import form_fields_for
+
+    fields = form_fields_for({
+        "name": "Application",
+        "fields": [{"name": "status", "type": "enum",
+                    "enumValues": ["draft", "submitted"]}],
+    }, creating=True)
+    status = next((f for f in fields if f.get("name") == "status"), None)
+    assert status is not None
+    assert [o["value"] for o in status.get("options") or []] == [
+        "draft", "submitted"]

@@ -24,7 +24,7 @@ export function AccordionPanel({ value, label, children }: AccordionPanelProps) 
         type="button"
         onClick={() => toggle(value)}
       >
-        <span className="text-left">{label}</span>
+        <span className="text-start">{label}</span>
         <span
           className="text-muted-foreground transition-transform shrink-0"
           style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}

@@ -26,7 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     // suppressHydrationWarning: browser extensions (Grammarly, ColorZilla, Scribe…)
     // inject attributes onto <html>/<body> before React hydrates; without this they
     // trip a benign hydration-mismatch warning. Scoped to these tags only.
-    <html lang="en" suppressHydrationWarning>
+    <html lang="__APP_LOCALE__" dir="__APP_DIR__" suppressHydrationWarning>
       <body suppressHydrationWarning>
         {/*
           Spec E Wave 2 accessibility spine — a SkipLink must be the first

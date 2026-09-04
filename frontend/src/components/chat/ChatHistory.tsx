@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { ChatMessage } from "./ChatMessage";
 import { narrateSmithThought, narrateSmithToolStart, narrateSmithHeartbeat } from "./smithNarration";
 import { VirtualOffice } from "@/components/virtual-office";
+import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import type { ChatMessage as ChatMessageType } from "@/types/project";
 import type { QuestState, ResourceCard } from "@/stores/chat";
 import { useChatStore, isBudgetError } from "@/stores/chat";
@@ -409,6 +410,9 @@ export function ChatHistory({
   const error = useChatStore((s) => s.error);
   const designTemplates = useChatStore((s) => s.designTemplates);
   const selectedTemplateId = useChatStore((s) => s.selectedTemplateId);
+  // A Blueprint DAG run, from its roster to its last frame. Governs the office
+  // view on its own so a short request cannot cut the animation off.
+  const officeRunActive = useOfficeStore((s) => s.runActive);
 
   const showProtest = !!error && isBudgetError(error);
 
@@ -563,8 +567,14 @@ export function ChatHistory({
         />
       )}
 
-      {/* Streaming: SSE status + link to open office */}
-      {streaming.isStreaming && (
+      {/* SSE status + link to open the office.
+        *
+        * `officeRunActive` keeps this up after the request that started the
+        * run has already returned. A Smith turn is one short POST, and its
+        * last frames — the celebration, whatever stayed blocked — land right
+        * as the response does; keyed on `isStreaming` alone the card vanishes
+        * at exactly the moment there is something to look at. */}
+      {(streaming.isStreaming || officeRunActive) && (
         <div className="px-4 md:px-6 py-3">
           <div className="mx-auto max-w-3xl rounded-xl border bg-background shadow-sm overflow-hidden">
             <SSEStatusBar streaming={streaming} verifyActive={verifyActive} />
@@ -661,8 +671,9 @@ export function ChatHistory({
         </div>
       )}
 
-      {/* Expanded fullscreen modal */}
-      {expanded && (streaming.isStreaming || showProtest) && (
+      {/* Expanded fullscreen modal — stays up until the run says it is done,
+        * not until the request that started it returns. */}
+      {expanded && (streaming.isStreaming || officeRunActive || showProtest) && (
         <ExpandedOfficeModal
           streaming={streaming}
           isProtest={showProtest}

@@ -321,7 +321,7 @@ function DeclarativeForm({
                   {(s.label || s.description) && (
                     <legend className="px-1">
                       {s.label && <span className="text-sm font-medium text-foreground">{s.label}</span>}
-                      {s.description && <span className="ml-2 text-caption text-muted-foreground">{s.description}</span>}
+                      {s.description && <span className="ms-2 text-caption text-muted-foreground">{s.description}</span>}
                     </legend>
                   )}
                   {s.fields.map((cf) => {

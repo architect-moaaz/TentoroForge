@@ -86,7 +86,7 @@ export function Avatar({ src, photoUrl, name, size, status, style }: AvatarProps
         : <span aria-label={name}>{getInitials(name)}</span>}
       {statusCls && (
         <span
-          className={`absolute right-0 bottom-0 h-2.5 w-2.5 rounded-full ring-2 ring-background ${statusCls}`}
+          className={`absolute end-0 bottom-0 h-2.5 w-2.5 rounded-full ring-2 ring-background ${statusCls}`}
           data-avatar-status={status}
           aria-hidden="true"
         />

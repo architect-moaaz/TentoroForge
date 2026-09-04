@@ -88,7 +88,7 @@ export function CommandPalette({ items, placeholder = "Type a command or searchâ
                   >
                     <span>{item.label}</span>
                     {item.shortcut && (
-                      <kbd className="ml-2 rounded border border-border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">
+                      <kbd className="ms-2 rounded border border-border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">
                         {item.shortcut}
                       </kbd>
                     )}

@@ -11,7 +11,38 @@ import { useChatStore, isBudgetError } from "@/stores/chat";
 import { useVisualEditorStore } from "@/stores/visual-editor";
 import { useSSE } from "@/hooks/useSSE";
 import { useSpeechSynthesis, stripForSpeech } from "@/lib/voice";
+import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
+import type { OfficeEvent } from "@/components/virtual-office/types";
 import type { Project } from "@/types/project";
+
+/** Which backend a user message belongs to.
+ *
+ *  `smith-turn`  — a change against a Living Blueprint. Runs the §72
+ *                  incremental DAG and animates the virtual office.
+ *  `front-door`  — the streaming build lifecycle: discovery, planning,
+ *                  generation, and the control signals that drive them.
+ */
+export type ChatRoute = "smith-turn" | "front-door";
+
+/** Bracketed machine messages — `[APPROVE_PLAN]`, `[SELECT_TEMPLATE:id]`,
+ *  `[APPROVE_DISCOVERY] {"mode":"fast"}`. They can carry a trailing JSON
+ *  object, so the pattern must allow one; an anchored `…\]$` misses those and
+ *  they leak into the transcript as chat bubbles. */
+export function isControlSignal(message: string): boolean {
+  return /^\[[A-Z_]+(:[^\]]*)?\](\s*\{[\s\S]*\})?$/.test(message.trim());
+}
+
+/** Where a message goes.
+ *
+ *  Two doors because there are two jobs. A project with no Blueprint has not
+ *  been discovered, planned or built yet, and a control signal belongs to that
+ *  lifecycle whether or not a Blueprint exists — neither is a special case of
+ *  the other, so neither is a fallback.
+ */
+export function routeFor(message: string, hasBlueprint: boolean): ChatRoute {
+  if (!hasBlueprint) return "front-door";
+  return isControlSignal(message) ? "front-door" : "smith-turn";
+}
 
 interface ChatPanelProps {
   projectId: string;
@@ -28,6 +59,11 @@ export function ChatPanel({
     useChatStore();
   const { startStream } = useSSE();
 
+  // Does this project have a Living Blueprint? Answered by the warmup call
+  // below, and it decides which conversation the user is having — see
+  // `handleSend`. False until we know, which is the pre-Smith behaviour.
+  const [hasBlueprint, setHasBlueprint] = useState(false);
+
   // ── Smith warmup: preload the app-map into the backend cache when the ──
   //   chat panel mounts, so the first turn sees the map already resident
   //   instead of paying its ~50 ms rebuild on the critical path. Fire-and-
@@ -36,12 +72,17 @@ export function ChatPanel({
   useEffect(() => {
     if (!projectId) return;
     const ctl = new AbortController();
+    setHasBlueprint(false);
     fetch(`/api/projects/${projectId}/smith/warmup`, {
       method: "POST",
       signal: ctl.signal,
-    }).catch(() => {
-      /* silent — warmup is best-effort */
-    });
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => setHasBlueprint(Boolean(body?.blueprint)))
+      .catch(() => {
+        /* silent — warmup is best-effort, and false means "use the front door",
+           which is the behaviour this panel had before Smith had an endpoint */
+      });
     return () => ctl.abort();
   }, [projectId]);
 
@@ -95,6 +136,26 @@ export function ChatPanel({
         /* malformed event — ignore */
       }
     };
+    // Office events pushed from a Blueprint DAG run. The run is synchronous
+    // Python with no request of its own to stream on — Smith kicks it off from
+    // a turn — so it narrates onto the project bus
+    // (`services/office_bridge.py`) and lands here. Same payload shape the
+    // generation stream's `office` frames carry, so it goes straight to the
+    // same store.
+    const onOffice = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as { office?: OfficeEvent };
+        if (payload?.office?.type) {
+          const store = useOfficeStore.getState();
+          if (store.agents.size === 0) store.initialize();
+          store.handleEvent(payload.office);
+        }
+      } catch {
+        /* malformed event — ignore */
+      }
+    };
+    es.addEventListener("office", onOffice);
+
     es.addEventListener("self_heal_message", onSelfHeal);
     // Silent error handler — the browser auto-retries EventSource on
     // network drop, so a temporary disconnect doesn't need a user-visible
@@ -102,6 +163,7 @@ export function ChatPanel({
     // will noisily fail in DevTools but the chat still works via polling.
 
     return () => {
+      es.removeEventListener("office", onOffice);
       es.removeEventListener("self_heal_message", onSelfHeal);
       es.close();
     };
@@ -295,6 +357,71 @@ export function ChatPanel({
     [projectId],
   );
 
+  // ── One conversational turn with Smith ────────────────────────────────
+  //
+  // Not a stream. The turn's *progress* is the virtual office: the backend
+  // narrates the incremental DAG onto this project's SSE stream (already open
+  // above), so the agents move while this request is in flight. What comes
+  // back over HTTP is the record — the reply, the version, what ran.
+  //
+  // `startStreaming()` is still what opens that window: it resets and seats
+  // the office cast, and flips the `isStreaming` flag the office panel and its
+  // "See Agents In Action" link key off. Without it the frames would arrive
+  // with nobody on the floor to move and no way to watch.
+  const sendSmithTurn = useCallback(
+    async (text: string) => {
+      const store = useChatStore.getState();
+      store.startStreaming();
+      try {
+        const res = await fetch(`/api/projects/${projectId}/smith/turn`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const body = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          useOfficeStore.getState().endRun();
+          store.setError(
+            body?.detail ?? `Smith could not take that turn (${res.status})`,
+          );
+          return;
+        }
+
+        // `rejected` is a turn Smith declined to act on rather than a failure:
+        // §17 says nothing is applied below the clarification line, and the
+        // reply explains why. It belongs in the transcript either way.
+        const reply: string = body?.reply || body?.rejected || "";
+        if (reply) {
+          store.addMessage({
+            id: crypto.randomUUID(),
+            project_id: projectId,
+            role: "assistant",
+            content: reply,
+            message_type: "chat",
+            metadata: body?.version ? { version: body.version } : null,
+            created_at: new Date().toISOString(),
+          });
+        }
+
+        // Only a turn that actually wrote something changed the app, so only
+        // then is the preview stale.
+        if (body?.applied) onGenerationComplete?.();
+      } catch (exc) {
+        // The producer is gone, so no terminal frame is coming and the office
+        // would stay up forever waiting for one. Only the failure path needs
+        // this: a run that completes says so itself.
+        useOfficeStore.getState().endRun();
+        store.setError(
+          exc instanceof Error ? exc.message : "Smith could not be reached",
+        );
+      } finally {
+        store.stopStreaming();
+      }
+    },
+    [projectId, onGenerationComplete],
+  );
+
   const handleSend = useCallback(
     (message: string, attachmentIds?: string[]) => {
       const trimmed = message.trim();
@@ -316,12 +443,8 @@ export function ChatPanel({
         return;
       }
 
-      // Bracketed control signals ([APPROVE_PLAN], [APPROVE_DISCOVERY],
-      // [SELECT_TEMPLATE:id]) are machine messages — don't show them as chat
-      // bubbles. They can carry a JSON payload — "[APPROVE_DISCOVERY] {\"mode\":
-      // \"fast\"}" — so the pattern must allow an optional trailing object; the
-      // old `…\]$` anchor missed those and they leaked into the transcript.
-      const isSignal = /^\[[A-Z_]+(:[^\]]*)?\](\s*\{[\s\S]*\})?$/.test(message.trim());
+      // Control signals are machine messages — don't show them as chat bubbles.
+      const isSignal = isControlSignal(message);
       if (!isSignal) {
         useChatStore.getState().addMessage({
           id: crypto.randomUUID(),
@@ -334,9 +457,24 @@ export function ChatPanel({
         });
       }
 
-      // Single front door: every user message — first prompt, follow-ups,
-      // approval signals — flows through /chat so Smith owns the whole
-      // lifecycle. chat_with_project handles fresh projects (no code, no
+      // Once the project has a Living Blueprint, a plain sentence is a change
+      // Smith can reason about against the definition it already holds, so it
+      // goes to `/smith/turn` — which runs the §72 incremental DAG and narrates
+      // it to the virtual office while the request is in flight.
+      //
+      // Everything else keeps the streaming front door. That is not a fallback:
+      // a project with no Blueprint still has to be discovered, planned and
+      // built, and the lifecycle signals ([APPROVE_PLAN], [SELECT_TEMPLATE:…])
+      // belong to that flow. Two doors because there are two jobs, not because
+      // one of them is a special case.
+      if (routeFor(message, hasBlueprint) === "smith-turn") {
+        void sendSmithTurn(message);
+        return;
+      }
+
+      // Single front door for the build lifecycle: first prompt, approval
+      // signals, and follow-ups on a project Smith has not yet written a
+      // Blueprint for. chat_with_project handles fresh projects (no code, no
       // pending plan/discovery) via the architect bootstrap intercept
       // (services.smith_architect_wire.run_bootstrap_stage), which runs
       // discovery → planner → generation through Smith's own orchestrators
@@ -355,7 +493,7 @@ export function ChatPanel({
         onGenerationComplete,
       );
     },
-    [projectId, startStream, onGenerationComplete],
+    [projectId, startStream, onGenerationComplete, hasBlueprint, sendSmithTurn],
   );
 
   // Auto-reconnect to in-progress generation after login/page load

@@ -1070,31 +1070,24 @@
       "acceptsChildren": true,
       "doc": "Renderer primitive — dispatched directly, not registered.",
       "props": {
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "type": "object",
-            "properties": {
-              "as": {
-                "type": "string",
-                "enum": [
-                  "div",
-                  "section",
-                  "article",
-                  "aside",
-                  "header",
-                  "footer",
-                  "main",
-                  "nav"
-                ],
-                "default": "div"
-              }
-            },
-            "additionalProperties": false
+        "type": "object",
+        "properties": {
+          "as": {
+            "type": "string",
+            "enum": [
+              "div",
+              "section",
+              "article",
+              "aside",
+              "header",
+              "footer",
+              "main",
+              "nav"
+            ],
+            "default": "div"
           }
-        ],
+        },
+        "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
@@ -3141,29 +3134,22 @@
       "acceptsChildren": true,
       "doc": "Renderer primitive — dispatched directly, not registered.",
       "props": {
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "type": "object",
-            "properties": {
-              "maxWidth": {
-                "type": "string",
-                "enum": [
-                  "sm",
-                  "md",
-                  "lg",
-                  "xl",
-                  "2xl",
-                  "full"
-                ],
-                "default": "lg"
-              }
-            },
-            "additionalProperties": false
+        "type": "object",
+        "properties": {
+          "maxWidth": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg",
+              "xl",
+              "2xl",
+              "full"
+            ],
+            "default": "lg"
           }
-        ],
+        },
+        "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
@@ -4647,22 +4633,44 @@
             "type": "string"
           },
           "action": {
-            "type": "object",
-            "properties": {
-              "label": {
-                "type": "string",
-                "minLength": 1
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "workflow"
+                ],
+                "additionalProperties": false
               },
-              "workflow": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "navigate": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "navigate"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "label",
-              "workflow"
-            ],
-            "additionalProperties": false
+            ]
           },
           "style": {
             "type": "object",
@@ -7380,22 +7388,44 @@
             "type": "string"
           },
           "action": {
-            "type": "object",
-            "properties": {
-              "label": {
-                "type": "string",
-                "minLength": 1
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflow": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "workflow"
+                ],
+                "additionalProperties": false
               },
-              "workflow": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "navigate": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "navigate"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "label",
-              "workflow"
-            ],
-            "additionalProperties": false
+            ]
           },
           "style": {
             "type": "object",
@@ -10881,45 +10911,38 @@
       "acceptsChildren": true,
       "doc": "Renderer primitive — dispatched directly, not registered.",
       "props": {
-        "anyOf": [
-          {
-            "not": {}
+        "type": "object",
+        "properties": {
+          "gap": {
+            "type": "string",
+            "minLength": 1
           },
-          {
-            "type": "object",
-            "properties": {
-              "gap": {
-                "type": "string",
-                "minLength": 1
-              },
-              "align": {
-                "type": "string",
-                "enum": [
-                  "start",
-                  "center",
-                  "end",
-                  "stretch"
-                ],
-                "default": "center"
-              },
-              "justify": {
-                "type": "string",
-                "enum": [
-                  "start",
-                  "center",
-                  "end",
-                  "between",
-                  "around"
-                ],
-                "default": "start"
-              },
-              "wrap": {
-                "type": "boolean"
-              }
-            },
-            "additionalProperties": false
+          "align": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "stretch"
+            ],
+            "default": "center"
+          },
+          "justify": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "between",
+              "around"
+            ],
+            "default": "start"
+          },
+          "wrap": {
+            "type": "boolean"
           }
-        ],
+        },
+        "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
@@ -13088,53 +13111,46 @@
       "acceptsChildren": true,
       "doc": "Renderer primitive — dispatched directly, not registered.",
       "props": {
-        "anyOf": [
-          {
-            "not": {}
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "vertical",
+              "horizontal"
+            ],
+            "default": "vertical"
           },
-          {
-            "type": "object",
-            "properties": {
-              "direction": {
-                "type": "string",
-                "enum": [
-                  "vertical",
-                  "horizontal"
-                ],
-                "default": "vertical"
-              },
-              "gap": {
-                "type": "string",
-                "minLength": 1
-              },
-              "align": {
-                "type": "string",
-                "enum": [
-                  "start",
-                  "center",
-                  "end",
-                  "stretch"
-                ],
-                "default": "stretch"
-              },
-              "justify": {
-                "type": "string",
-                "enum": [
-                  "start",
-                  "center",
-                  "end",
-                  "between",
-                  "around"
-                ],
-                "default": "start"
-              },
-              "wrap": {
-                "type": "boolean"
-              }
-            },
-            "additionalProperties": false
+          "gap": {
+            "type": "string",
+            "minLength": 1
+          },
+          "align": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "stretch"
+            ],
+            "default": "stretch"
+          },
+          "justify": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "between",
+              "around"
+            ],
+            "default": "start"
+          },
+          "wrap": {
+            "type": "boolean"
           }
-        ],
+        },
+        "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
@@ -14356,37 +14372,30 @@
       "acceptsChildren": false,
       "doc": "Renderer primitive — dispatched directly, not registered.",
       "props": {
-        "anyOf": [
-          {
-            "not": {}
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
           },
-          {
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "string"
-              },
-              "as": {
-                "type": "string",
-                "enum": [
-                  "span",
-                  "p",
-                  "h1",
-                  "h2",
-                  "h3",
-                  "h4",
-                  "h5",
-                  "h6",
-                  "label",
-                  "strong",
-                  "em"
-                ],
-                "default": "span"
-              }
-            },
-            "additionalProperties": false
+          "as": {
+            "type": "string",
+            "enum": [
+              "span",
+              "p",
+              "h1",
+              "h2",
+              "h3",
+              "h4",
+              "h5",
+              "h6",
+              "label",
+              "strong",
+              "em"
+            ],
+            "default": "span"
           }
-        ],
+        },
+        "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },

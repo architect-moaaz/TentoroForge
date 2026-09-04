@@ -36,6 +36,7 @@ and a per-app auth secret.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import shutil
 from pathlib import Path
@@ -65,10 +66,50 @@ PROJECTED_PATHS: tuple[str, ...] = (
     # so leaving this off the list silently restored the hardcoded gate and an
     # app with public pages had them quietly closed again.
     "src/middleware.ts",
-    # `/` needs its own route file because the catch-all is required, and the
-    # scaffold's redirects to a hardcoded "/home".
-    "src/app/page.tsx",
+    # `/` is owned by the scaffold's `(dashboard)/page.tsx`, inside the group
+    # that carries the shell. `project_root_route` overwrites that file with a
+    # redirect when no page claims `/`, and deletes any `src/app/page.tsx` an
+    # older build left beside it — a root page outside the group resolves to
+    # `/` too and renders without the sidebar.
+    "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
+    "src/lib/append-only-entities.ts",
+)
+
+#: Files inside a projected directory that the *scaffold* still owns.
+#:
+#: `src/db/schema` holds two kinds of table. The projection writes one file per
+#: business entity, and the scaffold ships the platform's own — the user table
+#: auth.ts and the signup route import. Marking the directory projection-owned
+#: is right for the first kind and deletes the second: the build failed on
+#: `Can't resolve '@/db/schema/user'` because nothing ever wrote it and
+#: assembly was told to keep its hands off the directory that would have.
+#:
+#: Directory-level ownership cannot express "these 28 files are generated and
+#: this one is not", so the exception is stated by name.
+SCAFFOLD_OWNED: tuple[str, ...] = (
+    "src/db/schema/user.ts",
+)
+
+#: Scaffold files that are a DEFAULT for something a projection writes: copied
+#: only when the projection did not write one.
+#:
+#: A third category, and it needs to be. `PROJECTED_PATHS` says "never touch",
+#: which leaves nothing when the projection is skipped; `SCAFFOLD_OWNED` says
+#: "always copy", and since assembly runs AFTER projection that would overwrite
+#: the application's own palette with the neutral one every time.
+#:
+#: `globals.css` imports `./tokens.css` unconditionally, so a scaffold without
+#: it does not build — and one page failing to plan was enough to skip the
+#: projection and produce `Module not found: Can't resolve './tokens.css'` for
+#: the whole application. The ordering fix stopped that particular trigger.
+#: This stops the class: a template that imports a file it does not contain is
+#: broken on its own terms, and a crash, a timeout, a partial run or an export
+#: taken mid-build all reach the same place.
+#:
+#: The floor is a plain-looking application, not an unbuildable one.
+SCAFFOLD_DEFAULTS: tuple[str, ...] = (
+    "src/app/tokens.css",
 )
 
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";
@@ -126,9 +167,16 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS):
+            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
+                    and str(dst_rel) not in SCAFFOLD_OWNED
+                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
+            # A default only fills a hole. The projection ran first and its
+            # output is the application's; this is what stands in when it did
+            # not run at all.
+            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+                continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
                 dst.write_text(_interpolate(src.read_text(),
@@ -154,6 +202,13 @@ EDGE_PAGES: tuple[str, ...] = (
     "src/components/EdgePageFrame.tsx",
 )
 
+#: Scaffold files carrying placeholders that are NOT `{{…}}`. `layout.tsx`
+#: holds `__APP_LOCALE__` / `__APP_DIR__` — §11's interface language reaching
+#: the document. Same failure as EDGE_PAGES and the same cause: a plain `.tsx`
+#: the `.tmpl` copy step never reads. It is listed separately only because the
+#: token spelling differs; the substitution pass below is one pass, not two.
+PLACEHOLDER_PAGES: tuple[str, ...] = EDGE_PAGES + ("src/app/layout.tsx",)
+
 
 def _landing_route(doc: dict) -> str:
     """Where "back to the app" should point.
@@ -177,19 +232,33 @@ def _landing_route(doc: dict) -> str:
 
 
 def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
-    """Substitute the scaffold's `{{…}}` placeholders from the Blueprint."""
+    """Substitute the scaffold's placeholders from the Blueprint.
+
+    Runs on THIS path — the Blueprint pipeline assembles through
+    `copy_scaffold`, never through `app_emitter.emit_standalone_app`, and
+    `inject_runtime`'s callers are all in the legacy router. Anything a
+    scaffold `.tsx` leaves unsubstituted ships literally.
+    """
+    from services.runtime_injector import _RTL_LANGUAGES  # one RTL list
+
     application = doc.get("application") or {}
     app_name = application.get("name") or "the app"
     initial = next((c for c in app_name if c.isalnum()), "A").upper()
+
+    tag = str((doc.get("product") or {}).get("locale") or "").strip() or "en"
+    base = tag.replace("_", "-").split("-")[0].lower()
+
     values = {
         "{{app_name}}": app_name,
         "{{app_initial}}": initial,
         "{{home_route}}": _landing_route(doc),
+        "__APP_LOCALE__": tag,
+        "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }
 
     out = Path(app_root)
     touched: list[str] = []
-    for rel in EDGE_PAGES:
+    for rel in PLACEHOLDER_PAGES:
         path = out / rel
         if not path.is_file():
             continue
@@ -219,6 +288,9 @@ def inject_runtime_layer(app_root: str | Path, doc: dict) -> dict[str, Any]:
     application = doc.get("application") or {}
     return inject_runtime(
         str(app_root),
+        # The projections own these; the injector must install the engine
+        # around them rather than over them.
+        preserve=PROJECTED_PATHS,
         app_name=application.get("name"),
         domain=application.get("domain"),
         project_id=application.get("id"),
@@ -321,6 +393,22 @@ def assemble(doc: dict, app_root: str | Path, *,
     for name in (".env", ".env.local"):
         (out / name).write_text(env_body, "utf-8")
 
+    # Last, after every writer above. A `{{token}}` surviving into a .tsx is a
+    # JSX expression, so it compiles, passes both gates, and dies at prerender
+    # — the guard reads the finished app and says so. It repairs nothing: a
+    # finding here means a substitution pass did not run, and the pass is what
+    # needs fixing.
+    #
+    # It existed already, validated over 8,612 emitted files, and its only
+    # caller was the legacy router — so the pipeline that builds today was the
+    # one flying blind. The report is written even when clean, so "no findings"
+    # and "never ran" stay distinguishable.
+    from services.residual_placeholder_guard import (
+        apply_residual_placeholder_guard,
+    )
+
+    placeholders = apply_residual_placeholder_guard(out)
+
     return {
         "scaffold": len(scaffold),
         "vendored": vendored,
@@ -329,6 +417,7 @@ def assemble(doc: dict, app_root: str | Path, *,
         "runtimeFiles": len(runtime.get("copied") or []),
         "runtimeErrors": runtime.get("errors") or [],
         "supersededRepairs": sorted(SUPERSEDED_REPAIRS),
+        "residualPlaceholders": placeholders.get("findings") or [],
     }
 
 
@@ -398,3 +487,80 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
     result["deployment"] = svc.doc["deployment"]
     result["dependencies"] = len(svc.doc["dependencies"])
     return result
+
+
+class BuildFailed(RuntimeError):
+    """The assembled application does not compile."""
+
+
+def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Planned pages against pages the application actually serves.
+
+    A RUN THAT PLANS N PAGES AND SHIPS FEWER REPORTS SUCCESS. `page_layouts`
+    completes with per-subject failures, every projection downstream faithfully
+    projects what survived, `next build` compiles it, and the missing routes are
+    discovered by a person clicking on them. Measured on two real builds:
+    53 planned -> 27 composed, and 38 planned -> 23 composed. Both "succeeded".
+
+    The projection is lossless — everything is lost at composition — so the
+    honest place to state the shortfall is against the registry the app is
+    actually served from, not against the Blueprint that intended it.
+
+    Returns the counts and the missing routes rather than raising: whether a
+    shortfall should end a run is the caller's decision, and `_project_preview`
+    records it either way. Reporting it is the part that was missing.
+    """
+    root = Path(app_root)
+    planned = {
+        str(p.get("route")) for p in (doc.get("pages") or [])
+        if isinstance(p, dict) and p.get("route")
+    }
+    registry = root / "src" / "schemas" / "registry.ts"
+    served: set[str] = set()
+    if registry.exists():
+        # The generated registry maps route -> loader, one `"<route>": () =>`
+        # per line. Read rather than re-derived, so this cannot agree with the
+        # Blueprint by construction and disagree with the app.
+        served = set(re.findall(r'"([^"]+)":\s*\(\)\s*=>', registry.read_text("utf-8")))
+
+    missing = sorted(planned - served)
+    return {
+        "planned": len(planned),
+        "served": len(served & planned),
+        "missing": missing,
+        "status": "complete" if not missing else "short",
+    }
+
+
+def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
+    """Install and build the assembled app; raise if it does not compile.
+
+    The `preview` node assembled a tree and reported success without ever
+    compiling it, so "an application was generated" meant "files were written".
+    Two build-breaking faults survived every run that way: the scaffold's own
+    user table was deleted by the projection guard, and the data engine's
+    catch-all imported a module no projection wrote. Both would have surfaced
+    the first time anything ran `next build`.
+
+    Slow — install and build are minutes, not seconds — and that is the cost of
+    the claim. A generated app that has not been compiled has not been checked.
+    """
+    import subprocess
+
+    root = Path(app_root)
+    steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
+             ("build", ["npm", "run", "build"]))
+    out: dict[str, Any] = {}
+    for name, cmd in steps:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              timeout=timeout)
+        out[name] = proc.returncode
+        if proc.returncode != 0:
+            # The tail carries the compiler's own message; the head is npm
+            # noise. Keep enough to name the module that could not resolve.
+            detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            raise BuildFailed(
+                f"npm {name} failed ({proc.returncode}):\n"
+                + "\n".join(detail[-25:])
+            )
+    return out

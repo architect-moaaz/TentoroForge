@@ -20,9 +20,11 @@ carries an invented ``updateDataModel``, and importing it would produce pages
 full of convincing fiction that never touch Postgres.
 """
 
+import json
+
 import pytest
 
-from services.a2ui_to_forge import translate
+from services.a2ui_to_forge import dangling_bindings, translate
 
 REG = {
     "entities": {
@@ -804,3 +806,554 @@ def test_a_resolved_binding_emits_no_question():
     r = translate(payload(_root([kpi("k", "Total Tasks", "/kpis/total")]),
                           {"kpis": {"total": 1}, "tasks": {"rows": []}}), REG)
     assert not [q for q in r.get("questions") or [] if q["component"] == "k"]
+
+
+def test_style_is_lifted_out_of_props():
+    """NodeV2 puts `style` beside `type`, `id` and `bind` — not in props.
+    A2UI emits it inside props, its own catalog accepts that, and ours
+    rejected the same tree:
+
+      InvalidPatternTemplate: root.children[0].props.(root):
+      {'style': {'maxWidth': ...}} is not valid under any of the schemas
+
+    Both pages of a live run were lost to it. Lifted here rather than
+    widening NodeV2 to take both placements: two spellings of one thing in
+    the Blueprint is the drift this binder exists to close.
+    """
+    surface = payload([
+        {"id": "root", "component": "Stack", "style": {"maxWidth": "1200px"},
+         "children": [{"id": "t", "component": "Text", "content": "hi",
+                       "style": {"padding": "8px"}}]},
+    ])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001",
+                    kind="entity_list")
+    root = out["schema"]["root"]
+    assert root["style"] == {"maxWidth": "1200px"}
+    assert "style" not in (root.get("props") or {})
+
+
+def test_a_node_without_a_style_gains_no_empty_one():
+    surface = payload([{"id": "root", "component": "Stack", "children": []}])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001",
+                    kind="entity_list")
+    assert "style" not in out["schema"]["root"]
+
+
+def test_no_node_anywhere_keeps_style_in_props():
+    """c051f6f lifted `style` in the general builder and missed the field
+    builder, so a form field still arrived with style inside props and the
+    identical rejection recurred on the next run. Walking the whole tree is
+    what a per-builder test could not say."""
+    surface = payload([
+        {"id": "root", "component": "Stack", "style": {"maxWidth": "680px"},
+         "children": ["form", "txt"]},
+        {"id": "form", "component": "Form", "style": {"gap": "12px"},
+         "children": ["field"]},
+        {"id": "field", "component": "Input", "label": "Name",
+         "field": "name", "style": {"width": "100%"}},
+        {"id": "txt", "component": "Text", "content": "hi",
+         "style": {"padding": "8px"}},
+    ])
+    out = translate(surface, REG, route="/x", page_id="PAGE-001", kind="form")
+
+    offenders = []
+
+    def walk(n):
+        if not isinstance(n, dict):
+            return
+        if "style" in (n.get("props") or {}):
+            offenders.append(n.get("type"))
+        for kid in n.get("children") or []:
+            walk(kid)
+
+    walk(out["schema"]["root"])
+    assert offenders == [], f"style left in props on: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# A workflow reference is nested as often as it is top-level.
+# ---------------------------------------------------------------------------
+
+def test_a_nested_invented_workflow_is_cleared():
+    """A composed /plants shipped `Table.rowActions[0].workflow =
+    "markPlantWatered"` — an id no workflow has. It reached the browser and
+    answered "Workflow not found" on click. Six sibling bindings on the same
+    page were correct FLOW ids; the check that exists to catch exactly this
+    only looked at the component's own `workflow` prop."""
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"rowActions": [{"label": "Mark", "workflow": "markPlantWatered"}]}
+    found = _dangling_workflows(props, {"FLOW-001"})
+
+    assert found == [("props.rowActions[0].workflow", "markPlantWatered")]
+    # Cleared, not left to fail on click: a binding that resolves to nothing
+    # renders as a working control.
+    assert "workflow" not in props["rowActions"][0]
+    assert props["rowActions"][0]["label"] == "Mark"
+
+
+def test_a_real_workflow_survives_at_any_depth():
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"workflow": "FLOW-001",
+             "emptyAction": {"workflow": "FLOW-002"},
+             "rowActions": [{"workflow": "FLOW-003"}]}
+    assert _dangling_workflows(props, {"FLOW-001", "FLOW-002", "FLOW-003"}) == []
+    assert props["emptyAction"]["workflow"] == "FLOW-002"
+    assert props["rowActions"][0]["workflow"] == "FLOW-003"
+
+
+def test_nothing_is_cleared_when_no_workflows_are_known():
+    """An empty registry means "we cannot tell", not "none are valid" —
+    clearing on no information would strip every binding in the app."""
+    from services.a2ui_to_forge import _dangling_workflows
+
+    props = {"workflow": "FLOW-001"}
+    # The caller guards on `known_ids` being non-empty; this pins the reason.
+    assert _dangling_workflows(props, {"FLOW-001"}) == []
+
+
+def test_a_row_relative_pointer_on_an_enum_prop_is_dropped():
+    """`Badge.variant` takes one of five fixed values. A2UI wrote
+    `{"path": "statusVariant"}` — row-relative — which the field-name rule
+    turned into the literal "statusVariant", and the page failed validation and
+    did not ship. Dropped, so the default applies and the badge renders neutral:
+    losing the colour is the small half, losing the page was the large one."""
+    from services.a2ui_to_forge import _enum_members
+
+    members = _enum_members("Badge", "variant")
+    assert members and "statusVariant" not in members
+
+
+def test_the_field_name_rule_still_applies_where_it_belongs():
+    """`Kanban.cardTitle` names the field to read, and dropping it left the
+    cards with no title. It is not an enum, so nothing changes for it."""
+    from services.a2ui_to_forge import _enum_members
+
+    assert _enum_members("Kanban", "cardTitle") == set()
+
+
+def _row_with(**badge_props):
+    """A Badge nested one level under a Repeat's template, not the template."""
+    return [{"id": "root", "component": "Stack", "children": ["list"]},
+            {"id": "list", "component": "Stack",
+             "children": {"componentId": "row", "path": "/tasks/rows"}},
+            {"id": "row", "component": "Stack", "children": ["badge"]},
+            {"id": "badge", "component": "Badge", **badge_props}]
+
+
+def test_a_descendant_of_a_repeat_template_binds_to_the_row_too():
+    """`expand_records` rewrote the template's OWN props to `{{item.…}}` and
+    its children's were built with no idea they were inside a repeat — so the
+    same pointer that followed the row on the template became a bare field name
+    one level down."""
+    r = translate(payload(_row_with(content={"path": "title"}),
+                          {"tasks": {"rows": [{"title": "x"}]}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "{{item.title}}"
+
+
+def test_an_enum_prop_inside_a_repeat_follows_the_row():
+    """The colour the badge lost. `Repeat` binds each element under its `as`
+    name, so the renderer can read `statusVariant` per row — and the A2UI
+    catalog admits a binding beside the members, so this validates."""
+    r = translate(payload(_row_with(variant={"path": "statusVariant"}),
+                          {"tasks": {"rows": [{"statusVariant": "success"}]}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["variant"] == "{{item.statusVariant}}"
+    assert not r["warnings"], "nothing was lost, so nothing to warn about"
+
+
+def test_the_binding_is_recorded_as_an_assumption_not_a_silent_rewrite():
+    r = translate(payload(_row_with(variant={"path": "statusVariant"}),
+                          {"tasks": {"rows": [{"statusVariant": "success"}]}}), REG)
+    assert any("follows the row" in a for a in r["assumptions"])
+
+
+def test_an_enum_prop_outside_a_repeat_is_still_dropped():
+    """Nothing binds the row there, so `{{item.…}}` would resolve to nothing.
+    The drop and its warning stand."""
+    comps = [{"id": "root", "component": "Stack", "children": ["x"]},
+             {"id": "x", "component": "Badge",
+              "variant": {"path": "statusVariant"}}]
+    r = translate(payload(comps, {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"].get("variant") is None
+    assert any("dropped" in w for w in r["warnings"])
+
+
+def test_an_absolute_pointer_is_not_treated_as_row_relative():
+    """A leading slash means the model root, and it means that inside a repeat
+    too — reading it off the row would bind to the wrong thing."""
+    r = translate(payload(_row_with(content={"path": "/tasks/label"}),
+                          {"tasks": {"rows": [{"title": "x"}], "label": "All"}}),
+                  REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "All"
+
+
+def test_enum_members_come_from_the_contracts_not_a_list_here():
+    """A second list would drift from the Zod components the way the A2UI
+    catalog did."""
+    from services.a2ui_to_forge import _enum_members
+
+    assert _enum_members("Badge", "variant") == {
+        "neutral", "primary", "success", "danger", "warning"}
+    assert _enum_members("NoSuchComponent", "variant") == set()
+
+
+# ──────────────────────────────── a prop no component accepts
+#
+# It did not fail here. It rode into `props` and met a `.strict()` field
+# downstream, where the whole page failed to parse and the message named a
+# schema path rather than the component that carried it.
+
+def _badge(**props):
+    return [{"id": "root", "component": "Stack", "children": ["x"]},
+            {"id": "x", "component": "Badge", **props}]
+
+
+def _warned(r, prop):
+    return any(f".{prop}:" in w for w in r["warnings"])
+
+
+def test_a_prop_no_component_accepts_is_named():
+    r = translate(payload(_badge(content="Live", sparkle="yes"),
+                          {"tasks": {"rows": []}}), REG)
+    assert _warned(r, "sparkle")
+    assert "Badge" in " ".join(r["warnings"])
+
+
+def test_it_is_reported_not_dropped():
+    """The catalog should be authoritative, but "should be" is the wrong
+    footing on which to delete a value a composer meant: a thin catalog entry
+    would silently strip props the renderer does accept."""
+    r = translate(payload(_badge(content="Live", sparkle="yes"),
+                          {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["sparkle"] == "yes"
+
+
+def test_an_alias_still_saves_the_page():
+    """The floor. `Badge.label` is renamed to `content` rather than passed
+    through to a `.strict()` node that would reject the whole page.
+
+    A rejection costs A2UI a retry out of three, shared with whatever else is
+    wrong with that surface, and a page that cannot self-correct is lost. A
+    prop name is not worth a page.
+    """
+    r = translate(payload(_badge(label="Live"), {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Badge")[0]["props"]["content"] == "Live"
+
+
+def test_the_rename_is_said_out_loud():
+    """What was wrong with the alias table was never the rename — it was the
+    silence. `translate` reported no warning and nothing dropped, so the
+    composer emitted `text` forever while the table quietly fixed it, and a
+    repair nobody can see is a repair nobody removes.
+
+    The catalog now offers `content` and A2UI's own validator rejects `label`,
+    so a rename reaching here means the composer was told and wrote something
+    else anyway. That is a catalog defect worth seeing.
+    """
+    r = translate(payload(_badge(label="Live"), {"tasks": {"rows": []}}), REG)
+    assert _warned(r, "label"), "the rename happened silently"
+    said = next(w for w in r["warnings"] if ".label:" in w)
+    assert "content" in said, "the warning does not name the right prop"
+
+
+def test_a_correct_prop_is_not_warned_about():
+    """The warning must mean something. A composer writing `content` — which
+    is what the catalog tells it to write — must produce no noise."""
+    r = translate(payload(_badge(content="Live"), {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "content")
+    assert nodes(r, "Badge")[0]["props"]["content"] == "Live"
+
+
+def test_a_node_sibling_is_not_an_unknown_prop():
+    """`style` sits beside `props` in NodeV2. A2UI emits it among the props and
+    the binder lifts it out — not unknown, early."""
+    r = translate(payload(_badge(content="Live", style={"maxWidth": "8rem"}),
+                          {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "style")
+
+
+def test_a_component_the_catalog_does_not_know_reports_nothing():
+    """Every prop would be "unknown" and the message would say nothing. That
+    the component itself is unrecognised is a different problem."""
+    comps = [{"id": "root", "component": "Stack", "children": ["x"]},
+             {"id": "x", "component": "NoSuchComponent", "whatever": 1}]
+    r = translate(payload(comps, {"tasks": {"rows": []}}), REG)
+    assert not _warned(r, "whatever")
+
+
+def test_a_real_composition_is_not_flooded():
+    """A warning on every prop of every node is a warning nobody reads."""
+    board = {"id": "b", "component": "Kanban", "cardTitle": {"path": "title"},
+             "data": {"path": "/tasks/rows"}}
+    r = translate(payload(_root([board]), {"tasks": {"rows": []}}), REG)
+    assert not r["warnings"]
+
+
+# --- row-relative bindings are not page bindings ---------------------------
+
+def test_a_row_relative_binding_is_not_dangling():
+    """`{{id}}` inside a Table means this row's id, not a missing source.
+
+    /tickets was refused over `rowHref: "/tickets/{{id}}"` on a Table whose
+    `rows` was bound to a declared source. Read as a page-level binding it
+    looked dangling; the renderer resolves it against the row.
+    """
+    schema = {
+        "dataSources": [{"name": "tickets"}],
+        "root": {"type": "Table",
+                 "props": {"rows": "{{tickets}}", "rowHref": "/tickets/{{id}}"}},
+    }
+    assert dangling_bindings(schema) == []
+
+
+def test_a_phantom_source_outside_a_row_is_still_dangling():
+    """The case the rule exists for. A composed /plants shipped four tiles
+    reading invented sources against one declared `plants`, and rendered four
+    blanks."""
+    schema = {
+        "dataSources": [{"name": "plants"}],
+        "root": {"type": "Stack", "children": [
+            {"type": "MetricTile", "props": {"value": "{{overdue.value}}"}}]},
+    }
+    assert dangling_bindings(schema) == ["overdue"]
+
+
+def test_a_row_over_an_undeclared_source_opens_no_scope():
+    """Otherwise the exemption would launder a phantom: bind rows to something
+    that does not exist and everything under it stops being checked."""
+    schema = {
+        "dataSources": [{"name": "plants"}],
+        "root": {"type": "Table",
+                 "props": {"rows": "{{ghosts}}", "rowHref": "/x/{{id}}"}},
+    }
+    assert dangling_bindings(schema) == ["ghosts", "id"]
+
+
+# --- a record page binds its record, it does not copy a sample -------------
+
+def _record_surface():
+    """A detail surface: fields pointing into one record object."""
+    return {"messages": [
+        {"updateDataModel": {"path": "/", "value": {
+            "ticket": {"id": "TCK-1042", "subject": "Cannot reset password"},
+        }}},
+        {"updateComponents": {"components": [
+            {"id": "root", "component": "Stack", "children": ["subj"]},
+            {"id": "subj", "component": "Text",
+             "content": {"path": "/ticket/subject"}},
+        ]}},
+    ]}
+
+
+def test_a_record_page_binds_its_fields_rather_than_baking_the_sample():
+    """/tickets/[id] shipped the sample ticket's text and rendered it for
+    every ticket. The pointer names where the value lives; that has to
+    survive to render time."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_record_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    blob = json.dumps(out["schema"])
+    assert "Cannot reset password" not in blob, "sample copy reached the page"
+    assert "{{" in blob, "nothing was bound"
+    ops = {s["name"]: s.get("op") for s in out["schema"].get("dataSources") or []}
+    assert "get" in ops.values(), f"no record source: {ops}"
+
+
+def test_a_collection_page_still_reads_copy_from_the_sample():
+    """The branch exists for headings and captions, and those are still read
+    off the sample — only a record page's own fields change meaning."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_record_surface(), reg, route="/tickets",
+                    page_id="P", kind="entity_list")
+    ops = {s.get("op") for s in out["schema"].get("dataSources") or []}
+    assert "get" not in ops, f"a list page minted a record source: {ops}"
+
+
+# --- args carry a binding the renderer can resolve -------------------------
+
+def _dispatch_surface():
+    return {"messages": [
+        {"updateDataModel": {"path": "/", "value": {
+            "ticket": {"id": "TCK-1042", "subject": "Cannot reset password"},
+        }}},
+        {"updateComponents": {"components": [
+            {"id": "root", "component": "Stack", "children": ["btn"]},
+            {"id": "btn", "component": "Button", "label": "Close ticket",
+             "workflow": "FLOW-002",
+             "args": {"ticketId": {"path": "/ticket/id"}}},
+        ]}},
+    ]}
+
+
+def test_args_bind_rather_than_shipping_a_pointer():
+    """`fallbackDispatch` posts args verbatim and `interpolateDeep` resolves
+    `{{...}}` strings only, so a raw {"path": ...} object reached the workflow
+    where an id belonged — the null-column failure args exists to prevent."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_dispatch_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    btn = json.dumps(out["schema"])
+    assert '"path"' not in btn, "a raw pointer reached the schema"
+    args = None
+    def walk(n):
+        nonlocal args
+        if isinstance(n, list):
+            for i in n: walk(i)
+        elif isinstance(n, dict):
+            if (n.get("props") or {}).get("workflow"):
+                args = n["props"].get("args")
+            for v in n.values():
+                if isinstance(v, (list, dict)): walk(v)
+    walk(out["schema"].get("root"))
+    assert args, "the dispatching button carries no args"
+    assert str(args.get("ticketId", "")).startswith("{{"), args
+    # and it must name a source the page actually declares
+    names = {s["name"] for s in out["schema"].get("dataSources") or []}
+    assert str(args["ticketId"]).strip("{}").split(".")[0] in names, (
+        f"{args} names no declared source among {names}")
+
+
+def test_args_never_carry_a_sample_value():
+    """Reading the pointer off the sample would send every click the same id."""
+    reg = {"entities": {"Ticket": {"table": "tickets", "columns": [
+        {"name": "id"}, {"name": "subject"}]}}}
+    out = translate(_dispatch_surface(), reg, route="/tickets/[id]",
+                    page_id="P", kind="record_workspace")
+    assert "TCK-1042" not in json.dumps(out["schema"])
+
+
+# --- the page contract answers what the pointer could not ------------------
+
+_ROUTE_NAMED = {"messages": [
+    {"updateDataModel": {"path": "/", "value": {"team": [{"id": "1"}]}}},
+    {"updateComponents": {"components": [
+        {"id": "root", "component": "Stack", "children": ["t"]},
+        {"id": "t", "component": "Table", "rows": {"path": "/team"},
+         "columns": [{"key": "name", "label": "Name"}]},
+    ]}},
+]}
+
+_REG = {"entities": {"TeamMember": {"slug": "team_members",
+                                    "columns": [{"name": "id"},
+                                                {"name": "name"}]}}}
+
+
+def test_a_route_named_pointer_resolves_through_the_page_contract():
+    """A2UI names data after the screen and the binder resolves by entity, so
+    `/team` on a page whose entity is TeamMember matched nothing and the page
+    ended with no sources at all — then failed the floor for bindings with
+    nothing behind them. `primaryEntity` is what the page says it is about."""
+    reg = {**_REG, "pageEntity": {"PAGE-004": "TeamMember"}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    names = [s["name"] for s in out["schema"].get("dataSources") or []]
+    assert names, "the page still bound nothing"
+    assert any("TeamMember" in a for a in out.get("assumptions") or []), \
+        "the inference was not recorded"
+
+
+def test_no_declaration_still_refuses_to_guess():
+    reg = {**_REG, "pageEntity": {}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    assert not (out["schema"].get("dataSources") or [])
+    assert any("could not resolve" in w for w in out.get("warnings") or [])
+
+
+def test_a_declaration_naming_no_real_entity_is_ignored():
+    """Otherwise the fallback would launder a bad contract into a binding."""
+    reg = {**_REG, "pageEntity": {"PAGE-004": "Nonexistent"}}
+    out = translate(_ROUTE_NAMED, reg, route="/team", page_id="PAGE-004",
+                    kind="entity_list")
+    assert not (out["schema"].get("dataSources") or [])
+    assert any("could not resolve" in w for w in out.get("warnings") or [])
+
+
+def test_a_literal_binding_naming_a_real_table_gets_a_source():
+    """A2UI expresses a data reference two ways: as a pointer this binder walks
+    and mints a source for, or as a literal `{{name}}` written into a prop and
+    passed through untouched. Only the first declared a source, so a
+    composition that named the right table the second way was refused for
+    binding data the page "will never fetch".
+
+    Measured on a legislative platform: 14 of 50 routes went unbuilt and every
+    name in the rejections — audit_logs, blocs, votes, attendance_records — is
+    a real table in that application's own schema. `/` was among them, so the
+    app opened on a 404.
+    """
+    from services.a2ui_to_forge import _adopt_table_bindings, dangling_bindings
+
+    class _Binder:
+        def __init__(self):
+            self.sources: list[dict] = []
+
+    registry = {"entities": {"Bloc": {"slug": "blocs", "columns": []},
+                             "Vote": {"slug": "votes", "columns": []}}}
+    schema = {
+        "dataSources": [],
+        "root": {"type": "Stack", "children": [
+            {"type": "Table", "props": {"rows": "{{blocs}}"}},
+            {"type": "MetricTile", "props": {"value": "{{votes.total}}"}},
+        ]},
+    }
+    binder = _Binder()
+    # `dangling_bindings` already reports the head of a dotted path.
+    assert sorted(dangling_bindings(schema)) == ["blocs", "votes"]
+
+    _adopt_table_bindings(schema, binder, registry)
+
+    names = {s["name"] for s in schema["dataSources"]}
+    assert names == {"blocs", "votes"}, names
+    # A dotted binding asks for the head: {{votes.total}} needs `votes`.
+    assert {s["entity"] for s in schema["dataSources"]} == {"Bloc", "Vote"}
+    assert dangling_bindings(schema) == []
+
+
+def test_an_invented_name_still_dangles():
+    """This completes the binder; it does not loosen the check. A name that
+    matches no entity is still a page binding data nobody will fetch."""
+    from services.a2ui_to_forge import _adopt_table_bindings, dangling_bindings
+
+    class _Binder:
+        def __init__(self):
+            self.sources: list[dict] = []
+
+    schema = {"dataSources": [],
+              "root": {"type": "Table", "props": {"rows": "{{sales_forecast}}"}}}
+    _adopt_table_bindings(schema, _Binder(), {"entities": {"Bloc": {"slug": "blocs"}}})
+    assert schema["dataSources"] == []
+    assert dangling_bindings(schema) == ["sales_forecast"]
+
+
+def test_a_missing_required_prop_is_defaulted_and_said_out_loud():
+    """`MetricTile.format` decides how the number reads. The node is strict
+    about having one, and without it the tile rendered blank — schema-valid to
+    A2UI at the time, rejected by Forge's node, silently empty on the page.
+
+    The default is kept as a floor: a rejection costs A2UI a retry out of three
+    and a page is worth more than a value nobody had to guess at. But injecting
+    a value the composer did not choose is a decision, and one made silently is
+    one nobody can review — "number" and "currency" read very differently and
+    this module has no idea which it is looking at.
+    """
+    tile = {"id": "m", "component": "MetricTile", "label": "Total",
+            "value": {"path": "/kpis/total"}}
+    r = translate(payload(_root([tile]), {"kpis": {"total": 4},
+                                          "tasks": {"rows": []}}), REG)
+    assert nodes(r, "MetricTile")[0]["props"]["format"] == "number"
+    assert _warned(r, "format"), "the default was injected silently"
+
+
+def test_a_format_the_composer_chose_is_left_alone_and_unwarned():
+    """The warning has to mean something: a composer that made the choice
+    itself must produce no noise, and must keep its choice."""
+    tile = {"id": "m", "component": "MetricTile", "label": "Revenue",
+            "format": "currency", "value": {"path": "/kpis/total"}}
+    r = translate(payload(_root([tile]), {"kpis": {"total": 4},
+                                          "tasks": {"rows": []}}), REG)
+    assert nodes(r, "MetricTile")[0]["props"]["format"] == "currency"
+    assert not _warned(r, "format")

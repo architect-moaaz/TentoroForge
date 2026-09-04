@@ -300,6 +300,17 @@ export function createRegistry() {
         passthrough.className = inputProps.className;
       }
       delete inputProps.className;
+      // `style` is the other half of that fidelity. Figma expresses what
+      // Tailwind cannot — exact gradients, transforms, clip paths — as an
+      // inline style object, and stripping it left 81 of 626 nodes on a real
+      // dashboard rendering in the wrong place. React takes `style` as an
+      // object, which is what the schema carries, so it forwards untouched;
+      // a string would be a mistake to pass on and is left alone.
+      if (inputProps.style && typeof inputProps.style === "object" &&
+          !Array.isArray(inputProps.style)) {
+        passthrough.style = inputProps.style;
+      }
+      delete inputProps.style;
       // `data-*` attributes get the same treatment — schemas mark nodes for
       // app-level CSS/JS hooks (e.g. data-dashboard-toolbar) and a strict
       // schema must never strip them.

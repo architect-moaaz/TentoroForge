@@ -184,7 +184,24 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "runtime"
 
 
-def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
+    """Clear ``target`` but keep anything under a preserved path.
+
+    Ownership of a shared directory has to be decided in one place. Handing the
+    preserved list in — rather than teaching this module which paths are
+    generated — keeps that decision with the caller that projects them.
+    """
+    for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
+        rel = str(child.relative_to(root))
+        if any(rel == p or rel.startswith(p + "/") for p in preserve):
+            continue
+        if child.is_file() or child.is_symlink():
+            child.unlink()
+        elif not any(child.iterdir()):
+            child.rmdir()
+
+
+def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | None = None, project_id: str | None = None, preserve: tuple[str, ...] = ()) -> dict[str, Any]:
     """Copy runtime files into a generated app's src/lib/ directory.
 
     Args:
@@ -223,9 +240,16 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             continue
 
         try:
+            # `preserve` names paths a projection owns. This used to rmtree the
+            # whole directory, which installed the workflow engine correctly and
+            # deleted the 13 workflow definitions written moments earlier —
+            # `src/lib/workflows/definitions` is in PROJECTED_PATHS, but that
+            # list only governs copy_scaffold, and this is a second copier with
+            # its own idea of ownership. Two copiers, one directory, and the
+            # generated half lost every run.
             if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+                _remove_except(dst, output_path, preserve)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
             # Track files
             for f in dst.rglob("*.ts"):
                 copied.append(str(f.relative_to(output_path)))
@@ -1879,11 +1903,24 @@ say "${GREEN}🚀 Starting generated app...${NC}"
 
 # Derive the DB name from .env.local's DATABASE_URL (segment after the last '/'),
 # so it matches the database docker-compose creates. Default: app.
-DB_NAME="app"
-if [ -f .env.local ]; then
-  _u=$(grep -E '^DATABASE_URL=' .env.local 2>/dev/null | head -1 | sed -E 's|.*/([^/?]+).*|\\1|' || true)
-  [ -n "$_u" ] && DB_NAME="$_u"
-fi
+# Every generated app used DB_NAME="app" and no COMPOSE_PROJECT_NAME, so the
+# second app to run reused the FIRST one's container and database. Picking a
+# free PORT isolates nothing when the container is shared: drizzle-kit found
+# another app's tables and asked, interactively, whether `articles` was a
+# rename of `bikes` — hanging the seed, and one keystroke away from renaming
+# another application's table.
+#
+# Derived from the project directory (output/<project-id>/app), so it needs no
+# substitution plumbing. Postgres will not take a leading digit or a dash.
+# The directory is the project's short_id — eight lowercase alphanumerics,
+# which is already a valid Postgres identifier and a valid compose project
+# name. `printf` rather than a bare command substitution into `tr`: `tr -c`
+# treats the trailing newline as "not alphanumeric" too, which is how the
+# first version of this produced `app_6vaj13oh_`. The sanitise stays for the
+# uuid-named directories that predate short_id paths.
+DB_NAME="app_$(printf '%s' "$(basename "$(dirname "$PWD")")" | tr -c 'a-z0-9' '_')"
+# Deliberately not read back from .env.local: assembly writes `/app` there for
+# every application, which is the value that put two apps in one database.
 
 # Pick a free host port for Postgres — every generated app otherwise hardcodes
 # 5432 and collides the moment a second app is already running.
@@ -1898,6 +1935,10 @@ if ! is_free "$DB_PORT"; then
   done
 fi
 export DB_PORT
+# Names the compose project, and so the container: without it Docker derives
+# it from the directory, which is `app` for every generated application.
+export COMPOSE_PROJECT_NAME="$DB_NAME"
+export PROJECT_DB_NAME="$DB_NAME"
 export DATABASE_URL="postgresql://postgres:postgres@localhost:${DB_PORT}/${DB_NAME}"
 say "${YELLOW}🔌 Database port: ${DB_PORT} (DATABASE_URL exported)${NC}"
 
@@ -2206,6 +2247,42 @@ def _resolve_app_name(output_path: Path, app_name: str | None, domain: str | Non
     return name
 
 
+#: Scripts written right-to-left. `dir` is derived from the language rather
+#: than declared beside it, because two fields that must agree eventually will
+#: not — and nobody writing a brief thinks to state a direction.
+_RTL_LANGUAGES = frozenset({
+    "ar", "arc", "ckb", "dv", "fa", "ha", "he", "khw", "ks", "ps", "sd",
+    "ug", "ur", "yi",
+})
+
+
+def _resolve_locale(output_path: Path) -> tuple[str, str]:
+    """`(lang, dir)` for this application, from the Blueprint that describes it.
+
+    §11 lists language beside purpose and personas, and until `product.locale`
+    existed nothing carried it: the scaffold hardcoded `<html lang="en">` with
+    no `dir` at all, so an Arabic-first brief produced an English left-to-right
+    application and said nothing about the difference.
+
+    `rtl_scope_guard` already rewrites the design agent's blanket
+    `direction: rtl` into `[dir="rtl"] …`, and noted that no artifact recorded
+    the locale to key that on. This is that artifact reaching the document.
+    """
+    import json
+
+    for candidate in (output_path.parent / ".forge" / "blueprint" / "current.json",
+                      output_path / ".forge" / "blueprint" / "current.json"):
+        try:
+            doc = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — a missing Blueprint is the legacy path
+            continue
+        tag = str((doc.get("product") or {}).get("locale") or "").strip()
+        if tag:
+            base = tag.replace("_", "-").split("-")[0].lower()
+            return tag, ("rtl" if base in _RTL_LANGUAGES else "ltr")
+    return "en", "ltr"
+
+
 def _substitute_app_name(output_path: Path, app_name: str | None,
                          domain: str | None = None) -> int:
     """Replace the literal __APP_NAME__ placeholder across the generated app's text
@@ -2217,6 +2294,7 @@ def _substitute_app_name(output_path: Path, app_name: str | None,
     # <meta name="description">. Prefer a design-spec tagline, else a clean
     # default built from the app name.
     description = _resolve_app_description(output_path, name, domain)
+    locale, direction = _resolve_locale(output_path)
     changed = 0
     src = output_path / "src"
     if not src.exists():
@@ -2228,8 +2306,12 @@ def _substitute_app_name(output_path: Path, app_name: str | None,
             text = f.read_text(encoding="utf-8")
         except Exception:
             continue
-        if "__APP_NAME__" in text or "__APP_DESCRIPTION__" in text:
-            new_text = text.replace("__APP_NAME__", name).replace("__APP_DESCRIPTION__", description)
+        if ("__APP_NAME__" in text or "__APP_DESCRIPTION__" in text
+                or "__APP_LOCALE__" in text or "__APP_DIR__" in text):
+            new_text = (text.replace("__APP_NAME__", name)
+                            .replace("__APP_DESCRIPTION__", description)
+                            .replace("__APP_LOCALE__", locale)
+                            .replace("__APP_DIR__", direction))
             if new_text != text:
                 f.write_text(new_text, encoding="utf-8")
                 changed += 1

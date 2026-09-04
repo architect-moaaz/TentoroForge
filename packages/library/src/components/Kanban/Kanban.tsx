@@ -232,7 +232,7 @@ export function Kanban(props: KanbanProps) {
                   draggable
                   onDragStart={() => setDragId(card.id)}
                   onDragEnd={() => { setDragId(null); setOverCol(null); }}
-                  className={`group block cursor-grab rounded-md border border-border bg-card p-2.5 text-left shadow-sm transition hover:border-primary/40 hover:shadow active:cursor-grabbing ${
+                  className={`group block cursor-grab rounded-md border border-border bg-card p-2.5 text-start shadow-sm transition hover:border-primary/40 hover:shadow active:cursor-grabbing ${
                     dragId === card.id ? "opacity-50" : ""
                   }`}
                 >

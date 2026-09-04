@@ -23,9 +23,12 @@ against a model's guess.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: What projection still owes, so a green data-layer run is not mistaken for a
 #: runnable app.
@@ -72,6 +75,12 @@ def _var_name(entity: dict) -> str:
     return parts[0] + "".join(p.title() for p in parts[1:])
 
 
+#: Timestamps the application sets for itself. Imported from the planner so
+#: "do not ask a person for this" and "the database must fill this" cannot
+#: disagree about which columns they are.
+from services.blueprint.page_planner import DERIVED_ON_CREATE
+
+
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
     builder = _TYPES.get(str(field.get("type") or "").lower(), _DEFAULT_TYPE)
@@ -85,7 +94,17 @@ def drizzle_column(field: dict) -> tuple[str, str]:
         line += ".notNull()"
     if field.get("unique"):
         line += ".unique()"
-    if field.get("defaultNow"):
+    # A NOT NULL timestamp nobody can supply must default, or the row cannot be
+    # written at all. `created_at` was `.notNull()` with no default, and
+    # `form_fields_for` correctly refuses to ask a person for it — so every
+    # insert this app could make failed with "null value in column created_at
+    # violates not-null constraint", after the workflow had run every node
+    # green. The two rules are one fact seen from both ends: DERIVED_ON_CREATE
+    # says nothing will supply this column, and a column nothing supplies needs
+    # the database to fill it.
+    derived_now = (builder == "timestamp"
+                   and str(field.get("name") or "").lower() in DERIVED_ON_CREATE)
+    if field.get("defaultNow") or derived_now:
         line += ".defaultNow()"
     default = field.get("default")
     if default is not None:
@@ -300,13 +319,65 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "service": [rel],
         })
 
-    barrel = ["// Re-exports every projected entity schema.",
+    # The platform's own tables live in this directory beside the projected
+    # ones and are not Blueprint entities, so nothing here would name them.
+    # drizzle resolves the schema through this barrel: a module no one
+    # re-exports is invisible to it, so `user.ts` was on disk, absent from
+    # every migration, and the generated app had nothing to authenticate
+    # against — login failed with "relation \"user\" does not exist" rather
+    # than a wrong password.
+    # Named, not globbed. Globbing the directory looked right and ran at the
+    # wrong time: the data layer writes this barrel while `user.ts` is still in
+    # the scaffold, and assembly does not copy it in until the preview node,
+    # several levels later. The glob saw the _forge_* tables (written here) and
+    # missed the one it was added for, so the users table was absent from every
+    # migration and login failed with "relation does not exist" — the same
+    # symptom as before the fix, from the opposite cause.
+    from services.blueprint.assembly import SCAFFOLD_OWNED
+
+    platform = sorted(
+        Path(rel).stem for rel in SCAFFOLD_OWNED
+        if rel.startswith("src/db/schema/") and rel.endswith(".ts")
+    )
+    platform += sorted(
+        f.stem for f in root.glob("_forge_*.ts") if f.stem not in platform
+    )
+    barrel = ["// Re-exports every projected entity schema, and the platform",
+              "// tables that share this directory.",
               "// Generated from the Living Blueprint."]
     barrel += [f'export * from "./{_module_name(e)}";' for e in entities]
+    barrel += [f'export * from "./{name}";' for name in platform]
     (root / "index.ts").write_text("\n".join(barrel) + "\n", "utf-8")
     written.append("src/db/schema/index.ts")
 
     return {"files": written, "entities": len(entities), "codeMap": code_map}
+
+
+#: Every derived endpoint is served by one catch-all route, so an API has no
+#: file of its own to be mapped to.
+_DATA_ROUTE = "src/app/api/data/[...path]/route.ts"
+
+
+def api_code_map(doc: dict) -> list[dict]:
+    """A ``codeMap`` entry per declared API, pointing at the route that serves it.
+
+    Nothing recorded APIs at all. Entities, workflows and pages each project to
+    their own file and were mapped; endpoints are derived and served
+    generically, so `project_backend` wrote no file per API and therefore no
+    entry — and absence in `codeMap` is indistinguishable from absent code.
+    `code_intelligence.unimplemented` read six endpoints as unbuilt on an app
+    that serves all six, which is §115's divergence check crying wolf on every
+    application it runs against.
+
+    Many artifacts to one file, which the resolver already expects:
+    `artifacts_for` on this path returns every endpoint, because a file
+    genuinely can implement more than one thing.
+    """
+    return [
+        {"artifact": str(a["id"]), "service": [_DATA_ROUTE]}
+        for a in _live(doc.get("apis"))
+        if a.get("id")
+    ]
 
 
 def apply_data_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
@@ -314,6 +385,10 @@ def apply_data_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
     Blueprint↔Implementation edge has real paths to check."""
     result = project_data_layer(svc.doc, app_root)
     for entry in result["codeMap"]:
+        svc.upsert("codeMap", entry, natural_key=entry["artifact"])
+    # Recorded here because this is the projection that stands up the data
+    # layer the endpoints read; the route itself ships with the scaffold.
+    for entry in api_code_map(svc.doc):
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     svc.save()
     return result
@@ -344,7 +419,13 @@ def project_frontend(doc: dict, app_root: str | Path,
         target.write_text(
             json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
         written.append(rel)
-        code_map.append({"artifact": page_id, "page": page_id, "service": [rel]})
+        # `frontend`, not `service`: §21's own example files a page's
+        # implementation under frontend, and `code_intel.where` is what
+        # answers "where is this page implemented". A page schema is what the
+        # UI engine renders — it is the page's frontend here, the same way a
+        # .tsx file is in a bespoke app. Filed under `service` it reported no
+        # frontend at all, while claiming a service layer it does not have.
+        code_map.append({"artifact": page_id, "frontend": [rel]})
 
     # A page that stopped planning must not leave its last good schema behind:
     # the directory would still hold eighteen files and read as a complete
@@ -451,18 +532,40 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     pages = [p for p in (doc.get("pages") or []) if p.get("status") != "DEPRECATED"]
     roles = {r.get("id"): r for r in (doc.get("roles") or [])}
 
-    entries, auth_routes = [], []
+    # Two lists, because they are two facts. Both keys were written from the
+    # same set, so `/survey/[slug]` was simultaneously reachable without a
+    # session and requiring one — a contradiction the middleware then read.
+    public_routes: list[str] = []
+    gated_routes: list[str] = []
+    entries: list[dict] = []
     guards: dict[str, Any] = {}
+    by_id = {p.get("id"): p for p in pages if p.get("id")}
+    # An app has as many front doors as it has audiences (§108, §112).
+    entry_by_access: dict[str, str] = {}
+
     for page in pages:
         route = page.get("route") or "/"
         slug = slugify_route(route)
+        access = page.get("access") or "authenticated"
+        # A public page renders without the app shell: navigation into a
+        # product the visitor cannot reach is worse than no navigation.
         entries.append({
             "id": slug,
             "route": route,
             "title": page.get("name") or slug,
             "schemaFile": f"src/schemas/{slug}.json",
-            "shell": True,
+            "shell": access != "public",
+            "access": access,
+            "presentation": page.get("presentation") or "page",
+            # By route, because that is what a router follows — resolved from
+            # the page ids the contract carries, so a rename cannot break it.
+            "navigatesTo": sorted({
+                str(by_id[t].get("route")) for t in (page.get("navigatesTo") or [])
+                if t in by_id and by_id[t].get("route")
+            }),
         })
+        if page.get("entry") and access not in entry_by_access:
+            entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
         named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles]
@@ -471,16 +574,29 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Read from the contract, not guessed from the route name. A page
         # called /login in an app with no auth is not an auth route, and a
         # public /pricing is not gated however it is spelled.
-        if (page.get("access") or "authenticated") == "public":
-            auth_routes.append(route)
+        (public_routes if access == "public" else gated_routes).append(route)
 
     # Transitions come from declared navigation, not from guessing which page
     # links to which.
+    # Declared navigation first; a page's own `navigatesTo` fills the rest.
+    # `transitions` shipped as [] on every application ever generated, because
+    # the `navigation` section carries edges nobody authors — so the arrows now
+    # come from the pages, which are authored per page and cannot go stale
+    # against them.
     transitions = []
+    seen: set[tuple[str, str]] = set()
     for edge in (doc.get("navigation") or {}).get("transitions") or []:
         if edge.get("from") and edge.get("to"):
             transitions.append({"from": edge["from"], "to": edge["to"],
                                 "trigger": edge.get("trigger", "")})
+            seen.add((edge["from"], edge["to"]))
+    for page in pages:
+        src = page.get("route")
+        for target in (page.get("navigatesTo") or []):
+            dst = (by_id.get(target) or {}).get("route")
+            if src and dst and (src, dst) not in seen:
+                seen.add((src, dst))
+                transitions.append({"from": src, "to": dst, "trigger": ""})
 
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
@@ -488,14 +604,32 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "version": "1.0",
         "pages": entries,
         # The guards read this as "reachable without a session".
-        "public_routes": sorted(set(auth_routes)),
-        "auth_routes": sorted(set(auth_routes)),
+        "public_routes": sorted(set(public_routes)),
+        "auth_routes": sorted(set(gated_routes)),
         "transitions": transitions,
         "guards": guards,
+        # Where each audience arrives.
+        "entries": entry_by_access,
+        # NAMED FOR WHAT IT IS. Calling this `initialPage` claimed a neutrality
+        # it does not have: it is the GATED entry, chosen because a login
+        # redirect and a "back to the application" link both need one and both
+        # need a concrete URL — a public entry is often a pattern
+        # (`/survey/[slug]`), which is why guessing "the first route" produced
+        # an href Next refuses. For an app that is mostly public that choice is
+        # arguable, so the name should carry the assumption rather than hide it.
+        #
+        # `initialPage` also stays, and stays a page ID, because that is what
+        # the visual editor reads (VisualEditorWorkspace falls back to
+        # `pages[0].id`). Writing a route into it would have handed that reader
+        # something it cannot look up.
+        "gatedEntry": entry_by_access.get("authenticated"),
+        "initialPage": slugify_route(entry_by_access["authenticated"])
+        if entry_by_access.get("authenticated") else None,
     }, indent=2, sort_keys=True) + "\n", "utf-8")
 
     return {"files": ["src/contracts/nav-flow.json"], "pages": len(entries),
-            "guarded": len(guards), "authRoutes": sorted(set(auth_routes))}
+            "guarded": len(guards), "authRoutes": sorted(set(gated_routes)),
+            "transitions": len(transitions), "entries": entry_by_access}
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +655,56 @@ _COLOR_TOKENS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _hsl_triplet(value: str) -> str | None:
+    """`#125E8A` -> `203 78% 30%`, the bare triplet shadcn wraps in `hsl()`.
+
+    The scaffold writes `hsl(var(--primary))`, so a hex under that name yields
+    `hsl(#125E8A)` — invalid, silently dropped, and the component falls back to
+    a default. Emitting hex for the aliases did not lose the cascade; it
+    poisoned it. Blueprint-named roles keep their hex, since nothing wraps
+    those.
+    """
+    v = str(value).strip().lstrip("#")
+    if len(v) == 3:
+        v = "".join(c * 2 for c in v)
+    if len(v) != 6:
+        return None
+    try:
+        r, g, b = (int(v[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return None
+    hi, lo = max(r, g, b), min(r, g, b)
+    light = (hi + lo) / 2
+    if hi == lo:
+        hue = sat = 0.0
+    else:
+        d = hi - lo
+        sat = d / (2 - hi - lo) if light > 0.5 else d / (hi + lo)
+        hue = {r: (g - b) / d + (6 if g < b else 0),
+               g: (b - r) / d + 2, b: (r - g) / d + 4}[hi] * 60
+    return f"{round(hue)} {round(sat * 100)}% {round(light * 100)}%"
+
+
+def _kebab(name: str) -> str:
+    """`mutedForeground` -> `muted-foreground`."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
+
+
+#: Where a component expects a shadcn name the Blueprint does not use, the
+#: nearest declared role stands in. Only aliases — every declared role is
+#: emitted under its own name regardless, so nothing depends on this table
+#: being complete.
+_TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("--foreground", ("foreground", "text", "textPrimary")),
+    ("--primary-foreground", ("primaryForeground", "onPrimary", "background")),
+    ("--muted", ("muted", "primarySubtle", "surfaceMuted")),
+    ("--muted-foreground", ("mutedForeground", "textMuted", "textSecondary")),
+    ("--secondary", ("secondary", "accent")),
+    ("--destructive", ("destructive", "danger")),
+    ("--ring", ("focusRing", "primary")),
+)
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -528,17 +712,70 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     into it: ``globals.css`` is one of the files the app emitter deliberately
     preserves, and a projection that edits preserved files in place would make
     re-projection destructive.
+
+    This wrote four variables from a thirteen-section design system, and every
+    generated app looked unstyled as a result. It read a fixed list of shadcn
+    role names — foreground, mutedForeground, destructive — against a Blueprint
+    that declares its own: primaryHover, dangerSubtle, focusRing, borderStrong,
+    statusAwaitingParts. Four names overlapped; the other seven lookups
+    returned None and were skipped in silence, because a missing CSS variable
+    is not an error. `radius` was read as a string and the Blueprint emits an
+    object, so every corner token was dropped, and typography and spacing were
+    never read at all.
+
+    So it emits what the Blueprint declares, under the Blueprint's own names,
+    and aliases the handful of shadcn names components ask for onto the nearest
+    declared role. A design system that grows a new role now reaches the app
+    without anyone editing a list here.
     """
     design = doc.get("designSystem") or {}
     colors = design.get("colors") or {}
     lines: list[str] = []
-    for token, role in _COLOR_TOKENS:
-        value = colors.get(role)
-        if value:
-            lines.append(f"  {token}: {value};")
+
+    # These four are the names the scaffold wraps in hsl(); the rest are ours
+    # alone and keep their hex.
+    WRAPPED = {"background", "foreground", "primary", "secondary"}
+    for role, value in sorted(colors.items()):
+        if isinstance(value, str) and value:
+            out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
+            lines.append(f"  --{_kebab(role)}: {out_value};")
+    for token, candidates in _TOKEN_ALIASES:
+        if any(line.startswith(f"  {token}:") for line in lines):
+            continue
+        for role in candidates:
+            raw = colors.get(role)
+            if isinstance(raw, str) and raw:
+                triplet = _hsl_triplet(raw)
+                lines.append(f"  {token}: {triplet or raw};")
+                break
+
     radius = design.get("radius")
     if isinstance(radius, str) and radius:
         lines.append(f"  --radius: {radius};")
+    elif isinstance(radius, dict):
+        for key, value in sorted(radius.items()):
+            if isinstance(value, str) and value:
+                lines.append(f"  --radius-{_kebab(key)}: {value};")
+        # Components ask for a bare `--radius`; `md` is the sane middle.
+        for key in ("md", "control", "card"):
+            if isinstance(radius.get(key), str):
+                lines.append(f"  --radius: {radius[key]};")
+                break
+
+    typography = design.get("typography") or {}
+    for key, token in (("fontFamilyBase", "--font-family-base"),
+                       ("fontFamilyNumeric", "--font-family-numeric"),
+                       ("baseSize", "--font-size-base"),
+                       ("lineHeightBase", "--line-height-base")):
+        value = typography.get(key)
+        if isinstance(value, str) and value:
+            lines.append(f"  {token}: {value};")
+
+    spacing = design.get("spacing")
+    if isinstance(spacing, dict):
+        for key, value in sorted(spacing.items()):
+            if isinstance(value, str) and value:
+                lines.append(f"  --space-{_kebab(key)}: {value};")
 
     out = Path(app_root) / "src" / "app"
     out.mkdir(parents=True, exist_ok=True)
@@ -565,9 +802,37 @@ _STEP_NODE_TYPE: dict[str, str] = {
 }
 
 #: Blueprint step type -> the db action a mutating step performs.
+#: The fallback when a step declares no operation. Only a system `action` is
+#: assumed to write, and it writes the ordinary thing.
+#:
+#: `human_task` and `approval` used to default to db_update, so a capture step
+#: — where a person fills a form, before anything is stored — updated every
+#: column of a row, and "Present the ordered queue" did too. A step that writes
+#: says which write it is; one that does not is where somebody acts, and the
+#: action step after it does the storing.
 _STEP_ACTION: dict[str, str] = {
-    "action": "db_insert", "human_task": "db_update", "approval": "db_update",
+    "action": "db_insert",
 }
+
+#: What the Blueprint's `config.operation` means to the workflow engine. The
+#: step type says a person or the system acts; the operation says WHICH act,
+#: and only the operation can tell a read from a write.
+_OPERATION_ACTION: dict[str, str] = {
+    "create": "db_insert",
+    "update": "db_update",
+    "delete": "db_delete",
+    "list": "db_query",
+    "read": "db_query",
+    "query": "db_query",
+}
+
+#: Values in `sets` the engine cannot evaluate. `now()` and CURRENT_DATE are
+#: SQL the Blueprint writes to mean "stamped by the system"; the engine writes
+#: a values map through Drizzle and would store them as the literal text.
+#: Dropped rather than mistranslated — the projected column already carries
+#: `defaultNow()` for exactly these, so the database supplies what the
+#: Blueprint intended.
+_DB_EVALUATED = {"now()", "current_date", "current_timestamp", "current_time"}
 
 
 def _wf_node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
@@ -600,14 +865,92 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
         nodes = [_wf_node("trigger", "trigger", 0, {"type": trigger}, "Start")]
         chain = ["trigger"]
-        for i, step in enumerate(wf.get("steps") or [], start=1):
+        # `start` and `end` are the Blueprint's own boundary markers, and this
+        # function emits a `trigger` node and an `end` node for every workflow
+        # regardless. Passing them through turned each into an action node with
+        # no action — `_STEP_NODE_TYPE` has no entry for either, so both fell to
+        # the "action" default, and `_STEP_ACTION` has none either, so both got
+        # actionType "noop". Every workflow whose first step was `start` failed
+        # on its first node with "Unregistered workflow actionType noop", which
+        # is every workflow this planner writes.
+        steps = [st for st in (wf.get("steps") or [])
+                 if st.get("type") not in ("start", "end")]
+        for i, step in enumerate(steps, start=1):
             step_id = f"s{i}"
             entity = entities.get(step.get("entity")) or {}
+            # THE OPERATION DECIDES, NOT THE STEP TYPE. Mapping on type alone
+            # made every `action` a db_insert, so "Set status Closed" inserted
+            # a second ticket, and "List tickets for the active view" and "Open
+            # the selected ticket" — both reads — inserted too. Three of one
+            # workflow's nodes wrote rows nobody asked for.
+            step_cfg = step.get("config") or {}
+            operation = str(step_cfg.get("operation") or "").strip().lower()
             config: dict[str, Any] = {
-                "actionType": _STEP_ACTION.get(step.get("type"), "noop"),
+                "actionType": (_OPERATION_ACTION.get(operation)
+                               or _STEP_ACTION.get(step.get("type"), "noop")),
             }
             if entity.get("table"):
                 config["table"] = entity["table"]
+                # WHAT TO WRITE, not just where. `db_insert` resolves
+                # `config.values` — a column→expression map — and the node
+                # carried none, so the insert named a table and supplied
+                # nothing: "null value in column \"name\" of relation
+                # \"plants\" violates not-null constraint". The workflow ran
+                # every node and still wrote nothing.
+                #
+                # Referenced bare — `{{name}}`, not `{{input.name}}`.
+                # `triggerWorkflow` passes the posted payload as ctx.variables
+                # itself, so the column name IS the variable name. Same columns
+                # the create form
+                # asks for, by the same rule (`_asked_of_a_person`), so the
+                # two cannot drift into asking for one set and storing another.
+                if config["actionType"] in ("db_insert", "db_update"):
+                    from services.blueprint.page_planner import form_fields_for
+
+                    creating = config["actionType"] == "db_insert"
+                    values = {
+                        f["name"]: f"{{{{{f['name']}}}}}"
+                        for f in form_fields_for(entity, creating=creating)
+                        if f.get("name")
+                    }
+                    # WHAT THE BLUEPRINT SAYS TO WRITE WINS OVER WHAT A FORM
+                    # ASKS FOR. `sets` is where a workflow states the values a
+                    # person never types: FLOW-001 says `status: "Open"` and
+                    # notes "Status and closedAt are never entered by the
+                    # agent". Deriving values from the form alone emitted
+                    # `status: "{{status}}"`, nothing supplied it, and the
+                    # insert failed on a not-null constraint — the design was
+                    # right and the projection overwrote it.
+                    # A MAP, OR NOTHING — never a crash. `config` is declared
+                    # `additionalProperties: {}`, a free-form bag, so `sets`
+                    # was unconstrained and one run emitted all 56 of them as
+                    # lists of prose: ["status = in_triage", "lastActionAt =
+                    # now"]. `.items()` raised AttributeError, the `integration`
+                    # node died, and with it every workflow definition and the
+                    # `testing` node downstream — thirty workflows lost to one
+                    # step's shape.
+                    #
+                    # The contract now types `sets` as column-to-value, which is
+                    # where this is actually fixed. This is the floor under it:
+                    # a shape the projection cannot honour is named in the log
+                    # and skipped, because the form-derived values above are
+                    # still a working insert, and losing the whole application's
+                    # workflows is not a better answer than losing one step's
+                    # overrides.
+                    sets = step_cfg.get("sets")
+                    if sets and not isinstance(sets, dict):
+                        logger.warning(
+                            "[projection] %s/%s: `sets` is %s, expected a "
+                            "column-to-value map — step overrides ignored: %.160s",
+                            wf.get("id"), step_id, type(sets).__name__, sets)
+                        sets = None
+                    for col, val in (sets or {}).items():
+                        if isinstance(val, str) and val.strip().lower() in _DB_EVALUATED:
+                            values.pop(col, None)
+                            continue
+                        values[col] = val
+                    if values:
+                        config["values"] = values
             if step.get("condition"):
                 config["condition"] = step["condition"]
             nodes.append(_wf_node(
@@ -633,8 +976,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             json.dumps(definition, indent=2, sort_keys=True) + "\n", "utf-8")
         rel = f"src/lib/workflows/definitions/{slug}.json"
         written.append(rel)
-        code_map.append({"artifact": wf.get("id"), "workflow": wf.get("id"),
-                         "service": [rel]})
+        code_map.append({"artifact": wf.get("id"), "service": [rel]})
 
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
@@ -644,10 +986,15 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _seed_value(field: dict, entity_name: str, row: int) -> Any:
+    from services.blueprint.page_planner import enum_values
+
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
-    if field.get("values") or field.get("enum"):
-        options = field.get("values") or field.get("enum")
+    # Spread across rows on purpose: with three rows and three states, the
+    # seeded data holds one record in each, which is what lets a page that only
+    # means something once something is submitted be reviewed at all.
+    options = enum_values(field)
+    if options:
         return options[(row - 1) % len(options)]
     if kind in ("int", "integer", "number"):
         return row
@@ -1109,6 +1456,83 @@ def access_map(doc: dict) -> dict[str, list[str]]:
     return out
 
 
+def public_apis(doc: dict) -> list[str]:
+    """The endpoints a public page has to be able to reach.
+
+    A page's access declaration stopped at the page. `/plants` was public and
+    rendered for anyone; `/api/data/plants` and `/api/workflows/FLOW-002/execute`
+    were not, so the table came up empty and adding a plant did nothing — a
+    generated app that looks broken on first open, with no error anywhere,
+    because a 307 to /login is a perfectly successful HTTP exchange.
+
+    Derived per page rather than opened wholesale. `/api/data` as a blanket
+    exclusion would expose every entity in the application because one page is
+    public; what a public page needs is the data behind *its own* bindings and
+    the workflows *it* launches, and the Blueprint states both.
+    """
+    public_pages = {p.get("id") for p in _live(doc.get("pages"))
+                    if (p.get("access") or "authenticated") == "public"}
+    if not public_pages:
+        return []
+
+    entities = {e.get("id"): e for e in
+                ((doc.get("data") or {}).get("entities") or [])}
+    by_name = {e.get("name"): e for e in entities.values()}
+
+    slugs: set[str] = set()
+    layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    for page in _live(doc.get("pages")):
+        if page.get("id") not in public_pages:
+            continue
+        named = [s.get("entity") for s
+                 in (layouts.get(page.get("id"), {}).get("dataSources") or [])]
+        named.append((entities.get((page.get("data") or {})
+                                   .get("primaryEntity")) or {}).get("name"))
+        for name in named:
+            ent = by_name.get(name)
+            if ent:
+                slugs.add(str(ent.get("table") or str(name).lower()))
+
+    out = [f"api/data/{slug}" for slug in sorted(slugs)]
+    out += [f"api/workflows/{w['id']}" for w in sorted(
+        (w for w in _live(doc.get("workflows"))
+         if w.get("id") and public_pages & set(w.get("launchedFrom") or [])),
+        key=lambda w: w["id"])]
+    return out
+
+
+def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/public-resources.ts`` — the entities a public page reads.
+
+    The middleware honours a page's access declaration, so `/plants` rendered
+    for anyone; the data route then asked for a session regardless and answered
+    401 to every fetch that page made. The plant was in the database and the
+    page allowed to show it could not read it.
+
+    Reads only. A public page writes through its workflows, and those routes
+    the middleware already opens — `/api/data` POST/PATCH/DELETE build their
+    context from `session.user` and stay gated.
+    """
+    slugs = sorted(a.split("/", 2)[2] for a in public_apis(doc)
+                   if a.startswith("api/data/"))
+    body = ",\n".join(f'  "{s}"' for s in slugs)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// Entities behind a public page's own bindings. Read access only —",
+        "// writes go through the workflow routes.",
+        "",
+        "export const PUBLIC_RESOURCES: string[] = [",
+        body,
+        "];",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "public-resources.ts").write_text("\n".join(lines), "utf-8")
+    return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
+
+
 def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/middleware.ts`` from what the pages declare.
 
@@ -1126,7 +1550,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # A public route at "/" needs the bare root excluded too.
     root_public = "/" in access["public"]
 
-    excluded = list(_ALWAYS_OPEN) + open_routes
+    # A public page is only public if what it fetches is reachable too.
+    apis = public_apis(doc)
+    excluded = list(_ALWAYS_OPEN) + open_routes + apis
     pattern = "|".join(excluded)
     # A negative lookahead cannot exclude the empty path, so `/` is matched by
     # `.*` no matter what is listed. When the landing route is public, requiring
@@ -1147,6 +1573,8 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   public: {route}')
     for route in access["role_restricted"]:
         lines.append(f'//   by role: {route}')
+    for route in apis:
+        lines.append(f'//   public: /{route}  (reached by a public page)')
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
@@ -1167,6 +1595,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {
         "files": ["src/middleware.ts"],
         "public": access["public"],
+        "publicApis": apis,
         "gated": len(access["authenticated"]) + len(access["role_restricted"]),
     }
 
@@ -1198,20 +1627,47 @@ def landing_route(doc: dict) -> str:
 
 
 def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
-    """Write ``src/app/page.tsx``.
+    """Make sure `/` resolves — inside the shell, not beside it.
 
     Next's `[...slug]` is a *required* catch-all: it matches `/roles` but never
-    `/`. So the root always needs its own route file, and the scaffold shipped
-    one that redirects to a hardcoded `/home`.
+    `/`, so the root needs a page of its own. This used to write
+    ``src/app/page.tsx``, on the stated grounds that "the scaffold shipped one
+    that redirects to a hardcoded /home".
 
-    Two cases, both read from the Blueprint. If a page claims `/`, render its
-    schema exactly as the catch-all would. If none does, redirect to the
-    declared landing route.
+    It does not any more. The scaffold ships
+    ``src/app/(dashboard)/page.tsx``, which renders the `/` schema exactly as
+    the catch-all would — so this was writing a SECOND handler for a route that
+    already had one. Route groups do not affect the URL, so both resolved to
+    `/`, and the one this wrote sat outside `(dashboard)` and therefore outside
+    `(dashboard)/layout.tsx`, which is where the sidebar lives.
+
+    The result: every route in the application rendered with the shell except
+    the one everybody lands on. The content was identical — same schema, same
+    registry key — so it looked like a styling bug rather than a routing one.
+
+    So the root page is owned in one place now, inside the group:
+
+      * a page claims `/`  — the scaffold's file already does the right thing;
+        leave it alone.
+      * nothing claims `/` — overwrite it with a redirect to the declared
+        landing route, still inside the group.
+
+    Either way any ``src/app/page.tsx`` a previous build left behind is
+    removed, because while it exists it shadows the in-group page and the
+    sidebar goes missing again.
     """
     root_page = next((p for p in _live(doc.get("pages"))
                       if (p.get("route") or "") == "/"), None)
-    out = Path(app_root) / "src" / "app"
+    app = Path(app_root) / "src" / "app"
+    out = app / "(dashboard)"
     out.mkdir(parents=True, exist_ok=True)
+
+    # A root page from a previous build shadows the in-group one. Removed
+    # whichever branch runs — leaving it is what loses the sidebar.
+    stale = app / "page.tsx"
+    removed = stale.is_file()
+    if removed:
+        stale.unlink()
 
     if root_page:
         body = (
@@ -1244,6 +1700,55 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
         )
         claimed = None
 
-    (out / "page.tsx").write_text(body, "utf-8")
-    return {"files": ["src/app/page.tsx"], "claimedBy": claimed,
+    # Only the redirect is written. When a page claims `/` the scaffold's
+    # in-group file already renders it, and rewriting it with an identical
+    # body would be this projection claiming ownership of something it does
+    # not need to own.
+    written: list[str] = []
+    if not root_page:
+        (out / "page.tsx").write_text(body, "utf-8")
+        written.append("src/app/(dashboard)/page.tsx")
+    return {"files": written, "claimedBy": claimed,
+            "removedStaleRoot": removed,
             "redirectsTo": None if root_page else landing_route(doc)}
+
+
+def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/append-only-entities.ts`` — imported by the data engine.
+
+    The catch-all imports this to reject PUT/DELETE on a ledger with a 405. The
+    scaffold ships the route but not the module, so every generated app failed
+    to compile on `Can't resolve '@/lib/append-only-entities'`. Nothing caught
+    it because nothing had ever run `next build` on a generated app.
+
+    The Blueprint has no append-only declaration yet, so the set is empty and
+    the file exists — which is what the reference app ships too. When entities
+    gain the flag, this reads it; until then it is honest about knowing of no
+    ledgers rather than guessing at which tables look like one.
+    """
+    names = sorted({
+        str(n) for entity in (doc.get("data") or {}).get("entities") or []
+        if entity.get("appendOnly")
+        for n in (entity.get("name"), entity.get("table"), entity.get("id"))
+        if n
+    })
+    names += [n.lower() for n in names if n.lower() not in names]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "append-only-entities.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// Every entity listed here is a ledger: rows INSERTed only, never\n"
+        "// UPDATEd or DELETEd. The Data Engine catch-all imports this Set and\n"
+        '// rejects PUT/DELETE with a 405 { error: { code: "LEDGER_IMMUTABLE" } }.\n\n'
+        "export const APPEND_ONLY_ENTITIES: ReadonlySet<string> = new Set([\n"
+        + "".join(f'  "{n}",\n' for n in sorted(set(names)))
+        + "]);\n\n"
+        "export function isAppendOnly(entity: string): boolean {\n"
+        "  if (!entity) return false;\n"
+        "  return APPEND_ONLY_ENTITIES.has(entity)\n"
+        "    || APPEND_ONLY_ENTITIES.has(String(entity).toLowerCase());\n"
+        "}\n",
+        "utf-8",
+    )
+    return {"files": ["src/lib/append-only-entities.ts"], "entities": len(set(names))}

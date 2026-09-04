@@ -1,7 +1,7 @@
 """Chat-v2 handler — Migration Step 3.
 
 The new single-entry point for the Smith-as-architect rewrite.
-Behind the ``FORGE_SMITH_ARCHITECT=1`` flag; when the flag is off
+The architect is the path, not an option behind a flag; what used to be off
 (the default) the handler returns a clear "not enabled" response
 so no traffic accidentally routes here.
 
@@ -25,6 +25,9 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+
+from services.smith.move_dispatcher import move_dispatcher
+from services.smith.understand_ask import understand_ask
 from typing import Any, Callable
 
 from services.smith_blueprint import Blueprint
@@ -39,15 +42,6 @@ logger = logging.getLogger(__name__)
 # Flag
 # --------------------------------------------------------------------------- #
 
-def architect_flag_enabled() -> bool:
-    """Truthy unless ``FORGE_SMITH_ARCHITECT=0`` explicitly disables it.
-
-    Default is ON — the architect stack is the primary path. Set
-    ``FORGE_SMITH_ARCHITECT=0`` to force-fall-back to the tactical
-    Smith while the architect stack is still being hardened."""
-    return os.environ.get("FORGE_SMITH_ARCHITECT", "1").strip() != "0"
-
-
 # --------------------------------------------------------------------------- #
 # Request / response shapes
 # --------------------------------------------------------------------------- #
@@ -57,7 +51,15 @@ class ChatV2Request:
     project_id: str
     output_dir: str
     message: str
+    #: Earlier turns as (role, text), oldest first. Empty is a first turn, not
+    #: an error — and a caller that has no transcript (self-heal, cron) simply
+    #: has none.
+    history: list[tuple[str, str]] = field(default_factory=list)
     source: str = "user"
+    #: Called with each reasoning chunk as it arrives, from the worker thread.
+    #: The router hands in one that emits a `thought` event; a caller with
+    #: nobody watching passes None and the model reasons privately, as before.
+    reasoning_fn: Callable[[str], None] | None = None
     # For tests + gradual wiring: caller can override any SmithSession
     # seam. Prod passes {} and the handler wires the real defaults.
     session_overrides: dict[str, Callable[..., Any]] = field(default_factory=dict)
@@ -81,14 +83,6 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
     """The single handler. Pure function of the request + env; every
     downstream boundary is either injected or resolved from the
     process env."""
-    if not architect_flag_enabled():
-        return ChatV2Response(
-            status="not_enabled",
-            answer=(
-                "Smith-as-architect handler is not enabled on this backend. "
-                "Set `FORGE_SMITH_ARCHITECT=1` to route through the new flow."
-            ),
-        )
 
     blueprint = Blueprint.load(
         project_id=req.project_id, output_dir=req.output_dir,
@@ -114,7 +108,9 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
 
     # kind == "iteration"
     try:
-        result = session.run_iteration(user_message=intent.message)
+        result = session.run_iteration(
+        user_message=intent.message, history=req.history,
+    )
     except AssertionError as exc:
         return _seams_missing("iteration", str(exc))
     return _to_response(result, intent="iteration")
@@ -140,8 +136,17 @@ def _build_session(
         planner_fn=overrides.get("planner_fn"),
         generator_fn=overrides.get("generator_fn"),
         guards_fn=overrides.get("guards_fn"),
-        understand_ask_fn=overrides.get("understand_ask_fn"),
-        iteration_move_fn=overrides.get("iteration_move_fn"),
+        # Wired, where the other seams are still None. `run_iteration` has
+        # always handled a clarification — it short-circuits to
+        # status="asked" — and had nothing feeding it, so §16's gate existed
+        # and never fired. An override still wins, which is what keeps the
+        # handler testable without a model.
+        understand_ask_fn=overrides.get("understand_ask_fn") or understand_ask,
+        # The move writes, so `run_iteration` verifies it against git rather
+        # than believing it. Wired here; overrides still win, which is how the
+        # handler stays testable without touching a filesystem.
+        iteration_move_fn=overrides.get("iteration_move_fn") or move_dispatcher,
+        reasoning_fn=req.reasoning_fn,
     )
 
 

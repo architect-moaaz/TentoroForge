@@ -1,22 +1,42 @@
 "use client";
 
-import { X, FileCode, MessageCircle } from "lucide-react";
+import { X, FileCode, MessageCircle, Lock, RotateCcw, MoveRight } from "lucide-react";
 import { useOfficeStore } from "../OfficeStateManager";
-import { AGENT_REGISTRY } from "../types";
+import { AGENT_BY_ID, DEPARTMENT_BY_ID } from "../types";
 
 export function AgentPanel() {
   const selectedAgent = useOfficeStore((s) => s.selectedAgent);
   const agents = useOfficeStore((s) => s.agents);
   const events = useOfficeStore((s) => s.events);
   const selectAgent = useOfficeStore((s) => s.selectAgent);
+  const roster = useOfficeStore((s) => s.roster);
+  const blockedReasons = useOfficeStore((s) => s.blockedReasons);
+  const skippedReasons = useOfficeStore((s) => s.skippedReasons);
 
   if (!selectedAgent) return null;
 
   const agent = agents.get(selectedAgent);
   const agentState = agent?.getState();
-  const agentInfo = AGENT_REGISTRY.find((a) => a.id === selectedAgent);
+  const agentInfo = AGENT_BY_ID[selectedAgent];
 
   if (!agentInfo) return null;
+
+  const department = DEPARTMENT_BY_ID[agentInfo.room];
+  const parked =
+    blockedReasons.get(selectedAgent) ?? skippedReasons.get(selectedAgent) ?? null;
+  const isBlocked = blockedReasons.has(selectedAgent);
+  const onDuty = roster.size === 0 || roster.has(selectedAgent);
+
+  // Where this agent's finished work went this run — the DAG's outgoing edges,
+  // read off the deliveries that actually left this desk.
+  const deliveredTo = Array.from(
+    new Set(
+      events
+        .filter((e) => e.type === "artifact_delivery" && e.from === selectedAgent)
+        .map((e) => (e.type === "artifact_delivery" ? e.to : ""))
+        .filter(Boolean),
+    ),
+  ).slice(-6);
 
   const stateLabel = agentState
     ? agentState.state.charAt(0).toUpperCase() + agentState.state.slice(1)
@@ -75,6 +95,10 @@ export function AgentPanel() {
           </div>
           <div>
             <p className="text-xs text-gray-400">{agentInfo.role}</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              {department?.label ?? agentInfo.room}
+              {!onDuty && " · not on this run"}
+            </p>
             <div className="flex items-center gap-1.5 mt-1">
               <span
                 className={`inline-block w-2 h-2 rounded-full ${
@@ -82,15 +106,64 @@ export function AgentPanel() {
                     ? "bg-green-400 animate-pulse"
                     : agentState?.state === "error"
                       ? "bg-red-400"
-                      : agentState?.state === "idle"
-                        ? "bg-gray-500"
-                        : "bg-yellow-400"
+                      : agentState?.state === "retrying"
+                        ? "bg-amber-400 animate-pulse"
+                        : agentState?.state === "blocked"
+                          ? "bg-slate-400"
+                          : agentState?.state === "skipped"
+                            ? "bg-slate-600"
+                            : agentState?.state === "idle"
+                              ? "bg-gray-500"
+                              : "bg-yellow-400"
                 }`}
               />
               <span className="text-xs text-gray-300">{stateLabel}</span>
             </div>
           </div>
         </div>
+
+        {/* What it is running right now, and how far through a fan-out */}
+        {agentState?.node && (
+          <div className="text-xs text-gray-400">
+            <span className="text-gray-500">Node </span>
+            <code className="text-gray-300">{agentState.node}</code>
+            {agentState.tally && (
+              <span className="ml-2 text-gray-500">
+                {agentState.tally.done}/{agentState.tally.total} authored
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Why this agent is parked. The office can show that it stopped; only
+            the panel has room to say what it stopped on. */}
+        {parked && (
+          <div
+            className={`flex items-start gap-2 text-xs px-2 py-2 rounded border ${
+              isBlocked
+                ? "bg-slate-800/50 text-slate-300 border-slate-700/50"
+                : "bg-gray-800/40 text-gray-400 border-gray-700/40"
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>
+              <span className="font-medium">
+                {isBlocked ? "Blocked" : "Skipped"}
+              </span>
+              {" — "}
+              {parked}
+            </span>
+          </div>
+        )}
+
+        {agentState?.state === "retrying" && agentState.attempt && (
+          <div className="flex items-center gap-2 text-xs text-amber-300">
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>
+              Retrying — attempt {agentState.attempt.n} of {agentState.attempt.of}
+            </span>
+          </div>
+        )}
 
         {/* Progress bar */}
         {agentState?.state === "working" && agentState.progress !== undefined && (
@@ -120,6 +193,27 @@ export function AgentPanel() {
             <span>
               {filesGenerated} file{filesGenerated !== 1 ? "s" : ""} generated
             </span>
+          </div>
+        )}
+
+        {/* Who was waiting on this desk */}
+        {deliveredTo.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <MoveRight className="w-3.5 h-3.5 text-gray-500" />
+              <span className="text-xs text-gray-500 font-medium">Delivered to</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {deliveredTo.map((id) => (
+                <button
+                  key={id}
+                  onClick={() => selectAgent(id)}
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-300 hover:bg-gray-700/60 transition-colors"
+                >
+                  {AGENT_BY_ID[id]?.name ?? id}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

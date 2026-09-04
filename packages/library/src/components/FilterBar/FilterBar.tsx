@@ -25,11 +25,11 @@ function FilterChipDropdown({ filter }: { filter: Props["chips"][number] }) {
         <span className="opacity-60">▾</span>
       </button>
       {open && (
-        <div className={`absolute left-0 top-full mt-1 min-w-[160px] ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-popover py-1 shadow-md z-10`}>
+        <div className={`absolute start-0 top-full mt-1 min-w-[160px] ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-popover py-1 shadow-md z-10`}>
           <button
             type="button"
             onClick={() => { setValue(filter.defaultValue ?? ""); setOpen(false); }}
-            className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-muted ${!value ? "font-semibold" : ""}`}
+            className={`block w-full px-3 py-1.5 text-start text-xs hover:bg-muted ${!value ? "font-semibold" : ""}`}
           >
             Any
           </button>
@@ -38,7 +38,7 @@ function FilterChipDropdown({ filter }: { filter: Props["chips"][number] }) {
               key={opt.value}
               type="button"
               onClick={() => { setValue(opt.value); setOpen(false); }}
-              className={`block w-full px-3 py-1.5 text-left text-xs hover:bg-muted ${value === opt.value ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+              className={`block w-full px-3 py-1.5 text-start text-xs hover:bg-muted ${value === opt.value ? "font-semibold text-foreground" : "text-muted-foreground"}`}
             >
               {opt.label}
             </button>
@@ -75,7 +75,7 @@ export function FilterBar({ chips, savedViews, showSearch }: Props) {
         />
       ))}
       {savedViews && savedViews.length > 0 && (
-        <div className="ml-auto">
+        <div className="ms-auto">
           <select
             onChange={(e) => {
               const view = savedViews.find((v) => v.id === e.target.value);

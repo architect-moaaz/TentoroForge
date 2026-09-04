@@ -19,6 +19,7 @@ from services.smith.clarification import Question, select
 from services.smith.context import resolve
 from services.smith.turn import (
     INTENTS,
+    build_interpret_prompt,
     TURN_SCHEMA,
     TurnRejected,
     build_interpret_prompt,
@@ -230,3 +231,64 @@ def test_the_model_may_not_edit_the_selected_batch(ats):
 
 def test_an_empty_batch_asks_nothing(ats):
     assert phrase(FakeModel(), []).items == []
+
+# --- the contract shape, told and enforced ---------------------------------
+
+def test_smith_is_told_the_shape_of_what_it_writes(ats):
+    """Smith was told *which* sections it owns and never what an artifact in
+    them looks like. The first live cold start is what surfaced it: asked for
+    requirements, the model returned title/statement/actor/priority/source/
+    notes — a perfectly reasonable requirement shape, and not this contract's.
+    All five were rejected."""
+    system, _ = build_interpret_prompt(resolve(ats, "x"), state="DISCOVERY")
+    assert "The shape of what you write" in system
+    assert '"description"' in system
+
+
+def test_the_shape_slice_is_narrowed_to_what_the_state_writes(ats):
+    """A cold start only ever writes requirements. Inlining nineteen section
+    schemas to say so costs ~4,900 tokens to no purpose."""
+    discovery, _ = build_interpret_prompt(resolve(ats, "x"), state="DISCOVERY")
+    anywhere, _ = build_interpret_prompt(resolve(ats, "x"), state="PREVIEW")
+    assert len(discovery) < len(anywhere)
+
+
+def test_a_body_that_breaks_the_contract_is_rejected_not_raised(ats):
+    """Checked here so a bad shape is re-asked. Without it the failure surfaced
+    from BlueprintService.validate deep inside apply_change — past the point
+    where a retry is possible, so the turn died with a traceback instead of
+    Smith trying again."""
+    plan = parse_turn(plan_json(intent="describe", proposals=[{
+        "section": "requirements", "natural_key": "r0",
+        "body": json.dumps({"title": "X", "statement": "Y", "actor": "recruiter"}),
+    }]))
+    with pytest.raises(TurnRejected, match="description"):
+        validate_turn(plan, ats)
+
+
+def test_a_conforming_body_passes(ats):
+    plan = parse_turn(plan_json(intent="describe", proposals=[{
+        "section": "requirements", "natural_key": "r0",
+        "body": json.dumps({"description": "A recruiter can post a role.",
+                            "confidence": 0.9}),
+    }]))
+    validate_turn(plan, ats)
+
+
+def test_a_bad_body_is_re_asked_with_the_contract_error(ats):
+    """The same pre-commit repair the agent path does: nothing has been written,
+    so a rejected proposal simply never becomes an artifact."""
+    bad = plan_json(intent="describe", proposals=[{
+        "section": "requirements", "natural_key": "r0",
+        "body": json.dumps({"title": "X"}),
+    }])
+    good = plan_json(intent="describe", proposals=[{
+        "section": "requirements", "natural_key": "r0",
+        "body": json.dumps({"description": "A recruiter can post a role.",
+                            "confidence": 0.9}),
+    }])
+    model = FakeModel(bad, good)
+    plan = interpret(model, resolve(ats, "x"), ats)
+    assert plan.proposals[0].body["description"].startswith("A recruiter")
+    assert "was rejected" in model.calls[1][1]
+    assert "description" in model.calls[1][1]

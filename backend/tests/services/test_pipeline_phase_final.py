@@ -23,7 +23,11 @@ from services.scope_card import Manifest, Page, persist_manifest
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run, not get_event_loop(): asyncio.run clears the current
+    # loop when it finishes, so any sibling suite that used it first left
+    # get_event_loop() raising "no current event loop". These tests passed
+    # alone and failed in the full run, which is the worst way to fail.
+    return asyncio.run(coro)
 
 
 # ─── rules_validator ─────────────────────────────────────────────────────

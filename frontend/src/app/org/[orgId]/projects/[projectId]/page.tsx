@@ -29,7 +29,10 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { ChatPanel } from "@/components/chat/ChatPanel";
+// §112 — Smith is the conversation in this workspace. `ChatPanel` drives
+// routers/generate.py, which never imports services.blueprint, so the chat
+// people actually used could not reach the Blueprint engine at all.
+import { SmithPanel } from "@/components/smith/SmithPanel";
 import { PreviewFrame } from "@/components/preview/PreviewFrame";
 import { CodePanel } from "@/components/code/CodePanel";
 import { HistoryPanel } from "@/components/deploy/HistoryPanel";
@@ -178,6 +181,23 @@ function ProjectWorkspace({
   const { data: project } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => api.get<Project>(`/api/projects/${projectId}`),
+  });
+
+  // §25/§109 — what Smith understood, so the approval gate can show it.
+  //
+  // SmithPanel renders the Application Definition from this prop and nothing
+  // else; without it the gate offered "Approve and build" above a stage list
+  // and a tick per node, so the one thing being approved was the one thing
+  // not on screen. `/blueprint/[projectId]` had always passed it and this
+  // call site — the chat tab people actually use — never did.
+  //
+  // A project with no Blueprint yet answers 404, which is the ordinary state
+  // before the first define run rather than an error worth surfacing.
+  const { data: blueprintDoc } = useQuery({
+    queryKey: ["project", projectId, "blueprint"],
+    queryFn: () =>
+      api.get<Record<string, unknown>>(`/api/projects/${projectId}/blueprint`),
+    retry: false,
   });
 
   // Load conversation history
@@ -368,6 +388,9 @@ function ProjectWorkspace({
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "navigation"] });
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "modules-layout"] });
     queryClient.invalidateQueries({ queryKey: ["project", projectId, "app-model"] });
+    // The define run just wrote it — without this the gate would show the
+    // Blueprint as it stood before the run that produced it.
+    queryClient.invalidateQueries({ queryKey: ["project", projectId, "blueprint"] });
   };
 
   return (
@@ -479,13 +502,27 @@ function ProjectWorkspace({
 
       {/* Main content area */}
       <div className="flex-1 overflow-hidden pt-[70px] bg-background">
-        {activeTab === "chat" && (
-          <ChatPanel
+        {/*
+          HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
+          rebuild from its query cache; the chat is not. Its transcript and its
+          run live in component state, so `activeTab === "chat" && <SmithPanel/>`
+          threw the conversation away on the way to Preview and brought back a
+          blank pane — and a build streaming over SSE lost its reader mid-run,
+          the one moment someone is most likely to go and look at the preview.
+
+          This keeps the tab switch cheap without making the panel own a cache
+          it has no way to fill: what survives a *navigation* away from the
+          project is a separate question, and needs the turns persisted
+          server-side rather than a different render here.
+        */}
+        <div className={activeTab === "chat" ? "h-full" : "hidden"}>
+          <SmithPanel
             projectId={projectId}
-            project={project || null}
-            onGenerationComplete={onGenerationComplete}
+            blueprint={blueprintDoc ?? null}
+            onRunComplete={onGenerationComplete}
+            className="h-full border-l-0"
           />
-        )}
+        </div>
         {activeTab === "preview" && (
           <PreviewFrame projectId={projectId} project={project || null} />
         )}

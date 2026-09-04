@@ -33,7 +33,7 @@ def test_no_selection_is_none(tmp_path):
 
 def test_researcher_falls_back_without_api_key(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    out = asyncio.get_event_loop().run_until_complete(
+    out = asyncio.run(
         research_design_templates("dentistry", "clinic management", n=3, use_cache=False))
     assert len(out) == 3
     # falls back to guarded house presets — every one is renderable.
@@ -51,7 +51,7 @@ def test_research_cache_roundtrip(monkeypatch):
     marker[0]["name"] = "CACHED-MARKER"
     dr._cache_set(key, marker)
     try:
-        out = asyncio.get_event_loop().run_until_complete(
+        out = asyncio.run(
             dr.research_design_templates("cafe pos", "point of sale for a coffee shop", n=3))
         assert out[0]["name"] == "CACHED-MARKER"   # returned from cache, no research
     finally:

@@ -50,7 +50,7 @@ export function MultiSelect({
 
   return (
     <div className="relative inline-block">
-      {label && <label className="mr-2 text-xs font-medium text-muted-foreground">{label}:</label>}
+      {label && <label className="me-2 text-xs font-medium text-muted-foreground">{label}:</label>}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -60,7 +60,7 @@ export function MultiSelect({
         <span className="opacity-60">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 min-w-[240px] rounded-md border border-border bg-popover shadow-md z-10">
+        <div className="absolute start-0 top-full mt-1 min-w-[240px] rounded-md border border-border bg-popover shadow-md z-10">
           {showSearchBox && (
             <div className="border-b border-border p-2">
               <input

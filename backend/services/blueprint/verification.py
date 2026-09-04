@@ -51,9 +51,13 @@ EDGES: tuple[str, ...] = (
     # Added by the migration ledger: each collapses a cluster of passes from
     # the old repair chain that the PRD's ten edges do not cover.
     "Navigation↔Page",
+    "Page↔Precondition",
     "Page↔Workflow",
     "Widget↔DataSource",
-    "Page↔PatternTemplate",
+    "Page↔Layout",
+    # §73 — every other edge asks whether the Blueprint is coherent. This asks
+    # whether what it describes would do anything.
+    "Page↔Function",
 )
 
 #: What this module does *not* establish, so nobody mistakes a green report for
@@ -72,9 +76,13 @@ SECTION_OWNER: dict[str, str] = {
     "modules": "solution_architecture",
     "navigation": "solution_architecture",
     "pages": "page_design",
-    "components": "page_design",
+    # §34 — A2UI is the composition authority, so a composed page that is
+    # wrong is its to author again. The section was already reachable as a
+    # finding's `section` through the Page↔Layout edge and had no owner, so
+    # every one of those repair tasks was addressed to "unassigned".
+    "pageLayouts": "a2ui_pages",
+    "components": "frontend",
     "widgets": "page_design",
-    "uiRegistry": "page_design",
     "designSystem": "accessibility",
     "data.entities": "data_model",
     "data.relationships": "data_model",
@@ -260,39 +268,40 @@ def check_page_permission(doc: dict) -> list[Finding]:
     return out
 
 
-def check_page_pattern_template(doc: dict) -> list[Finding]:
-    """A page can only be rendered if its pattern has a template behind it.
+def check_page_layout(doc: dict) -> list[Finding]:
+    """A page can only be rendered if something composed a tree for it.
 
-    Two ways this breaks, and both are silent without the edge. A page declares
-    a pattern nobody authored a template for, so the frontend projection emits
-    nothing for it — and eleven pages out of eighteen looks exactly like
-    success. Or a template names a component the registry does not have, which
-    only surfaces when something tries to render it.
+    Two ways this breaks, and both are silent without the edge. A page that
+    nothing composed projects to nothing — and eleven pages out of eighteen
+    looks exactly like success. Or a composed tree names a component the
+    registry does not have, which only surfaces when something tries to
+    render it.
+
+    Used to read `patternTemplates`, one template per pattern, and ask whether
+    each page's pattern had one. Both the section and the agent that authored
+    it are gone: A2UI composes per page, so the question is now asked of the
+    page itself.
     """
     from services.blueprint.page_planner import load_catalog, validate_template
 
-    templates = {t.get("pattern"): t for t in _live(doc.get("patternTemplates"))}
+    authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
     out: list[Finding] = []
 
     for page in _live(doc.get("pages")):
-        pattern = page.get("pattern")
-        if not pattern:
-            continue
-        if pattern not in templates:
+        if page.get("id") not in authored:
             out.append(Finding(
-                "Page↔PatternTemplate", section="pages",
+                "Page↔Layout", section="pages",
                 artifact_id=page.get("id"),
-                detail=f"pattern {pattern!r} has no template, so the page "
-                       f"cannot be projected",
+                detail="no composed tree, so the page cannot be projected",
             ))
 
-    if templates:
+    if authored:
         catalog = load_catalog()
-        for pattern, template in sorted(templates.items()):
-            for error in validate_template(template, catalog):
+        for page_id, layout in sorted(authored.items()):
+            for error in validate_template(layout, catalog):
                 out.append(Finding(
-                    "Page↔PatternTemplate", section="patternTemplates",
-                    artifact_id=pattern, detail=error,
+                    "Page↔Layout", section="pageLayouts",
+                    artifact_id=page_id, detail=error,
                 ))
     return out
 
@@ -366,14 +375,53 @@ def check_workflow_api(doc: dict) -> list[Finding]:
     return out
 
 
-def check_design_system(doc: dict) -> list[Finding]:
-    """§38 — components should come from the registry, not be invented."""
-    registry = set(doc.get("uiRegistry", {}).get("components") or [])
+def check_page_function(doc: dict) -> list[Finding]:
+    """§73 — would this application actually work?
+
+    Controls that declare no action, actions naming workflows that do not
+    exist, bindings with no source, pages nothing composed. Each was found by
+    somebody using the generated app; none needed it running to find.
+    """
+    from services.blueprint.functional_completeness import functional_findings
+
     return [
-        Finding("Design↔DesignSystem", section="components", artifact_id=c.get("id"),
-                detail=f"registryKey {c['registryKey']!r} is not in the UI registry")
-        for c in _live(doc.get("components"))
-        if c.get("registryKey") and c["registryKey"] not in registry
+        Finding("Page↔Function", section="pageLayouts",
+                artifact_id=f["page"], detail=f["detail"])
+        for f in functional_findings(doc)
+    ]
+
+
+def check_design_system(doc: dict) -> list[Finding]:
+    """§38 — the design language every page is composed against must exist.
+
+    Was a registry check: `components` carried a `registryKey` and `uiRegistry`
+    listed the keys, so a component could be caught naming a key nobody
+    declared. Both sections were authored by `page_designs`, which is gone —
+    the registry was a list of names that were never code, and the edge was
+    checking one LLM section against another.
+
+    The failure worth catching is upstream of that and was never covered: a
+    `designSystem` too thin to compose against. One run produced 174 bytes of
+    it, `project_design_tokens` emitted almost no variables, every page was
+    composed against a palette that wasn't there, and the app came out
+    unstyled. Nothing reported it, because a missing token is not an error
+    anywhere downstream — it is just absence.
+    """
+    design = doc.get("designSystem") or {}
+    if not design:
+        return [Finding("Design↔DesignSystem", section="designSystem",
+                        detail="no design system, so every page is composed "
+                               "against a language that does not exist")]
+
+    # The groups `project_design_tokens` reads. A group that is missing does
+    # not fail the projection; it silently emits fewer variables.
+    return [
+        Finding("Design↔DesignSystem", section="designSystem",
+                artifact_id=group,
+                detail=f"{group!r} is missing, so nothing projects into "
+                       f"tokens.css for it")
+        for group in ("colors", "spacing", "typography", "radius")
+        if not (design.get(group) or {})
     ]
 
 
@@ -591,6 +639,71 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
     return out
 
 
+def check_page_precondition(doc: dict) -> list[Finding]:
+    """§75 — a page that declares a precondition nothing can satisfy.
+
+    `requires` exists so an approval screen can say it needs a submitted
+    record rather than leave every reviewer looking at a correct rendering of
+    nothing. Said, it has to be true: a state the entity does not declare can
+    never be reached, and a `producedBy` naming a workflow that does not exist
+    is a promise the application cannot keep.
+
+    Checked here rather than in the preview sweep because it is a fact about
+    the document. A sweep would notice it as "no record in that state", which
+    is the same complaint whether the state is unreachable or merely
+    unseeded — and those want different fixes from different people.
+    """
+    from services.blueprint.page_planner import enum_values
+
+    out: list[Finding] = []
+    entities = {e.get("id"): e for e in _live(_entities(doc))}
+    flows = _ids(_live(doc.get("workflows")))
+
+    for page in _live(doc.get("pages")):
+        needs = page.get("requires")
+        if not isinstance(needs, dict):
+            continue
+        page_id = page.get("id")
+        entity_id = needs.get("entity")
+        state = str(needs.get("state") or "")
+
+        entity = entities.get(entity_id)
+        if entity is None:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires a record of {entity_id}, which is not an "
+                       "entity this application has",
+            ))
+            continue
+
+        declared = {v for f in (entity.get("fields") or [])
+                    if isinstance(f, dict) for v in enum_values(f)}
+        if declared and state not in declared:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires {entity.get('name') or entity_id} in state "
+                       f"{state!r}, which is not one of its declared values "
+                       f"({', '.join(sorted(declared))})",
+            ))
+        elif not declared:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"requires {entity.get('name') or entity_id} in state "
+                       f"{state!r}, but that entity declares no states at all "
+                       "— no field of it carries enumValues",
+            ))
+
+        produced_by = needs.get("producedBy")
+        if produced_by and produced_by not in flows:
+            out.append(Finding(
+                "Page↔Precondition", section="pages", artifact_id=page_id,
+                detail=f"names {produced_by} as what produces that state, and "
+                       "no such workflow exists",
+            ))
+
+    return out
+
+
 CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Page↔API": check_page_api,
     "API↔Database": check_api_database,
@@ -598,13 +711,15 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "API↔Permission": check_api_permission,
     "Workflow↔BusinessRule": check_workflow_rule,
     "Workflow↔API": check_workflow_api,
+    "Page↔Function": check_page_function,
     "Design↔DesignSystem": check_design_system,
     "Requirement↔Code": check_requirement_code,
     "Requirement↔Test": check_requirement_test,
     "Blueprint↔Implementation": check_blueprint_implementation,
     "Navigation↔Page": check_navigation_page,
+    "Page↔Precondition": check_page_precondition,
     "Page↔Workflow": check_page_workflow,
-    "Page↔PatternTemplate": check_page_pattern_template,
+    "Page↔Layout": check_page_layout,
     "Widget↔DataSource": check_widget_datasource,
 }
 

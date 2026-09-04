@@ -33,14 +33,23 @@ def test_fails_when_schema_missing(tmp_path):
     assert len(result["missing"]) == 2
 
 
-def test_dynamic_routes_resolved_via_detail_convention(tmp_path):
-    """/users/[id] should look for src/schemas/users/detail.json."""
+def test_dynamic_routes_resolved_by_their_parameter_segment(tmp_path):
+    """/users/[id] looks for src/schemas/users/[id].json.
+
+    Was the "detail convention" (users/detail.json), dropped so coverage
+    checks the same path slugify_route writes to.
+    """
     schemas = tmp_path / "src" / "schemas" / "users"
     schemas.mkdir(parents=True)
-    (schemas / "detail.json").write_text("{}")
+    (schemas / "[id].json").write_text("{}")
     plan = {"pages": [{"route": "/users/[id]", "name": "User detail"}]}
     result = check_pages_coverage(str(tmp_path), plan)
-    assert result["passed"] is True
+    assert result["passed"] is True, result
+
+    # And the old convention no longer satisfies it.
+    (schemas / "[id].json").unlink()
+    (schemas / "detail.json").write_text("{}")
+    assert check_pages_coverage(str(tmp_path), plan)["passed"] is False
 
 
 def test_nested_routes_use_folder_layout(tmp_path):

@@ -24,7 +24,7 @@ async def test_commitbiz_fixture_pipeline_end_to_end(tmp_path):
     from services import figma_mcp_pipeline
 
     # Mock the downloader so we don't fetch from Figma's CDN
-    async def fake_download(urls, output_dir, concurrency=8):
+    async def fake_download(urls, output_dir, concurrency=8, project_id=None):
         return {u: f"/figma/asset_{i}.svg" for i, u in enumerate(urls)}
 
     src = FIXTURE.read_text()
@@ -73,7 +73,7 @@ async def test_pipeline_rewrites_image_srcs(tmp_path):
     function App() { return <img src={imgX} alt="" />; }
     '''
 
-    async def fake_download(urls, output_dir, concurrency=8):
+    async def fake_download(urls, output_dir, concurrency=8, project_id=None):
         return {"https://www.figma.com/api/mcp/asset/abc-123": "/figma/test.svg"}
 
     with patch.object(

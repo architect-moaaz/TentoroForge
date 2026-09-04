@@ -1,219 +1,1118 @@
 {
   "$schema_version": "1.0.0",
-  "$description": "Anchoring examples shown to the planner LLM. Grow this file (never Python) to teach the planner about new kinds of apps. Each entry composes primitives + declares archetypes (recipes or capability compositions) + runtime_context. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md.",
+  "$description": "Anchoring examples shown to the planner LLM. Grow this file (never Python) to teach the planner about new kinds of apps. Each entry composes primitives + declares archetypes (recipes or capability compositions) + runtime_context. See docs/superpowers/specs/2026-08-11-intelligent-rich-forge.md. Every value here MUST be in the shipped vocabularies (shapes/vocabulary.json, archetypes/capability_vocabulary.json, runtime/context_vocabulary.json) — these entries are shown to the planner, so a value the validator rejects teaches it to emit one. Add the term to the vocabulary first, then use it here.",
   "reference_apps": [
     {
       "name": "Snap2App",
       "gloss": "Visual product-price scanner. Point camera → get price comparison across retailers.",
       "app_shape": {
-        "layout": {"shell": "none", "hero": "full-bleed-gradient", "primaryInteraction": "capture", "density": "spacious"},
-        "auth": {"surface": "modal", "gating": "on-action"},
-        "nav": {"menu": "none", "back": "history"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "list", "denormalization": "aggressive"},
-        "identity": {"usageMode": "single-session"},
+        "layout": {
+          "shell": "none",
+          "hero": "full-bleed-gradient",
+          "primaryInteraction": "capture",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "modal",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "none",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "list",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "single-session"
+        },
         "label": "hero-cta-capture-utility"
       },
       "archetypes": [
-        {"name": "scan", "recipe": "visual_product_search", "entities": ["scan_session", "price_result"], "routes": ["/", "/scan", "/history"]}
+        {
+          "name": "scan",
+          "recipe": "visual_product_search",
+          "entities": [
+            "scan_session",
+            "price_result"
+          ],
+          "routes": [
+            "/",
+            "/scan",
+            "/history"
+          ]
+        }
       ],
       "industry": "consumer-retail",
-      "runtime_context": ["camera"]
+      "runtime_context": [
+        "camera"
+      ]
     },
     {
       "name": "Spotify",
       "gloss": "Music streaming with player-shell and catalog browse.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "player-bar", "primaryInteraction": "player", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "grid", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "player-bar",
+          "primaryInteraction": "player",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "player-shell"
       },
       "archetypes": [
-        {"name": "library", "recipe": "catalog", "entities": ["playlist", "track"], "routes": ["/library"]},
-        {"name": "now_playing", "recipe": "player", "entities": ["track"], "routes": ["/now-playing"]}
+        {
+          "name": "library",
+          "recipe": "catalog",
+          "entities": [
+            "playlist",
+            "track"
+          ],
+          "routes": [
+            "/library"
+          ]
+        },
+        {
+          "name": "now_playing",
+          "recipe": "player",
+          "entities": [
+            "track"
+          ],
+          "routes": [
+            "/now-playing"
+          ]
+        }
       ],
       "industry": "consumer-music",
-      "runtime_context": ["background_tasks", "offline_sync", "push_notifications", "wallet_pass"]
+      "runtime_context": [
+        "background_tasks",
+        "offline_sync",
+        "push_notifications",
+        "wallet_pass"
+      ]
     },
     {
       "name": "Instagram",
       "gloss": "Social photo feed with camera capture.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "feed-header", "primaryInteraction": "feed", "density": "spacious"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "feed", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "feed-header",
+          "primaryInteraction": "feed",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "feed",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "social-feed"
       },
       "archetypes": [
-        {"name": "feed", "recipe": "feed", "entities": ["post"], "routes": ["/"]},
-        {"name": "capture", "recipe": "visual_product_search", "entities": ["post"], "routes": ["/capture"]}
+        {
+          "name": "feed",
+          "recipe": "feed",
+          "entities": [
+            "post"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "capture",
+          "recipe": "visual_product_search",
+          "entities": [
+            "post"
+          ],
+          "routes": [
+            "/capture"
+          ]
+        }
       ],
       "industry": "consumer-social",
-      "runtime_context": ["camera", "photo_library", "push_notifications", "contacts", "deep_linking"]
+      "runtime_context": [
+        "camera",
+        "photo_library",
+        "push_notifications",
+        "contacts",
+        "deep_linking"
+      ]
     },
     {
       "name": "Uber rider",
       "gloss": "Book a car via map + real-time tracking.",
       "app_shape": {
-        "layout": {"shell": "map-canvas", "hero": "map-canvas", "primaryInteraction": "map", "density": "spacious"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "drawer", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "map-pins", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "map-canvas",
+          "hero": "map-canvas",
+          "primaryInteraction": "map",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "drawer",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "map-pins",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "map-canvas-booking"
       },
       "archetypes": [
-        {"name": "ride_request", "recipe": "wizard", "entities": ["ride"], "routes": ["/request"], "local_shape": {"layout": {"primaryInteraction": "form"}, "nav": {"menu": "none"}}},
-        {"name": "active_ride", "capabilities": {"read": {"pattern": "map-pins"}, "write": {"pattern": "none"}, "interactions": ["live-follow", "pinch-zoom"], "presentation": {"itemShape": "pin"}, "state": {"realtime": "stream"}}, "entities": ["ride"], "routes": ["/active"]},
-        {"name": "ride_history", "capabilities": {"read": {"pattern": "list", "grouping": "date"}, "write": {"pattern": "none"}, "interactions": ["filter", "sort"], "presentation": {"itemShape": "row"}, "state": {"realtime": "none"}}, "entities": ["ride"], "routes": ["/history"], "local_shape": {"layout": {"shell": "header", "primaryInteraction": "data-grid"}}},
-        {"name": "payment_methods", "recipe": "crud", "entities": ["payment_method"], "routes": ["/payment"], "local_shape": {"layout": {"shell": "header", "primaryInteraction": "form"}}},
-        {"name": "chat", "recipe": "chat", "entities": ["message"], "routes": ["/chat"], "local_shape": {"layout": {"shell": "three-pane"}}}
+        {
+          "name": "ride_request",
+          "recipe": "wizard",
+          "entities": [
+            "ride"
+          ],
+          "routes": [
+            "/request"
+          ],
+          "local_shape": {
+            "layout": {
+              "primaryInteraction": "form"
+            },
+            "nav": {
+              "menu": "none"
+            }
+          }
+        },
+        {
+          "name": "active_ride",
+          "capabilities": {
+            "read": {
+              "pattern": "map-pins"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "live-follow",
+              "pinch-zoom"
+            ],
+            "presentation": {
+              "itemShape": "pin"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "ride"
+          ],
+          "routes": [
+            "/active"
+          ]
+        },
+        {
+          "name": "ride_history",
+          "capabilities": {
+            "read": {
+              "pattern": "list",
+              "grouping": "date"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter",
+              "sort"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "ride"
+          ],
+          "routes": [
+            "/history"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "header",
+              "primaryInteraction": "data-grid"
+            }
+          }
+        },
+        {
+          "name": "payment_methods",
+          "recipe": "crud",
+          "entities": [
+            "payment_method"
+          ],
+          "routes": [
+            "/payment"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "header",
+              "primaryInteraction": "form"
+            }
+          }
+        },
+        {
+          "name": "chat",
+          "recipe": "chat",
+          "entities": [
+            "message"
+          ],
+          "routes": [
+            "/chat"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "three-pane"
+            }
+          }
+        }
       ],
       "industry": "consumer-mobility",
-      "runtime_context": ["geo", "push_notifications", "background_tasks", "biometric_auth", "wallet_pass"]
+      "runtime_context": [
+        "geo",
+        "push_notifications",
+        "background_tasks",
+        "biometric_auth",
+        "wallet_pass"
+      ]
     },
     {
       "name": "Workday HCM",
       "gloss": "Human capital management workspace with directory, org chart, time-off, payroll, recruiting modules.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "none", "primaryInteraction": "data-grid", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "crumb"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "list", "denormalization": "moderate"},
-        "identity": {"usageMode": "multi-user-team"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "none",
+          "primaryInteraction": "data-grid",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "crumb"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "list",
+          "denormalization": "moderate"
+        },
+        "identity": {
+          "usageMode": "multi-user-team"
+        },
         "label": "enterprise-workspace"
       },
       "archetypes": [
-        {"name": "employee_directory", "recipe": "directory", "entities": ["employee"], "routes": ["/employees"]},
-        {"name": "org_chart", "capabilities": {"read": {"pattern": "tree", "grouping": "hierarchy"}, "write": {"pattern": "drag"}, "interactions": ["pinch-zoom", "drag-reorder"], "presentation": {"itemShape": "node"}, "state": {"realtime": "none"}}, "entities": ["employee"], "routes": ["/org-chart"], "local_shape": {"layout": {"primaryInteraction": "map"}}},
-        {"name": "time_off", "recipe": "approval_queue", "entities": ["time_off_request"], "routes": ["/time-off"], "local_shape": {"data": {"readShape": "board"}}},
-        {"name": "payroll_run", "recipe": "wizard", "entities": ["pay_run"], "routes": ["/payroll"], "local_shape": {"nav": {"menu": "none"}}},
-        {"name": "performance_review", "recipe": "wizard", "entities": ["review"], "routes": ["/reviews"]},
-        {"name": "benefits_enrollment", "recipe": "wizard", "entities": ["benefits_election"], "routes": ["/benefits"]},
-        {"name": "recruiting_pipeline", "capabilities": {"read": {"pattern": "board", "grouping": "status"}, "write": {"pattern": "drag", "integrity": "audit-logged"}, "interactions": ["drag-between-groups", "bulk-select", "filter"], "presentation": {"itemShape": "card"}, "state": {"realtime": "poll"}}, "entities": ["candidate"], "routes": ["/recruiting"]}
+        {
+          "name": "employee_directory",
+          "recipe": "directory",
+          "entities": [
+            "employee"
+          ],
+          "routes": [
+            "/employees"
+          ]
+        },
+        {
+          "name": "org_chart",
+          "capabilities": {
+            "read": {
+              "pattern": "tree",
+              "grouping": "hierarchy"
+            },
+            "write": {
+              "pattern": "drag"
+            },
+            "interactions": [
+              "pinch-zoom",
+              "drag-reorder"
+            ],
+            "presentation": {
+              "itemShape": "node"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "employee"
+          ],
+          "routes": [
+            "/org-chart"
+          ],
+          "local_shape": {
+            "layout": {
+              "primaryInteraction": "map"
+            }
+          }
+        },
+        {
+          "name": "time_off",
+          "recipe": "approval_queue",
+          "entities": [
+            "time_off_request"
+          ],
+          "routes": [
+            "/time-off"
+          ],
+          "local_shape": {
+            "data": {
+              "readShape": "board"
+            }
+          }
+        },
+        {
+          "name": "payroll_run",
+          "recipe": "wizard",
+          "entities": [
+            "pay_run"
+          ],
+          "routes": [
+            "/payroll"
+          ],
+          "local_shape": {
+            "nav": {
+              "menu": "none"
+            }
+          }
+        },
+        {
+          "name": "performance_review",
+          "recipe": "wizard",
+          "entities": [
+            "review"
+          ],
+          "routes": [
+            "/reviews"
+          ]
+        },
+        {
+          "name": "benefits_enrollment",
+          "recipe": "wizard",
+          "entities": [
+            "benefits_election"
+          ],
+          "routes": [
+            "/benefits"
+          ]
+        },
+        {
+          "name": "recruiting_pipeline",
+          "capabilities": {
+            "read": {
+              "pattern": "board",
+              "grouping": "status"
+            },
+            "write": {
+              "pattern": "drag",
+              "integrity": "audit-logged"
+            },
+            "interactions": [
+              "drag-between-groups",
+              "bulk-select",
+              "filter"
+            ],
+            "presentation": {
+              "itemShape": "card"
+            },
+            "state": {
+              "realtime": "poll"
+            }
+          },
+          "entities": [
+            "candidate"
+          ],
+          "routes": [
+            "/recruiting"
+          ]
+        }
       ],
       "industry": "hr-payroll",
-      "runtime_context": ["push_notifications", "biometric_auth", "offline_sync"]
+      "runtime_context": [
+        "push_notifications",
+        "biometric_auth",
+        "offline_sync"
+      ]
     },
     {
       "name": "Shopify storefront",
       "gloss": "Ecommerce buyer flow: catalog → detail → cart → checkout → orders.",
       "app_shape": {
-        "layout": {"shell": "header", "hero": "media-hero", "primaryInteraction": "card-grid", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-action"},
-        "nav": {"menu": "header-links", "back": "crumb"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "grid", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "header",
+          "hero": "media-hero",
+          "primaryInteraction": "card-grid",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "header-links",
+          "back": "crumb"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "consumer-marketplace"
       },
       "archetypes": [
-        {"name": "catalog", "recipe": "catalog", "entities": ["product"], "routes": ["/", "/collections"]},
-        {"name": "product_detail", "recipe": "crud", "entities": ["product"], "routes": ["/products/[slug]"]},
-        {"name": "cart", "recipe": "cart", "entities": ["cart_item"], "routes": ["/cart"]},
-        {"name": "checkout", "recipe": "checkout", "entities": ["order", "address", "payment"], "routes": ["/checkout"], "local_shape": {"layout": {"hero": "none", "primaryInteraction": "form"}, "nav": {"menu": "none"}}},
-        {"name": "orders", "recipe": "crud", "entities": ["order"], "routes": ["/orders"]},
-        {"name": "account", "recipe": "crud", "entities": ["user"], "routes": ["/account"]}
+        {
+          "name": "catalog",
+          "recipe": "catalog",
+          "entities": [
+            "product"
+          ],
+          "routes": [
+            "/",
+            "/collections"
+          ]
+        },
+        {
+          "name": "product_detail",
+          "recipe": "crud",
+          "entities": [
+            "product"
+          ],
+          "routes": [
+            "/products/[slug]"
+          ]
+        },
+        {
+          "name": "cart",
+          "recipe": "cart",
+          "entities": [
+            "cart_item"
+          ],
+          "routes": [
+            "/cart"
+          ]
+        },
+        {
+          "name": "checkout",
+          "recipe": "checkout",
+          "entities": [
+            "order",
+            "address",
+            "payment"
+          ],
+          "routes": [
+            "/checkout"
+          ],
+          "local_shape": {
+            "layout": {
+              "hero": "none",
+              "primaryInteraction": "form"
+            },
+            "nav": {
+              "menu": "none"
+            }
+          }
+        },
+        {
+          "name": "orders",
+          "recipe": "crud",
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/orders"
+          ]
+        },
+        {
+          "name": "account",
+          "recipe": "crud",
+          "entities": [
+            "user"
+          ],
+          "routes": [
+            "/account"
+          ]
+        }
       ],
       "industry": "consumer-retail",
-      "runtime_context": ["push_notifications", "wallet_pass", "biometric_auth"]
+      "runtime_context": [
+        "push_notifications",
+        "wallet_pass",
+        "biometric_auth"
+      ]
     },
     {
       "name": "Robinhood",
       "gloss": "Retail brokerage: portfolio, watchlist, chart, order placement.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "metric-row", "primaryInteraction": "chart", "density": "dense"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "timeline", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "metric-row",
+          "primaryInteraction": "chart",
+          "density": "dense"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "timeline",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "personal-finance-tracker"
       },
       "archetypes": [
-        {"name": "portfolio", "recipe": "dashboard", "entities": ["position"], "routes": ["/"]},
-        {"name": "watchlist", "capabilities": {"read": {"pattern": "feed"}, "write": {"pattern": "inline"}, "interactions": ["live-follow", "sort"], "presentation": {"itemShape": "row"}, "state": {"realtime": "stream"}}, "entities": ["watchlist_item"], "routes": ["/watchlist"]},
-        {"name": "chart", "recipe": "chart_analysis", "entities": ["price_bar"], "routes": ["/chart/[symbol]"]},
-        {"name": "order", "recipe": "wizard", "entities": ["order"], "routes": ["/order"], "local_shape": {"layout": {"shell": "none", "primaryInteraction": "form"}}},
-        {"name": "news", "recipe": "feed", "entities": ["news_item"], "routes": ["/news"]}
+        {
+          "name": "portfolio",
+          "recipe": "dashboard",
+          "entities": [
+            "position"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "watchlist",
+          "capabilities": {
+            "read": {
+              "pattern": "feed"
+            },
+            "write": {
+              "pattern": "inline"
+            },
+            "interactions": [
+              "live-follow",
+              "sort"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "watchlist_item"
+          ],
+          "routes": [
+            "/watchlist"
+          ]
+        },
+        {
+          "name": "chart",
+          "recipe": "chart_analysis",
+          "entities": [
+            "price_bar"
+          ],
+          "routes": [
+            "/chart/[symbol]"
+          ]
+        },
+        {
+          "name": "order",
+          "recipe": "wizard",
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/order"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "none",
+              "primaryInteraction": "form"
+            }
+          }
+        },
+        {
+          "name": "news",
+          "recipe": "feed",
+          "entities": [
+            "news_item"
+          ],
+          "routes": [
+            "/news"
+          ]
+        }
       ],
       "industry": "fintech-brokerage",
-      "runtime_context": ["push_notifications", "biometric_auth", "wallet_pass", "background_tasks"]
+      "runtime_context": [
+        "push_notifications",
+        "biometric_auth",
+        "wallet_pass",
+        "background_tasks"
+      ]
     },
     {
       "name": "Gusto payroll",
       "gloss": "SMB payroll with pay-run wizard, employees, tax filings, benefits, approvals.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "metric-row", "primaryInteraction": "data-grid", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "crumb"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "list", "denormalization": "moderate"},
-        "identity": {"usageMode": "multi-user-team"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "metric-row",
+          "primaryInteraction": "data-grid",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "crumb"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "list",
+          "denormalization": "moderate"
+        },
+        "identity": {
+          "usageMode": "multi-user-team"
+        },
         "label": "compliance-workspace"
       },
       "archetypes": [
-        {"name": "pay_runs", "recipe": "dashboard", "entities": ["pay_run"], "routes": ["/"]},
-        {"name": "run_wizard", "recipe": "wizard", "entities": ["pay_run"], "routes": ["/run"], "local_shape": {"nav": {"menu": "none"}, "layout": {"hero": "none"}}},
-        {"name": "employees", "recipe": "directory", "entities": ["employee"], "routes": ["/employees"]},
-        {"name": "tax_filings", "recipe": "crud", "entities": ["tax_filing"], "routes": ["/taxes"]},
-        {"name": "benefits", "recipe": "crud", "entities": ["benefit"], "routes": ["/benefits"]},
-        {"name": "approvals", "recipe": "approval_queue", "entities": ["approval"], "routes": ["/approvals"]},
-        {"name": "audit_log", "recipe": "crud", "entities": ["audit_event"], "routes": ["/audit"]}
+        {
+          "name": "pay_runs",
+          "recipe": "dashboard",
+          "entities": [
+            "pay_run"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "run_wizard",
+          "recipe": "wizard",
+          "entities": [
+            "pay_run"
+          ],
+          "routes": [
+            "/run"
+          ],
+          "local_shape": {
+            "nav": {
+              "menu": "none"
+            },
+            "layout": {
+              "hero": "none"
+            }
+          }
+        },
+        {
+          "name": "employees",
+          "recipe": "directory",
+          "entities": [
+            "employee"
+          ],
+          "routes": [
+            "/employees"
+          ]
+        },
+        {
+          "name": "tax_filings",
+          "recipe": "crud",
+          "entities": [
+            "tax_filing"
+          ],
+          "routes": [
+            "/taxes"
+          ]
+        },
+        {
+          "name": "benefits",
+          "recipe": "crud",
+          "entities": [
+            "benefit"
+          ],
+          "routes": [
+            "/benefits"
+          ]
+        },
+        {
+          "name": "approvals",
+          "recipe": "approval_queue",
+          "entities": [
+            "approval"
+          ],
+          "routes": [
+            "/approvals"
+          ]
+        },
+        {
+          "name": "audit_log",
+          "recipe": "crud",
+          "entities": [
+            "audit_event"
+          ],
+          "routes": [
+            "/audit"
+          ]
+        }
       ],
       "industry": "hr-payroll",
-      "runtime_context": ["push_notifications", "biometric_auth"]
+      "runtime_context": [
+        "push_notifications",
+        "biometric_auth"
+      ]
     },
     {
       "name": "Swiggy",
       "gloss": "Food delivery: restaurant browse → menu → cart → checkout → live tracking.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "media-hero", "primaryInteraction": "card-grid", "density": "comfortable"},
-        "auth": {"surface": "modal", "gating": "on-action"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "grid", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "media-hero",
+          "primaryInteraction": "card-grid",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "modal",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "on-demand-marketplace"
       },
       "archetypes": [
-        {"name": "restaurant_discovery", "recipe": "catalog", "entities": ["restaurant"], "routes": ["/"]},
-        {"name": "search", "capabilities": {"read": {"pattern": "grid"}, "write": {"pattern": "none"}, "interactions": ["filter", "sort"], "presentation": {"itemShape": "card"}, "state": {"realtime": "none"}}, "entities": ["restaurant"], "routes": ["/search"]},
-        {"name": "restaurant_menu", "capabilities": {"read": {"pattern": "list", "grouping": "category"}, "write": {"pattern": "inline"}, "interactions": ["filter", "group-by"], "presentation": {"itemShape": "row"}, "state": {"realtime": "none"}}, "entities": ["menu_item"], "routes": ["/r/[id]"]},
-        {"name": "cart", "recipe": "cart", "entities": ["cart_item"], "routes": ["/cart"]},
-        {"name": "checkout", "recipe": "checkout", "entities": ["order"], "routes": ["/checkout"], "local_shape": {"layout": {"hero": "none", "primaryInteraction": "form"}, "nav": {"menu": "none"}}},
-        {"name": "order_tracking", "capabilities": {"read": {"pattern": "map-pins"}, "write": {"pattern": "none"}, "interactions": ["live-follow"], "presentation": {"itemShape": "pin"}, "state": {"realtime": "stream"}}, "entities": ["order"], "routes": ["/track/[id]"], "local_shape": {"layout": {"shell": "map-canvas", "hero": "map-canvas", "primaryInteraction": "map"}}},
-        {"name": "order_history", "capabilities": {"read": {"pattern": "list", "grouping": "date"}, "write": {"pattern": "none"}, "interactions": ["filter", "sort"], "presentation": {"itemShape": "row"}, "state": {"realtime": "none"}}, "entities": ["order"], "routes": ["/orders"]},
-        {"name": "addresses", "recipe": "crud", "entities": ["address"], "routes": ["/addresses"]},
-        {"name": "account", "recipe": "crud", "entities": ["user"], "routes": ["/account"]},
-        {"name": "chat_with_rider", "recipe": "chat", "entities": ["message"], "routes": ["/chat"], "local_shape": {"layout": {"shell": "three-pane"}}}
+        {
+          "name": "restaurant_discovery",
+          "recipe": "catalog",
+          "entities": [
+            "restaurant"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "search",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter",
+              "sort"
+            ],
+            "presentation": {
+              "itemShape": "card"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "restaurant"
+          ],
+          "routes": [
+            "/search"
+          ]
+        },
+        {
+          "name": "restaurant_menu",
+          "capabilities": {
+            "read": {
+              "pattern": "list",
+              "grouping": "category"
+            },
+            "write": {
+              "pattern": "inline"
+            },
+            "interactions": [
+              "filter",
+              "group-by"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "menu_item"
+          ],
+          "routes": [
+            "/r/[id]"
+          ]
+        },
+        {
+          "name": "cart",
+          "recipe": "cart",
+          "entities": [
+            "cart_item"
+          ],
+          "routes": [
+            "/cart"
+          ]
+        },
+        {
+          "name": "checkout",
+          "recipe": "checkout",
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/checkout"
+          ],
+          "local_shape": {
+            "layout": {
+              "hero": "none",
+              "primaryInteraction": "form"
+            },
+            "nav": {
+              "menu": "none"
+            }
+          }
+        },
+        {
+          "name": "order_tracking",
+          "capabilities": {
+            "read": {
+              "pattern": "map-pins"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "live-follow"
+            ],
+            "presentation": {
+              "itemShape": "pin"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/track/[id]"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "map-canvas",
+              "hero": "map-canvas",
+              "primaryInteraction": "map"
+            }
+          }
+        },
+        {
+          "name": "order_history",
+          "capabilities": {
+            "read": {
+              "pattern": "list",
+              "grouping": "date"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter",
+              "sort"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/orders"
+          ]
+        },
+        {
+          "name": "addresses",
+          "recipe": "crud",
+          "entities": [
+            "address"
+          ],
+          "routes": [
+            "/addresses"
+          ]
+        },
+        {
+          "name": "account",
+          "recipe": "crud",
+          "entities": [
+            "user"
+          ],
+          "routes": [
+            "/account"
+          ]
+        },
+        {
+          "name": "chat_with_rider",
+          "recipe": "chat",
+          "entities": [
+            "message"
+          ],
+          "routes": [
+            "/chat"
+          ],
+          "local_shape": {
+            "layout": {
+              "shell": "three-pane"
+            }
+          }
+        }
       ],
       "industry": "consumer-food-delivery",
-      "runtime_context": ["geo", "push_notifications", "contacts", "deep_linking", "wallet_pass"]
+      "runtime_context": [
+        "geo",
+        "push_notifications",
+        "contacts",
+        "deep_linking",
+        "wallet_pass"
+      ]
     },
     {
       "name": "Tip calculator",
       "gloss": "Single-purpose form that computes tip from a bill amount.",
       "app_shape": {
-        "layout": {"shell": "none", "hero": "none", "primaryInteraction": "form", "density": "spacious"},
-        "auth": {"surface": "none", "gating": "none"},
-        "nav": {"menu": "none", "back": "none"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "single-record", "denormalization": "none"},
-        "identity": {"usageMode": "single-session"},
+        "layout": {
+          "shell": "none",
+          "hero": "none",
+          "primaryInteraction": "form",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "none",
+          "gating": "none"
+        },
+        "nav": {
+          "menu": "none",
+          "back": "none"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "single-record",
+          "denormalization": "none"
+        },
+        "identity": {
+          "usageMode": "single-session"
+        },
         "label": "single-purpose-utility"
       },
       "archetypes": [
-        {"name": "calc", "capabilities": {"read": {"pattern": "single-record"}, "write": {"pattern": "create-form"}, "interactions": [], "presentation": {"itemShape": "row"}, "state": {"realtime": "none"}}, "entities": ["bill"], "routes": ["/"]}
+        {
+          "name": "calc",
+          "capabilities": {
+            "read": {
+              "pattern": "single-record"
+            },
+            "write": {
+              "pattern": "create-form"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "bill"
+          ],
+          "routes": [
+            "/"
+          ]
+        }
       ],
       "industry": "consumer-utility",
       "runtime_context": []
@@ -222,313 +1121,1466 @@
       "name": "Mint (personal finance)",
       "gloss": "Aggregate bank accounts, categorize transactions, track budgets and goals.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "kpi-strip", "primaryInteraction": "dashboard", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "dashboard", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "metric-row",
+          "primaryInteraction": "chart",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "insight-dashboard"
       },
       "archetypes": [
-        {"name": "overview", "recipe": "dashboard", "entities": ["account", "transaction", "budget"], "routes": ["/"]},
-        {"name": "transactions", "recipe": "data_grid", "entities": ["transaction"], "routes": ["/transactions"]},
-        {"name": "budgets", "recipe": "crud", "entities": ["budget"], "routes": ["/budgets"]},
-        {"name": "goals", "recipe": "crud", "entities": ["goal"], "routes": ["/goals"]}
+        {
+          "name": "overview",
+          "recipe": "dashboard",
+          "entities": [
+            "account",
+            "transaction",
+            "budget"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "transactions",
+          "recipe": "data_grid",
+          "entities": [
+            "transaction"
+          ],
+          "routes": [
+            "/transactions"
+          ]
+        },
+        {
+          "name": "budgets",
+          "recipe": "crud",
+          "entities": [
+            "budget"
+          ],
+          "routes": [
+            "/budgets"
+          ]
+        },
+        {
+          "name": "goals",
+          "recipe": "crud",
+          "entities": [
+            "goal"
+          ],
+          "routes": [
+            "/goals"
+          ]
+        }
       ],
       "industry": "finance-personal",
-      "runtime_context": ["push_notifications", "biometric_auth", "deep_linking"]
+      "runtime_context": [
+        "push_notifications",
+        "biometric_auth",
+        "deep_linking"
+      ]
     },
     {
       "name": "Strava",
       "gloss": "Track workouts via GPS, share activities, follow friends.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "map-canvas", "primaryInteraction": "capture", "density": "spacious"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "feed", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "map-canvas",
+          "primaryInteraction": "capture",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "feed",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "activity-tracker"
       },
       "archetypes": [
-        {"name": "record", "capabilities": {"read": {"pattern": "map-pins"}, "write": {"pattern": "streaming-capture"}, "interactions": ["start-stop", "pause-resume", "live-follow"], "presentation": {"itemShape": "pin"}, "state": {"realtime": "stream"}}, "entities": ["activity"], "routes": ["/record"]},
-        {"name": "feed", "recipe": "feed", "entities": ["activity"], "routes": ["/"]},
-        {"name": "history", "recipe": "catalog", "entities": ["activity"], "routes": ["/you"]}
+        {
+          "name": "record",
+          "capabilities": {
+            "read": {
+              "pattern": "map-pins"
+            },
+            "write": {
+              "pattern": "capture"
+            },
+            "interactions": [
+              "live-follow"
+            ],
+            "presentation": {
+              "itemShape": "pin"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "activity"
+          ],
+          "routes": [
+            "/record"
+          ]
+        },
+        {
+          "name": "feed",
+          "recipe": "feed",
+          "entities": [
+            "activity"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "history",
+          "recipe": "catalog",
+          "entities": [
+            "activity"
+          ],
+          "routes": [
+            "/you"
+          ]
+        }
       ],
       "industry": "health-fitness",
-      "runtime_context": ["geo", "background_tasks", "sensors", "push_notifications"]
+      "runtime_context": [
+        "geo",
+        "background_tasks",
+        "sensors",
+        "push_notifications"
+      ]
     },
     {
       "name": "Duolingo",
       "gloss": "Bite-sized language lessons with streaks and gamified progress.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "progress-tree", "primaryInteraction": "wizard", "density": "spacious"},
-        "auth": {"surface": "modal", "gating": "on-action"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "single-record", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "none",
+          "primaryInteraction": "form",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "modal",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "single-record",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "gamified-learning"
       },
       "archetypes": [
-        {"name": "learning_path", "capabilities": {"read": {"pattern": "tree"}, "write": {"pattern": "none"}, "interactions": ["select-node", "progress-fill"], "presentation": {"itemShape": "node"}, "state": {"realtime": "none"}}, "entities": ["unit", "lesson"], "routes": ["/"]},
-        {"name": "lesson", "recipe": "wizard", "entities": ["lesson", "attempt"], "routes": ["/lesson/[id]"]},
-        {"name": "profile", "recipe": "detail_view", "entities": ["user"], "routes": ["/profile"]}
+        {
+          "name": "learning_path",
+          "capabilities": {
+            "read": {
+              "pattern": "tree"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "node"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "unit",
+            "lesson"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "lesson",
+          "recipe": "wizard",
+          "entities": [
+            "lesson",
+            "attempt"
+          ],
+          "routes": [
+            "/lesson/[id]"
+          ]
+        },
+        {
+          "name": "profile",
+          "recipe": "detail_view",
+          "entities": [
+            "user"
+          ],
+          "routes": [
+            "/profile"
+          ]
+        }
       ],
       "industry": "education-learning",
-      "runtime_context": ["push_notifications", "sound", "haptics", "offline_sync"]
+      "runtime_context": [
+        "push_notifications",
+        "haptic_feedback",
+        "offline_sync"
+      ]
     },
     {
       "name": "FedEx tracking",
       "gloss": "Enter a tracking number, see package location, delivery ETA, and history.",
       "app_shape": {
-        "layout": {"shell": "header", "hero": "search-hero", "primaryInteraction": "lookup", "density": "comfortable"},
-        "auth": {"surface": "none", "gating": "none"},
-        "nav": {"menu": "topbar", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "timeline", "denormalization": "aggressive"},
-        "identity": {"usageMode": "single-session"},
+        "layout": {
+          "shell": "header",
+          "hero": "full-bleed-gradient",
+          "primaryInteraction": "search",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "none",
+          "gating": "none"
+        },
+        "nav": {
+          "menu": "header-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "timeline",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "single-session"
+        },
         "label": "search-and-timeline"
       },
       "archetypes": [
-        {"name": "track", "capabilities": {"read": {"pattern": "timeline"}, "write": {"pattern": "none"}, "interactions": ["search", "refresh", "map-pin"], "presentation": {"itemShape": "step"}, "state": {"realtime": "poll"}}, "entities": ["shipment", "scan_event"], "routes": ["/", "/track/[id]"]}
+        {
+          "name": "track",
+          "capabilities": {
+            "read": {
+              "pattern": "timeline"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter",
+              "pinch-zoom"
+            ],
+            "presentation": {
+              "itemShape": "dot"
+            },
+            "state": {
+              "realtime": "poll"
+            }
+          },
+          "entities": [
+            "shipment",
+            "scan_event"
+          ],
+          "routes": [
+            "/",
+            "/track/[id]"
+          ]
+        }
       ],
       "industry": "logistics-tracking",
-      "runtime_context": ["push_notifications", "deep_linking"]
+      "runtime_context": [
+        "push_notifications",
+        "deep_linking"
+      ]
     },
     {
       "name": "Airbnb",
       "gloss": "Search stays on map, view listings, book with calendar and pay.",
       "app_shape": {
-        "layout": {"shell": "header", "hero": "search-hero", "primaryInteraction": "search", "density": "comfortable"},
-        "auth": {"surface": "modal", "gating": "on-action"},
-        "nav": {"menu": "topbar", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "grid", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "header",
+          "hero": "media-hero",
+          "primaryInteraction": "search",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "modal",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "header-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "search-map-booking"
       },
       "archetypes": [
-        {"name": "search", "capabilities": {"read": {"pattern": "grid-with-map"}, "write": {"pattern": "none"}, "interactions": ["filter", "map-pan", "sort"], "presentation": {"itemShape": "card"}, "state": {"realtime": "none"}}, "entities": ["listing"], "routes": ["/", "/search"]},
-        {"name": "listing", "recipe": "detail_view", "entities": ["listing", "review"], "routes": ["/listing/[id]"]},
-        {"name": "booking", "recipe": "checkout", "entities": ["reservation", "payment"], "routes": ["/book/[id]"]},
-        {"name": "trips", "recipe": "catalog", "entities": ["reservation"], "routes": ["/trips"]},
-        {"name": "messages", "recipe": "chat", "entities": ["thread", "message"], "routes": ["/inbox"]}
+        {
+          "name": "search",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter",
+              "pinch-zoom",
+              "sort"
+            ],
+            "presentation": {
+              "itemShape": "card"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "listing"
+          ],
+          "routes": [
+            "/",
+            "/search"
+          ]
+        },
+        {
+          "name": "listing",
+          "recipe": "detail_view",
+          "entities": [
+            "listing",
+            "review"
+          ],
+          "routes": [
+            "/listing/[id]"
+          ]
+        },
+        {
+          "name": "booking",
+          "recipe": "checkout",
+          "entities": [
+            "reservation",
+            "payment"
+          ],
+          "routes": [
+            "/book/[id]"
+          ]
+        },
+        {
+          "name": "trips",
+          "recipe": "catalog",
+          "entities": [
+            "reservation"
+          ],
+          "routes": [
+            "/trips"
+          ]
+        },
+        {
+          "name": "messages",
+          "recipe": "chat",
+          "entities": [
+            "thread",
+            "message"
+          ],
+          "routes": [
+            "/inbox"
+          ]
+        }
       ],
       "industry": "hospitality-booking",
-      "runtime_context": ["geo", "push_notifications", "deep_linking", "wallet_pass", "photo_library"]
+      "runtime_context": [
+        "geo",
+        "push_notifications",
+        "deep_linking",
+        "wallet_pass",
+        "photo_library"
+      ]
     },
     {
       "name": "Netflix",
       "gloss": "Browse movie/show catalog, watch on demand, per-profile recommendations.",
       "app_shape": {
-        "layout": {"shell": "header", "hero": "hero-billboard", "primaryInteraction": "browse", "density": "spacious"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "topbar", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "row-rails", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "header",
+          "hero": "media-hero",
+          "primaryInteraction": "card-grid",
+          "density": "spacious"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "header-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "billboard-catalog"
       },
       "archetypes": [
-        {"name": "browse", "capabilities": {"read": {"pattern": "row-rails"}, "write": {"pattern": "none"}, "interactions": ["horizontal-scroll", "hover-preview"], "presentation": {"itemShape": "poster"}, "state": {"realtime": "none"}}, "entities": ["title", "row"], "routes": ["/browse"]},
-        {"name": "watch", "capabilities": {"read": {"pattern": "single-record"}, "write": {"pattern": "streaming-consumption"}, "interactions": ["play", "pause", "seek", "quality"], "presentation": {"itemShape": "player"}, "state": {"realtime": "stream"}}, "entities": ["title"], "routes": ["/watch/[id]"]},
-        {"name": "search", "capabilities": {"read": {"pattern": "grid"}, "write": {"pattern": "none"}, "interactions": ["search", "filter"], "presentation": {"itemShape": "poster"}, "state": {"realtime": "none"}}, "entities": ["title"], "routes": ["/search"]},
-        {"name": "profile_switch", "recipe": "detail_view", "entities": ["profile"], "routes": ["/profiles"]}
+        {
+          "name": "browse",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "infinite-scroll"
+            ],
+            "presentation": {
+              "itemShape": "tile"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "title",
+            "row"
+          ],
+          "routes": [
+            "/browse"
+          ]
+        },
+        {
+          "name": "watch",
+          "capabilities": {
+            "read": {
+              "pattern": "single-record"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "bar"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "title"
+          ],
+          "routes": [
+            "/watch/[id]"
+          ]
+        },
+        {
+          "name": "search",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter"
+            ],
+            "presentation": {
+              "itemShape": "tile"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "title"
+          ],
+          "routes": [
+            "/search"
+          ]
+        },
+        {
+          "name": "profile_switch",
+          "recipe": "detail_view",
+          "entities": [
+            "profile"
+          ],
+          "routes": [
+            "/profiles"
+          ]
+        }
       ],
       "industry": "media-streaming",
-      "runtime_context": ["background_tasks", "offline_sync", "push_notifications", "deep_linking"]
+      "runtime_context": [
+        "background_tasks",
+        "offline_sync",
+        "push_notifications",
+        "deep_linking"
+      ]
     },
     {
       "name": "Notion",
       "gloss": "Block-based notes and databases with rich editing and cross-links.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "none", "primaryInteraction": "editor", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-tree", "back": "history"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "document", "denormalization": "moderate"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "none",
+          "primaryInteraction": "form",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "single-record",
+          "denormalization": "moderate"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "document-workspace"
       },
       "archetypes": [
-        {"name": "page_editor", "capabilities": {"read": {"pattern": "document"}, "write": {"pattern": "inline-edit"}, "interactions": ["slash-command", "drag-block", "mention", "auto-save"], "presentation": {"itemShape": "block"}, "state": {"realtime": "presence"}}, "entities": ["page", "block"], "routes": ["/", "/page/[id]"]},
-        {"name": "database_view", "capabilities": {"read": {"pattern": "list", "grouping": "property"}, "write": {"pattern": "inline-edit"}, "interactions": ["filter", "sort", "group", "view-switch"], "presentation": {"itemShape": "row"}, "state": {"realtime": "presence"}}, "entities": ["record"], "routes": ["/db/[id]"]},
-        {"name": "search", "recipe": "search", "entities": ["page"], "routes": ["/search"]}
+        {
+          "name": "page_editor",
+          "capabilities": {
+            "read": {
+              "pattern": "single-record"
+            },
+            "write": {
+              "pattern": "inline"
+            },
+            "interactions": [
+              "keyboard-nav",
+              "drag-reorder",
+              "inline-edit"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "page",
+            "block"
+          ],
+          "routes": [
+            "/",
+            "/page/[id]"
+          ]
+        },
+        {
+          "name": "database_view",
+          "capabilities": {
+            "read": {
+              "pattern": "list",
+              "grouping": "category"
+            },
+            "write": {
+              "pattern": "inline"
+            },
+            "interactions": [
+              "filter",
+              "sort",
+              "group-by"
+            ],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "record"
+          ],
+          "routes": [
+            "/db/[id]"
+          ]
+        },
+        {
+          "name": "search",
+          "recipe": "search_with_filters",
+          "entities": [
+            "page"
+          ],
+          "routes": [
+            "/search"
+          ]
+        }
       ],
       "industry": "productivity-notes",
-      "runtime_context": ["offline_sync", "background_tasks", "deep_linking"]
+      "runtime_context": [
+        "offline_sync",
+        "background_tasks",
+        "deep_linking"
+      ]
     },
     {
       "name": "Reddit",
       "gloss": "Threaded community discussion, subs, votes, comment trees.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "feed-header", "primaryInteraction": "feed", "density": "comfortable"},
-        "auth": {"surface": "modal", "gating": "on-action"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "feed", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "feed-header",
+          "primaryInteraction": "feed",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "modal",
+          "gating": "on-action"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "feed",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "community-feed"
       },
       "archetypes": [
-        {"name": "feed", "recipe": "feed", "entities": ["post"], "routes": ["/", "/r/[sub]"]},
-        {"name": "post_detail", "capabilities": {"read": {"pattern": "tree"}, "write": {"pattern": "create-form"}, "interactions": ["vote", "collapse-thread", "reply"], "presentation": {"itemShape": "comment"}, "state": {"realtime": "poll"}}, "entities": ["post", "comment"], "routes": ["/r/[sub]/[postId]"]},
-        {"name": "compose", "recipe": "create_form", "entities": ["post"], "routes": ["/submit"]}
+        {
+          "name": "feed",
+          "recipe": "feed",
+          "entities": [
+            "post"
+          ],
+          "routes": [
+            "/",
+            "/r/[sub]"
+          ]
+        },
+        {
+          "name": "post_detail",
+          "capabilities": {
+            "read": {
+              "pattern": "tree"
+            },
+            "write": {
+              "pattern": "create-form"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "poll"
+            }
+          },
+          "entities": [
+            "post",
+            "comment"
+          ],
+          "routes": [
+            "/r/[sub]/[postId]"
+          ]
+        },
+        {
+          "name": "compose",
+          "recipe": "crud",
+          "entities": [
+            "post"
+          ],
+          "routes": [
+            "/submit"
+          ]
+        }
       ],
       "industry": "community-social",
-      "runtime_context": ["push_notifications", "deep_linking"]
+      "runtime_context": [
+        "push_notifications",
+        "deep_linking"
+      ]
     },
     {
       "name": "IRS.gov file taxes",
       "gloss": "Multi-step government form for filing personal taxes.",
       "app_shape": {
-        "layout": {"shell": "header", "hero": "none", "primaryInteraction": "wizard", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "stepper", "back": "wizard"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "single-record", "denormalization": "none"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "header",
+          "hero": "none",
+          "primaryInteraction": "form",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "none",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "single-record",
+          "denormalization": "none"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "long-form-wizard"
       },
       "archetypes": [
-        {"name": "filing_wizard", "recipe": "wizard", "entities": ["return", "form_section"], "routes": ["/file", "/file/[step]"]},
-        {"name": "documents", "recipe": "crud", "entities": ["document"], "routes": ["/documents"]},
-        {"name": "status", "recipe": "detail_view", "entities": ["return"], "routes": ["/status"]}
+        {
+          "name": "filing_wizard",
+          "recipe": "wizard",
+          "entities": [
+            "return",
+            "form_section"
+          ],
+          "routes": [
+            "/file",
+            "/file/[step]"
+          ]
+        },
+        {
+          "name": "documents",
+          "recipe": "crud",
+          "entities": [
+            "document"
+          ],
+          "routes": [
+            "/documents"
+          ]
+        },
+        {
+          "name": "status",
+          "recipe": "detail_view",
+          "entities": [
+            "return"
+          ],
+          "routes": [
+            "/status"
+          ]
+        }
       ],
       "industry": "government-forms",
-      "runtime_context": ["biometric_auth", "deep_linking"]
+      "runtime_context": [
+        "biometric_auth",
+        "deep_linking"
+      ]
     },
     {
       "name": "AT&T self-service",
       "gloss": "Manage phone plan, view bill, run speed test, contact support.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "kpi-strip", "primaryInteraction": "dashboard", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "dashboard", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "metric-row",
+          "primaryInteraction": "chart",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "self-service-portal"
       },
       "archetypes": [
-        {"name": "overview", "recipe": "dashboard", "entities": ["account", "plan", "bill"], "routes": ["/"]},
-        {"name": "billing", "recipe": "catalog", "entities": ["invoice", "payment"], "routes": ["/billing"]},
-        {"name": "plan_change", "recipe": "wizard", "entities": ["plan"], "routes": ["/plan/change"]},
-        {"name": "support", "recipe": "chat", "entities": ["ticket", "message"], "routes": ["/support"]}
+        {
+          "name": "overview",
+          "recipe": "dashboard",
+          "entities": [
+            "account",
+            "plan",
+            "bill"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "billing",
+          "recipe": "catalog",
+          "entities": [
+            "invoice",
+            "payment"
+          ],
+          "routes": [
+            "/billing"
+          ]
+        },
+        {
+          "name": "plan_change",
+          "recipe": "wizard",
+          "entities": [
+            "plan"
+          ],
+          "routes": [
+            "/plan/change"
+          ]
+        },
+        {
+          "name": "support",
+          "recipe": "chat",
+          "entities": [
+            "ticket",
+            "message"
+          ],
+          "routes": [
+            "/support"
+          ]
+        }
       ],
       "industry": "telecom-selfservice",
-      "runtime_context": ["push_notifications", "biometric_auth"]
+      "runtime_context": [
+        "push_notifications",
+        "biometric_auth"
+      ]
     },
     {
       "name": "Shopify admin",
       "gloss": "Merchant back-office: products, orders, customers, analytics.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "kpi-strip", "primaryInteraction": "dashboard", "density": "compact"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "grid", "denormalization": "moderate"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "metric-row",
+          "primaryInteraction": "chart",
+          "density": "dense"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "moderate"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "admin-back-office"
       },
       "archetypes": [
-        {"name": "home", "recipe": "dashboard", "entities": ["order", "sale"], "routes": ["/"]},
-        {"name": "orders", "recipe": "data_grid", "entities": ["order"], "routes": ["/orders"]},
-        {"name": "order_detail", "recipe": "detail_view", "entities": ["order", "customer", "fulfillment"], "routes": ["/orders/[id]"]},
-        {"name": "products", "recipe": "crud", "entities": ["product", "variant"], "routes": ["/products"]},
-        {"name": "customers", "recipe": "crud", "entities": ["customer"], "routes": ["/customers"]},
-        {"name": "analytics", "recipe": "dashboard", "entities": ["metric"], "routes": ["/analytics"]}
+        {
+          "name": "home",
+          "recipe": "dashboard",
+          "entities": [
+            "order",
+            "sale"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "orders",
+          "recipe": "data_grid",
+          "entities": [
+            "order"
+          ],
+          "routes": [
+            "/orders"
+          ]
+        },
+        {
+          "name": "order_detail",
+          "recipe": "detail_view",
+          "entities": [
+            "order",
+            "customer",
+            "fulfillment"
+          ],
+          "routes": [
+            "/orders/[id]"
+          ]
+        },
+        {
+          "name": "products",
+          "recipe": "crud",
+          "entities": [
+            "product",
+            "variant"
+          ],
+          "routes": [
+            "/products"
+          ]
+        },
+        {
+          "name": "customers",
+          "recipe": "crud",
+          "entities": [
+            "customer"
+          ],
+          "routes": [
+            "/customers"
+          ]
+        },
+        {
+          "name": "analytics",
+          "recipe": "dashboard",
+          "entities": [
+            "metric"
+          ],
+          "routes": [
+            "/analytics"
+          ]
+        }
       ],
       "industry": "ecommerce-admin",
-      "runtime_context": ["push_notifications", "deep_linking"]
+      "runtime_context": [
+        "push_notifications",
+        "deep_linking"
+      ]
     },
     {
       "name": "Mixpanel",
       "gloss": "Product analytics workspace: funnels, retention, cohorts, dashboards.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "none", "primaryInteraction": "explore", "density": "compact"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "dashboard", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "none",
+          "primaryInteraction": "chart",
+          "density": "dense"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "analytics-workspace"
       },
       "archetypes": [
-        {"name": "dashboards", "recipe": "dashboard", "entities": ["dashboard", "chart"], "routes": ["/", "/dashboards/[id]"]},
-        {"name": "insights", "capabilities": {"read": {"pattern": "chart"}, "write": {"pattern": "config-form"}, "interactions": ["query-builder", "drill-down", "date-range"], "presentation": {"itemShape": "chart"}, "state": {"realtime": "none"}}, "entities": ["query", "chart"], "routes": ["/insights"]},
-        {"name": "funnels", "capabilities": {"read": {"pattern": "chart"}, "write": {"pattern": "config-form"}, "interactions": ["step-builder", "cohort-select"], "presentation": {"itemShape": "chart"}, "state": {"realtime": "none"}}, "entities": ["funnel", "step"], "routes": ["/funnels"]},
-        {"name": "cohorts", "recipe": "crud", "entities": ["cohort"], "routes": ["/cohorts"]}
+        {
+          "name": "dashboards",
+          "recipe": "dashboard",
+          "entities": [
+            "dashboard",
+            "chart"
+          ],
+          "routes": [
+            "/",
+            "/dashboards/[id]"
+          ]
+        },
+        {
+          "name": "insights",
+          "capabilities": {
+            "read": {
+              "pattern": "chart"
+            },
+            "write": {
+              "pattern": "edit-form"
+            },
+            "interactions": [
+              "filter"
+            ],
+            "presentation": {
+              "itemShape": "bar"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "query",
+            "chart"
+          ],
+          "routes": [
+            "/insights"
+          ]
+        },
+        {
+          "name": "funnels",
+          "capabilities": {
+            "read": {
+              "pattern": "chart"
+            },
+            "write": {
+              "pattern": "edit-form"
+            },
+            "interactions": [
+              "filter"
+            ],
+            "presentation": {
+              "itemShape": "bar"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "funnel",
+            "step"
+          ],
+          "routes": [
+            "/funnels"
+          ]
+        },
+        {
+          "name": "cohorts",
+          "recipe": "crud",
+          "entities": [
+            "cohort"
+          ],
+          "routes": [
+            "/cohorts"
+          ]
+        }
       ],
       "industry": "workspace-analytics",
-      "runtime_context": ["deep_linking"]
+      "runtime_context": [
+        "deep_linking"
+      ]
     },
     {
       "name": "Slack",
       "gloss": "Team messaging with channels, DMs, threads, and file sharing.",
       "app_shape": {
-        "layout": {"shell": "three-pane", "hero": "none", "primaryInteraction": "chat", "density": "compact"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-tree", "back": "history"},
-        "workflows": {"executionMode": "fire-and-forget"},
-        "data": {"readShape": "chat-stream", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "three-pane",
+          "hero": "none",
+          "primaryInteraction": "chat",
+          "density": "dense"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "fire-and-forget"
+        },
+        "data": {
+          "readShape": "feed",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "team-messaging"
       },
       "archetypes": [
-        {"name": "channel", "recipe": "chat", "entities": ["channel", "message"], "routes": ["/", "/c/[channelId]"]},
-        {"name": "thread", "capabilities": {"read": {"pattern": "tree"}, "write": {"pattern": "reply"}, "interactions": ["react", "reply", "mention"], "presentation": {"itemShape": "message"}, "state": {"realtime": "stream"}}, "entities": ["message", "reply"], "routes": ["/c/[channelId]/thread/[msgId]"]},
-        {"name": "dm", "recipe": "chat", "entities": ["dm_thread", "message"], "routes": ["/dm/[userId]"]},
-        {"name": "search", "recipe": "search", "entities": ["message", "file"], "routes": ["/search"]},
-        {"name": "files", "recipe": "catalog", "entities": ["file"], "routes": ["/files"]}
+        {
+          "name": "channel",
+          "recipe": "chat",
+          "entities": [
+            "channel",
+            "message"
+          ],
+          "routes": [
+            "/",
+            "/c/[channelId]"
+          ]
+        },
+        {
+          "name": "thread",
+          "capabilities": {
+            "read": {
+              "pattern": "tree"
+            },
+            "write": {
+              "pattern": "create-form"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "row"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "message",
+            "reply"
+          ],
+          "routes": [
+            "/c/[channelId]/thread/[msgId]"
+          ]
+        },
+        {
+          "name": "dm",
+          "recipe": "chat",
+          "entities": [
+            "dm_thread",
+            "message"
+          ],
+          "routes": [
+            "/dm/[userId]"
+          ]
+        },
+        {
+          "name": "search",
+          "recipe": "search_with_filters",
+          "entities": [
+            "message",
+            "file"
+          ],
+          "routes": [
+            "/search"
+          ]
+        },
+        {
+          "name": "files",
+          "recipe": "catalog",
+          "entities": [
+            "file"
+          ],
+          "routes": [
+            "/files"
+          ]
+        }
       ],
       "industry": "workspace-communication",
-      "runtime_context": ["push_notifications", "deep_linking", "background_tasks", "photo_library"]
+      "runtime_context": [
+        "push_notifications",
+        "deep_linking",
+        "background_tasks",
+        "photo_library"
+      ]
     },
     {
       "name": "Google Photos",
       "gloss": "Cloud photo library with search, albums, and auto-organized memories.",
       "app_shape": {
-        "layout": {"shell": "bottom-tabs", "hero": "grid-header", "primaryInteraction": "gallery", "density": "compact"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "bottom-tabs", "back": "history"},
-        "workflows": {"executionMode": "await-with-progress"},
-        "data": {"readShape": "grid", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "bottom-tabs",
+          "hero": "feed-header",
+          "primaryInteraction": "card-grid",
+          "density": "dense"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "bottom-tabs",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "await-with-progress"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "media-library"
       },
       "archetypes": [
-        {"name": "gallery", "capabilities": {"read": {"pattern": "grid", "grouping": "date"}, "write": {"pattern": "upload"}, "interactions": ["select", "pinch-zoom", "share"], "presentation": {"itemShape": "thumbnail"}, "state": {"realtime": "none"}}, "entities": ["photo"], "routes": ["/"]},
-        {"name": "search", "capabilities": {"read": {"pattern": "grid"}, "write": {"pattern": "none"}, "interactions": ["search", "filter-by-person", "filter-by-place"], "presentation": {"itemShape": "thumbnail"}, "state": {"realtime": "none"}}, "entities": ["photo"], "routes": ["/search"]},
-        {"name": "albums", "recipe": "crud", "entities": ["album"], "routes": ["/albums"]},
-        {"name": "photo_detail", "recipe": "detail_view", "entities": ["photo"], "routes": ["/photo/[id]"]}
+        {
+          "name": "gallery",
+          "capabilities": {
+            "read": {
+              "pattern": "grid",
+              "grouping": "date"
+            },
+            "write": {
+              "pattern": "capture"
+            },
+            "interactions": [
+              "bulk-select",
+              "pinch-zoom"
+            ],
+            "presentation": {
+              "itemShape": "tile"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "photo"
+          ],
+          "routes": [
+            "/"
+          ]
+        },
+        {
+          "name": "search",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "filter"
+            ],
+            "presentation": {
+              "itemShape": "tile"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "photo"
+          ],
+          "routes": [
+            "/search"
+          ]
+        },
+        {
+          "name": "albums",
+          "recipe": "crud",
+          "entities": [
+            "album"
+          ],
+          "routes": [
+            "/albums"
+          ]
+        },
+        {
+          "name": "photo_detail",
+          "recipe": "detail_view",
+          "entities": [
+            "photo"
+          ],
+          "routes": [
+            "/photo/[id]"
+          ]
+        }
       ],
       "industry": "consumer-photo",
-      "runtime_context": ["camera", "photo_library", "background_tasks", "geo", "biometric_auth"]
+      "runtime_context": [
+        "camera",
+        "photo_library",
+        "background_tasks",
+        "geo",
+        "biometric_auth"
+      ]
     },
     {
       "name": "Apple Music",
       "gloss": "Music streaming with library, browse, radio, search — sidebar-driven.",
       "app_shape": {
-        "layout": {"shell": "sidebar", "hero": "player-bar", "primaryInteraction": "player", "density": "comfortable"},
-        "auth": {"surface": "route", "gating": "on-load"},
-        "nav": {"menu": "sidebar-links", "back": "history"},
-        "workflows": {"executionMode": "streaming"},
-        "data": {"readShape": "row-rails", "denormalization": "aggressive"},
-        "identity": {"usageMode": "returning-personal"},
+        "layout": {
+          "shell": "sidebar",
+          "hero": "player-bar",
+          "primaryInteraction": "player",
+          "density": "comfortable"
+        },
+        "auth": {
+          "surface": "route",
+          "gating": "on-load"
+        },
+        "nav": {
+          "menu": "sidebar-links",
+          "back": "history"
+        },
+        "workflows": {
+          "executionMode": "streaming"
+        },
+        "data": {
+          "readShape": "grid",
+          "denormalization": "aggressive"
+        },
+        "identity": {
+          "usageMode": "returning-personal"
+        },
         "label": "player-shell"
       },
       "archetypes": [
-        {"name": "library", "recipe": "catalog", "entities": ["playlist", "track"], "routes": ["/library"]},
-        {"name": "browse", "capabilities": {"read": {"pattern": "row-rails"}, "write": {"pattern": "none"}, "interactions": ["horizontal-scroll"], "presentation": {"itemShape": "card"}, "state": {"realtime": "none"}}, "entities": ["album", "playlist"], "routes": ["/browse"]},
-        {"name": "radio", "capabilities": {"read": {"pattern": "list"}, "write": {"pattern": "none"}, "interactions": ["play"], "presentation": {"itemShape": "card"}, "state": {"realtime": "stream"}}, "entities": ["station"], "routes": ["/radio"]},
-        {"name": "now_playing", "recipe": "player", "entities": ["track"], "routes": ["/now-playing"]},
-        {"name": "search", "recipe": "search", "entities": ["track", "album"], "routes": ["/search"]}
+        {
+          "name": "library",
+          "recipe": "catalog",
+          "entities": [
+            "playlist",
+            "track"
+          ],
+          "routes": [
+            "/library"
+          ]
+        },
+        {
+          "name": "browse",
+          "capabilities": {
+            "read": {
+              "pattern": "grid"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [
+              "infinite-scroll"
+            ],
+            "presentation": {
+              "itemShape": "card"
+            },
+            "state": {
+              "realtime": "none"
+            }
+          },
+          "entities": [
+            "album",
+            "playlist"
+          ],
+          "routes": [
+            "/browse"
+          ]
+        },
+        {
+          "name": "radio",
+          "capabilities": {
+            "read": {
+              "pattern": "list"
+            },
+            "write": {
+              "pattern": "none"
+            },
+            "interactions": [],
+            "presentation": {
+              "itemShape": "card"
+            },
+            "state": {
+              "realtime": "stream"
+            }
+          },
+          "entities": [
+            "station"
+          ],
+          "routes": [
+            "/radio"
+          ]
+        },
+        {
+          "name": "now_playing",
+          "recipe": "player",
+          "entities": [
+            "track"
+          ],
+          "routes": [
+            "/now-playing"
+          ]
+        },
+        {
+          "name": "search",
+          "recipe": "search_with_filters",
+          "entities": [
+            "track",
+            "album"
+          ],
+          "routes": [
+            "/search"
+          ]
+        }
       ],
       "industry": "consumer-music",
-      "runtime_context": ["background_tasks", "offline_sync", "push_notifications", "wallet_pass"]
+      "runtime_context": [
+        "background_tasks",
+        "offline_sync",
+        "push_notifications",
+        "wallet_pass"
+      ]
     }
   ]
 }

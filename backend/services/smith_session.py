@@ -124,6 +124,7 @@ class SmithSession:
         guards_fn: GuardsFn | None = None,
         understand_ask_fn: UnderstandFn | None = None,
         iteration_move_fn: MoveFn | None = None,
+        reasoning_fn: Callable[[str], None] | None = None,
     ) -> None:
         self.project_id = project_id
         self.output_dir = output_dir
@@ -134,6 +135,9 @@ class SmithSession:
         self._guards = guards_fn or (lambda _out: [])
         self._understand = understand_ask_fn
         self._move = iteration_move_fn
+        # Where Smith's reasoning goes so the user can read it. None means
+        # nobody is watching, which is every caller that predates it.
+        self._reasoning = reasoning_fn
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -202,7 +206,146 @@ class SmithSession:
 
     # ---- Iteration flow (§5.2 / §7 / §11) -------------------------------
 
-    def run_iteration(self, user_message: str) -> TurnResult:
+    def _connect_figma(self, understanding: dict) -> "TurnResult":
+        """Attach a Figma design, having asked for a URL and a variable NAME.
+
+        SMITH NEVER ASKS FOR THE TOKEN. §42 lists `chat history` first among the
+        places a raw credential must not come to rest, and this conversation is
+        written to disk. `services.figma.credentials` settled the shape before
+        this method existed: a `FigmaCredential` holds a REFERENCE — the name of
+        an environment variable — and the gateway resolves the secret at the
+        moment of the call. A name is not a secret, so it can be asked for,
+        stored and echoed; the token is never held at all.
+
+        The extraction is evidence, not the application (§48-§51). What it
+        produces is a `designSources` record for `figma_intelligence` to fan out
+        over, and the run that follows is the ordinary DAG.
+        """
+        from services.smith.figma_connect import FigmaConnectError, connect
+
+        url = (understanding.get("figma_url") or "").strip()
+        token_env = (understanding.get("token_env") or "").strip()
+
+        if not url:
+            return TurnResult(
+                status="asked",
+                answer="Which Figma file? Paste the link from Figma's Share "
+                       "dialog and I'll pull the screens and tokens out of it.",
+            )
+        if not token_env:
+            # The ask names the shape of the answer, because the obvious reply
+            # to "I need your Figma token" is to paste one — and that is the
+            # outcome this whole path exists to avoid.
+            return TurnResult(
+                status="asked",
+                answer=("Which environment variable holds your Figma token? I "
+                        "need the NAME — `FIGMA_TOKEN`, for example — not the "
+                        "token itself. Anything you type here is written to "
+                        "the conversation log, so a credential must not go in "
+                        "it; export the token in the backend's environment and "
+                        "tell me what you called it."),
+            )
+
+        # THE CHEAP CHECK STAYS FIRST. Asking which kind of design this is
+        # before knowing it IS one answers a mistyped link with a question about
+        # scope — the same ordering mistake the URL check was moved forward to
+        # fix, reintroduced one question later.
+        from services.figma.url import parse as _parse_figma_url
+
+        if _parse_figma_url(url) is None:
+            return TurnResult(
+                status="needs_user",
+                answer=(f"That does not look like a Figma URL: {url!r}. I need "
+                        f"the link from Figma's Share dialog, like "
+                        f"https://figma.com/design/<key>/<name>?node-id=1-2"),
+            )
+
+        from services.smith.understand_ask import _design_scope
+
+        treat_as = _design_scope(understanding.get("treat_as"))
+        if not treat_as:
+            # ASKED ONCE, BECAUSE THE TWO ANSWERS BUILD DIFFERENT APPLICATIONS.
+            # Evidence derives the page set from the data model with the design
+            # informing it — one real dashboard produced thirteen pages that way,
+            # every one a fair reading of what a dashboard implies. Specification
+            # builds the frames and nothing else. Guessing either way is a whole
+            # application's shape decided silently.
+            return TurnResult(
+                status="asked",
+                answer=("Before I pull it in — is this design the "
+                        "SPECIFICATION or a REFERENCE?\n\n"
+                        "• Specification: I build exactly the screens you drew "
+                        "and nothing else. No sign-in, no lists behind the "
+                        "numbers, no forms to create what they show, unless "
+                        "they are in the file.\n"
+                        "• Reference: the screens become requirements and the "
+                        "design language, and the application is built around "
+                        "them — usually more pages than frames.\n\n"
+                        "Say “specification” or “reference”."),
+            )
+
+        try:
+            out = connect(self.output_dir, figma_url=url, token_env=token_env,
+                          treat_as=treat_as)
+        except FigmaConnectError as exc:
+            # Every message on this path names the reference or the failure
+            # kind; `FigmaGatewayError` redacts its own detail (§42).
+            return TurnResult(status="needs_user", answer=str(exc))
+        except Exception as exc:  # noqa: BLE001 — a turn reports, never crashes
+            logger.exception("figma connect failed for %s", self.output_dir)
+            return TurnResult(
+                status="needs_user",
+                answer=f"I could not read that Figma file: {type(exc).__name__}.",
+            )
+
+        return TurnResult(status="resolved", answer=out["summary"])
+
+    def _compose(self, verb: str, understanding: dict,
+                 user_message: str) -> "TurnResult":
+        """Compose a screen, or add sections to one, through the real agent.
+
+        `services.smith.compose.run` builds the same TaskSpec the orchestrator
+        builds and hands it to the same executor, so a page Smith composes and
+        a page the build composed come from one code path — then commits it
+        through `apply_change` so the Blueprint stays the record.
+
+        THE SAME FUNCTION THE TOOL CALLS. `compose_route` and `add_widgets` are
+        also tools in the ReAct catalogue, which is the path a live chat turn
+        takes. Both arrive here; a private copy of the loading-and-committing
+        would be a second answer to what composing a route means, and it would
+        drift the first time either was touched.
+        """
+        from services.smith.compose import run as compose_run
+
+        route = str(understanding.get("route") or "").strip()
+        widgets = [str(w) for w in (understanding.get("widgets") or [])]
+        # The composition runs for about a minute. Handing it the same sink
+        # `understand_ask` used means the wait carries the model's reasoning
+        # instead of a spinner — and it is the same sink, so a turn reads as
+        # one continuous train of thought rather than two disconnected ones.
+        out = compose_run(str(self.output_dir), verb, route=route,
+                          widgets=widgets, request=user_message,
+                          reasoning=self._reasoning)
+
+        if not out.get("applied"):
+            # A refusal is an outcome. Reporting it beats claiming success with
+            # nothing behind it, which is the failure this path is a reaction to.
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         f"I could not {verb.replace('_', ' ')} "
+                                         f"{route} and have changed nothing."))
+
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(
+            status="resolved",
+            answer=(str(out.get("diff_summary") or f"I updated {route}.")
+                    + (f" Updated: {', '.join(touched[:6])}." if touched
+                       else "")),
+            touched_paths=touched,
+        )
+
+    def run_iteration(self, user_message: str,
+                      history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
 
         Contract:
@@ -226,10 +369,77 @@ class SmithSession:
 
         baseline = snapshot_baseline(self.output_dir, guards_fn=self._guards)
 
-        understanding = self._understand(user_message, blueprint_ctx) or {}
+        # THE EXCHANGE, NOT JUST THE LATEST LINE. Smith asks "is that right?"
+        # and the reply is the word "yes", which means nothing without the
+        # question above it. Default None keeps every existing caller — and
+        # every test — working unchanged.
+        seam_kwargs: dict[str, Any] = {"history": history or []}
+        if self._reasoning is not None:
+            seam_kwargs["reasoning"] = self._reasoning
+        try:
+            understanding = self._understand(
+                user_message, blueprint_ctx, **seam_kwargs,
+            ) or {}
+        except TypeError:
+            # A seam that predates the history argument. Degrades to the old
+            # single-turn behaviour rather than failing the turn.
+            understanding = self._understand(user_message, blueprint_ctx) or {}
+
+        # ANSWERED, SO NOTHING TO CHANGE. §8 gives Smith the Blueprint as a
+        # memory layer and `pick_relevant_slice` has already put the relevant
+        # part of it in front of the model. A question reaching here used to
+        # come back as a request to restate it as a change, which sends the
+        # user away to rephrase something Smith could already answer.
+        #
+        # `no_op` rather than a new status: the existing meaning — read,
+        # nothing needed changing — is exactly what answering is, and it does
+        # not hand off to the DAG, so a question no longer produces a run.
+        answered = (understanding.get("answer") or "").strip()
+        if answered:
+            return TurnResult(status="no_op", answer=answered)
+
         clarification = (understanding.get("clarification_needed") or "").strip()
         if clarification:
             return TurnResult(status="asked", answer=clarification)
+
+        # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
+        # five required fields, so a composition could not be expressed at all.
+        # Requirements are per verb now; see services/smith/verbs.
+        from services.smith.verbs import (VERB_HELP, is_known, missing_fields,
+                                          verb_of)
+
+        verb = verb_of(understanding)
+        if not is_known(understanding):
+            return TurnResult(
+                status="needs_user",
+                answer=("I did not recognise that as something I can do. I can "
+                        + "; ".join(f"{v} — {h.split('.')[0].lower()}"
+                                    for v, h in VERB_HELP.items()) + "."),
+            )
+        # Only the new verbs are gated here. `rename` keeps the path it always
+        # had — its fields are enforced by `understand_ask`, and re-checking
+        # them in the turn made a call that used to reach the dispatcher stop
+        # short of it.
+        if verb != "rename":
+            gaps = missing_fields(understanding)
+            if gaps:
+                return TurnResult(
+                    status="asked",
+                    answer=(f"I can do that, I just need {' and '.join(gaps)}. "
+                            + VERB_HELP.get(verb, "")),
+                )
+
+        if verb == "connect_figma":
+            return self._connect_figma(understanding)
+        if verb in ("compose_route", "add_widgets"):
+            return self._compose(verb, understanding, user_message)
+        if verb == "rebuild":
+            return TurnResult(
+                status="needs_user",
+                answer=("A rebuild regenerates the whole application from its "
+                        "definition. Say \u201crebuild\u201d again to confirm "
+                        "and I will start it."),
+            )
 
         target_file = (understanding.get("target_file") or "").strip()
         element_label = (understanding.get("element_label") or "").strip()
@@ -240,13 +450,21 @@ class SmithSession:
                        "should I edit? A route path or a screen name works.",
             )
 
+        # The "is this even a rename?" question is the VERB's now, decided
+        # above, so it is not re-litigated here. f1a601f checked `new_value`
+        # at this point and stopped turns that carry the rename shape without
+        # it — the dispatcher derives that field, and an injected mover does
+        # not need it at all.
         move = self._move(understanding, self.output_dir)
         if move is None:
             return TurnResult(
                 status="no_op",
-                answer="I looked at what you asked and I don't see anything "
-                       "to change — the current state already matches. If "
-                       "that surprises you, let me know what's off from your side.",
+                answer=(
+                    f"I looked for \u201c{element_label}\u201d in "
+                    f"{target_file} and could not find it, so I have changed "
+                    "nothing rather than editing the nearest thing. If it is "
+                    "there under different wording, tell me the exact text."
+                ),
             )
 
         # Ground truth: what did git actually see change?

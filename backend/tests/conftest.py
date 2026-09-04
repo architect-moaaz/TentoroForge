@@ -17,6 +17,53 @@ os.environ["SECRET_KEY"] = "test-secret"
 os.environ["ANTHROPIC_API_KEY"] = "test-key"
 
 # ---------------------------------------------------------------------------
+# The rate limiter is a WALL-CLOCK token bucket, and the suite shares one.
+#
+# `middleware/rate_limit.py` keeps a per-IP bucket — burst 20, refilling at
+# 2/sec — and every TestClient request in the run arrives from the same IP
+# against the same app instance. So the suite's HTTP budget depends on how
+# fast the suite happens to run: shave ten seconds off the total and requests
+# that used to arrive after a refill now arrive before one.
+#
+# The symptom is a test asserting 200 and getting 429, in a file nobody
+# touched, reproducible in a full run and passing in isolation. Adding tests
+# ANYWHERE can cause it, which makes it read as "your change broke this" when
+# the change was in a module with no HTTP surface at all.
+#
+# Nothing tests this middleware (test_auth's 429 is `auth.py`'s login lockout,
+# which is unrelated), so the limit is simply lifted here. A test that does
+# want to exercise it should build its own middleware instance with its own
+# numbers rather than racing the shared one.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("RATE_LIMIT_REQUESTS_PER_MINUTE", "1000000")
+os.environ.setdefault("RATE_LIMIT_BURST", "1000000")
+
+# ---------------------------------------------------------------------------
+# Projects created by tests go somewhere disposable.
+#
+# `project_service.create_project` makes `<OUTPUT_BASE>/<short-id>`, git-inits
+# it, and OUTPUT_BASE was the repo's real `output/` — the directory holding the
+# developer's actual generated applications. Every suite run left eight to ten
+# empty git repos there; 300 had accumulated, 23MB, indistinguishable from a
+# project someone had started and abandoned.
+#
+# One directory per session, removed at the end. Set before any import so the
+# module-level constant reads it.
+# ---------------------------------------------------------------------------
+import tempfile as _tempfile
+
+_TEST_OUTPUT = _tempfile.mkdtemp(prefix="forge-test-output-")
+os.environ["FORGE_OUTPUT_BASE"] = _TEST_OUTPUT
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    """Take the projects with us. Best-effort: a leftover temp directory is a
+    nuisance, a failed teardown that reddens a green run is worse."""
+    import shutil as _shutil
+
+    _shutil.rmtree(_TEST_OUTPUT, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
 # .env isolation: config.py and main.py call load_dotenv() at import time.
 # Any test module that (transitively) imports them — pytest imports EVERY
 # collected module, even ones -k later deselects — would dump the

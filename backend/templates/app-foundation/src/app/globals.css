@@ -1,28 +1,33 @@
+/* Generated design tokens. Imported first so the cascade sees them, and
+   unlayered so they win over the @layer base defaults below — a layered
+   rule loses to an unlayered one regardless of source order.
+
+   Written by project_design_tokens. Nothing imported it for the life of
+   this file, so every generated app rendered on scaffold defaults while
+   a correct palette sat unread next to it. */
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: __CSS_BACKGROUND__;
-    --foreground: __CSS_FOREGROUND__;
     --card: 0 0% 100%;
-    --card-foreground: __CSS_FOREGROUND__;
+    --card-foreground: var(--foreground);
     --popover: 0 0% 100%;
-    --popover-foreground: __CSS_FOREGROUND__;
-    --primary: __CSS_PRIMARY__;
+    --popover-foreground: var(--foreground);
     --primary-foreground: 0 0% 100%;
-    --secondary: __CSS_SECONDARY__;
-    --secondary-foreground: __CSS_FOREGROUND__;
+    --secondary-foreground: var(--foreground);
     --muted: 210 40% 96%;
     --muted-foreground: 215 16% 47%;
     --accent: 210 40% 96%;
-    --accent-foreground: __CSS_FOREGROUND__;
+    --accent-foreground: var(--foreground);
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: __CSS_PRIMARY__;
+    --ring: var(--primary);
     --radius: 0.625rem;
   }
 
@@ -33,7 +38,6 @@
     --card-foreground: 210 20% 98%;
     --popover: 222 84% 8%;
     --popover-foreground: 210 20% 98%;
-    --primary: __CSS_PRIMARY__;
     --primary-foreground: 0 0% 100%;
     --secondary: 215 25% 20%;
     --secondary-foreground: 210 20% 98%;
@@ -45,7 +49,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 215 25% 20%;
     --input: 215 25% 20%;
-    --ring: __CSS_PRIMARY__;
+    --ring: var(--primary);
   }
 
   * {

@@ -95,12 +95,26 @@ export type StatNodeT = z.infer<typeof StatNode>;
 export const DescriptionListNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("DescriptionList"),
+  // Kept in step with what the component actually accepts. This shape carried
+  // only `items` and `orientation` while the rendered component also takes
+  // `emptyText`, `itemMode`, `dataSource` and the loading props — so a page
+  // using any of them rendered correctly and failed validation, which is how
+  // several pages became silently non-conforming.
   props: z.object({
     items: z.array(z.object({
       term:        z.string().min(1),
       description: z.string(),
     }).strict()).min(1),
     orientation: z.enum(["vertical", "horizontal"]).optional(),
+    /** Shown instead of an empty list — a record with nothing to show is a
+     *  normal state, not a broken one. */
+    emptyText:    z.string().optional(),
+    /** Bound source when the pairs come from data rather than the schema. */
+    dataSource:   z.unknown().optional(),
+    itemMode:     z.string().optional(),
+    isLoading:    z.boolean().optional(),
+    skeletonRows: z.number().optional(),
+    className:    z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

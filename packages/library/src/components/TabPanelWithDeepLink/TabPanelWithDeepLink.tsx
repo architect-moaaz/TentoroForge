@@ -40,7 +40,7 @@ export function TabPanelWithDeepLink({
             >
               {tab.label}
               {isActive && (
-                <span className="absolute -bottom-px left-0 right-0 h-0.5 bg-primary" />
+                <span className="absolute -bottom-px start-0 end-0 h-0.5 bg-primary" />
               )}
             </button>
           );

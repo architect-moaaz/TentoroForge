@@ -138,11 +138,11 @@ export function CartPanel({
         <>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+              <tr className="border-b border-border text-start text-xs text-muted-foreground">
                 <th className="py-2 font-medium">Item</th>
                 <th className="py-2 font-medium">Qty</th>
-                <th className="py-2 text-right font-medium">Price</th>
-                <th className="py-2 text-right font-medium">Subtotal</th>
+                <th className="py-2 text-end font-medium">Price</th>
+                <th className="py-2 text-end font-medium">Subtotal</th>
                 <th className="py-2 w-8"></th>
               </tr>
             </thead>
@@ -162,9 +162,9 @@ export function CartPanel({
                         <button type="button" onClick={() => setQty(r.id, r.quantity + 1)} disabled={busy} className="h-7 w-7 hover:bg-accent">+</button>
                       </div>
                     </td>
-                    <td className="py-3 text-right">{price ? fmt(price, currency) : "—"}</td>
-                    <td className="py-3 text-right font-medium">{lineTotal ? fmt(lineTotal, currency) : "—"}</td>
-                    <td className="py-3 text-right">
+                    <td className="py-3 text-end">{price ? fmt(price, currency) : "—"}</td>
+                    <td className="py-3 text-end font-medium">{lineTotal ? fmt(lineTotal, currency) : "—"}</td>
+                    <td className="py-3 text-end">
                       <button type="button" onClick={() => remove(r.id)} disabled={busy} aria-label="Remove" className="text-muted-foreground hover:text-destructive">✕</button>
                     </td>
                   </tr>
@@ -187,7 +187,7 @@ export function CartPanel({
                 ))}
               </select>
             </label>
-            <div className="text-right">
+            <div className="text-end">
               <div className="text-xs text-muted-foreground">Total</div>
               <div className="text-2xl font-medium">{fmt(body.subtotal, currency)}</div>
               <button

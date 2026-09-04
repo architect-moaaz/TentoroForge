@@ -870,13 +870,10 @@ def test_the_prompt_redirects_rationale_to_assumptions(svc):
 #: than a data one, so an unexplained gap is a bug and an explained one is a
 #: design decision.
 _DELIBERATE_BLIND_SPOTS: dict[tuple[str, str], str] = {
-    ("page_layouts", "patternTemplates"):
-        "A per-page author designs bespoke; it depends on `patterns` so that "
-        "pages nobody authors individually still have a template to fall back "
-        "on, which is an ordering constraint rather than an input.",
-    ("patterns", "components"):
-        "A2UI composes from the 165-component catalog, not from Blueprint "
-        "components; it depends on page_designs for ordering, not for data.",
+    ("page_layouts", "components"):
+        "A2UI composes from the component catalog, not from Blueprint "
+        "`components` — which the frontend projection derives from the trees "
+        "A2UI composed, so reading it here would be circular.",
 }
 
 
@@ -944,3 +941,637 @@ def test_the_two_agents_that_need_everything_still_get_it():
 
     for agent in ("verification", "memory"):
         assert "*" in AGENT_REGISTRY[agent].reads, agent
+
+# ---------------------------------------------------------------------------
+# Prompt caching
+# ---------------------------------------------------------------------------
+
+
+def test_a_large_system_prompt_is_sent_as_a_cache_tagged_block():
+    """The catalog is identical for every page; it should be billed once."""
+    from services.blueprint.executors import _cacheable
+
+    blocks = _cacheable("x" * (2048 * 4))
+    assert isinstance(blocks, list)
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert blocks[0]["text"] == "x" * (2048 * 4)
+
+
+def test_a_short_system_prompt_is_left_alone():
+    """A write costs more than a read; below the minimum it never pays off."""
+    from services.blueprint.executors import _cacheable
+
+    assert _cacheable("short") == "short"
+
+
+def test_the_page_authoring_prefix_is_identical_across_subjects():
+    """What makes the cache hit: the catalog does not vary by page.
+
+    If a subject ever leaks into the system prompt this silently becomes 34
+    cache writes and no reads, which costs more than not caching at all.
+    """
+    from services.blueprint.executors import build_prompt
+
+    doc = {
+        "pages": [
+            {"id": "PAGE-001", "route": "/a", "purpose": "a", "pattern": "list"},
+            {"id": "PAGE-002", "route": "/b", "purpose": "b", "pattern": "list"},
+        ],
+        "data": {"entities": []},
+    }
+    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    assert first == second
+
+
+def test_an_agent_sees_provenance_only_for_what_it_owns():
+    """`evidence` is 27% of the requirements section and no consumer reads it.
+
+    The requirement agent must keep it — it cannot update a citation it cannot
+    see. Everyone else gets the statement without the derivation.
+    """
+    from services.blueprint.executors import context_for
+
+    doc = {
+        "requirements": [
+            {"id": "REQ-001", "description": "d",
+             "evidence": [{"message": "m", "source": "s", "type": "conversation"}]},
+        ],
+        "data": {"entities": []},
+        "pages": [{"id": "PAGE-001", "syncNote": "reconciled", "purpose": "p"}],
+    }
+    owner = context_for(doc, "requirement")
+    assert "evidence" in owner["requirements"][0]
+
+    consumer = context_for(doc, "testing")
+    assert "evidence" not in consumer["requirements"][0]
+    assert consumer["requirements"][0]["description"] == "d"
+    assert "syncNote" not in consumer["pages"][0]
+    assert consumer["pages"][0]["purpose"] == "p"
+
+
+def test_stripping_provenance_leaves_nested_structures_intact():
+    from services.blueprint.executors import _without_provenance
+
+    v = {"a": [{"b": {"c": 1, "evidence": "x"}}], "syncNote": "y"}
+    assert _without_provenance(v) == {"a": [{"b": {"c": 1}}]}
+
+
+def test_effort_is_tiered_per_node_and_the_load_bearing_nodes_stay_high():
+    """Cheapening a node the rest of the run derives from is a false economy."""
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    for node in ("requirements", "application_model", "data_model",
+                 "page_contracts", "business_rules", "security", "workflows",
+                 "page_layouts"):
+        assert r.for_task(node, "x").effort == "high", node
+    assert r.for_task("testing", "x").effort == "medium"
+    assert r.for_task("integrations", "x").effort == "low"
+
+
+def test_tiering_varies_effort_and_nothing_else():
+    """Same model everywhere, so a regression is attributable to thinking."""
+    from services.blueprint.executors import DEFAULT_MODEL, tiered_router
+
+    r = tiered_router()
+    assert r.default.model == DEFAULT_MODEL
+    assert all(c.model == DEFAULT_MODEL for c in r.by_node.values())
+
+
+def test_every_tiered_node_is_a_real_dag_node():
+    """A typo here silently leaves the node at the default effort."""
+    from services.blueprint.executors import EFFORT_BY_NODE
+    from services.blueprint.orchestrator import DAG
+
+    assert set(EFFORT_BY_NODE) <= set(DAG)
+
+
+# ---------------------------------------------------------------------------
+# A design montage the authoring agent can see
+# ---------------------------------------------------------------------------
+
+_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+    "de0000000c4944415408d76360000000020001e221bc330000000049454e44ae426082")
+
+
+def test_a_montage_is_sent_as_a_cache_tagged_image_block(tmp_path):
+    """Identical for every page in a fan-out — the strongest cache candidate."""
+    from services.blueprint.executors import image_block
+
+    p = tmp_path / "montage.png"
+    p.write_bytes(_PNG)
+    block = image_block(p)
+    assert block["type"] == "image"
+    assert block["source"]["media_type"] == "image/png"
+    assert block["source"]["type"] == "base64"
+    assert block["cache_control"] == {"type": "ephemeral"}
+
+
+def test_a_file_that_is_not_an_image_is_refused_here(tmp_path):
+    """A 400 from the API is a worse way to learn this."""
+    from services.blueprint.executors import image_block
+
+    p = tmp_path / "notes.txt"
+    p.write_text("hello")
+    with pytest.raises(ValueError, match="not an image"):
+        image_block(p)
+
+
+def test_the_montage_leads_and_the_page_brief_follows(tmp_path):
+    """The brief varies per page; a montage after it would be re-billed."""
+    from services.blueprint.executors import AnthropicModel
+
+    p = tmp_path / "m.png"
+    p.write_bytes(_PNG)
+    sent: dict = {}
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                sent.update(kw)
+                raise RuntimeError("stop after capture")
+
+    # Small max_tokens keeps this on the non-streaming path.
+    model = AnthropicModel(_client=_Client(), max_tokens=1000)
+    try:
+        model(system="s", user="author PAGE-003", schema={}, image=p)
+    except RuntimeError:
+        pass
+    content = sent["messages"][0]["content"]
+    assert content[0]["type"] == "image"
+    assert content[1] == {"type": "text", "text": "author PAGE-003"}
+
+
+def test_without_a_montage_the_message_is_unchanged(tmp_path):
+    from services.blueprint.executors import AnthropicModel
+
+    sent: dict = {}
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                sent.update(kw)
+                raise RuntimeError("stop")
+
+    model = AnthropicModel(_client=_Client(), max_tokens=1000)
+    try:
+        model(system="s", user="u", schema={})
+    except RuntimeError:
+        pass
+    assert sent["messages"][0]["content"] == "u"
+
+
+def test_the_authoring_prompt_asks_for_the_empty_state_to_carry_its_action():
+    """A sibling button repeats the header's and shows even with rows: one
+    generated page had "Add customer" twice, the second under a full table."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
+                      "purpose": "p", "pattern": "entity_list"}],
+           "data": {"entities": []}}
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "EmptyState.action" in user
+    assert "not as a Button beside it" in user
+
+
+def test_the_authoring_prompt_forbids_a_loading_state():
+    """Sources resolve server-side, so a spinner is a state that cannot occur.
+    gate_states drops these; not authoring them is the cheaper half."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
+                      "purpose": "p", "pattern": "entity_list"}],
+           "data": {"entities": []}}
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "loading or skeleton" in user
+    assert "gated for you" in user
+
+
+# --- §34: A2UI composes the page, the agent is the fallback -----------------
+
+
+def test_a2ui_composition_becomes_a_pagelayouts_artifact(tmp_path, monkeypatch):
+    """The composer returns a tree; page_layouts emits it as the artifact the
+    agent would have. `frontend` projects it and every binder built around
+    that artifact runs over A2UI's tree exactly as over an agent's."""
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/articles",
+                         "pattern": "entity_list", "requirements": ["REQ-1"]}]
+
+    monkeypatch.setattr(
+        "services.a2ui_authority.compose_page_via_a2ui",
+        lambda *a, **k: {"applied": True, "root": {"type": "Stack"},
+                         "page_id": k.get("page_id")})
+
+    run = ex.make_executor(svc, object())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    result = run(spec)
+    p = result.proposals[0]
+    assert p.section == "pageLayouts"
+    assert p.natural_key == "PAGE-001"
+    assert p.body["page"] == "PAGE-001"
+    assert p.body["root"] == {"type": "Stack"}
+
+
+def test_a_declined_page_falls_through_to_the_authoring_agent(tmp_path, monkeypatch):
+    """An unreachable server must cost the composition, never the page: this
+    node fans out 34 times, and a run finishing 28 of 32 is why per-subject
+    tolerance exists."""
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/articles",
+                         "pattern": "entity_list"}]
+    monkeypatch.setattr(
+        "services.a2ui_authority.compose_page_via_a2ui",
+        lambda *a, **k: {"applied": False, "reason": "below the floor"})
+
+    called = {}
+
+    class _Model:
+        enforces_schema = True
+
+        def __call__(self, **kw):
+            called["llm"] = True
+            raise RuntimeError("reached the agent")
+
+    run = ex.make_executor(svc, _Model())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    with pytest.raises(Exception):
+        run(spec)
+    assert called.get("llm"), "a declined composition must reach the agent"
+
+
+def test_a_composer_that_raises_does_not_lose_the_page(tmp_path, monkeypatch):
+    from services.blueprint import executors as ex
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A",
+                                  domain="D")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/a", "pattern": "form"}]
+
+    def boom(*a, **k):
+        raise RuntimeError("server went away")
+
+    monkeypatch.setattr("services.a2ui_authority.compose_page_via_a2ui", boom)
+
+    class _Model:
+        enforces_schema = True
+
+        def __call__(self, **kw):
+            raise RuntimeError("reached the agent")
+
+    run = ex.make_executor(svc, _Model())
+    spec = ex.TaskSpec(task_id="T1", node="page_layouts", agent="a2ui_pages",
+                       subject="PAGE-001")
+    with pytest.raises(Exception, match="reached the agent"):
+        run(spec)
+
+
+def test_a2ui_ids_do_not_reach_the_template():
+    """TemplateNode is type/props/children/repeat/visibleIf and strict — a
+    template has no identity, because plan_page calls assign_node_ids after
+    instantiating it. Fifteen A2UI ids arrived and the artifact was rejected
+    whole."""
+    from services.blueprint.executors import _as_template
+
+    out = _as_template({
+        "id": "root", "type": "Stack", "props": {},
+        "children": [{"id": "t", "type": "Table", "props": {},
+                      "children": [{"id": "x", "type": "Text", "props": {}}]}],
+    })
+    assert "id" not in out
+    assert "id" not in out["children"][0]
+    assert "id" not in out["children"][0]["children"][0]
+
+
+def test_only_a_node_s_own_id_is_stripped():
+    """`id` inside props is an ordinary prop value — a Table keyed by a column
+    called id would have lost it to a blind recursion."""
+    from services.blueprint.executors import _as_template
+
+    out = _as_template({"id": "t", "type": "Table",
+                        "props": {"rowKey": "id", "id": "a-real-prop"}})
+    assert out["props"] == {"rowKey": "id", "id": "a-real-prop"}
+
+
+# ══════════════════════════════════════════════════════════════════
+# data_model replies compactly; the envelope is built in code
+# ══════════════════════════════════════════════════════════════════
+
+
+def test_data_model_reply_expands_to_the_same_proposals():
+    """The compact shape must produce exactly what the model used to hand-write.
+
+    Agents answer in the §29 envelope, where `body` is the artifact encoded as
+    a JSON STRING — every quote escaped. Measured on a real 21-entity model:
+    47,715 characters as envelopes against 20,223 in this shape. A reply
+    truncated at 45,183, so a 21-entity model already exceeded the ceiling as
+    envelopes and no amount of thinking budget would have helped.
+    """
+    from services.blueprint.executors import expand_data_model
+
+    props = expand_data_model({"entities": [
+        {"name": "Member",
+         "description": "An elected member.",
+         "fields": [
+             {"name": "id", "type": "uuid", "required": True},
+             {"name": "fullName", "type": "string", "label": True,
+              "sensitive": True},
+             {"name": "blocId", "type": "uuid", "references": "PoliticalBloc"},
+         ],
+         "constraints": ["fullName is unique within a term"]},
+        {"name": "PoliticalBloc",
+         "fields": [{"name": "id", "type": "uuid"}]},
+    ]})
+
+    assert [p.natural_key for p in props] == ["Member", "PoliticalBloc"]
+    assert {p.section for p in props} == {"data.entities"}
+    member = props[0].body
+    assert member["name"] == "Member"
+    assert [f["name"] for f in member["fields"]] == ["id", "fullName", "blocId"]
+    # Identity is the deterministic layer's to assign.
+    assert "id" not in member
+    # The flags downstream reads must survive the trip.
+    assert member["fields"][1]["sensitive"] is True
+    assert member["fields"][2]["references"] == "PoliticalBloc"
+    assert member["constraints"] == ["fullName is unique within a term"]
+
+
+def test_data_model_reply_that_names_nothing_is_refused():
+    """A parse that yields no entities must fail, not commit an empty section.
+
+    `data.entities` missing is what a run stopped at 3/18 looked like for three
+    attempts — an absent section reads as a stall, and nothing said otherwise.
+    """
+    import json
+
+    import pytest as _pytest
+
+    from services.blueprint.executors import MalformedEnvelope, parse_envelope
+
+    for reply in ({"entities": []}, {"entities": [{"fields": []}]}):
+        with _pytest.raises(MalformedEnvelope):
+            parse_envelope(json.dumps({**reply, "confidence": 0.9}),
+                           task_id="t", agent="data_model", node="data_model")
+
+
+def test_other_nodes_still_answer_in_the_envelope():
+    """Only data_model changed shape; every other node is untouched."""
+    import json
+
+    from services.blueprint.executors import (PROPOSAL_SCHEMA, SCHEMA_BY_NODE,
+                                              parse_envelope)
+
+    assert set(SCHEMA_BY_NODE) == {"data_model"}
+    assert SCHEMA_BY_NODE["data_model"] is not PROPOSAL_SCHEMA
+
+    result = parse_envelope(
+        json.dumps({"proposals": [{"section": "modules", "natural_key": "M",
+                                   "body": json.dumps({"name": "M"})}],
+                    "confidence": 0.8}),
+        task_id="t", agent="ux_architecture", node="ux_architecture")
+    assert [p.section for p in result.proposals] == ["modules"]
+
+
+def test_the_data_model_prompt_asks_for_entities_not_proposals():
+    """A prompt carrying both contracts would contradict itself."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {"application": {"id": "APP-1"}, "requirements": [], "modules": []}
+    system, _ = build_prompt(doc, "data_model")
+    assert "Return `entities`" in system
+    assert "body is a JSON string" not in system
+
+    other, _ = build_prompt(doc, "ux_architecture")
+    assert "body is a JSON string" in other
+
+
+def test_the_compact_reply_schema_agrees_with_the_blueprint_contract():
+    """Every key the reply may carry must be one the contract accepts.
+
+    The first compact schema invented a shape — `label` on a field,
+    `constraints` on an entity, no `table` — and `data.entities` is
+    `additionalProperties: false` with `table` required. Every proposal was
+    rejected on apply: the node reported done, the section stayed empty, and
+    the run ended at 5/18 having written nothing, with no error anywhere.
+
+    A reply schema that disagrees with the contract it feeds is the same defect
+    as a reader pointed one directory away from its writer.
+    """
+    import json
+
+    import jsonschema
+
+    from services.blueprint.executors import DATA_MODEL_SCHEMA, expand_data_model
+    from services.blueprint.service import CONTRACT_PATH
+
+    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+    entity_schema = (contract["properties"]["data"]["properties"]["entities"]
+                     ["items"])
+
+    reply_entity = DATA_MODEL_SCHEMA["properties"]["entities"]["items"]
+    allowed = set(entity_schema["properties"])
+    assert set(reply_entity["properties"]) <= allowed, (
+        set(reply_entity["properties"]) - allowed)
+
+    reply_field = reply_entity["properties"]["fields"]["items"]
+    allowed_field = set(entity_schema["properties"]["fields"]["items"]["properties"])
+    assert set(reply_field["properties"]) <= allowed_field, (
+        set(reply_field["properties"]) - allowed_field)
+
+    # And an expanded body must actually validate. The contract folds `$ref`
+    # against the whole document, so it is registered under a URI and the
+    # entity reached through it — validating the sub-schema alone leaves every
+    # `#/properties/...` pointing at nothing.
+    from referencing import Registry, Resource
+
+    registry = Registry().with_resource(
+        "urn:contract", Resource.from_contents(contract))
+    reach = {"$ref": "urn:contract#/properties/data/properties/entities/items"}
+
+    props = expand_data_model({"entities": [{
+        "name": "Member", "table": "members", "labelField": "fullName",
+        "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "fullName", "type": "string", "sensitive": True,
+             "required": True},
+            {"name": "blocId", "type": "uuid", "references": "PoliticalBloc"},
+        ]}]})
+
+    # `references` names an entity; resolve_batch_references rewrites names to
+    # allocated IDs before validation, so substitute here as that layer does.
+    body = dict(props[0].body, id="ENTITY-001")
+    for f in body["fields"]:
+        if f.get("references"):
+            f["references"] = "ENTITY-002"
+    jsonschema.Draft202012Validator(reach, registry=registry).validate(body)
+
+
+def test_database_is_tuned_but_the_deciding_nodes_are_not():
+    """`database` projects a data model that is already decided; the nodes the
+    rest of the run derives from keep their reasoning.
+
+    Measured: 224s a call at `high`, against 65s for ux_architecture and 102s
+    for design_system — both tuned when they were written. `security`,
+    `workflows` and `business_rules` stay high on purpose; the test above
+    protects them, and that objection was right about `data_model`, where the
+    fix turned out to be the reply's shape rather than its thinking.
+    """
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    assert r.for_task("database", "x").effort == "medium"
+    for node in ("security", "workflows", "business_rules", "data_model"):
+        assert r.for_task(node, "x").effort == "high", node
+
+
+def test_a_lone_fanout_can_run_at_full_width():
+    """WAVE_CONCURRENCY caps the wave; FANOUT_CONCURRENCY caps one node inside
+    it. If the wave cap were the lower of the two, raising the fan-out would be
+    half a change — page_layouts would still be throttled by the wave."""
+    from services.blueprint.orchestrator import (FANOUT_CONCURRENCY,
+                                                 WAVE_CONCURRENCY)
+
+    assert WAVE_CONCURRENCY >= FANOUT_CONCURRENCY
+
+
+def test_the_design_language_rides_in_the_cached_prefix():
+    """`designSystem` is identical for every page, so it belongs in the system
+    prompt where it is cached once — not in the per-page brief.
+
+    Measured on a 44-page application: 15,923 chars, 66% of a brief, sitting
+    AFTER the page id in the user message and so never a cache prefix. That is
+    ~3,981 tokens re-sent 44 times, ~175,000 input tokens a run at full price.
+    """
+    from services.blueprint.executors import _cacheable, build_prompt
+
+    doc = {
+        "application": {"id": "APP-1"},
+        "designSystem": {"colour": {"primary": "tokens.color.primary"},
+                         "density": "comfortable"},
+        "pages": [{"id": "PAGE-001", "route": "/a", "pattern": "entity_list"},
+                  {"id": "PAGE-002", "route": "/b", "pattern": "entity_list"}],
+        "data": {"entities": []},
+        "requirements": [],
+    }
+    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002")
+
+    # Identical prefix, or every page writes a new cache entry instead of
+    # reading the last one — which is what an 18% hit rate looked like.
+    assert s1 == s2
+    assert "tokens.color.primary" in s1
+    # And it must not ALSO ride per page, or nothing was saved.
+    assert "tokens.color.primary" not in u1
+    assert "designSystem" not in u1
+
+    blocks = _cacheable(s1)
+    assert isinstance(blocks, list) and "cache_control" in blocks[0]
+
+
+def test_the_page_brief_still_carries_what_is_per_page():
+    """Moving the shared half out must not take the page's own facts with it."""
+    from services.blueprint.executors import build_prompt
+
+    doc = {
+        "application": {"id": "APP-1"},
+        "designSystem": {"density": "comfortable"},
+        "pages": [{"id": "PAGE-001", "route": "/sessions", "name": "Sessions",
+                   "pattern": "entity_list"}],
+        "data": {"entities": []},
+        "requirements": [],
+    }
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    assert "PAGE-001" in user
+    assert "/sessions" in user
+
+
+def test_the_page_planner_is_told_that_deferred_is_not_declined():
+    """A brief that names ten modules and says which six to begin with must not
+    get all ten.
+
+    The rule read "if they named it, it gets its feature" — so naming phase two
+    is how you got phase two built. The Palestinian Legislative Council brief
+    ended "Begin with sessions, committees, attendance, voting, minutes, and
+    document management. Add legislative workflows, mobile access, analytics,
+    and the public portal in later phases", and the run planned 44 pages across
+    all ten modules. The sentence was in the description and quoted to the
+    model; the instruction beside it discarded the second half.
+    """
+    from services.blueprint.page_planner import page_slot_prompt
+
+    described = ("Sessions, committees, voting and minutes. Begin with "
+                 "sessions and committees. Add analytics and the public "
+                 "portal in later phases.")
+    prompt = page_slot_prompt({"application": {"description": described}})
+
+    # Their words still travel verbatim — the evidence, not a summary of it.
+    assert described in prompt
+    # And the distinction the old rule flattened.
+    assert "for NOW" in prompt
+    assert "Decline what they deferred" in prompt
+    # A brief with no phasing must not be pruned by this.
+    assert "names no phases" in prompt
+
+
+def test_a_brief_without_phasing_is_unaffected():
+    """The escape hatch has to be stated, or a model reads the phasing advice
+    as licence to drop features from a brief that never deferred anything."""
+    from services.blueprint.page_planner import page_slot_prompt
+
+    prompt = page_slot_prompt(
+        {"application": {"description": "A noticeboard for a community centre."}})
+    assert "When the brief names no phases, this does not apply" in prompt
+
+
+def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
+    """`max_tokens` caps thinking AND answer together, so a node can truncate
+    without its answer being large — data_model emits ~10,400 tokens of JSON
+    after ~18,600 of reasoning.
+
+    Five nodes were measured at exactly 32,000 output tokens in one night's
+    runs. Everything else peaked at 65% or below and is left alone: a ceiling
+    nobody approaches is not insurance, it is a bigger number to be wrong
+    about.
+    """
+    from services.blueprint.executors import (DEFAULT_MAX_TOKENS,
+                                              MAX_TOKENS_BY_NODE, tiered_router)
+
+    r = tiered_router()
+    for node in ("data_model", "page_contracts", "database", "security",
+                 "workflows"):
+        assert r.for_task(node, "x").max_tokens == 64000, node
+    for node in ("requirements", "ux_architecture", "integrations",
+                 "page_layouts", "design_system", "testing"):
+        assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
+    assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
+                                       "database", "security", "workflows"}
+
+
+def test_raising_the_ceiling_did_not_disturb_effort():
+    """The router now builds its by_node map from the union of two dicts. A node
+    tuned for tokens but not effort must keep the default, and vice versa."""
+    from services.blueprint.executors import tiered_router
+
+    r = tiered_router()
+    # tuned for tokens only — effort must stay at the default
+    assert r.for_task("workflows", "x").effort == "high"
+    assert r.for_task("security", "x").effort == "high"
+    # tuned for both
+    assert r.for_task("database", "x").effort == "medium"
+    # tuned for effort only — ceiling must stay default
+    assert r.for_task("integrations", "x").effort == "low"
+    assert r.for_task("ux_architecture", "x").effort == "medium"
