@@ -14,7 +14,7 @@
 
 import { Engine } from "@tentoroforge/engine";
 import { resolveCrumbHrefs } from "@tentoroforge/renderer";
-import { dataEngine, resolveAggregate, resolveSeries } from "./data-engine-bridge";
+import { actorCtx, dataEngine, resolveAggregate, resolveSeries } from "./data-engine-bridge";
 import { LiveRefresh } from "./LiveRefresh";
 import { WorkflowDispatchProvider } from "./WorkflowDispatchProvider";
 import { WizardShell } from "./WizardShell";
@@ -172,6 +172,12 @@ export async function renderSchemaPage(
     }
   }
 
+  // The aggregate and series resolvers are called directly here, not through
+  // dataEngine.run, so they need the actor handed to them explicitly — an
+  // ownership-scoped KPI or chart resolved without one reports zero instead of
+  // every tenant's total.
+  const engineCtx = actorCtx(user);
+
   const previewData: Record<string, unknown> = {};
   for (const s0 of ((page as any).dataSources ?? []) as Array<{ name: string; op?: string }>) {
     // Aggregates carry their own scoping filter (the KPI breakdowns); only
@@ -181,7 +187,7 @@ export async function renderSchemaPage(
       : s0;
     try {
       if (s.op === "aggregate" || s.op === "stats") {
-        previewData[s.name] = await resolveAggregate(s as any);   // → { todayCount: 3, … }
+        previewData[s.name] = await resolveAggregate(s as any, engineCtx);   // → { todayCount: 3, … }
       } else if (s.op === "count" || s.op === "sum" || s.op === "avg" || s.op === "min" || s.op === "max") {
         // Scalar KPI aggregates. These previously fell through to the list
         // branch: the tile rendered the UNFILTERED row count, so every
@@ -216,7 +222,7 @@ export async function renderSchemaPage(
             : Math.max(...nums);
         }
       } else if (s.op === "series") {
-        previewData[s.name] = await resolveSeries(s as any);      // → [{ label, value }, …] for charts
+        previewData[s.name] = await resolveSeries(s as any, engineCtx);      // → [{ label, value }, …] for charts
       } else {
         const res = await dataEngine.run(s as any, { request, user });  // → array
         // Detail/get sources name a SINGLE record (bound as {{project.name}}), so

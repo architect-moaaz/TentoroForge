@@ -620,12 +620,46 @@ export const Integration = z.object({
 // §11 · security  (§100)
 // ===========================================================================
 
+/**
+ * An enforceable rule about one column and the acting user. Projected into
+ * `src/lib/ownership-rules.ts`, which the data engine reads — so this object,
+ * not the prose beside it, is what actually takes effect.
+ *
+ * Both kinds set the column server-side on create. Only `scope` filters:
+ * an `attribution` column records who acted and is never an access filter,
+ * which is what an application with agency-wide visibility needs.
+ */
+export const RecordScopeRule = z.object({
+  /** Entity name or table, as spelled in `data.entities`. */
+  entity: z.string(),
+  /** Column holding the actor's value (`ownerId`, `createdByUserId`, …). */
+  column: z.string(),
+  /**
+   * `scope` — the column decides who may reach the row: set on create and
+   * added as a WHERE predicate to every read and write.
+   * `attribution` — the column only records who acted: set on create, a body
+   * value ignored, never used to filter.
+   */
+  kind: z.enum(["scope", "attribution"]).default("scope"),
+  /** The actor's own id, or the workspace/tenant id their session carries. */
+  scope: z.enum(["user", "workspace"]).default("user"),
+  /** Roles exempt from the rule — they read unscoped, and may write the column. */
+  unscopedRoles: z.array(z.string()).default([]),
+  note: z.string().default(""),
+});
+
 export const Security = z.object({
   authentication: z
     .enum(["none", "email_password", "sso", "oauth", "magic_link"])
     .default("email_password"),
   rbac: z.boolean().default(true),
-  ownershipRules: z.array(z.string()).default([]),
+  /**
+   * A string states policy and enforces nothing; a {@link RecordScopeRule}
+   * is enforced. An entity with no rule is readable by every authenticated
+   * user — correct when authorisation is by role rather than by record, and
+   * a leak otherwise.
+   */
+  ownershipRules: z.array(z.union([z.string(), RecordScopeRule])).default([]),
   protectedRoutes: z.array(z.string()).default([]),
   auditLogging: z.boolean().default(false),
 });

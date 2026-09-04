@@ -1,0 +1,115 @@
+{
+  "_comment": [
+    "Fixture Blueprint for the row-scoping tests. ONE source for both halves:",
+    "run-ownership-tests.sh renders src/lib/ownership-rules.ts from this doc with",
+    "the real projection, and ownership-scope.test.mts builds its tables and rows",
+    "from the same entities. A test that hand-wrote the manifest would pass while",
+    "the projection emitted something else.",
+    "",
+    "Invoice is scoped to its owner, with admin exempt. Announcement carries an",
+    "attribution rule: postedByUserId is filled from the session but must never",
+    "narrow a read - the case a name-based heuristic would get wrong, and the one",
+    "the live ATS blueprint depends on. Ticket is drift: the rule names a column",
+    "the table does not carry, and the engine has to fail closed on it."
+  ],
+  "data": {
+    "entities": [
+      {
+        "name": "Invoice",
+        "table": "invoices",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "ownerId",
+            "type": "uuid"
+          },
+          {
+            "name": "title",
+            "type": "text"
+          },
+          {
+            "name": "status",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      },
+      {
+        "name": "Announcement",
+        "table": "announcements",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "postedByUserId",
+            "type": "uuid"
+          },
+          {
+            "name": "title",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      },
+      {
+        "name": "Ticket",
+        "table": "tickets",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "title",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      }
+    ]
+  },
+  "security": {
+    "ownershipRules": [
+      "Announcements are company-wide: every signed-in user reads every row. postedByUserId records who wrote one and is never an access filter.",
+      {
+        "entity": "Invoice",
+        "column": "ownerId",
+        "scope": "user",
+        "unscopedRoles": [
+          "admin"
+        ],
+        "note": "An invoice belongs to the user who raised it."
+      },
+      {
+        "entity": "Ticket",
+        "column": "ownerId",
+        "scope": "user",
+        "note": "Drift fixture: names a column the projected table does not carry."
+      },
+      {
+        "entity": "Announcement",
+        "column": "postedByUserId",
+        "kind": "attribution",
+        "scope": "user",
+        "note": "Filled from the session; must not narrow any read."
+      }
+    ]
+  }
+}

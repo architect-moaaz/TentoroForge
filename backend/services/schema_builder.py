@@ -400,8 +400,36 @@ def build_schema_files(plan: dict, output_dir: str, registry: dict | None = None
     except Exception as e:  # noqa: BLE001
         errors.append(f"src/lib/searchable-columns.ts: {e}")
 
+    # Row-scoping manifest: the runtime data-engine reads this to add an owner
+    # or tenant predicate to every read and write. This pipeline builds from a
+    # plan, which carries no ``security.ownershipRules`` — so the manifest is
+    # empty and nothing is scoped, exactly as it behaved before the manifest
+    # existed. The file is still emitted because the runtime imports it
+    # statically; declaring rules means moving the app onto the Blueprint
+    # projection, which is where ``security.ownershipRules`` lives.
+    try:
+        rel = _emit_ownership_rules_manifest(root)
+        generated.append(rel)
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"src/lib/ownership-rules.ts: {e}")
+
     logger.info("schema_builder: %d generated, %d errors", len(generated), len(errors))
     return {"generated": generated, "errors": errors}
+
+
+def _emit_ownership_rules_manifest(root: Path) -> str:
+    """Write an empty ``src/lib/ownership-rules.ts``.
+
+    The module body comes from the Blueprint projection so the two pipelines
+    cannot render different lookups for the same manifest.
+    """
+    from services.blueprint.projection import render_ownership_rules_module
+
+    lib_dir = root / "src" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "ownership-rules.ts").write_text(
+        render_ownership_rules_module({}), "utf-8")
+    return "src/lib/ownership-rules.ts"
 
 
 def _emit_append_only_manifest(root: Path, models: list[dict], reg_entities: dict) -> str:

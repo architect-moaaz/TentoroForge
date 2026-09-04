@@ -11122,7 +11122,63 @@
       "CandidateDocument blobs are served only through an authorisation-checked download endpoint that resolves storageKey server-side; storage keys, signed URLs and direct bucket paths are never returned to a client.",
       "Uploads are validated server-side for content type and size before the blob is stored, and a replacement CV clears isCurrent on the previous row in the same transaction (REQ-005).",
       "Sensitive candidate fields (email, phone, location, linkedinUrl, notes) and User.passwordHash are excluded from list payloads and logs; passwordHash is never returned by any endpoint.",
-      "Route guards are enforced server-side on every request. Hiding a navigation entry or disabling a button is presentation only and is never the sole control."
+      "Route guards are enforced server-side on every request. Hiding a navigation entry or disabling a button is presentation only and is never the sole control.",
+      {
+        "column": "postedByUserId",
+        "entity": "Role",
+        "kind": "attribution",
+        "note": "Recorded so a requisition names the recruiter who posted it. Attribution, not access: every recruiter works the whole board (ROLE-001, TEST-059).",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "createdByUserId",
+        "entity": "Candidate",
+        "kind": "attribution",
+        "note": "Records which recruiter added the candidate. The directory is agency-wide, so this column never narrows a read (TEST-059).",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "uploadedByUserId",
+        "entity": "CandidateDocument",
+        "kind": "attribution",
+        "note": "Records who uploaded the CV. Access to the blob is decided by the brokered download endpoint and the readable application, not by who filed it.",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "createdByUserId",
+        "entity": "Application",
+        "kind": "attribution",
+        "note": "Records which recruiter attached the candidate to the role. Hiring-manager access is decided by currentStage and status, not by this column.",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "changedByUserId",
+        "entity": "ApplicationStageEvent",
+        "kind": "attribution",
+        "note": "Who moved the application. The stage history is append-only and read by every recruiter, so this is the audit signature and nothing more.",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "scheduledByUserId",
+        "entity": "Interview",
+        "kind": "attribution",
+        "note": "Who booked the interview. Distinct from interviewerUserId, which is a domain FK naming who conducts it and must never be filled from the session.",
+        "scope": "user",
+        "unscopedRoles": []
+      },
+      {
+        "column": "decidedByUserId",
+        "entity": "OfferDecision",
+        "kind": "attribution",
+        "note": "Which hiring manager recorded the decision. Recruiters read every decision to see the outcome, so this is attribution rather than a scope.",
+        "scope": "user",
+        "unscopedRoles": []
+      }
     ],
     "protectedRoutes": [
       "/",
