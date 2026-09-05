@@ -11749,6 +11749,19 @@ are shaped placeholders).
     `models` → `Base.metadata.create_all` → `alembic stamp head` (41 tables).
   - a2ui requires the `agent2ui` checkout on disk + `A2UI_REPO` set +
     `mcp>=1.0,<2.0` in the backend venv (§32.3).
+  - **All workspace packages must be built, not just the engine/editor stacks.**
+    The frontend editor imports `@forge/registry` (`packages/registry`, resolved
+    via `main: dist/index.js`); if `registry` is unbuilt, opening any project
+    dies with *"Module not found: Can't resolve '@forge/registry'"* on the visual
+    editor route (`components/canvas/hooks/useDrop.ts`), blocking every build.
+    The stock `npm run build` (a) is ordered wrong — it compiles `@tentoroforge/renderer`
+    before its dependency `@forge/patches` (TS2307) — and (b) never builds
+    `registry` or the aux packages at all. Build the full set in dependency order:
+    `schema → registry → patches → library → renderer → engine → editor`, plus
+    `ir`, `compiler`, `patterns`, `figma-parser` for the IR/Figma flows
+    (`catalog` is data-only, no build). `registry`'s build additionally emits
+    `dist/starter.json` + `dist/component-contracts.json` (the component catalog
+    Smith and the a2ui binder read). Fixed 2026-08-26 (branch `component-fixes`).
 
 ### 32.8 What still holds
 
