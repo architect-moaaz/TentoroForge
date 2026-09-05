@@ -514,6 +514,30 @@ class SmithChatRequest(BaseModel):
     approved: bool = False
 
 
+def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
+    """Attach the design an opening brief named, now that a Blueprint exists.
+
+    The same exchange `connect_figma` runs from a later message, without the
+    later message: the token is resolved by NAME from the org's integrations
+    or the environment, `treatAs` is recorded, and what was found is said.
+    A failure is said too, as a question — a wrong link or a missing token is
+    the user's to fix, and the definition stands either way.
+    """
+    from services.smith.figma_connect import FigmaConnectError, connect
+
+    try:
+        out = connect(output_dir, figma_url=named["figma_url"],
+                      token_env=named["token_env"], treat_as=named["treat_as"])
+        emit("message", {"text": out["summary"]})
+    except FigmaConnectError as exc:
+        emit("message", {"text": f"The design could not be attached: {exc}",
+                         "status": "needs_user"})
+    except Exception as exc:  # noqa: BLE001 — the definition stands
+        logger.warning("[smith-chat] design attach failed: %s", exc)
+        emit("message", {"text": f"The design could not be attached: {exc}",
+                         "status": "needs_user"})
+
+
 def _brief_from(history: Any, message: str) -> str:
     """Everything the user has said, in order, as one brief.
 
@@ -735,10 +759,21 @@ async def smith_chat(
                 # per conversation, so this asks once and then defines —
                 # whether or not the answer was any good. A clarifier that can
                 # fire twice can fire forever.
+                # THE DESIGN THE BRIEF NAMES. "Import from Figma" is an opening
+                # message with the file link in it; read as prose the link was
+                # lost — the definition ran, the clarifier asked which palette,
+                # and nothing was fetched. Found here, it shapes the questions
+                # and is attached the moment the definition has made a
+                # Blueprint to attach it to, in this same turn.
+                from services.smith.figma_connect import find_in as _figma_in
+
+                named_design = _figma_in(_brief_from(req.history, req.message))
+
                 if not req.history:
                     from services.smith.clarify_brief import clarify_brief
 
-                    asked = clarify_brief(req.message)
+                    asked = clarify_brief(req.message,
+                                          design_attached=bool(named_design))
                     if asked:
                         # One message per question, so each carries its own
                         # options and the panel can offer them as answers. They
@@ -769,10 +804,13 @@ async def smith_chat(
                 # Blueprint already existed to append to. This is the create
                 # path, which had no prior text to append to and needed the
                 # conversation instead.
-                return _run_dag(str(output_dir), app_root,
-                                _brief_from(req.history, req.message),
-                                approved=req.approved, emit=emit,
-                                app_name=getattr(project, "name", "") or "")
+                defined_now = _run_dag(str(output_dir), app_root,
+                                       _brief_from(req.history, req.message),
+                                       approved=req.approved, emit=emit,
+                                       app_name=getattr(project, "name", "") or "")
+                if named_design:
+                    _attach_named_design(output_dir, named_design, emit)
+                return defined_now
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
