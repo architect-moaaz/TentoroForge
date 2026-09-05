@@ -337,7 +337,7 @@ def test_a_change_that_writes_something_versions_the_blueprint(ats, tmp_path):
         "body": json.dumps({
             "name": "Manager Offer Approval",
             "purpose": "A hiring manager approves an offer before it is sent.",
-            "trigger": {"kind": "event", "detail": "offer.prepared"},
+            "trigger": {"kind": "api_event", "detail": "offer.prepared"},
             "confidence": 0.9,
         }),
     }])
@@ -386,7 +386,7 @@ def test_a_proposal_still_drives_regeneration(ats, tmp_path):
         "body": json.dumps({
             "name": "Manager Offer Approval",
             "purpose": "A hiring manager approves an offer before it is sent.",
-            "trigger": {"kind": "event", "detail": "offer.prepared"},
+            "trigger": {"kind": "api_event", "detail": "offer.prepared"},
             "confidence": 0.9,
         }),
     }])
@@ -456,3 +456,23 @@ def test_only_the_turn_module_calls_a_model():
         if "client(" in p.read_text("utf-8")
     ]
     assert callers == ["turn.py"]
+
+
+def test_a_change_the_blueprint_refuses_is_a_rejected_turn_not_a_crash(ats, tmp_path):
+    """Plan validation is re-asked once; if the model still proposes a workflow
+    the Blueprint refuses, the turn reports the refusal and writes nothing."""
+    bad = plan_json(anchors=["ENTITY-008"], proposals=[{
+        "section": "workflows", "natural_key": "Manager Offer Approval",
+        "body": json.dumps({
+            "name": "Manager Offer Approval",
+            "trigger": {"kind": "api_event", "detail": "offer.prepared"},
+            "steps": [{"key": "review", "name": "Review", "type": "approval", "config": {}}],
+        }),
+    }])
+    smith = Smith.adopt(ats, tmp_path, model=FakeModel(bad))
+    before = smith.doc["version"]
+    turn = smith.turn("managers approve offers before they are sent")
+    assert turn.change is None
+    assert "assignType" in turn.rejected
+    assert "not altered anything" in turn.reply
+    assert smith.doc["version"] == before

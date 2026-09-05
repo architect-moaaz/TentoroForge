@@ -44,6 +44,7 @@ def node_contracts() -> dict:
     types = (_RT / "types.ts").read_text(encoding="utf-8")
     index = (_RT / "index.ts").read_text(encoding="utf-8")
     ai = (_RT / "ai.ts").read_text(encoding="utf-8")
+    ocr = (_RT / "ocr.ts").read_text(encoding="utf-8")
     engine = (_RT / "engine.ts").read_text(encoding="utf-8")
 
     node_types = _union_members(types, "NodeType")
@@ -53,7 +54,7 @@ def node_contracts() -> dict:
     actions: dict[str, dict] = {}
     # Registered handlers (index.ts + ai.ts). A handler whose body window mentions
     # "no-op"/"not configured" is a stub (a silent placeholder).
-    for src in (index, ai):
+    for src in (index, ai, ocr):
         for m in re.finditer(r'registerActionHandler\("([a-z_]+)"', src):
             name = m.group(1)
             block = src[m.start():m.start() + 900]
@@ -106,18 +107,22 @@ def parse_editor_catalog(types_ts_path) -> dict:
 
     Pure parsing; tolerant of formatting/whitespace. Reuses `_union_members` for the
     two unions."""
-    text = Path(types_ts_path).read_text(encoding="utf-8")
+    types_ts_path = Path(types_ts_path)
+    text = types_ts_path.read_text(encoding="utf-8")
 
     node_types = set(_union_members(text, "WorkflowNodeType"))
     action_types = set(_union_members(text, "ActionType"))
 
-    # Restrict palette scanning to the NODE_CATEGORIES array so unrelated quoted
-    # literals elsewhere can't leak in; fall back to the whole file if not found.
-    m = re.search(r"NODE_CATEGORIES\b", text)
-    palette_src = text[m.start():] if m else text
-
-    palette_types = set(re.findall(r'\btype:\s*"([^"]+)"', palette_src))
-    palette_actions = set(re.findall(r'\bactionType:\s*"([^"]+)"', palette_src))
+    # The palette is derived from the workflow node catalog, whose frontend
+    # copy sits beside the types file (`src/catalog/workflow-nodes.json`).
+    catalog = json.loads(
+        (types_ts_path.parents[1] / "catalog" / "workflow-nodes.json").read_text("utf-8")
+    )
+    palette_types = {n["type"] for n in catalog["nodes"] if n.get("palette", True)}
+    palette_actions = {
+        v["key"] for n in catalog["nodes"] if n["type"] == "action"
+        for v in n.get("variants") or []
+    }
 
     return {
         "nodeTypes": node_types,

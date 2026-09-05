@@ -28,6 +28,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.catalog import WorkflowNodeCatalog, workflow_nodes
+from services.workflow_nodes import workflow_node
 logger = logging.getLogger(__name__)
 
 #: What projection still owes, so a green data-layer run is not mistaken for a
@@ -896,25 +898,8 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # workflows — the definitions the workflow engine executes
 # ---------------------------------------------------------------------------
 
-#: Blueprint step type -> the runtime node type the workflow engine dispatches.
-_STEP_NODE_TYPE: dict[str, str] = {
-    "action": "action", "approval": "approval", "human_task": "human_task",
-    "condition": "condition", "notification": "notification",
-    "integration": "action", "timer": "timer",
-}
-
-#: Blueprint step type -> the db action a mutating step performs.
-#: The fallback when a step declares no operation. Only a system `action` is
-#: assumed to write, and it writes the ordinary thing.
-#:
-#: `human_task` and `approval` used to default to db_update, so a capture step
-#: — where a person fills a form, before anything is stored — updated every
-#: column of a row, and "Present the ordered queue" did too. A step that writes
-#: says which write it is; one that does not is where somebody acts, and the
-#: action step after it does the storing.
-_STEP_ACTION: dict[str, str] = {
-    "action": "db_insert",
-}
+def _wf_node(node_id: str, ntype: str, row: int, config: dict, label: str) -> dict:
+    return workflow_node(node_id, ntype, row, config, label)
 
 #: What the Blueprint's `config.operation` means to the workflow engine. The
 #: step type says a person or the system acts; the operation says WHICH act,
@@ -937,21 +922,124 @@ _OPERATION_ACTION: dict[str, str] = {
 _DB_EVALUATED = {"now()", "current_date", "current_timestamp", "current_time"}
 
 
-def _wf_node(node_id: str, ntype: str, x: int, config: dict, label: str) -> dict:
-    return {"id": node_id, "type": ntype, "position": {"x": x, "y": 0},
-            "data": {"config": config, "label": label}}
+def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
+                 wf_id: str = "") -> dict[str, Any]:
+    """The node config for one step: the catalog's defaults for that node and
+    variant, then what the step declares.
+
+    The Blueprint may state a condition as ``condition``; the engine evaluates
+    ``expression``. THE OPERATION DECIDES which act an action performs when
+    the step names one and no ``actionType``: mapping on step type alone made
+    every ``action`` a db_insert, so "Set status Closed" inserted a second
+    ticket and two reads inserted too. A db_insert/db_update against an entity
+    with no ``values`` of its own gets the same columns the entity's form asks
+    for, so the two cannot drift into asking for one set and storing another;
+    ``sets`` is where the Blueprint states the values a person never types,
+    and it wins over the form.
+    """
+    ntype = step.get("type")
+    declared = dict(step.get("config")) if isinstance(step.get("config"), dict) else {}
+    if ntype == "condition" and "expression" not in declared and declared.get("condition"):
+        declared["expression"] = declared.pop("condition")
+    if ntype == "action" and "actionType" not in declared:
+        operation = str(declared.get("operation") or "").strip().lower()
+        if operation in _OPERATION_ACTION:
+            declared["actionType"] = _OPERATION_ACTION[operation]
+    config: dict[str, Any] = {**catalog.defaults(ntype, declared), **declared}
+    if entity.get("table") and "table" not in config:
+        config["table"] = entity["table"]
+
+    if (ntype == "action" and config.get("actionType") in ("db_insert", "db_update")
+            and entity.get("table")):
+        values = dict(config["values"]) if isinstance(config.get("values"), dict) else None
+        if values is None:
+            from services.blueprint.page_planner import form_fields_for
+
+            creating = config["actionType"] == "db_insert"
+            # Referenced bare — `{{name}}`, not `{{input.name}}`: the posted
+            # payload is ctx.variables itself, so the column name IS the variable.
+            values = {
+                f["name"]: f"{{{{{f['name']}}}}}"
+                for f in form_fields_for(entity, creating=creating)
+                if f.get("name")
+            }
+        # A MAP, OR NOTHING — never a crash. `config` is a free-form bag, so
+        # `sets` has arrived as a list of prose; a shape the projection cannot
+        # honour is named in the log and skipped.
+        sets = config.get("sets")
+        if sets and not isinstance(sets, dict):
+            logger.warning(
+                "[projection] %s/%s: `sets` is %s, expected a column-to-value map "
+                "— step overrides ignored: %.160s",
+                wf_id, step.get("key"), type(sets).__name__, sets)
+            sets = None
+        for col, val in (sets or {}).items():
+            if isinstance(val, str) and val.strip().lower() in _DB_EVALUATED:
+                values.pop(col, None)
+                continue
+            values[col] = val
+        if values:
+            config["values"] = values
+    return config
+
+
+def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
+           end_id: str) -> list[dict]:
+    """Edges from declared connectivity, or a linear chain when none is declared.
+
+    A step's ``next`` lists the keys it hands to. A branching node's first
+    target is the then-branch and its second the else-branch, which is how the
+    editor's handles and the engine's ``edgeType`` both read it. A non-terminal
+    step that names nothing flows to the end node.
+    """
+    by_key = {s.get("key"): s for s in steps}
+    declared = any(s.get("next") for s in steps)
+    branching = set(catalog.branching_types())
+    edges: list[dict] = []
+
+    def add(src: str, tgt: str, kind: str = "default") -> None:
+        e: dict[str, Any] = {"id": f"e_{src}_{tgt}", "source": src, "target": tgt,
+                             "data": {"edgeType": kind}}
+        if kind == "else":
+            e["sourceHandle"] = "else"
+        edges.append(e)
+
+    if not declared:
+        for a, b in zip(chain, chain[1:]):
+            add(a, b)
+        return edges
+
+    add("trigger", steps[0]["key"]) if steps else add("trigger", end_id)
+    for s in steps:
+        key, ntype = s.get("key"), s.get("type")
+        node = catalog.node(ntype) or {}
+        if not node.get("handles", {}).get("out", True):
+            continue
+        targets = [t for t in (s.get("next") or []) if t in by_key]
+        if not targets:
+            add(key, end_id)
+            continue
+        if ntype in branching:
+            add(key, targets[0], "then")
+            for t in targets[1:2]:
+                add(key, t, "else")
+        else:
+            for t in targets:
+                add(key, t)
+    return edges
 
 
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
-    A Blueprint workflow states what the business does; a definition states how
-    the engine runs it. The translation is mechanical — steps become nodes in
-    declared order, joined by edges from a trigger to an end — which is why
-    this is a projection and not an agent. The old chain's own CRUD generator
-    makes the same argument in its docstring: "Mechanical — no LLM, so no
-    hallucinated names."
+    A Blueprint workflow states what the business does in the workflow node
+    catalog's vocabulary; a definition is those nodes assembled for the
+    engine. The translation is mechanical — a step is a catalog node carrying
+    the step's configuration, joined by the edges the step declares — which is
+    why this is a projection and not an agent. There is no mapping table: a
+    step whose type is not in the catalog was refused before it got here.
     """
+    catalog = workflow_nodes()
     entities = {e.get("id"): e for e in (doc.get("data") or {}).get("entities") or []}
     workflows = [w for w in (doc.get("workflows") or [])
                  if w.get("status") != "DEPRECATED"]
@@ -963,115 +1051,51 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     code_map: list[dict] = []
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
-        trigger = (wf.get("trigger") or {}).get("kind") or "manual"
+        declared_trigger = wf.get("trigger") or {}
+        trigger_cfg: dict[str, Any] = {
+            **catalog.defaults("trigger"),
+            "type": declared_trigger.get("kind") or "manual",
+        }
+        detail = declared_trigger.get("detail")
+        if detail:
+            trigger_cfg["event" if trigger_cfg["type"] == "api_event" else
+                        "condition" if trigger_cfg["type"] == "db_change" else
+                        "cron" if trigger_cfg["type"] == "schedule" else
+                        "description"] = detail
 
-        nodes = [_wf_node("trigger", "trigger", 0, {"type": trigger}, "Start")]
+        # `start` is the Blueprint's own boundary marker (the trigger node is
+        # the start); documents predating the catalog are migrated on load,
+        # but a projection must never turn one into an action with no action.
+        steps = [s for s in (wf.get("steps") or [])
+                 if isinstance(s, dict) and s.get("key") and s.get("type") != "start"]
+        # Top-to-bottom, one node per row: the editor's handles are top (in)
+        # and bottom (out), so this is the layout its edges are drawn for.
+        nodes = [_wf_node("trigger", "trigger", 0, trigger_cfg, "Start")]
         chain = ["trigger"]
-        # `start` and `end` are the Blueprint's own boundary markers, and this
-        # function emits a `trigger` node and an `end` node for every workflow
-        # regardless. Passing them through turned each into an action node with
-        # no action — `_STEP_NODE_TYPE` has no entry for either, so both fell to
-        # the "action" default, and `_STEP_ACTION` has none either, so both got
-        # actionType "noop". Every workflow whose first step was `start` failed
-        # on its first node with "Unregistered workflow actionType noop", which
-        # is every workflow this planner writes.
-        steps = [st for st in (wf.get("steps") or [])
-                 if st.get("type") not in ("start", "end")]
-        for i, step in enumerate(steps, start=1):
-            step_id = f"s{i}"
-            entity = entities.get(step.get("entity")) or {}
-            # THE OPERATION DECIDES, NOT THE STEP TYPE. Mapping on type alone
-            # made every `action` a db_insert, so "Set status Closed" inserted
-            # a second ticket, and "List tickets for the active view" and "Open
-            # the selected ticket" — both reads — inserted too. Three of one
-            # workflow's nodes wrote rows nobody asked for.
-            step_cfg = step.get("config") or {}
-            operation = str(step_cfg.get("operation") or "").strip().lower()
-            config: dict[str, Any] = {
-                "actionType": (_OPERATION_ACTION.get(operation)
-                               or _STEP_ACTION.get(step.get("type"), "noop")),
-            }
-            if entity.get("table"):
-                config["table"] = entity["table"]
-                # WHAT TO WRITE, not just where. `db_insert` resolves
-                # `config.values` — a column→expression map — and the node
-                # carried none, so the insert named a table and supplied
-                # nothing: "null value in column \"name\" of relation
-                # \"plants\" violates not-null constraint". The workflow ran
-                # every node and still wrote nothing.
-                #
-                # Referenced bare — `{{name}}`, not `{{input.name}}`.
-                # `triggerWorkflow` passes the posted payload as ctx.variables
-                # itself, so the column name IS the variable name. Same columns
-                # the create form
-                # asks for, by the same rule (`_asked_of_a_person`), so the
-                # two cannot drift into asking for one set and storing another.
-                if config["actionType"] in ("db_insert", "db_update"):
-                    from services.blueprint.page_planner import form_fields_for
-
-                    creating = config["actionType"] == "db_insert"
-                    values = {
-                        f["name"]: f"{{{{{f['name']}}}}}"
-                        for f in form_fields_for(entity, creating=creating)
-                        if f.get("name")
-                    }
-                    # WHAT THE BLUEPRINT SAYS TO WRITE WINS OVER WHAT A FORM
-                    # ASKS FOR. `sets` is where a workflow states the values a
-                    # person never types: FLOW-001 says `status: "Open"` and
-                    # notes "Status and closedAt are never entered by the
-                    # agent". Deriving values from the form alone emitted
-                    # `status: "{{status}}"`, nothing supplied it, and the
-                    # insert failed on a not-null constraint — the design was
-                    # right and the projection overwrote it.
-                    # A MAP, OR NOTHING — never a crash. `config` is declared
-                    # `additionalProperties: {}`, a free-form bag, so `sets`
-                    # was unconstrained and one run emitted all 56 of them as
-                    # lists of prose: ["status = in_triage", "lastActionAt =
-                    # now"]. `.items()` raised AttributeError, the `integration`
-                    # node died, and with it every workflow definition and the
-                    # `testing` node downstream — thirty workflows lost to one
-                    # step's shape.
-                    #
-                    # The contract now types `sets` as column-to-value, which is
-                    # where this is actually fixed. This is the floor under it:
-                    # a shape the projection cannot honour is named in the log
-                    # and skipped, because the form-derived values above are
-                    # still a working insert, and losing the whole application's
-                    # workflows is not a better answer than losing one step's
-                    # overrides.
-                    sets = step_cfg.get("sets")
-                    if sets and not isinstance(sets, dict):
-                        logger.warning(
-                            "[projection] %s/%s: `sets` is %s, expected a "
-                            "column-to-value map — step overrides ignored: %.160s",
-                            wf.get("id"), step_id, type(sets).__name__, sets)
-                        sets = None
-                    for col, val in (sets or {}).items():
-                        if isinstance(val, str) and val.strip().lower() in _DB_EVALUATED:
-                            values.pop(col, None)
-                            continue
-                        values[col] = val
-                    if values:
-                        config["values"] = values
-            if step.get("condition"):
-                config["condition"] = step["condition"]
+        for s in steps:
+            entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
-                step_id, _STEP_NODE_TYPE.get(step.get("type"), "action"),
-                i * 200, config, step.get("name") or step_id,
+                s["key"], s.get("type"), len(chain),
+                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug)),
+                s.get("name") or s["key"],
             ))
-            chain.append(step_id)
-        nodes.append(_wf_node("end", "end", len(chain) * 200, {}, "End"))
-        chain.append("end")
+            chain.append(s["key"])
+        end_id = next((s["key"] for s in steps
+                       if not (catalog.node(s.get("type")) or {}).get("handles", {}).get("out", True)),
+                      None)
+        if end_id is None:
+            end_id = "end"
+            nodes.append(_wf_node(end_id, "end", len(chain), {}, "End"))
+            chain.append(end_id)
 
-        edges = [{"id": f"e{i}", "source": a, "target": b}
-                 for i, (a, b) in enumerate(zip(chain, chain[1:]))]
+        edges = _edges(chain, steps, catalog, end_id)
 
         definition = {
             "id": slug,
             "name": wf.get("name") or slug,
             "blueprintId": wf.get("id"),
             "processVariables": [],
-            "definition": {"trigger": {"type": trigger},
+            "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},
         }
         (out / f"{slug}.json").write_text(

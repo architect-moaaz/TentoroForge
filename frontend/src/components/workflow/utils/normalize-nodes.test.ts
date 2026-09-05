@@ -53,4 +53,28 @@ describe("normalizeWorkflowNodes", () => {
     expect(normalizeWorkflowNodes(null)).toEqual([]);
     expect(normalizeWorkflowNodes([])).toEqual([]);
   });
+
+  it("fills a missing data.nodeType from the canonical top-level type", () => {
+    const raw = {
+      id: "s1",
+      type: "user_task",
+      position: { x: 250, y: 120 },
+      data: { label: "Review", config: { table: "tickets" } },
+    } as unknown as WorkflowNodeSerialized;
+    const [n] = normalizeWorkflowNodes([raw]);
+    expect(n.type).toBe("user_task");
+    expect(n.data.nodeType).toBe("user_task");
+    expect(n.data.config).toEqual({ table: "tickets" });
+    // input untouched
+    expect(raw.data.nodeType).toBeUndefined();
+  });
+
+  it("still promotes a legacy AI action that arrived without data.nodeType", () => {
+    const [n] = normalizeWorkflowNodes([
+      { id: "g", type: "action", position: { x: 0, y: 0 },
+        data: { label: "Gen", config: { actionType: "ai_generate" } } } as unknown as WorkflowNodeSerialized,
+    ]);
+    expect(n.type).toBe("ai_generate");
+    expect(n.data.nodeType).toBe("ai_generate");
+  });
 });

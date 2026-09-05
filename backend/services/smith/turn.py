@@ -75,7 +75,16 @@ COMMANDS: tuple[str, ...] = (
 
 
 class TurnRejected(ValueError):
-    """The plan did not survive validation and must be re-asked, not repaired."""
+    """The plan did not survive validation and must be re-asked, not repaired.
+
+    ``catalogs`` names the Forge catalogs the retry must be shown — a plan
+    refused for authoring a workflow outside the node catalog is re-asked with
+    that catalog in hand, and only then.
+    """
+
+    def __init__(self, message: str, *, catalogs: tuple[str, ...] = ()):
+        super().__init__(message)
+        self.catalogs = catalogs
 
 
 TURN_SCHEMA: dict[str, Any] = {
@@ -535,6 +544,22 @@ def validate_turn(
     if not 0.0 <= plan.confidence <= 1.0:
         problems.append(f"confidence {plan.confidence} is outside 0..1")
 
+    # A workflow is built from catalog nodes, each configured. Checked here,
+    # before anything is applied, so the retry is asked with the catalog and
+    # the exact keys it left empty — the same refusal the agent gate makes.
+    catalogs: tuple[str, ...] = ()
+    workflow_problems = []
+    if any(p.section == "workflows" for p in plan.proposals):
+        from services.catalog import workflow_nodes
+
+        catalog = workflow_nodes()
+        for p in plan.proposals:
+            if p.section == "workflows":
+                name = p.body.get("name") or p.natural_key
+                workflow_problems += [f"workflow {name}/{e}" for e in catalog.workflow_errors(p.body)]
+        if workflow_problems:
+            catalogs = ("workflow_nodes",)
+    problems += workflow_problems
     # A command turn that does not say which command is the failure mode this
     # field exists to close: `intent: command` used to be parsed and then
     # silently dispatched to nothing, so "build it" got a confident reply and
@@ -551,7 +576,25 @@ def validate_turn(
         )
 
     if problems:
-        raise TurnRejected("; ".join(problems))
+        raise TurnRejected("; ".join(problems), catalogs=catalogs)
+
+
+def _catalog_addenda(catalogs: tuple[str, ...]) -> str:
+    """The catalogs a rejected plan is re-asked with. Fetched on demand — a
+    turn that never proposes a workflow never pays for the node catalog."""
+    out = ""
+    if "workflow_nodes" in catalogs:
+        from services.catalog import workflow_nodes
+
+        out += (
+            "\n\nA workflow step IS a node from the workflow node catalog below: "
+            "its `type` is a catalog node and its `config` carries what that node "
+            "declares it needs, with real values. Connect steps with `next` "
+            "(a branching node's first target is the then-branch, its second the "
+            "else-branch); the workflow's `trigger.kind` is a catalog trigger and "
+            "an `end` step is the terminal.\n\n" + workflow_nodes().digest()
+        )
+    return out
 
 
 def interpret(
@@ -586,6 +629,7 @@ def interpret(
                 "Return a corrected plan. Do not explain the mistake, and do "
                 "not invent ids to satisfy the check."
             )
+            prompt += _catalog_addenda(getattr(last, "catalogs", ()))
         raw = client(system=system, user=prompt, schema=TURN_SCHEMA)
         text = raw.text if isinstance(raw, ModelReply) else raw
         try:

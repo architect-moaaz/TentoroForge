@@ -382,6 +382,35 @@ def check_capability(result: AgentResult) -> None:
             )
 
 
+class InvalidWorkflowStep(ValueError):
+    """A proposed workflow uses a step the node catalog does not offer, or
+    leaves a node's declared configuration empty."""
+
+
+def check_workflow_steps(result: "AgentResult") -> None:
+    """Reject workflows whose steps are not configured catalog nodes.
+
+    The same argument as :func:`check_pattern_templates`: accepting a step
+    whose config the engine cannot execute and repairing it later is how the
+    old chain grew its regeneration passes. A step is a node from the catalog
+    carrying what that node declares it needs; anything else is refused here,
+    with the missing keys named, so the agent is asked again.
+    """
+    proposals = [p for p in result.proposals if p.section == "workflows"]
+    if not proposals:
+        return
+
+    from services.catalog import workflow_nodes
+
+    catalog = workflow_nodes()
+    problems: list[str] = []
+    for proposal in proposals:
+        name = proposal.body.get("name") or proposal.natural_key
+        problems.extend(f"{name}/{e}" for e in catalog.workflow_errors(proposal.body))
+    if problems:
+        raise InvalidWorkflowStep("; ".join(problems[:8]))
+
+
 class InvalidPatternTemplate(ValueError):
     """A2UI proposed a template the component registry cannot render."""
 
@@ -514,6 +543,7 @@ def apply_agent_result(
     result.validate()
     check_capability(result)
     check_pattern_templates(result, svc.doc)
+    check_workflow_steps(result)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

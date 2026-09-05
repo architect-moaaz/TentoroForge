@@ -1117,9 +1117,10 @@
                 "type": "string",
                 "enum": [
                   "manual",
-                  "event",
+                  "webhook",
                   "schedule",
-                  "condition"
+                  "api_event",
+                  "db_change"
                 ]
               },
               "detail": {
@@ -1146,15 +1147,26 @@
                 "type": {
                   "type": "string",
                   "enum": [
-                    "start",
+                    "trigger",
                     "action",
                     "condition",
+                    "exclusive_gateway",
+                    "parallel_gateway",
+                    "fork",
+                    "join",
+                    "decision",
+                    "wait",
+                    "end",
+                    "end_event",
+                    "user_task",
+                    "assignment",
                     "approval",
-                    "human_task",
-                    "notification",
-                    "timer",
-                    "integration",
-                    "end"
+                    "task_pool",
+                    "escalation",
+                    "ai_classify",
+                    "ai_extract",
+                    "ai_decide",
+                    "ai_generate"
                   ]
                 },
                 "entity": {
@@ -1423,16 +1435,19 @@
           "items": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "description": "Prose statement of an access rule. Documents policy; enforces nothing."
               },
               {
                 "type": "object",
                 "properties": {
                   "entity": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Entity name or table this governs, as spelled in data.entities."
                   },
                   "column": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId."
                   },
                   "kind": {
                     "type": "string",
@@ -1440,6 +1455,7 @@
                       "scope",
                       "attribution"
                     ],
+                    "description": "\"scope\": the column decides who may reach the row — it is set from the session on create AND becomes a WHERE predicate on every read and write. \"attribution\": the column only records who acted — it is set from the session on create and a value in the request body is ignored, but it is NEVER used as an access filter. Choose attribution wherever every holder of a role is meant to see every row; scoping on an audit column silently narrows an application that was designed to be shared.",
                     "default": "scope"
                   },
                   "scope": {
@@ -1448,6 +1464,7 @@
                       "user",
                       "workspace"
                     ],
+                    "description": "What `column` is compared to: the acting user's own id, or the workspace/tenant id their session carries.",
                     "default": "user"
                   },
                   "unscopedRoles": {
@@ -1455,10 +1472,12 @@
                     "items": {
                       "type": "string"
                     },
+                    "description": "Role names that read and write this entity unscoped. Name a role only where the product genuinely grants it every row.",
                     "default": []
                   },
                   "note": {
                     "type": "string",
+                    "description": "Why this rule exists, in one sentence.",
                     "default": ""
                   }
                 },
@@ -1466,10 +1485,12 @@
                   "entity",
                   "column"
                 ],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "description": "An enforceable rule about one column and the acting user. A `scope` rule limits which rows the actor reaches; an `attribution` rule only records who acted. Both set the column server-side on create."
               }
             ]
           },
+          "description": "Who may reach which rows. A plain string is a prose statement of policy — it documents the rule but nothing enforces it. An object is an enforceable record-scoping rule: it is projected into src/lib/ownership-rules.ts and the data engine adds it as a WHERE predicate to every read and write of that entity, so declaring one here is what actually scopes the rows. An entity with no object rule is readable by every authenticated user, which is correct for an application whose authorisation is by role rather than by record — say so in a string rule so the absence is a decision rather than an omission.",
           "default": []
         },
         "protectedRoutes": {

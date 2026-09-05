@@ -13,13 +13,14 @@ Read-only, no fixtures — runs against the checked-in source files.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[3]
 
-TYPES_TS = REPO / "frontend" / "src" / "types" / "workflow.ts"
+CATALOG_JSON = REPO / "frontend" / "src" / "catalog" / "workflow-nodes.json"
 CONTRACTS_TS = REPO / "frontend" / "src" / "components" / "workflow" / "actionContracts.ts"
 ENGINE_TS = REPO / "backend" / "templates" / "runtime" / "workflows" / "engine.ts"
 
@@ -48,31 +49,25 @@ _CONTRACT_EXEMPT = {
 }
 
 
+def _catalog() -> dict:
+    """The workflow node catalog — the palette is derived from it, so it is
+    the palette. Read the frontend's emitted copy, which is what the editor
+    bundles."""
+    return json.loads(CATALOG_JSON.read_text("utf-8"))
+
+
 def _palette_action_types() -> set[str]:
-    """actionType strings that show up as defaultConfig on action nodes."""
-    txt = TYPES_TS.read_text()
-    return set(re.findall(r'actionType:\s*"([^"]+)"', txt))
+    """actionType variants the palette offers on action nodes."""
+    return {
+        v["key"] for n in _catalog()["nodes"] if n["type"] == "action"
+        for v in n.get("variants") or []
+    }
 
 
 def _palette_node_types() -> set[str]:
-    """`type: "..."` strings on NODE_CATEGORIES entries — top-level only.
-
-    Node entries look like:
-        { id: "…", type: "action", …, defaultConfig: { type: "manual" } }
-    We want the outer `type` (kind of node), NOT the nested one inside
-    defaultConfig (which is a trigger sub-type like manual / webhook).
-    Strip defaultConfig blocks before matching.
-    """
-    txt = TYPES_TS.read_text()
-    start = txt.find("NODE_CATEGORIES")
-    if start < 0:
-        return set()
-    end = txt.find("];", start)
-    body = txt[start : end + 2]
-    # Remove `defaultConfig: {...}` fragments so their inner `type: "…"`
-    # doesn't leak into the match set.
-    body = re.sub(r"defaultConfig:\s*\{[^{}]*\}", "", body)
-    return set(re.findall(r'\btype:\s*"([^"]+)"', body))
+    """Node types the palette offers (a runtime-only alias is flagged
+    `palette: false` and is not offered)."""
+    return {n["type"] for n in _catalog()["nodes"] if n.get("palette", True)}
 
 
 def _contract_keys() -> set[str]:
@@ -129,3 +124,16 @@ def test_no_contract_leaked_that_isnt_in_the_palette() -> None:
         f"{sorted(orphan)}. Either add a palette node for them or "
         "delete the contract from actionContracts.ts."
     )
+
+
+def test_ai_decide_branches_instead_of_fanning_out() -> None:
+    """The editor gives ai_decide an else handle, the projection emits then/else
+    edges for it and the platform engine routes on the decision. The scaffold
+    engine used to follow every outgoing edge after an AI node, so a two-branch
+    decision ran both branches in the generated app. Pin the routing."""
+    src = ENGINE_TS.read_text("utf-8")
+    assert "function branchEdges(" in src
+    case = src[src.index('if (node.type === "ai_decide")'):]
+    assert "branchEdges(outgoing, decision)" in case[:800]
+    # condition routing goes through the same rule, so the two cannot drift
+    assert src.count("branchEdges(") >= 3

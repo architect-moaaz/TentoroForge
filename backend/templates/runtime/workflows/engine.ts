@@ -547,9 +547,31 @@ async function executeNode(
         // Write outputs back to process variables
         const producedOutputs = writeOutputParams(node, actionOutput, ctx);
         logEntry.producedOutputs = producedOutputs;
-        nextEdges = workflow.definition.edges.filter(
+        const outgoing = workflow.definition.edges.filter(
           (e) => e.source === node.id,
         );
+        if (node.type === "ai_decide") {
+          // A decision is a branch, not a fan-out: take the then-edges on a
+          // positive decision and the else-edges otherwise — the same rule a
+          // condition node applies, and the one the editor's handles, the
+          // projection's edges and the platform engine all assume.
+          const decision = !!(actionOutput as { decision?: unknown } | null)?.decision;
+          nextEdges = branchEdges(outgoing, decision);
+          // Same shape the condition case logs, so the simulator/history can
+          // answer "why did it take this branch?" for a decision too.
+          logEntry.output = {
+            ...(actionOutput && typeof actionOutput === "object" ? actionOutput : { output: actionOutput }),
+            branch: decision ? "then" : "else",
+            takenEdges: nextEdges.map((e) => e.target),
+          };
+          if (nextEdges.length === 0 && outgoing.length > 0) {
+            console.warn(
+              `[ai_decide ${node.data?.label || node.id}] no ${decision ? "then/default" : "else"} edge defined — workflow ends silently mid-graph`,
+            );
+          }
+        } else {
+          nextEdges = outgoing;
+        }
         break;
       }
 
@@ -937,18 +959,27 @@ async function handleCondition(
   }
 
   const allEdges = workflow.definition.edges.filter((e) => e.source === node.id);
+  const edges = branchEdges(allEdges, !!result);
 
-  const edges = result
-    ? // Take "then" edges (or default if no labels)
-      allEdges.filter(
+  return { edges, expression, evaluated: result, evalError };
+}
+
+/**
+ * The outgoing edges a yes/no outcome takes: the `then` edges (or unlabelled /
+ * `default` ones) when taken, the `else` edges when not. One rule for every
+ * node that branches on a boolean — `condition`, `exclusive_gateway` and
+ * `ai_decide` — so they cannot drift. `ai_decide` used to skip this and follow
+ * every outgoing edge, so a two-branch decision ran both branches.
+ */
+function branchEdges(allEdges: WorkflowEdge[], taken: boolean): WorkflowEdge[] {
+  return taken
+    ? allEdges.filter(
         (e) =>
           e.data?.edgeType === "then" ||
           e.data?.edgeType === "default" ||
           !e.data?.edgeType,
       )
     : allEdges.filter((e) => e.data?.edgeType === "else");
-
-  return { edges, expression, evaluated: result, evalError };
 }
 
 /**

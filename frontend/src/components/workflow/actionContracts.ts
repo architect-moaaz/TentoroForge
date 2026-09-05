@@ -315,6 +315,20 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
       { name: "data", type: "object", label: "Extracted fields" },
     ],
   },
+  // --- Integrations --------------------------------------------------- //
+  mcp_tool_call: {
+    label: "MCP · Tool Call",
+    inputs: [
+      { name: "mcp_server_name", type: "string", required: true, label: "Server name",
+        help: "An enabled MCP server (Settings → MCP Servers); matched case-insensitively." },
+      { name: "mcp_tool_name", type: "string", required: true, label: "Tool name" },
+      { name: "args", type: "object", label: "Arguments ({{var}} bindings allowed)" },
+      { name: "mcp_server_id", type: "uuid", label: "Server id (instead of name)", advanced: true },
+    ],
+    outputs: [
+      { name: "result", type: "object", label: "Tool result" },
+    ],
+  },
   ocr_document: {
     label: "OCR · Document (PaddleOCR)",
     inputs: [

@@ -57,7 +57,8 @@ from services.blueprint.orchestrator import (
     transition,
 )
 from services.blueprint.orchestrator import run as run_dag
-from services.blueprint.service import BlueprintService
+from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep
+from services.blueprint.service import BlueprintInvalid, BlueprintService
 from services.smith import clarification, decisions as decision_log, greeting
 from services.smith.change import ChangeResult, PreviewContext, apply_change, resolve_preview
 from services.smith.code_intel import Trace, coverage, trace
@@ -637,18 +638,30 @@ class Smith:
             turn.recorded = self._record_answers(plan, user_msg)
 
         if plan.proposals or (plan.intent == "change" and plan.anchors):
-            turn.change = apply_change(
-                self.blueprint,
-                text,
-                proposals=plan.proposals,
-                anchors=self._impact_seeds(plan, preview),
-                interpretation=plan.summary,
-                executor=self.executor,
-                app_root=self.app_root,
-                run_agents=run_agents and self.executor is not None,
-                regenerate=self.defined,
-                observer=observer,
-            )
+            try:
+                turn.change = apply_change(
+                    self.blueprint,
+                    text,
+                    proposals=plan.proposals,
+                    anchors=self._impact_seeds(plan, preview),
+                    interpretation=plan.summary,
+                    executor=self.executor,
+                    app_root=self.app_root,
+                    run_agents=run_agents and self.executor is not None,
+                    regenerate=self.defined,
+                    observer=observer,
+                )
+            except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+                # The Blueprint refused what the plan proposed. Nothing was
+                # written — apply validates before it commits — so this is an
+                # outcome to report, not an error to surface as a traceback.
+                turn.rejected = str(exc)
+                turn.reply = (
+                    "I drafted that change, but the Blueprint refused it, so I have "
+                    f"not altered anything: {exc}"
+                )
+                turn.smith = self.conversation.append("smith", turn.reply)
+                return turn
 
         if plan.intent == "ask" and plan.anchors:
             first = plan.anchors[0]

@@ -32,36 +32,28 @@ logger = logging.getLogger(__name__)
 # keys, at least one of which must be present and non-empty for the node to count as
 # executable. An actionType absent from this map (custom / unknown / ai_* placeholder)
 # is treated as NON-executable — those are storyboard no-ops at runtime.
-_REQUIRED: dict[str, tuple[tuple[str, ...], ...]] = {
-    "db_insert": (("table",), ("values",)),
-    # db_update MUST carry a `values` SET clause — a where-only update is a no-op.
-    "db_update": (("table",), ("where",), ("values",)),
-    "db_delete": (("table",), ("where",)),
-    "db_query": (("table",),),
-    "send_email": (("to", "recipient", "recipientRole"), ("subject", "body", "template", "message")),
-    "send_notification": (("recipient", "to", "userId", "user_id", "channel", "recipientRole"),),
-    "http_call": (("url", "endpoint"),),
-    "api_call": (("url", "endpoint"),),
-    # Real engine actions that carry their own params (never prose): a variable
-    # write, a FEEL-lite expression, a field mapping. Recognised so the guard
-    # doesn't needlessly LLM-regenerate valid deterministic progress/compute nodes.
-    "set_variable": (("variableName", "name", "var"),),
-    "custom": (("expression", "code", "handler"),),
-    "transform": (("expression", "mapping", "code", "template"),),
-    # AI nodes are real (runtime workflows/ai.ts). A node counts as executable
-    # when it carries a prompt/instruction and/or an input/source — the fields the
-    # handler actually reads (canonical `ai*` names plus common aliases). Without
-    # these entries the guard treated every AI node as a no-op and regenerated it
-    # into `custom`, silently destroying ai_extract/generate/classify/decide.
-    "ai_generate": (("aiPrompt", "prompt", "instruction", "aiInput", "input"),),
-    "ai_classify": (("aiInput", "input", "aiContext", "context", "aiPrompt", "prompt"),),
-    "ai_extract": (
-        ("aiExtractFields", "fields", "aiPrompt", "prompt", "instruction"),
-        ("aiInput", "input", "inputVar", "aiFileRef", "source", "documentUrl"),
-    ),
-    "ai_decide": (("aiPrompt", "prompt", "aiContext", "context", "instruction", "aiOptions", "options"),),
-    "generate_document": (("template", "content", "html", "body", "spec", "data", "title"),),
-}
+def _required_from_catalog() -> dict[str, tuple[tuple[str, ...], ...]]:
+    """What each action variant must carry to execute — read from the workflow
+    node catalog, the same declaration the workflow agent authors against and
+    the editor's palette offers. ``api_call`` is the legacy spelling of
+    ``http_call`` and shares its contract."""
+    from services.catalog import workflow_nodes
+
+    cat = workflow_nodes()
+    out = {
+        key: tuple(tuple(g) for g in variant["config"].get("required") or ())
+        for key, variant in cat.variants("action").items()
+    }
+    # Older workflows spell an AI node as `action` + `actionType: ai_*`; the
+    # contract is the top-level AI node's.
+    for ntype in cat.node_types:
+        if ntype.startswith("ai_"):
+            out[ntype] = tuple(tuple(g) for g in cat.required_groups(ntype))
+    out["api_call"] = out["http_call"]
+    return out
+
+
+_REQUIRED: dict[str, tuple[tuple[str, ...], ...]] = _required_from_catalog()
 
 
 def _present(v: object) -> bool:

@@ -19,7 +19,15 @@ export function normalizeWorkflowNodes(
   nodes: WorkflowNodeSerialized[] | undefined | null,
 ): WorkflowNodeSerialized[] {
   if (!Array.isArray(nodes)) return [];
-  return nodes.map((node) => {
+  return nodes.map((raw) => {
+    // The top-level `type` is the canonical node type (the engine dispatches on
+    // it); `data.nodeType` is the editor's copy, which the canvas and the
+    // properties panel switch on. A node written without the copy would render
+    // as React Flow's unstyled default box, so fill it from the canonical field.
+    const node: WorkflowNodeSerialized =
+      raw?.data && !raw.data.nodeType && raw.type
+        ? { ...raw, data: { ...raw.data, nodeType: raw.type as WorkflowNodeSerialized["data"]["nodeType"] } }
+        : raw;
     const at = node?.data?.config?.actionType;
     const isLegacyAiAction =
       (node?.type === "action" || node?.data?.nodeType === "action") &&

@@ -173,7 +173,8 @@ def test_delete_workflow_cascades_child_tables(tmp_path):
     cascade = next(n for n in nodes if n["id"].startswith("cascade_"))
     cfg = cascade["data"]["config"]
     assert cfg == {"actionType": "db_delete", "table": "price_results",
-                   "where": {"scanSessionId": "{{id}}"}, "continueOnError": True}
+                   "where": {"scanSessionId": "{{id}}"}, "continueOnError": True,
+                   "nodeType": "action"}
     assert ids.index(cascade["id"]) < ids.index("db_delete")
     # edges form one linear chain covering every node
     edges = wf["definition"]["edges"]
@@ -182,3 +183,14 @@ def test_delete_workflow_cascades_child_tables(tmp_path):
     # parent delete uses the canonical binding form
     main = next(n for n in nodes if n["id"] == "db_delete")
     assert main["data"]["config"]["where"] == {"id": "{{id}}"}
+
+
+def test_nodes_carry_the_editor_type_and_stack_top_to_bottom():
+    wf = build_crud_workflow("Task", "tasks", _FIELDS, "delete", pk="id",
+                             children=[{"table": "comments", "fk": "task_id"}])
+    nodes = wf["definition"]["nodes"]
+    for n in nodes:
+        assert n["data"]["nodeType"] == n["type"], n
+    assert [n["id"] for n in nodes] == ["trigger", "cascade_0_comments", "db_delete", "end"]
+    assert {n["position"]["x"] for n in nodes} == {250}
+    assert [n["position"]["y"] for n in nodes] == [0, 120, 240, 360]
