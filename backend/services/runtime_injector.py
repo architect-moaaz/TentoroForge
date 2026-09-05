@@ -2216,6 +2216,14 @@ def _fix_tailwind_config(output_path: Path) -> None:
                 or "@tentoroforge/renderer" not in existing
                 # Missing the named type scale → Heading classes no-op; upgrade it.
                 or "page-title" not in existing
+                # MISSING THE SCHEMAS GLOB → every page class is uncompiled. The
+                # scaffold ships its own tailwind.config.ts carrying the three
+                # markers above, so this never rewrote it — and the scaffold's
+                # copy lacked `src/schemas/**`. A real 15-page app came out with
+                # 6,519 arbitrary classes in its schemas and CSS for none. Three
+                # files produce this config; this writer gets the last word, so
+                # this is where the check has to live.
+                or "src/schemas/**/*.json" not in existing
             )
         except Exception:
             needs_config = True
@@ -2750,7 +2758,7 @@ def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
 # import cycle with the router.
 _SYNC_VALID_RULE_TYPES = {
     "validation", "access", "business", "computed", "state_machine", "trigger",
-    "condition_action", "decision_table",
+    "condition_action", "decision_table", "row_access",
 }
 
 

@@ -44,6 +44,14 @@ Return ONLY a JSON object with exactly these keys:
       "connect_figma" — they named a Figma design to build from or to use as
                         the visual reference. Any figma.com/design or
                         figma.com/file link is this verb.
+    "rebuild"       — build or regenerate the WHOLE application: "build",
+                      "build it", "start the build", "generate the app",
+                      "rebuild everything". No route, no single screen.
+                      THE DIFFERENCE FROM compose_route IS SCOPE, and it was
+                      missing from this list entirely — so a bare "Build"
+                      became a compose of "/" and answered "there is no page
+                      at '/' in this application", which is true, unhelpful,
+                      and reads as a broken app rather than a misread word.
       "" when you are asking or answering rather than changing.
 
 Then fill in ONLY the fields that verb needs. Leave the others "".

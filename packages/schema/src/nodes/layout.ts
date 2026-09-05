@@ -83,6 +83,11 @@ export const ContainerNode = z
     props: z
       .object({
         maxWidth: z.enum(["sm", "md", "lg", "xl", "2xl", "full"]).default("lg"),
+        // A container that opens something. A designer's clickable list row —
+        // a title, a status chip, a version — is a card that navigates, not a
+        // button with one label; it keeps its children and carries the
+        // destination here, through the same Navigator seam Button uses.
+        navigate: z.string().optional(),
       })
       .strict()
       .optional(),

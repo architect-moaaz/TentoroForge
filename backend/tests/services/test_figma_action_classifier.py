@@ -33,14 +33,33 @@ def test_dashboard_nav():
 def test_view_analytics():
     assert classify_button_action("View Analytics") == {"navigate": "/analytics"}
 
-def test_view_unknown_workflow():
-    out = classify_button_action("View Context")
-    assert "workflow" in out
-    assert out["workflow"].startswith("view.")
+def test_view_unknown_infers_nothing():
+    """"View Context" used to become the workflow `view.context`.
 
-def test_unknown_label_default_workflow():
-    out = classify_button_action("Convert to Lead")
-    assert out["workflow"] == "convert.toLead"
+    No such workflow exists, and the Blueprint validator rejects a page whose
+    button targets one that is not defined."""
+    assert classify_button_action("View Context") == {}
+
+
+def test_unknown_label_infers_nothing():
+    """The default was `{"workflow": _slugify(label)}` — a workflow id named
+    after whatever the button said.
+
+    It cost a real 15-screen design every one of its pages: "Dashboard",
+    "Front Desk" and "New Case" each invented a target, the validator refused
+    each page with "targets workflow 'dashboard', which this application does
+    not define", and the run finished with no layouts — frontend, testing and
+    preview all skipped behind them.
+
+    A button with no action renders and can be wired later; a button pointing
+    at a workflow that was never defined cannot be part of any valid page."""
+    assert classify_button_action("Convert to Lead") == {}
+
+
+def test_a_label_that_does_match_still_infers():
+    """The floor stays: declining is for what did NOT match, not for
+    everything."""
+    assert classify_button_action("Sign in") != {}
 
 def test_empty_label():
     assert classify_button_action("") == {}

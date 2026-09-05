@@ -1421,7 +1421,54 @@
         "ownershipRules": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "entity": {
+                    "type": "string"
+                  },
+                  "column": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "scope",
+                      "attribution"
+                    ],
+                    "default": "scope"
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "workspace"
+                    ],
+                    "default": "user"
+                  },
+                  "unscopedRoles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "note": {
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "entity",
+                  "column"
+                ],
+                "additionalProperties": false
+              }
+            ]
           },
           "default": []
         },
@@ -1486,6 +1533,9 @@
                 "looksLikeScreen": {
                   "type": "boolean",
                   "default": true
+                },
+                "shows": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -1510,6 +1560,69 @@
               "type": "string"
             },
             "default": []
+          },
+          "chrome": {
+            "type": "object",
+            "properties": {
+              "sidebar": {
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "groups": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "default": ""
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "navigate": {
+                                "type": "string"
+                              },
+                              "workflow": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "default": []
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              },
+              "sharedBy": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "sidebar",
+              "sharedBy"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -1606,6 +1719,12 @@
         "derivedFromFigma": {
           "type": "boolean",
           "default": false
+        },
+        "paletteEvidence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
         }
       },
       "additionalProperties": false,
@@ -1841,6 +1960,31 @@
               ""
             ],
             "default": ""
+          },
+          "canvas": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "fit": {
+                "type": "string",
+                "enum": [
+                  "scale",
+                  "fluid"
+                ]
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": false
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"

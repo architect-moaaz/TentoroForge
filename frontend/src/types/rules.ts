@@ -5,6 +5,10 @@
 export type RuleType =
   | "validation"
   | "access"
+  // Which ROWS an actor may reach, as opposed to `access`, which decides which
+  // COLUMNS come back. Compiled into the query's WHERE clause by the data
+  // engine, so a hidden row is absent from counts and aggregates too.
+  | "row_access"
   | "business"
   | "computed"
   | "state_machine"
@@ -17,6 +21,7 @@ export type RuleType =
 export const RULE_TYPES: { value: RuleType; label: string }[] = [
   { value: "validation", label: "Validation" },
   { value: "access", label: "Access Control" },
+  { value: "row_access", label: "Row Access" },
   { value: "business", label: "Business Rule" },
   { value: "computed", label: "Computed Field" },
   { value: "state_machine", label: "State Machine" },
@@ -104,6 +109,14 @@ export interface RuleConfig {
 
   // Access Control
   actions?: Record<string, Record<string, "allow" | "deny">>;
+
+  // Row Access — `when` is the visual tree, `whenFeel` the compiled FEEL-lite
+  // the data engine turns into a WHERE clause. `roles` names who the rule
+  // grants to; rules on a model union, and an actor no rule addresses reaches
+  // no rows.
+  when?: ConditionExpression | null;
+  whenFeel?: string;
+  roles?: string[];
 
   // Business Rule
   triggerAction?: string;

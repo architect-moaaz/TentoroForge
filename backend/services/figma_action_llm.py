@@ -114,6 +114,23 @@ Confidence rubric:
 Do not narrate. Emit ONE JSON object. No code fences."""
 
 
+#: The shape `classify_figma_action_llm` parses back. Declared so the reply is
+#: machine-checked rather than hoped for — the parser's fallback for anything
+#: it cannot read is `kind="none"`, which is indistinguishable from a genuine
+#: "no action" and is exactly how the broken import stayed invisible.
+_REPLY_SCHEMA: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["kind"],
+    "properties": {
+        "kind": {"type": "string",
+                 "enum": ["navigate", "workflow", "external", "none"]},
+        "target": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+}
+
+
 def _default_query_fn(system_prompt: str, user_prompt: str) -> str:
     """Real LLM call — kept minimal so tests can stub cleanly.
 
@@ -121,9 +138,27 @@ def _default_query_fn(system_prompt: str, user_prompt: str) -> str:
     so we don't fork provider handling. Falls back to an empty string on
     any error; the caller treats that as "garbage → none".
     """
+    # THIS IMPORTED A FUNCTION THAT NO LONGER EXISTS.
+    #
+    # It was `from services.llm_edit import _default_llm_query`, removed when
+    # that module made every caller pass its own boundary. The ImportError
+    # landed in the `except` below and was logged, and the CALLER swallows a
+    # failure as "garbage → none" — so the registry-safe classifier had been
+    # silently dead, and every Figma button fell through to keyword matching.
+    #
+    # The cost was invisible until a design with real buttons arrived: keyword
+    # matching either invented a workflow the app does not define, or declared
+    # none, and the Blueprint validator refuses BOTH. A 15-screen design lost
+    # every page to a dangling import.
+    #
+    # Bound to the same client the rest of the pipeline uses, so timeouts,
+    # retries and the model choice are not forked here.
     try:
-        from services.llm_edit import _default_llm_query  # type: ignore
-        return _default_llm_query(system_prompt, user_prompt)  # type: ignore[misc]
+        from services.blueprint.executors import AnthropicModel
+
+        reply = AnthropicModel(max_tokens=1024)(
+            system=system_prompt, user=user_prompt, schema=_REPLY_SCHEMA)
+        return str(getattr(reply, "text", reply) or "")
     except Exception:
         logger.exception("classify_figma_action_llm: default LLM query failed")
         return ""

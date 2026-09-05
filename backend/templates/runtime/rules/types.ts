@@ -5,6 +5,10 @@
 export type RuleType =
   | "validation"
   | "access"
+  // Row-level read access: which ROWS of a model an actor may reach, as
+  // opposed to `access`, which decides which COLUMNS come back. Compiled to a
+  // WHERE clause by rules/row-access-sql.ts rather than evaluated per row.
+  | "row_access"
   | "business"
   | "computed"
   | "state_machine"
@@ -58,6 +62,28 @@ export interface AccessRuleConfig {
   can_edit?: boolean;
   /** Can delete */
   can_delete?: boolean;
+}
+
+export interface RowAccessRuleConfig {
+  /** Visual condition tree — round-trippable in the editor. */
+  when?: unknown;
+  /**
+   * Compiled FEEL-lite — what the data engine turns into SQL. Named to match
+   * ConditionActionConfig, which already pairs a tree with its compiled text;
+   * a second convention for the same idea is a second thing to remember.
+   *
+   * Evaluated over the row's own columns plus `user.<field>`. TRUE = readable.
+   */
+  whenFeel: string;
+  /**
+   * Roles this rule grants to. Empty or absent = every role.
+   *
+   * Rules on a model are GRANTS that union: an actor reaches a row if ANY rule
+   * addressed to them says so. An actor addressed by NO rule on a model that
+   * has rules reaches nothing — the same fail-closed reading `canAccessField`
+   * uses, so a role is never granted rows by having been forgotten.
+   */
+  roles?: string[];
 }
 
 export interface BusinessRuleConfig {

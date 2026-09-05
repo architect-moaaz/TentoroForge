@@ -32,17 +32,16 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [figmaUrl, setFigmaUrl] = useState("");
-  const [figmaToken, setFigmaToken] = useState("");
+  const [figmaScope, setFigmaScope] =
+    useState<"evidence" | "specification">("evidence");
   const [figmaDescription, setFigmaDescription] = useState("");
   const [figmaUrlError, setFigmaUrlError] = useState<string | null>(null);
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  // Load saved Figma token from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("figma_token");
-    if (saved) setFigmaToken(saved);
-  }, []);
+  // The load-saved-token effect went with the field that fed it: a PAT
+  // in localStorage is a credential at rest in the browser (§42), and
+  // nothing that runs ever read it back.
 
   const createProject = useMutation({
     mutationFn: (data: { name: string; description?: string }) =>
@@ -59,7 +58,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     mutationFn: async (data: {
       name: string;
       figmaUrl: string;
-      figmaToken: string;
       figmaDescription: string;
     }) => {
       // Prefer the user's own words as the project description so the
@@ -73,26 +71,33 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
         name: data.name,
         description: desc,
       });
-      // Save token for future use
-      localStorage.setItem("figma_token", data.figmaToken);
       return project;
     },
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ["org", orgId, "projects"] });
       onOpenChange(false);
-      // Persist the trigger params for ChatPanel's auto-generation hook.
-      // `description` here is the user's brief — ChatPanel forwards it to
-      // /generate so the pipeline sees BOTH the Figma URL (for design) AND
-      // a plain-language app intent (for planner/business-logic context).
-      const desc = figmaDescription.trim()
-        ? figmaDescription.trim()
-        : `Import from Figma: ${figmaUrl}`;
+      // HANDED TO SMITH, NOT TO THE LEGACY PIPELINE.
+      //
+      // This wrote `figma_generate_<id>` for ChatPanel's auto-generation hook,
+      // which posted to /api/projects/:id/generate. ChatPanel is mounted
+      // NOWHERE — the project page swapped it for SmithPanel precisely because
+      // /generate never reaches the Blueprint engine — so the trigger was
+      // written and never read. The URL and the token were silently discarded
+      // and nothing generated: an entry point that could not keep its promise.
+      //
+      // SmithPanel reads this key instead and connects the design through
+      // `connect_figma`: the credential is resolved by NAME from the org's
+      // integrations, `treatAs` is recorded, and the run that follows is the
+      // ordinary Blueprint DAG.
       sessionStorage.setItem(
-        `figma_generate_${project.id}`,
+        `figma_connect_${project.id}`,
         JSON.stringify({
           figma_url: figmaUrl,
-          figma_token: figmaToken,
-          description: desc,
+          treat_as: figmaScope,
+          // The brief travels with it so the panel can START the definition
+          // rather than leaving it typed in the composer for someone to press
+          // send on. "Import design" should import the design.
+          brief: figmaDescription.trim(),
         }),
       );
       router.push(`/org/${orgId}/projects/${project.id}`);
@@ -110,12 +115,10 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
       setFigmaUrlError("Enter a valid Figma URL (e.g., https://www.figma.com/design/...)");
       return;
     }
-    if (!figmaToken.trim()) return;
     setFigmaUrlError(null);
     createFigmaProject.mutate({
       name: name.trim(),
       figmaUrl,
-      figmaToken,
       figmaDescription,
     });
   };
@@ -274,21 +277,43 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 <p className="mt-1 text-xs text-destructive">{figmaUrlError}</p>
               )}
             </div>
+            {/* NO TOKEN FIELD. It asked for the PAT and put it in
+                localStorage — a credential at rest in the browser, which §42
+                forbids — and then dropped it, because the only component that
+                read it is mounted nowhere. The token now comes from the org's
+                integrations, resolved by name at the moment of the call. */}
             <div>
-              <Label htmlFor="figma-token" className="flex items-center gap-1.5">
+              <Label className="flex items-center gap-1.5">
                 <Key className="h-3.5 w-3.5" />
-                Figma Access Token
+                Is this design the specification?
               </Label>
-              <Input
-                id="figma-token"
-                type="password"
-                value={figmaToken}
-                onChange={(e) => setFigmaToken(e.target.value)}
-                placeholder="figd_xxxxxxxxxxxxx"
-                className="mt-1"
-              />
+              <div className="mt-1.5 space-y-1.5">
+                {([
+                  ["evidence", "A reference", "The screens you drew are built from the design, and the rest of the app is built around them — usually more pages than frames."],
+                  ["specification", "The specification", "One page per frame and nothing else — no sign-in, no lists, no forms unless you drew them."],
+                ] as const).map(([value, label, help]) => (
+                  <label
+                    key={value}
+                    className="flex cursor-pointer gap-2 rounded-md border p-2 text-xs"
+                  >
+                    <input
+                      type="radio"
+                      name="figma-scope"
+                      checked={figmaScope === value}
+                      onChange={() => setFigmaScope(value)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">{label}</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        {help}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Generate at figma.com &rarr; Settings &rarr; Personal access tokens. Stored locally.
+                The Figma token comes from your organisation&apos;s integrations.
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -297,9 +322,9 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
               </Button>
               <Button
                 onClick={handleFigmaCreate}
-                disabled={!name.trim() || !figmaUrl || !figmaToken || isPending}
+                disabled={!name.trim() || !figmaUrl || isPending}
               >
-                {createFigmaProject.isPending ? "Creating..." : "Import & Generate"}
+                {createFigmaProject.isPending ? "Creating..." : "Import design"}
               </Button>
             </div>
           </div>

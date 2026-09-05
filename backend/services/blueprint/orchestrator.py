@@ -665,9 +665,40 @@ def completed_nodes(
     for key, node in nodes.items():
         if node.kind != "agent" or not node.produces:
             continue
-        if all(_section(doc, path) for path in node.produces):
-            done.add(key)
+        if not all(_section(doc, path) for path in node.produces):
+            continue
+        # A FAN-OUT IS COMPLETE WHEN EVERY SUBJECT IS, NOT WHEN ANY IS.
+        #
+        # "The section has content" is the right test for a node that writes
+        # once. For a node that writes once PER SUBJECT it is wrong by exactly
+        # the failures: `page_layouts` ended a run with 4 of 15 pages composed
+        # and 11 failed, this read the 4 as "pageLayouts has content" and
+        # planned the next run without it — so `frontend` was built from a
+        # four-page application and the eleven failed pages were never
+        # retried. Resume-not-redo became resume-not-finish.
+        #
+        # Checked against the rows themselves rather than a count, because a
+        # deprecated page leaves a layout behind and a count would call that
+        # complete too.
+        subject_key = _SUBJECT_ROW_KEY.get(node.fanout)
+        if node.fanout and subject_key:
+            section, field = subject_key
+            present = {str(row.get(field) or "")
+                       for row in (doc.get(section) or []) if isinstance(row, dict)}
+            if any(subject not in present for subject in subjects_for(node, doc)):
+                continue
+        done.add(key)
     return done
+
+
+#: For a fan-out node, which produced section names the subject a row was
+#: written for, and under which field. Only fan-outs whose rows carry their
+#: subject can be judged per subject; one that does not (a design source's
+#: requirements carry `evidence`, not a source id) keeps the section-level
+#: rule above, which is the behaviour every run had before this existed.
+_SUBJECT_ROW_KEY: dict[str, tuple[str, str]] = {
+    "pages": ("pageLayouts", "page"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1366,16 +1397,26 @@ def _run_verification(svc: BlueprintService) -> None:
 
 
 def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
-    """Entities -> Drizzle modules, plus the mask manifest the engine reads."""
+    """Entities -> Drizzle modules, plus the manifests the engine reads.
+
+    The mask manifest says which columns come back redacted, the append-only
+    manifest which entities refuse a rewrite, and the ownership manifest which
+    *rows* the actor may reach at all. They are projected together because the
+    data engine reads all three, and it is the one place every read passes
+    through — the API route and the server render call it directly, so a
+    control that lived in the route would not cover the SSR path.
+    """
     from services.blueprint.projection import (
         apply_data_projection, project_append_only_entities,
-        project_searchable_columns, project_sensitive_columns,
+        project_ownership_rules, project_searchable_columns,
+        project_sensitive_columns,
     )
 
     apply_data_projection(svc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
+    project_ownership_rules(svc.doc, app_root)
 
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
@@ -1384,7 +1425,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
         project_public_resources,
-        project_nav_flow, project_root_route,
+        project_nav_flow, project_root_route, project_shell,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -1433,6 +1474,10 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
     project_nav_flow(svc.doc, app_root)
+    # The rail itself, from the same tree the route graph was read from:
+    # `shell.json` is what the scaffold's layout builds its sidebar from, and
+    # nothing wrote it, so every rail was the flat fallback.
+    project_shell(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
     # The data route needs the same list the matcher was built from.

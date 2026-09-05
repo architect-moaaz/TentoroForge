@@ -126,6 +126,22 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the root's `size-full` resolves against the viewport, and every child
     # positioned against a 3902px-wide drawing lands somewhere else — which is
     # how a thirty-card dashboard rendered three cards and blank space.
+    # THE CLOSED VOCABULARIES, WHICH NOTHING WAS SUPPLYING.
+    #
+    # `figma_llm_ctx` exists so a button's action can only ever name a route or
+    # workflow this application actually defines — "the LLM cannot invent a
+    # target that isn't in the supplied lists". Nothing called
+    # `set_figma_llm_context`, so the lists were always empty, the guarded
+    # classifier never ran, and every button fell through to keyword matching.
+    #
+    # That left a design with buttons unbuildable from either side: inventing a
+    # target failed as "targets workflow 'dashboard', which this application
+    # does not define", and inventing nothing failed as "Button 'Dashboard'
+    # declares no action — it would do nothing". A real 15-screen design lost
+    # every page to it. The lists are the way out, and the Blueprint has had
+    # them all along.
+    _set_action_vocabulary(svc.doc)
+
     try:
         cw = float(getattr(screen, "width", 0) or 0)
         ch = float(getattr(screen, "height", 0) or 0)
@@ -147,6 +163,38 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     except Exception as exc:  # noqa: BLE001 — one frame, never the run
         logger.warning("[figma] %s: %s", page.get("id"), exc)
         return None
+
+    # THE DESIGN'S CHROME IS THE SHELL'S, NOT THIS PAGE'S.
+    #
+    # Every frame is drawn whole — rail, brand, page — and the rail is the
+    # same subtree on every frame. Composed whole, each page carried its own
+    # sidebar beside the scaffold's, and `/cases/new` (a modal route) put a
+    # third inside a dialog. `chrome.shared_chrome` finds what every screen
+    # shares; `split` takes it out and unwraps the frame's boxes so the shell
+    # wraps content that is only content. A design with one frame, or frames
+    # that share nothing, has no chrome and composes exactly as before.
+    try:
+        from services.figma import chrome as _chrome
+
+        shared = _shared_chrome_for(svc)
+        if shared:
+            schema["children"][0], removed = _chrome.split(schema["children"][0], shared)
+            if removed:
+                logger.info("[figma] %s: removed %d chrome subtree(s)",
+                            page.get("id"), len(removed))
+    except Exception as exc:  # noqa: BLE001 — never the page
+        logger.warning("[figma] chrome split failed for %s: %s", page.get("id"), exc)
+
+    # A CARD ON A LIST PAGE OPENS THE ITEM, NOT THE LIST IT IS ON. The
+    # classifier bound the card's title to the page's own route because it
+    # does not know which page the card sits on; this step does.
+    from services.figma import cards as _cards
+
+    routes = [str(p.get("route") or "") for p in (svc.doc.get("pages") or [])]
+    retargeted = _cards.bind_cards(schema["children"][0], str(page.get("route") or ""), routes)
+    if retargeted:
+        logger.info("[figma] %s: %d card(s) retargeted from the page itself",
+                    page.get("id"), retargeted)
 
     # A PICTURE OF A CHART BECOMES A CHART, BEFORE PROVENANCE IS STRIPPED.
     #
@@ -208,6 +256,48 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     return out
 
 
+def _set_action_vocabulary(doc: dict) -> None:
+    """Give the action classifier this application's real routes and workflows.
+
+    Best-effort: a doc without pages or workflows leaves the vocabulary empty,
+    which is the behaviour every run had before this existed.
+    """
+    try:
+        from services.figma_llm_ctx import set_figma_llm_context
+    except Exception:  # noqa: BLE001
+        return
+
+    routes = [str(p.get("route") or "") for p in (doc.get("pages") or [])]
+    routes = [r for r in routes if r.startswith("/")]
+
+    # IDS ONLY, BECAUSE IDS ARE WHAT RESOLVE.
+    #
+    # This offered names as well as ids, reasoning that a model reading a
+    # button recognises "Refund Approval Decision" more readily than
+    # "FLOW-014". It does — and then binds to it, and the validator rejects the
+    # page: "targets workflow 'Refund Approval Decision', which this
+    # application does not define", because `functional_completeness` resolves
+    # a button's `workflow` against `workflows[].id` alone. Offering a spelling
+    # that cannot resolve manufactures the exact failure the closed vocabulary
+    # exists to prevent.
+    #
+    # The cost is real: an opaque id is harder to choose correctly, so fewer
+    # buttons bind to workflows. Routes carry their own meaning and do most of
+    # the binding, and a button that binds to nothing now becomes Text rather
+    # than an invalid control.
+    workflows: list[str] = []
+    for flow in doc.get("workflows") or []:
+        value = str(flow.get("id") or "").strip()
+        if value and value not in workflows:
+            workflows.append(value)
+
+    try:
+        set_figma_llm_context(routes=routes or None,
+                              workflows=workflows or None)
+    except Exception:  # noqa: BLE001 — an enrichment, never the page
+        logger.info("[figma] could not set the action vocabulary")
+
+
 def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
                       app_root: str | Path) -> list[dict]:
     """What the frame's rectangles are, looked at rather than guessed.
@@ -254,3 +344,61 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
 
     entities = (svc.doc.get("data") or {}).get("entities") or []
     return vision.classify(AnthropicModel(max_tokens=8000), shots, entities)
+
+
+#: Chrome per (project, designs) for the life of the process. The fan-out
+#: composes twelve pages at once and each call would otherwise transform every
+#: screen again; the rail does not change between pages of one run.
+_CHROME_CACHE: dict[tuple, set[str]] = {}
+
+
+def _shared_chrome_for(svc: Any) -> set[str]:
+    """The fingerprints every screen of this application's designs share.
+
+    NEVER THROUGH THE ACTION CLASSIFIER. `compose` sets the routes/workflows
+    vocabulary before it transforms a page, so that page's buttons bind. The
+    same vocabulary was still set when this transformed the OTHER fourteen
+    screens for their fingerprints — and with it set, every button on every
+    screen is a real classifier call. Fifteen screens, twenty-odd buttons each,
+    twelve subjects at once: a run sat nine minutes in `page_layouts` without
+    composing one page or rendering one crop. A fingerprint is types and text;
+    the context is cleared for the transform and restored after.
+    """
+    key = (str(svc.output_dir),
+           tuple(str(s.get("id") or "") for s in svc.doc.get("designSources") or []))
+    cached = _CHROME_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    from services.figma import chrome as _chrome
+    from services.figma import store
+    from services.figma_llm_ctx import (
+        get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
+    )
+    from services.jsx_to_schema import transform_jsx_to_schema
+
+    saved = (list(get_routes()), list(get_workflows()))
+    reset_figma_llm_context()
+    roots: list[dict] = []
+    try:
+        for source in svc.doc.get("designSources") or []:
+            try:
+                ref = store.load(str(source.get("id") or ""), svc.output_dir)
+            except Exception:  # noqa: BLE001
+                ref = None
+            for screen in (ref.screens if ref else []):
+                code = str((screen.structure or {}).get("code") or "")
+                if not code:
+                    continue
+                try:
+                    w, h = float(screen.width or 0), float(screen.height or 0)
+                    canvas = (w, h) if w > 0 and h > 0 else None
+                    roots.append(transform_jsx_to_schema(code, {}, canvas=canvas)["children"][0])
+                except Exception:  # noqa: BLE001 — one frame, never the set
+                    continue
+    finally:
+        set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+
+    shared = _chrome.shared_chrome(roots)
+    _CHROME_CACHE[key] = shared
+    return shared

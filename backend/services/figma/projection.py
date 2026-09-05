@@ -85,6 +85,25 @@ def design_system_from(ref: DesignReference) -> dict[str, Any]:
         projected = _tokens(bucket)
         if projected:
             out[key] = projected
+
+    # WHEN THE FILE PUBLISHES NOTHING, THE FRAMES STILL SAY IT. Most files
+    # publish no variables, and the extraction records exactly that: "tokens
+    # must be derived from the frames themselves". Nothing derived them, so
+    # `designSystem` stayed the agent's generic palette — teal on grey — and
+    # the sign-in page, painted from those tokens, looked like a different
+    # product from the cream-and-gold frames next to it. `palette.from_screens`
+    # counts the fills, text colours and faces the frames actually use; a
+    # published variable still wins over a counted one, bucket by bucket.
+    if "colors" not in out or "typography" not in out:
+        from services.figma import palette as _palette
+
+        derived = _palette.from_screens(ref.screens)
+        if derived.get("colors") and "colors" not in out:
+            out["colors"] = dict(derived["colors"])
+        if derived.get("typography") and "typography" not in out:
+            out["typography"] = dict(derived["typography"])
+        if derived.get("evidence") and len(out) > 1:
+            out["paletteEvidence"] = dict(derived["evidence"])
     return out
 
 

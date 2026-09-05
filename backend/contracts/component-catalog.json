@@ -3147,6 +3147,9 @@
               "full"
             ],
             "default": "lg"
+          },
+          "navigate": {
+            "type": "string"
           }
         },
         "additionalProperties": false,

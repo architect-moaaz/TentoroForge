@@ -96,10 +96,22 @@ export function Grid({ node, children }: { node: any; children: ReactNode[] }) {
   const callerClass = typeof p.className === "string" ? ` ${p.className}` : "";
   const callerStyle = p.style && typeof p.style === "object" ? p.style as React.CSSProperties : {};
 
+  // A CLASS THAT ALREADY SAYS THE COLUMNS IS THE COLUMNS. A page composed
+  // from a design frame arrives with Dev Mode's own track spec —
+  // `grid-cols-[___355.66px_355.66px_355.66px_355.66px]` — and `columns` is
+  // merely that spec counted. Emitting the responsive ladder on top of it
+  // made `sm:grid-cols-2` beat the spec at every viewport under `lg`, so a
+  // drawn four-column KPI row folded to two on a laptop and slid under the
+  // charts positioned beneath it. The design's spec is a fixed-width drawing
+  // (it renders inside a scaled canvas, where the viewport is not the
+  // constraint); a grid with no spec of its own keeps the ladder.
+  const declaresColumns = /(^|\s)grid-cols-/.test(callerClass);
+  const colsClass = declaresColumns ? "" : ` ${gridColsClass(columns)}`;
+
   return (
     <div
       data-node-id={node.id}
-      className={`grid ${gridColsClass(columns)} ${gapClass(p.gap)}${callerClass}`}
+      className={`grid${colsClass} ${gapClass(p.gap)}${callerClass}`}
       style={{
         ...resolveStyle(node.style),
         ...slotProps.style,

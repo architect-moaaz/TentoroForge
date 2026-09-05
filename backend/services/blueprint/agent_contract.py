@@ -117,7 +117,11 @@ _READS: dict[str, set[str]] = {
     "product_analysis": {"requirements"},
 
     # Structure: modules and navigation over the pages that exist.
-    "solution_architecture": {"requirements", "pages"},
+    # `designSources` because a connected design DRAWS the navigation — its
+    # sidebar is the same subtree on every screen — and the agent that authors
+    # `navigation.tree` could not see it, so every Figma app got the generic
+    # sidebar with the design's own rail rendered inside each page (§48).
+    "solution_architecture": {"requirements", "pages", "designSources"},
 
     # Data: grounded in requirements, not in anybody's UI.
     "data_model": {"requirements"},

@@ -701,6 +701,25 @@ export const PageLayout = z.object({
   composedBy: z
     .enum(["a2ui", "agent", "deterministic", "figma", ""])
     .default(""),
+  /**
+   * The Figma frame's own size, for a layout composed from one. `FigmaCanvas`
+   * scales the page by (available width / frame width) and reads it off the
+   * projected schema; the executor carries it here from the composer. Absent
+   * for every A2UI page and for a frame with no recorded size — and, until it
+   * was declared, present-but-forbidden: fifteen of fifteen layout rows were
+   * refused as "'canvas' was unexpected" on the first run that wrote it.
+   */
+  canvas: z
+    .object({
+      width: z.number().positive(),
+      height: z.number().positive(),
+      // How the frame meets a viewport narrower than itself. `fluid`: the
+      // page reflows — a drawn box is a maximum, not a size — which is what
+      // an auto-layout frame supports. `scale`: the frame is a positioned
+      // picture and shrinks as one. Absent means `scale`, the older behaviour.
+      fit: z.enum(["scale", "fluid"]).optional(),
+    })
+    .optional(),
   ...artifactBase,
 });
 
@@ -958,12 +977,46 @@ export const Integration = z.object({
 // §11 · security  (§100)
 // ===========================================================================
 
+/**
+ * An enforceable rule about one column and the acting user. Projected into
+ * `src/lib/ownership-rules.ts`, which the data engine reads — so this object,
+ * not the prose beside it, is what actually takes effect.
+ *
+ * Both kinds set the column server-side on create. Only `scope` filters:
+ * an `attribution` column records who acted and is never an access filter,
+ * which is what an application with agency-wide visibility needs.
+ */
+export const RecordScopeRule = z.object({
+  /** Entity name or table, as spelled in `data.entities`. */
+  entity: z.string(),
+  /** Column holding the actor's value (`ownerId`, `createdByUserId`, …). */
+  column: z.string(),
+  /**
+   * `scope` — the column decides who may reach the row: set on create and
+   * added as a WHERE predicate to every read and write.
+   * `attribution` — the column only records who acted: set on create, a body
+   * value ignored, never used to filter.
+   */
+  kind: z.enum(["scope", "attribution"]).default("scope"),
+  /** The actor's own id, or the workspace/tenant id their session carries. */
+  scope: z.enum(["user", "workspace"]).default("user"),
+  /** Roles exempt from the rule — they read unscoped, and may write the column. */
+  unscopedRoles: z.array(z.string()).default([]),
+  note: z.string().default(""),
+});
+
 export const Security = z.object({
   authentication: z
     .enum(["none", "email_password", "sso", "oauth", "magic_link"])
     .default("email_password"),
   rbac: z.boolean().default(true),
-  ownershipRules: z.array(z.string()).default([]),
+  /**
+   * A string states policy and enforces nothing; a {@link RecordScopeRule}
+   * is enforced. An entity with no rule is readable by every authenticated
+   * user — correct when authorisation is by role rather than by record, and
+   * a leak otherwise.
+   */
+  ownershipRules: z.array(z.union([z.string(), RecordScopeRule])).default([]),
   protectedRoutes: z.array(z.string()).default([]),
   auditLogging: z.boolean().default(false),
 });
@@ -993,6 +1046,15 @@ export const DesignSourceFrame = z.object({
    *  than filtered, because the naming convention is the file author's, not
    *  ours, and a wrong guess silently deletes evidence (§49). */
   looksLikeScreen: z.boolean().default(true),
+  /**
+   * What the frame shows, read off its own heading with the shared chrome
+   * removed. Fifteen frames of one real file all carried the same name, so
+   * the planner routed them by position: the Ticket Queue became `/login`,
+   * Front Desk became `/cases`, Policy Manager `/users/new` — 14 of 15 wrong.
+   * A frame's heading is its identity; this is the evidence the planner
+   * routes by (§48, §49).
+   */
+  shows: z.string().optional(),
 });
 
 export const DesignSource = z.object({
@@ -1035,6 +1097,42 @@ export const DesignSource = z.object({
    *  instead of passing for a complete one. Each is a clarification owed to
    *  the user before the DAG builds against it (§48, §50). */
   gaps: z.array(z.string()).default([]),
+  /**
+   * What every screen of this design shares — its chrome — read as evidence
+   * (§48). The rail is the same subtree on every frame; `services/figma/chrome`
+   * finds it by that definition and records what it says here, in the order
+   * the designer drew it. `ux_architecture`, the one author of
+   * `navigation.tree`, reads this and reproduces it; before it existed every
+   * Figma application got the generic sidebar with the drawn one rendered
+   * inside each page.
+   *
+   * Absent for a design with one frame, or frames that share nothing.
+   */
+  chrome: z
+    .object({
+      sidebar: z.object({
+        brand: z.array(z.string()).default([]),
+        groups: z
+          .array(
+            z.object({
+              label: z.string().default(""),
+              items: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    navigate: z.string().optional(),
+                    workflow: z.string().optional(),
+                  }),
+                )
+                .default([]),
+            }),
+          )
+          .default([]),
+      }),
+      /** How many screens the rail was found on. */
+      sharedBy: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 export const DesignSystem = z.object({
@@ -1052,6 +1150,14 @@ export const DesignSystem = z.object({
   interactionConventions: z.array(z.string()).default([]),
   /** §47 — set when the design system was extracted from a Figma file. */
   derivedFromFigma: z.boolean().default(false),
+  /**
+   * Why each frame-derived token was chosen: the number of times the frames
+   * use it. Present only when the file published no variables and the
+   * scheme was counted off the frames instead (§49 — an inference carries
+   * its evidence). `background: 74` beside `#f7f3eb` lets a reader see the
+   * ground was the ground and not a guess.
+   */
+  paletteEvidence: z.record(z.string(), z.number()).optional(),
 });
 
 // ===========================================================================

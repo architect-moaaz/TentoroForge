@@ -57,6 +57,13 @@ export function Row({ node, children }: { node: any; children: ReactNode[] }) {
   const hasItems   = /\bitems-(start|center|end|stretch|baseline)\b/.test(callerClassRaw);
   const hasJustify = /\bjustify-(start|center|end|between|around|evenly)\b/.test(callerClassRaw);
   const hasGap     = /\bgap-/.test(callerClassRaw);
+  // A CLASS THAT DECLARES `flex` IS A DRAWN ROW. A page composed from a design
+  // frame arrives with the row's own layout — direction, gap or none, and
+  // whether it wraps, decided by the transform from what was drawn. The
+  // defaults below exist for authored layouts that state nothing; laid on top
+  // of a drawn row they put a 12px gap the design never had between a KPI's
+  // label and its number, and wrapped the icon beside a title under it.
+  const drawn = /\bflex\b/.test(callerClassRaw);
 
   // Full-height rows (page shells, sidebar columns) need their children
   // to stretch so a 247px sidebar and a flex-1 main both fill the viewport.
@@ -69,8 +76,8 @@ export function Row({ node, children }: { node: any; children: ReactNode[] }) {
 
   const className = [
     "flex flex-row",
-    hasGap   ? "" : _gapClass(p.gap),
-    p.wrap === false ? "" : "flex-wrap",
+    hasGap || drawn ? "" : _gapClass(p.gap),
+    p.wrap === false || drawn ? "" : "flex-wrap",
     hasItems ? "" : (ALIGN_CLASS[p.align ?? defaultAlign] ?? `items-${defaultAlign}`),
     hasJustify ? "" : (JUSTIFY_CLASS[p.justify ?? "start"] ?? "justify-start"),
     callerClassRaw,

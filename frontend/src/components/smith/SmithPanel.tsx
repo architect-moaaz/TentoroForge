@@ -23,7 +23,7 @@
  * its state. Nothing streams a model's intermediate thinking into this pane.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * The engine's origin. The greeting fetch below was relative, so it resolved
@@ -533,20 +533,101 @@ export function SmithPanel({
     ]);
   }, [run.messages]);
 
+  // Split out so a turn can be sent by something other than the composer —
+  // the Figma import hands one in below, and it must go through exactly the
+  // same path a typed message does or it is a second way to talk to Smith.
+  const sendText = useCallback(
+    (text: string) => {
+      if (!text || !projectId) return;
+      // Taken BEFORE the new turn is appended: the history is what came before
+      // this message, and including the message in its own history would have
+      // Smith read the question as its own answer.
+      const prior = messages.map((m) => ({ role: m.role, text: m.text }));
+      setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
+      void start({ description: text, evidence, history: prior });
+    },
+    [projectId, messages, evidence, start],
+  );
+
   const send = () => {
     const text = draft.trim();
     if (!text || busy || !projectId) return;
     setDraft("");
-    // Taken BEFORE the new turn is appended: the history is what came before
-    // this message, and including the message in its own history would have
-    // Smith read the question as its own answer.
-    const prior = messages.map((m) => ({ role: m.role, text: m.text }));
-    setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-    void start({ description: text, evidence, history: prior });
+    sendText(text);
   };
 
+  // THE FIGMA IMPORT LANDS HERE.
+  //
+  // `NewAppDialog` writes `figma_connect_<projectId>` and navigates. It used
+  // to write a different key for `ChatPanel`, which is mounted nowhere, so the
+  // import created a project and silently dropped the design.
+  //
+  // Sent as an ordinary turn on purpose: `connect_figma` already asks for the
+  // URL, resolves the token BY NAME from the org's integrations, records
+  // `treatAs`, and reports what it found. Reproducing any of that here would
+  // be a second implementation of the one exchange that already works.
+  // AFTER THE DEFINITION, NOT BEFORE IT.
+  //
+  // Sending this on mount does not work: the FIRST turn on a new project is
+  // always the definition. Smith answers a connect message with "Let me
+  // define that first" (and may ask a clarification before even that), and
+  // the design is never connected — the same way a Figma URL pasted into the
+  // brief is read as prose. Connecting only succeeds once a Blueprint exists,
+  // which is exactly what the definition run produces.
+  //
+  // So the trigger is held and fired when that run completes.
+  const figmaPending = useRef<{ url: string; scope: string } | null>(null);
+  const figmaSent = useRef(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const key = `figma_connect_${projectId}`;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    try {
+      const { figma_url, treat_as, brief } = JSON.parse(raw);
+      if (figma_url) {
+        figmaPending.current = {
+          url: figma_url,
+          scope: treat_as === "specification" ? "the specification" : "a reference",
+        };
+      }
+      // AND START THE DEFINITION. Without this the brief sat prefilled in the
+      // composer waiting for someone to press send, so "Import design" created
+      // a project and then appeared to do nothing — and because the connect
+      // below waits for the definition, the design was never fetched either.
+      const opening = String(brief || "").trim();
+      if (opening) sendText(opening);
+    } catch {
+      // A malformed trigger is not worth a broken panel.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  useEffect(() => {
+    if (run.status !== "complete" || figmaSent.current) return;
+    const pending = figmaPending.current;
+    if (!pending) return;
+    figmaSent.current = true;
+    sendText(
+      `Connect this Figma design as ${pending.scope}: ${pending.url} — the ` +
+        `access token is in the environment variable FIGMA_TOKEN.`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.status]);
+
   const approve = () => {
-    const brief = [...messages].reverse().find((m) => m.role === "user");
+    // THE BRIEF MAY NOT BE IN MEMORY. After a reload — or after any later turn
+    // — the last user message can be a clarification answer or nothing at all,
+    // and this returned silently, so the button did nothing. The Blueprint's
+    // own description is the brief the definition was built from.
+    const spoken = [...messages].reverse().find((m) => m.role === "user");
+    const described = String(
+      ((blueprint as { application?: { description?: unknown } } | null | undefined)
+        ?.application?.description) ?? "",
+    ).trim();
+    const brief = spoken ?? (described ? { text: described } : null);
     if (!brief) return;
     setMessages((m) => [
       ...m,
@@ -555,6 +636,22 @@ export function SmithPanel({
     ]);
     void start({ description: brief.text, evidence, approved: true });
   };
+
+  // A definition exists and nothing has been built from it. Read off the
+  // Blueprint so it survives reloads and later turns, unlike `awaitingApproval`.
+  // "Not built" means FEWER LAYOUTS THAN PAGES, not zero layouts. A run that
+  // failed partway leaves some pages composed and the rest not — 4 of 15 on a
+  // real project — and demanding zero hid the gate on exactly the project
+  // that most needed a way to finish. A fresh definition has no pages yet, so
+  // the floor of one keeps it showing there too.
+  const bp = (blueprint ?? {}) as Record<string, unknown>;
+  const pageCount = (bp.pages as unknown[] | undefined)?.length ?? 0;
+  const layoutCount = (bp.pageLayouts as unknown[] | undefined)?.length ?? 0;
+  const definedNotBuilt =
+    !busy &&
+    Array.isArray(bp.requirements) &&
+    (bp.requirements as unknown[]).length > 0 &&
+    layoutCount < Math.max(pageCount, 1);
 
   // What the side panel is showing: the run you picked, or the live one.
   const sidePlan =
@@ -690,12 +787,19 @@ export function SmithPanel({
 
             {m.options && m.options.length > 0 && (
               // §16 — the architect asks rather than assumes. Answering is
-              // just another turn, so these send their own label.
+              // just another turn, so these SEND their own label.
+              //
+              // They used to `setDraft(opt)` — which only typed the answer
+              // into the composer and left it there. The comment above already
+              // said "send"; the code filled a box. Clicking an answer and
+              // having nothing happen reads as a dead control, and the
+              // question stays on screen as if it were never answered.
               <div className="mt-2 flex flex-wrap gap-1">
                 {m.options.map((opt) => (
                   <button
                     key={opt}
-                    onClick={() => setDraft(opt)}
+                    disabled={busy}
+                    onClick={() => sendText(opt)}
                     className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
                   >
                     {opt}
@@ -827,6 +931,32 @@ export function SmithPanel({
             definition={blueprint}
           />
         </>
+      ) : definedNotBuilt ? (
+        // THE GATE OUTLIVES THE RUN THAT OPENED IT.
+        //
+        // `run.awaitingApproval` is in-memory: a reload, or any turn after the
+        // definition — connecting a Figma design, answering a question — left
+        // the panel with no plan and the approval control gone. The definition
+        // was finished and there was no way left to say yes to it, so nothing
+        // ever started and the stage list stayed empty. That is why the
+        // pipeline "cannot be seen": no run was ever begun from here.
+        //
+        // Derived from the Blueprint instead: a definition exists, nothing has
+        // been built from it, and no run is in flight.
+        <div className="mt-6 px-2">
+          <p className="text-xs text-muted-foreground">
+            The definition is ready and nothing has been built from it yet.
+            Approving builds the application — the pages, the data and the
+            workflows — which takes a few minutes.
+          </p>
+          <button
+            onClick={approve}
+            disabled={busy}
+            className="mt-3 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+          >
+            Approve and build
+          </button>
+        </div>
       ) : (
         <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
           What Smith does appears here — the plan it follows, the stages as

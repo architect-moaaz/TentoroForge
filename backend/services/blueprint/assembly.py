@@ -407,9 +407,16 @@ def assemble(doc: dict, app_root: str | Path, *,
     # placeholder substitution landed on disk and the browser still showed
     # `ReferenceError: app_name is not defined`. Assembly changes the sources it
     # compiles from, so it invalidates the cache it invalidated.
-    cache = out / ".next"
-    if cache.exists():
-        shutil.rmtree(cache, ignore_errors=True)
+    # BUT NOT THE DIRECTORY A RUNNING DEV SERVER IS SERVING FROM. Removing
+    # `.next` whole while `next dev` was up took its manifests away, and the
+    # served app answered "Internal Server Error" (`routes-manifest.json`
+    # not found) after every rebuild until someone restarted it. The dev
+    # server recompiles changed sources by itself; what goes stale is the
+    # persistent compiler cache under `.next/cache` and the verification
+    # build's own output, and those are what assembly clears.
+    for stale in (out / ".next" / "cache", out / VERIFY_DIST_DIR):
+        if stale.exists():
+            shutil.rmtree(stale, ignore_errors=True)
 
     # A per-app secret, generated rather than templated — a shared one across
     # every generated app is a real vulnerability, not a nit.
@@ -419,10 +426,16 @@ def assemble(doc: dict, app_root: str | Path, *,
     # `/api/auth/error?error=Configuration`, which looks like a routing bug and
     # is actually a missing secret. `.env` is only created if absent, so a
     # re-assembly never rotates a secret out from under a running app.
+    # THE COMMENT ABOVE WAS THE INTENT; THE CODE ROTATED THE SECRET ANYWAY.
+    # Both files were rewritten with fresh secrets on every assembly, so every
+    # rebuild signed the user out with `JWT_SESSION_ERROR: decryption
+    # operation failed` — a session issued under the old secret. An app keeps
+    # its secrets across rebuilds; only an app that has none is given some.
+    kept = existing_secrets(out)
     env_body = (
         f"DATABASE_URL={database_url}\n"
-        f"AUTH_SECRET={secrets.token_urlsafe(32)}\n"
-        f"NEXTAUTH_SECRET={secrets.token_urlsafe(32)}\n"
+        f"AUTH_SECRET={kept.get('AUTH_SECRET') or secrets.token_urlsafe(32)}\n"
+        f"NEXTAUTH_SECRET={kept.get('NEXTAUTH_SECRET') or secrets.token_urlsafe(32)}\n"
         # No NEXTAUTH_URL: pinning it to :3000 sent every post-login redirect
         # to a port the app is not served on. NextAuth infers the origin from
         # the request, which is correct for any port a preview lands on.
@@ -467,6 +480,30 @@ def assemble(doc: dict, app_root: str | Path, *,
         "supersededRepairs": sorted(SUPERSEDED_REPAIRS),
         "residualPlaceholders": placeholders.get("findings") or [],
     }
+
+
+_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET")
+
+
+def existing_secrets(app_root: str | Path) -> dict[str, str]:
+    """The auth secrets an assembled app already runs with, if any.
+
+    Read from `.env.local` first because Next gives it precedence, then
+    `.env`. A secret is the app's identity to every session it has issued;
+    a rebuild that changes it logs everyone out.
+    """
+    root = Path(app_root)
+    found: dict[str, str] = {}
+    for name in (".env.local", ".env"):
+        f = root / name
+        if not f.exists():
+            continue
+        for line in f.read_text("utf-8").splitlines():
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if key in _SECRET_KEYS and value and key not in found:
+                found[key] = value
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -593,22 +630,59 @@ def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
     Slow — install and build are minutes, not seconds — and that is the cost of
     the claim. A generated app that has not been compiled has not been checked.
     """
+    import os
     import subprocess
 
     root = Path(app_root)
     steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
              ("build", ["npm", "run", "build"]))
+    # THE CHECK MUST NOT BREAK THE THING IT CHECKS. `next build` and `next dev`
+    # both own `.next`; a verification build in the directory of a running
+    # dev server rewrote its manifests under it, and the served app answered
+    # 500 (`routes-manifest.json` not found) while the build itself failed on
+    # the dev server's half-written chunks — three times on one project. The
+    # generated Next config reads its `distDir` from this variable, so the
+    # verification compiles beside the served app and never into it.
+    env = {**os.environ, "NEXT_DIST_DIR": VERIFY_DIST_DIR}
     out: dict[str, Any] = {}
     for name, cmd in steps:
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
-                              timeout=timeout)
+                              timeout=timeout, env=env)
         out[name] = proc.returncode
         if proc.returncode != 0:
-            # The tail carries the compiler's own message; the head is npm
-            # noise. Keep enough to name the module that could not resolve.
-            detail = (proc.stderr or proc.stdout or "").strip().splitlines()
             raise BuildFailed(
                 f"npm {name} failed ({proc.returncode}):\n"
-                + "\n".join(detail[-25:])
+                + build_message(proc.stdout, proc.stderr)
             )
     return out
+
+
+#: Where a verification build writes, beside — never inside — the served app.
+VERIFY_DIST_DIR = ".next-verify"
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_ERROR_LINE = re.compile(
+    r"Failed to compile|Module not found|Type error|error TS\d+|"
+    r"\bError:|SyntaxError|ReferenceError|Build error occurred", re.I)
+_NOISE = ("inferred your workspace root", "multiple lockfiles",
+          "outputFileTracingRoot", "npm error", "npm ERR!", "npm notice")
+
+
+def build_message(stdout: str | None, stderr: str | None) -> str:
+    """The compiler's own message, from wherever it was written.
+
+    Next writes its errors to stdout and its warnings to stderr, and the
+    scaffold's monorepo placement earns a lockfile warning on every build. The
+    first version kept `stderr or stdout`, so whenever a warning existed the
+    error was discarded, and the run log's 400-character reason was the
+    warning about lockfiles — for a build that failed for another reason
+    entirely. Both streams are read; the warning is dropped; the message
+    starts at the first line that names an error, so the reason's first
+    characters are the ones that matter.
+    """
+    lines = [_ANSI.sub("", l).rstrip()
+             for l in ((stdout or "") + "\n" + (stderr or "")).splitlines()]
+    lines = [l for l in lines if l.strip() and not any(n in l for n in _NOISE)]
+    start = next((i for i, l in enumerate(lines) if _ERROR_LINE.search(l)), None)
+    kept = lines[start:start + 25] if start is not None else lines[-25:]
+    return "\n".join(kept)

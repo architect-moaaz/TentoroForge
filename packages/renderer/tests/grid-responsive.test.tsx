@@ -54,4 +54,23 @@ describe("Grid responsiveness", () => {
     const cls = grid({ columns: n, equalCols: true }).className;
     expect(cls).toMatch(/(^|\s)grid-cols-[12](\s|$)/);
   });
+
+  // A page composed from a design frame carries Dev Mode's own track spec.
+  // The ladder on top of it let `sm:grid-cols-2` fold a drawn four-column row
+  // at every viewport under `lg`, under the charts positioned beneath it.
+  it("does not fold a grid whose className already declares its columns", () => {
+    const el = grid({
+      columns: 4,
+      className: "grid-cols-[___355.66px_355.66px_355.66px_355.66px] gap-x-[16px]",
+    });
+    expect(el.className).toContain("grid-cols-[___355.66px");
+    expect(el.className).not.toContain("sm:grid-cols-2");
+    expect(el.className).not.toContain("lg:grid-cols-4");
+    expect(el.className).not.toContain("grid-cols-1");
+  });
+
+  it("keeps the ladder for a grid with no spec of its own", () => {
+    const el = grid({ columns: 4, className: "rounded-lg" });
+    expect(el.className).toContain("lg:grid-cols-4");
+  });
 });

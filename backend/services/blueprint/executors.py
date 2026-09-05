@@ -1012,7 +1012,14 @@ NODE_TASKS: dict[str, str] = {
         "domain expert would recognise, and name the artifacts each governs."
     ),
     "security": (
-        "Define roles and the permissions that guard entities and endpoints."
+        "Define roles and the permissions that guard entities and endpoints. "
+        "Then say who reaches which rows: an entity whose rows belong to one "
+        "user or one workspace needs an ownershipRules entry naming the entity "
+        "and the column that scopes it, because that object is what the data "
+        "engine turns into a WHERE clause \u2014 a prose rule beside it "
+        "documents the policy and enforces nothing. Where authorisation really "
+        "is by role and every holder sees every row, write that as a prose rule "
+        "so the absence of a scoping object reads as a decision."
     ),
     "testing": (
         "Write the tests that verify the requirements. Every approved requirement "
@@ -1283,6 +1290,12 @@ def build_prompt(
             "author a loading or skeleton state: data resolves on the server "
             "before the page renders, so nothing is ever in flight and a "
             "spinner would sit under a table that had already loaded.\n\n"
+            "A control that runs a workflow names it by id from `workflows` "
+            "below — `FLOW-007`, never its title, never a name you infer "
+            "from the page, never a template. If no listed workflow does what "
+            "the control needs, the control navigates instead or is left "
+            "out; there is no workflow this application runs that is not in "
+            "that list.\n\n"
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
             + json.dumps(brief, indent=2, sort_keys=True)
@@ -1445,6 +1458,40 @@ def build_prompt(
     # usually follows and occasionally does not, and one `references: ""`
     # fails the whole contract. Told what was rejected, the author fixes its
     # own field; told nothing, it re-emits it.
+    if spec.agent == "solution_architecture":
+        # THE DESIGN DRAWS THE NAVIGATION. Its sidebar is the same subtree on
+        # every screen, and `store.connect` records what it says. This agent
+        # is the one author of `navigation.tree`, and it could not see a
+        # design at all — so every Figma application got the generic rail with
+        # the drawn one rendered inside each page. §48: the design decides what
+        # exists; this agent decides how it is reached — and reproduces it.
+        #
+        # PLACED AFTER THE GENERIC PROMPT IS BUILT. It first sat among the
+        # per-agent hooks above, where `user` does not exist yet, and raised
+        # UnboundLocalError on every ux_architecture call — the one run that
+        # was meant to prove the design's rail could become the shell.
+        from services.figma.chrome import describe as _describe_chrome
+
+        drawn = [(src.get("id"), src.get("chrome"))
+                 for src in doc.get("designSources") or [] if src.get("chrome")]
+        if drawn:
+            user += (
+                "\n\nA CONNECTED DESIGN DRAWS THE NAVIGATION. Its sidebar is "
+                "identical on every screen, and this is what it says, in the "
+                "order the designer drew it:\n\n"
+                + "\n\n".join(
+                    f"[{sid}]\n" + _describe_chrome(chrome.get("sidebar") or {})
+                    for sid, chrome in drawn)
+                + "\n\nREPRODUCE IT. `navigation.style` is `sidebar`. "
+                "`navigation.tree` has one node per group heading, in that "
+                "order, with the group's destinations as its `children`, each "
+                "bound to the page whose route it names — use the `pages` "
+                "above. Do not add destinations the design does not draw, and "
+                "do not drop the ones it does; a drawn destination with no "
+                "matching page is still a node, without a `page`, so its "
+                "absence is visible rather than silent."
+            )
+
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
@@ -2026,6 +2073,13 @@ def make_executor(
                           "root": _as_template(drawn["root"]),
                           "composedBy": "figma",
                           "dataSources": drawn["dataSources"],
+                          # THE FRAME'S SIZE TRAVELS WITH THE TREE. `compose`
+                          # returns it and `FigmaCanvas` scales by it, but
+                          # nothing between them carried it: a projected app
+                          # had no `_figmaCanvas`, so a 3902px frame rendered
+                          # cropped instead of scaled. Absent for a frame with
+                          # no recorded size, which composes flowed anyway.
+                          **({"canvas": drawn["canvas"]} if drawn.get("canvas") else {}),
                           "rationale": (
                               f"built from Figma frame "
                               f"{page.get('figmaFrame')} (§48)"),

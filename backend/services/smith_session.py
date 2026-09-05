@@ -434,11 +434,21 @@ class SmithSession:
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, user_message)
         if verb == "rebuild":
+            # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
+            # The build is driven by the client — `useBlueprintRun` posts the
+            # run request with `approved: true` — and this handler has no way
+            # to reach it. It used to answer "say rebuild again to confirm",
+            # and nothing consumed the confirmation: saying it again returned
+            # the same sentence forever.
             return TurnResult(
                 status="needs_user",
-                answer=("A rebuild regenerates the whole application from its "
-                        "definition. Say \u201crebuild\u201d again to confirm "
-                        "and I will start it."),
+                answer=("Building the whole application is started from the "
+                        "definition, not from chat: open the \u201cDefinition "
+                        "ready to review\u201d card above and press "
+                        "\u201cApprove and build\u201d. That runs the pages, "
+                        "the data and the workflows, which takes a few "
+                        "minutes.\n\nI can still change one screen from here "
+                        "\u2014 name the route and I will rebuild that."),
             )
 
         target_file = (understanding.get("target_file") or "").strip()

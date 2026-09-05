@@ -55,6 +55,11 @@ VALID_RULE_TYPES = {
     "validation", "access", "business", "computed", "state_machine", "trigger",
     "content_moderation", "similarity_check", "ai_validation", "ai_enrichment",
     "condition_action", "decision_table",
+    # Row-level read access. `access` decides which COLUMNS come back;
+    # `row_access` decides which ROWS the query returns at all, and the data
+    # engine compiles its condition into the WHERE clause rather than filtering
+    # afterwards — so the rows it hides are also absent from the count.
+    "row_access",
 }
 
 

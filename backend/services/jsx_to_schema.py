@@ -8,6 +8,7 @@ a full JS AST parser.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -460,6 +461,18 @@ from .figma_llm_ctx import (
 from .figma_llm_ctx import _CTX as _FIGMA_LLM_CTX  # noqa: F401
 
 
+#: One answer per (label, vocabulary) for the life of the process.
+#:
+#: The classifier is a real model call per button, made inside the transform.
+#: A design's rail is the same twenty buttons on every screen, and a fan-out
+#: composes twelve screens at once — so the same label under the same routes
+#: and workflows was classified fifteen times over, in parallel, and the API
+#: throttled the run into a stall: 342 s in `page_layouts` with nothing
+#: composed and the process nearly idle, waiting on back-off. Same label, same
+#: vocabulary, same answer; asking once is the honest cost.
+_ACTION_MEMO: dict[tuple, dict] = {}
+
+
 def _classify_button_action_with_llm(
     label: str, data_name: str, class_name: str,
 ) -> dict:
@@ -468,6 +481,18 @@ def _classify_button_action_with_llm(
     Registry-safety is enforced inside classify_figma_action_llm — the
     LLM cannot invent a target that isn't in the supplied lists.
     """
+    key = (label, data_name, tuple(_get_routes()), tuple(_get_workflows()))
+    hit = _ACTION_MEMO.get(key)
+    if hit is not None:
+        return dict(hit)
+    result = _classify_button_action_uncached(label, data_name, class_name)
+    _ACTION_MEMO[key] = dict(result)
+    return result
+
+
+def _classify_button_action_uncached(
+    label: str, data_name: str, class_name: str,
+) -> dict:
     if _figma_llm_enabled():
         routes = _get_routes()
         workflows = _get_workflows()
@@ -543,7 +568,247 @@ _LEADING_ZERO_RE = re.compile(r'^leading-\[0(px)?\]$')
 #: real dashboard export carried 534 absolute nodes and five pixel offsets — so
 #: in this mode every node keeps its composition and the root is given the
 #: frame's true size. Set only by `transform_jsx_to_schema`, always restored.
-_CANVAS_MODE = False
+#:
+#: PER THREAD, NOT PER MODULE. The page fan-out composes twelve frames at once
+#: on worker threads, and when these were module globals one frame's
+#: `finally: mode = False` landed in the middle of another's transform. That
+#: frame finished under the off-canvas rules — a table's positioned cells were
+#: inferred into a wrapping flex row and its height stripped — while its
+#: canvas record still said `fluid`. The symptom was one page half on the
+#: canvas and half off it, differing run to run.
+_state = threading.local()
+
+
+def _canvas_mode() -> bool:
+    return getattr(_state, "canvas_mode", False)
+
+
+def _canvas_fit() -> str:
+    """How the frame meets a narrower viewport — see `frame_fit`."""
+    return getattr(_state, "canvas_fit", "scale")
+
+
+def _in_drawing() -> bool:
+    """True while transforming the subtree of a drawing — a container whose
+    children are placed in two dimensions. Nothing inside a drawing reflows."""
+    return getattr(_state, "in_drawing", False)
+
+
+def _offset_padding(children: list) -> tuple[int, int]:
+    """The inset a hand-placed stack was drawn with: (left, top) of its
+    nearest child, in whole pixels. Becomes padding when the stack reflows."""
+    lefts, tops = [], []
+    for c in children:
+        if not isinstance(c, JSXElement):
+            continue
+        cn = c.attrs.get("className", "")
+        if "absolute" not in cn.split():
+            continue
+        l = _ABS_LEFT_RE.search(cn)
+        t = _ABS_TOP_RE.search(cn)
+        if l:
+            lefts.append(float(l.group(1) or 0))
+        if t:
+            tops.append(float(t.group(1) or 0))
+    return (int(round(min(lefts))) if lefts else 0, int(round(min(tops))) if tops else 0)
+
+
+def _fluid_layout(element: "JSXElement", is_grid: bool = False) -> tuple:
+    """How a container on a fluid canvas lays out its positioned children.
+
+    Returns (flow, gap, is_drawing). `flow` is "col" or "row" when the
+    children were hand-placed along ONE axis — a card whose two rows sit at
+    left 12, top 12 and top 36 — which is a stack the designer built without
+    auto-layout, and reflows as one. Placement in two dimensions (a chart's
+    bars and labels) is a drawing, and a drawing keeps every position it was
+    drawn with, all the way down.
+    """
+    kids = [c for c in element.children if isinstance(c, JSXElement)]
+    positioned = [k for k in kids
+                  if "absolute" in (k.attrs.get("className") or "").split()
+                  and "contents" not in (k.attrs.get("className") or "").split()]
+    flow, gap = (None, 0)
+    if not is_grid:
+        flow, gap = _infer_absolute_flow(element.children)
+        if flow == "wrap":
+            # Placement on two lines of the SAME KIND of thing — five filter
+            # chips, four on one line and one below — is one row the designer
+            # wrapped by hand, and reflows as a row that wraps. Two lines of
+            # different things (a chart's bars and its labels) are a drawing.
+            names = {k.attrs.get("data-name") for k in positioned}
+            same_kind = len(positioned) >= 3 and len(names) == 1 and None not in names
+            flow, gap = ("row", gap) if same_kind else (None, 0)
+    is_drawing = bool(positioned) and len(positioned) * 2 >= len(kids) and flow is None
+    return flow, gap, is_drawing
+
+_PX_W_RE = re.compile(r"^w-\[(\d+(?:\.\d+)?)px\]$")
+_PX_H_RE = re.compile(r"^h-\[(\d+(?:\.\d+)?)px\]$")
+_GRID_SPEC_RE = re.compile(r"^grid-cols-\[(.+)\]$")
+_GRID_ROWS_RE = re.compile(r"^grid-rows-\[(.+)\]$")
+
+
+def frame_fit(root: "JSXElement") -> str:
+    """Whether a frame can reflow (`fluid`) or must shrink as a picture (`scale`).
+
+    Read off the frame's top level: walk through single-child wrappers to the
+    first node that lays out several children. A frame whose top-level
+    children are absolutely positioned is a flattened composition — one real
+    dashboard export put 625 of 632 elements in `absolute contents left-[x]
+    top-[y]` wrappers — and nothing in it can reflow, so it scales. A frame
+    whose top level flows (a `flex` stack of rows and grids, which is what an
+    auto-layout design exports as) can reflow, and does.
+    """
+    node = root
+    while isinstance(node, JSXElement):
+        kids = [c for c in node.children if isinstance(c, JSXElement)]
+        if len(kids) != 1:
+            break
+        node = kids[0]
+    kids = [c for c in node.children if isinstance(c, JSXElement)] if isinstance(node, JSXElement) else []
+    positioned = [k for k in kids if "absolute" in (k.attrs.get("className") or "").split()]
+    return "scale" if kids and len(positioned) * 2 >= len(kids) else "fluid"
+
+
+def _responsive_container_classes(cn: str, element: "JSXElement", drawing: bool = False) -> str:
+    """A drawn box is a maximum, not a size.
+
+    Dev Mode exports every auto-layout frame with the pixel size it had on
+    the canvas — `w-[355.66px] h-[85px] shrink-0`, `grid-cols-[___355.66px_
+    355.66px_355.66px]` — and a page assembled from those is exactly as wide
+    as the artboard at every viewport. Composed on a scaled canvas it shrinks
+    as a picture, text and all. For a frame that flows, the same numbers mean
+    something else: the width the designer gave a box is the most it should
+    take, the height the least, and a row of boxes wraps when it must.
+
+      w-[N px]           -> max-w-[N px] w-full
+      h-[N px]           -> min-h-[N px]
+      shrink-0           -> (dropped)
+      flex (row, 2+ kids) + flex-wrap
+      grid-cols-[px…]    -> grid-cols-[repeat(auto-fit,minmax(min(W px,100%),1fr))]
+                            where W is the widest drawn track — as many
+                            columns as fit, never narrower than drawn
+
+    A DRAWING KEEPS ITS SIZE. A container whose own children are absolutely
+    positioned — the bars, gridlines and axis labels of a drawn chart — is a
+    picture, and a picture reflowed is a broken picture. It keeps its width
+    and height and gains only `max-w-full`, so it never pushes the page
+    sideways. Leaves (text, images) are not containers and are never
+    touched here: a 46px axis label stays 46px.
+    """
+    tokens = cn.split() if cn else []
+    kids = [c for c in element.children if isinstance(c, JSXElement)]
+    if not kids:
+        return cn
+    # A DRAWING KEEPS ITS SIZE — decided by the caller (`_fluid_layout`): a
+    # container whose children are placed in two dimensions.
+    if drawing:
+        # A drawing wider than the viewport scrolls sideways rather than
+        # reflowing or being cut: its positioned children are its content.
+        if not any(t.startswith("max-w-") for t in tokens):
+            tokens.append("max-w-full")
+        if not any(t.startswith("overflow-x-") for t in tokens):
+            tokens.append("overflow-x-auto")
+        return " ".join(tokens)
+
+    out: list[str] = []
+    for t in tokens:
+        m = _PX_W_RE.match(t)
+        if m:
+            out += [f"max-w-[{m.group(1)}px]", "w-full"]
+            continue
+        m = _PX_H_RE.match(t)
+        if m:
+            out.append(f"min-h-[{m.group(1)}px]")
+            continue
+        if t == "shrink-0":
+            continue
+        m = _GRID_ROWS_RE.match(t)
+        if m:
+            # Fixed row tracks pin every card to the drawn height; a card
+            # that wraps its text at a narrow width then overflows its own
+            # border. The drawn height is the least a row may be.
+            heights = [float(x[:-2]) for x in m.group(1).split("_")
+                       if re.fullmatch(r"\d+(?:\.\d+)?px", x)]
+            if heights:
+                out.append(f"auto-rows-[minmax({min(heights):g}px,auto)]")
+                continue
+        m = _GRID_SPEC_RE.match(t)
+        if m:
+            tracks = [x for x in m.group(1).split("_") if x]
+            widths = [float(x[:-2]) for x in tracks if re.fullmatch(r"\d+(?:\.\d+)?px", x)]
+            if tracks and len(widths) == len(tracks):
+                w = f"{max(widths):g}"
+                out.append(f"grid-cols-[repeat(auto-fit,minmax(min({w}px,100%),1fr))]")
+                continue
+        out.append(t)
+    # A ROW WRAPS WHEN IT IS A ROW OF THINGS THAT SAY SOMETHING. Two or more
+    # children that are containers carrying text — cards, chips, buttons —
+    # make a row that wraps at a narrow viewport. A row of bars (no text),
+    # a row of axis labels (not containers), or a text block beside its icon
+    # (one such child) shrinks instead. The first rule wrapped every row, and
+    # a bar chart's sixth bar dropped under the legend; the second wrapped
+    # only wide boxes, and a row of filter chips ran off the page.
+    if "flex" in out and "flex-col" not in out and "flex-wrap" not in out \
+            and _wide_containers(kids) >= 2:
+        out.append("flex-wrap")
+    return " ".join(out)
+
+
+_COL_SPAN_RE = re.compile(r"^col-(?:\[\d+/span_(\d+)\]|span-(\d+))$")
+_PLACEMENT_RE = re.compile(r"^(?:col|row|col-start|col-end|row-start|row-end|justify-self|self)-")
+
+
+def _spanned(element: "JSXElement") -> bool:
+    return any(_COL_SPAN_RE.match(t)
+               for k in element.children if isinstance(k, JSXElement)
+               for t in (k.attrs.get("className") or "").split())
+
+
+def _proportional_row(element: "JSXElement", props: dict, cn: str) -> dict:
+    """A drawn grid whose children span tracks becomes a row that keeps
+    their proportions and wraps.
+
+    `grid-cols-[355px_355px_355px]` with a list in column 1 and a detail
+    panel at `col-[2/span_2]` is a one-to-two split. As an auto-fit grid the
+    explicit "column 2, span 2" forced implicit columns past the edge at any
+    width under three tracks, and the panel was cut off. A flex row says the
+    same thing responsively: each child's basis is the width it was drawn
+    at, it grows in proportion to the tracks it spanned, and a child that no
+    longer fits beside its neighbour takes the next line, full width.
+    """
+    tokens = [t for t in (props.get("className") or cn).split()
+              if t != "grid" and not t.startswith("grid-cols-") and not t.startswith("grid-rows-")
+              and not t.startswith("auto-rows-")]
+    tokens = ["flex", "flex-wrap"] + [t for t in tokens if t not in ("flex", "flex-wrap")]
+    props["className"] = " ".join(tokens)
+    spec = next((t for t in cn.split() if t.startswith("grid-cols-[")), "")
+    widths = [float(x[:-2]) for x in spec[len("grid-cols-["):-1].split("_") if re.fullmatch(r"\d+(?:\.\d+)?px", x)]
+    track = min(widths) if widths else 0.0
+    children = _transform_children(element.children)
+    kids = [k for k in element.children if isinstance(k, JSXElement)]
+    for node, kid in zip(children, kids):
+        span = 1
+        for t in (kid.attrs.get("className") or "").split():
+            m = _COL_SPAN_RE.match(t)
+            if m:
+                span = int(m.group(1) or m.group(2) or 1)
+        kp = node.get("props") or {}
+        kept = [t for t in (kp.get("className") or "").split() if not _PLACEMENT_RE.match(t)]
+        basis = f"{span * track:g}px" if track else "0px"
+        kept += [f"flex-[{span}_1_{basis}]", "min-w-0"]
+        kp["className"] = " ".join(kept)
+        node["props"] = kp
+    return _make_node("Row", props, children)
+
+
+def _wide_containers(kids: list) -> int:
+    """How many children are containers that carry words — cards, chips,
+    buttons. A bar has no text, a label is not a container, and an icon
+    drawn as a glyph (✓, ⚠) is a picture, not a word; none of them makes a
+    row of things that wrap."""
+    return sum(1 for k in kids
+               if any(isinstance(c, JSXElement) for c in k.children)
+               and re.search(r"[A-Za-z0-9]", _descendant_text(k) or ""))
 
 
 def _is_decorative_positioned(cn: str) -> bool:
@@ -575,7 +840,7 @@ def _is_decorative_positioned(cn: str) -> bool:
     # correctly 3902x1975. Such a wrapper must become transparent instead
     # (see `_filter_position_classes`), letting its children resolve against
     # the frame, which is the coordinate space their percentages are in.
-    if _CANVAS_MODE:
+    if _canvas_mode():
         return "contents" not in tokens
     # TRIED AND REVERTED: also treating `inset-0` / `size-full` as composition.
     # It is true that Dev Mode writes most of a frame that way — one real
@@ -626,7 +891,7 @@ def _filter_position_classes(cn: str, preserve_absolute: bool = False) -> str:
     # the offsets it carried, which `display: contents` was already ignoring.
     # What remains is a static div — it establishes no containing block, so an
     # absolutely-positioned descendant resolves against the frame itself.
-    if _CANVAS_MODE and "contents" in tokens:
+    if _canvas_mode() and "contents" in tokens:
         tokens = [t for t in tokens if t != "contents"]
         return " ".join(
             t for t in tokens
@@ -665,8 +930,41 @@ def _children_have_absolute(children: list) -> bool:
 
 
 # Regex patterns for detecting absolute-flow offsets on child elements.
-_ABS_TOP_RE = re.compile(r'\btop-\[(\-?\d+(?:\.\d+)?)px\]')
-_ABS_LEFT_RE = re.compile(r'\bleft-\[(\-?\d+(?:\.\d+)?)px\]')
+# `top-0` / `left-0` are the same fact as `top-[0px]`: Dev Mode writes the
+# bare form for zero, and a rule that read only the bracketed one took the
+# SECOND chip's offset as a row's inset (36px) because the first said `left-0`.
+_ABS_TOP_RE = re.compile(r'\btop-(?:\[(\-?\d+(?:\.\d+)?)px\]|(0))(?=\s|$)')
+_ABS_LEFT_RE = re.compile(r'\bleft-(?:\[(\-?\d+(?:\.\d+)?)px\]|(0))(?=\s|$)')
+
+
+def _grid_columns(cn: str) -> int | None:
+    """How many columns a Tailwind grid class declares, or None if unreadable.
+
+    `Grid` REQUIRES `columns` in the component catalog, and this transform
+    emitted the node without it — so every page containing a Figma auto-layout
+    grid was refused with "'columns' is a required property". On one real
+    15-screen design that was 15 of 15 pages, and the count was sitting in the
+    className the whole time.
+
+    Two spellings, because Dev Mode writes both:
+      * `grid-cols-3` — the count itself.
+      * `grid-cols-[___355.66px_355.66px_355.66px]` — an explicit track list,
+        underscore-separated. The leading underscores are Tailwind's encoding
+        of spaces in an arbitrary value, so empty segments are separators and
+        not tracks.
+    """
+    for token in (cn or "").split():
+        if not token.startswith("grid-cols-"):
+            continue
+        value = token[len("grid-cols-"):]
+        if value.isdigit():
+            count = int(value)
+            return count if count > 0 else None
+        if value.startswith("[") and value.endswith("]"):
+            tracks = [t for t in value[1:-1].split("_") if t]
+            if tracks:
+                return len(tracks)
+    return None
 
 
 def _infer_absolute_flow(children: list) -> tuple:
@@ -699,9 +997,9 @@ def _infer_absolute_flow(children: list) -> tuple:
         t = _ABS_TOP_RE.search(cn)
         l = _ABS_LEFT_RE.search(cn)
         if t:
-            tops.append(float(t.group(1)))
+            tops.append(float(t.group(1) or 0))
         if l:
-            lefts.append(float(l.group(1)))
+            lefts.append(float(l.group(1) or 0))
 
     if abs_count < 2:
         return (None, 0)
@@ -874,6 +1172,12 @@ _HEADING_NAME_RE = re.compile(r"^Heading\s+(\d)$", re.I)
 # Composite types where descendant text becomes a prop (don't recurse children)
 _TEXT_CONSUMING = {"Input", "Button", "Link"}
 
+#: What `functional_completeness` accepts as an action on a control.
+#: Mirrored rather than imported: this module is the Figma transform and
+#: must not depend on the Blueprint package.
+_ACTION_PROPS = frozenset({"navigate", "onClick", "opensDialog",
+                          "submit", "togglesSidebar", "workflow"})
+
 _BIG_FONT_RE = re.compile(r"text-\[(\d+)px\]")
 
 # Regex for bare flex (flex but NOT flex-col)
@@ -887,6 +1191,74 @@ def _descendant_text(node) -> str:
     if isinstance(node, JSXElement):
         return "".join(_descendant_text(c) for c in node.children).strip()
     return ""
+
+
+def _text_leaf_count(node: "JSXElement") -> int:
+    """How many separate pieces of text an element says."""
+    if isinstance(node, str):
+        return 1 if node.strip() else 0
+    if isinstance(node, JSXElement):
+        return sum(_text_leaf_count(c) for c in node.children)
+    return 0
+
+
+def _clickable_card(element: "JSXElement", attrs: dict, data_name: str,
+                    props: dict) -> dict:
+    """A control that says several things is a card, not a button.
+
+    Designers name a clickable list row "Button" because it is one to them:
+    press it, the detail opens. Dev Mode then hands us a frame with a title,
+    a status chip, a scope and a version inside it, and consuming all of that
+    into one `label` rendered a policy list as
+
+        After-Hours Duty Manager ProtocolActiveAll Brandsv2.1
+
+    with the row's layout gone. A Button has one label. An element with two or
+    more pieces of text is a container that happens to open something, so it
+    keeps its children and its drawn classes, and carries the destination as
+    `navigate` on the container itself. The destination is classified from
+    the first thing the card says — its title — because that is what the
+    designer would have put on a button had it been one.
+
+    When nothing binds, the card is still the card: a container with its
+    children and no action. That is what it was on the drawing.
+    """
+    first = next((t for t in _text_leaves(element) if t), "")
+    action = _classify_button_action_with_llm(first, data_name,
+                                              attrs.get("className", ""))
+    if action.get("navigate"):
+        props["navigate"] = action["navigate"]
+    # A card is a container; on a fluid canvas its drawn width is a maximum
+    # like any other container's, and rows the designer placed by hand inside
+    # it reflow as a stack. This branch is reached before the layout section
+    # that does this for the rest, so it does it for itself.
+    strip, drawing = False, False
+    if _canvas_mode() and _canvas_fit() == "fluid" and not _in_drawing():
+        flow, gap, drawing = _fluid_layout(element)
+        rewritten = _responsive_container_classes(
+            props.get("className", ""), element, drawing=drawing)
+        if rewritten:
+            props["className"] = rewritten
+        if flow in ("col", "row"):
+            strip = True
+            left, top = _offset_padding(element.children)
+            extra = ["flex", "flex-col" if flow == "col" else "flex-wrap items-center", f"gap-[{gap}px]"]
+            if left:
+                extra.append(f"px-[{left}px]")
+            if flow == "col" and top:
+                extra.append(f"py-[{top}px]")
+            props["className"] = _filter_container_height(
+                " ".join(extra) + " " + props.get("className", "")).strip()
+    children = _transform_children(element.children, strip_positions=strip, in_drawing=drawing)
+    return _make_node("Container", props, children)
+
+
+def _text_leaves(node: "JSXElement") -> list[str]:
+    if isinstance(node, str):
+        return [node.strip()]
+    if isinstance(node, JSXElement):
+        return [t for c in node.children for t in _text_leaves(c)]
+    return []
 
 
 def _has_visual_children(node: "JSXElement") -> bool:
@@ -933,9 +1305,45 @@ def _make_node(node_type: str, props: dict, children: list | None = None) -> dic
     }
 
 
+_FONT_CLASS_RE = re.compile(r"^font-\['([^':\]]+)(?::[^'\]]*)?'\]$")
+
+
+def _font_class(token: str) -> str:
+    """`font-['Inter:Medium']` -> `font-['Inter',ui-sans-serif,system-ui,sans-serif]`.
+
+    Dev Mode names a text's family with its style attached, and a family
+    called "Inter:Medium" exists nowhere, so the browser fell all the way
+    back to its default — Times — on every text node of a design drawn in
+    Inter. The weight already travels as `font-medium`; the family gets its
+    real name and a generic behind it, monospace for a mono face and the
+    system sans for everything else, so a face that is not installed is at
+    least the right kind of face rather than the wrong one.
+    """
+    m = _FONT_CLASS_RE.match(token)
+    if not m:
+        return token
+    family = m.group(1).replace("_", " ").strip()
+    generic = "ui-monospace,monospace" if "mono" in family.lower() \
+        else "ui-sans-serif,system-ui,sans-serif"
+    return f"font-['{family}',{generic}]"
+
+
 def _attach_style_passthrough(props: dict, attrs: dict, preserve_absolute: bool = False) -> None:
     """Copy className, style, and data-node-id onto the props dict."""
     cn = _filter_position_classes(attrs.get("className", ""), preserve_absolute=preserve_absolute)
+    if cn and "font-['" in cn:
+        cn = " ".join(_font_class(t) for t in cn.split())
+    # A LINE DRAWN SINGLE WRAPS WHEN IT MUST; A LABEL STAYS A LABEL. Dev Mode
+    # marks every text that fit on one line at the drawn width
+    # `whitespace-nowrap`; on a fluid canvas the width is no longer
+    # guaranteed, and a heading that cannot wrap is cut at the edge of its
+    # card instead. But a chip's label that wraps mid-word is worse than a
+    # chip that moves to the next line, so a short text keeps its line and
+    # only a long one gives it up. The content is already on the props here.
+    content = props.get("content")
+    if cn and _canvas_mode() and _canvas_fit() == "fluid" and "whitespace-nowrap" in cn \
+            and (not isinstance(content, str) or len(content.strip()) > 24):
+        cn = " ".join(t for t in cn.split() if t != "whitespace-nowrap")
     # Always strip Figma "collapse hints" — min-h-px, flex-[1_0_0], etc.
     # collapse content to zero in our flowed-flex layout regardless of
     # whether the surrounding container is Stack / Row / Container.
@@ -958,7 +1366,7 @@ def _attach_style_passthrough(props: dict, attrs: dict, preserve_absolute: bool 
         props["_figmaNodeId"] = str(nid)
 
 
-def _transform_node(element: JSXElement) -> dict | None:
+def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> dict | None:
     """Convert a single JSXElement (and recursively its children) to a schema node."""
     tag = element.tag
     attrs = element.attrs
@@ -1120,6 +1528,9 @@ def _transform_node(element: JSXElement) -> dict | None:
             children = _transform_children(element.children)
             return _make_node("Form", props, children)
 
+        if schema_type == "Button" and _text_leaf_count(element) >= 2:
+            return _clickable_card(element, attrs, data_name, props)
+
         if schema_type in _TEXT_CONSUMING:
             # Consume descendant text into label/placeholder
             text_content = _descendant_text(element)
@@ -1130,7 +1541,28 @@ def _transform_node(element: JSXElement) -> dict | None:
             # the old collapse dropped the <img>. Keep the children in that
             # case, and still expose the text as label/placeholder so
             # workflow/navigate inference and accessible names still work.
-            keep_children = _has_visual_children(element) and schema_type != "Input"
+            # NONE OF THESE ACCEPT CHILDREN, so none of them may keep any.
+            #
+            # `Button`, `Link` and `Input` are all `acceptsChildren: false` in
+            # the component catalog. This kept the children of a Button that
+            # contained an icon — to stop an earlier collapse from dropping the
+            # <img> — and produced exactly the tree the validator refuses:
+            # "'Button' takes no children, got 3". On a real 15-screen design
+            # that rejected EVERY page: all 15 page_layouts subjects failed and
+            # frontend, integration, testing and preview were skipped behind
+            # them, so a design with buttons in it could not build at all.
+            #
+            # The icon is not lost. The catalog already carries it as a prop —
+            # `iconSrc` on Button, `iconLeft` on Input — which is where a
+            # picture inside a control belongs; a child node was always the
+            # wrong shape for it, not merely an unlucky one.
+            icon_slot = {"Button": "iconSrc", "Input": "iconLeft"}.get(schema_type)
+            if icon_slot and _has_visual_children(element):
+                icon_el = _find_first_img(element)
+                icon_src = (icon_el.attrs.get("src") or "") if icon_el else ""
+                if icon_src:
+                    props[icon_slot] = icon_src
+            keep_children = False
             if schema_type == "Input":
                 props["placeholder"] = text_content
                 # Infer `name` from Figma data-name + input type + placeholder
@@ -1158,6 +1590,25 @@ def _transform_node(element: JSXElement) -> dict | None:
                     props["navigate"] = action["navigate"]
             elif schema_type == "Link":
                 props["label"] = text_content
+            # A BUTTON THAT DOES NOTHING IS NOT A BUTTON.
+            #
+            # `functional_completeness` refuses a page containing one, and says
+            # why: "A control with no action renders, is clickable, and does
+            # nothing — indistinguishable from a broken application... Worse
+            # than the control not being there." It is right, and the answer is
+            # not to relax the rule but to stop emitting the control.
+            #
+            # A Figma label the action classifier could not bind to any route
+            # or workflow this application defines is, on the evidence, a
+            # caption drawn to look like a button. Emitting it as Text keeps
+            # the words, loses only the affordance, and leaves the page valid;
+            # emitting it as a Button lost the whole page.
+            if schema_type == "Button" and not (set(props) & _ACTION_PROPS):
+                text_props = {k: v for k, v in props.items()
+                              if k in ("className", "style")}
+                text_props["content"] = props.get("label", "")
+                return _make_node("Text", text_props, [])
+
             children = _transform_children(element.children) if keep_children else []
             return _make_node(schema_type, props, children)
 
@@ -1173,7 +1624,11 @@ def _transform_node(element: JSXElement) -> dict | None:
     # Decorative positioned node: absolute + fixed pixel size.
     # These are SVG vector layers that compose into an icon shape — the
     # absolute offsets must be preserved so the layers overlay correctly.
-    preserve_abs = _is_decorative_positioned(cn)
+    # A CHILD OF A REFLOWED STACK LOSES ITS OFFSETS. Its parent was hand-placed
+    # along one axis and now flows; the child's `absolute left-[12px]
+    # top-[36px]` was that placement, and keeping it would put the child back
+    # where the flow no longer is.
+    preserve_abs = _is_decorative_positioned(cn) and not strip_positions
 
     # Detect if children were Figma-laid-out via absolute top-[Npx] / left-[Npx]
     # offsets BEFORE we recurse — the existing position filter will strip those
@@ -1181,11 +1636,42 @@ def _transform_node(element: JSXElement) -> dict | None:
     # Skip if the node already carries grid layout (Grid handles its own flow).
     is_grid = "grid grid-cols-" in cn or "grid-cols-" in cn
     inferred_flow, inferred_gap = (None, 0)
-    if not is_grid:
+    is_drawing = False
+    fluid = _canvas_mode() and _canvas_fit() == "fluid" and not _in_drawing()
+    if not is_grid and not _canvas_mode():
         inferred_flow, inferred_gap = _infer_absolute_flow(element.children)
+    elif fluid:
+        # ON A FLUID CANVAS a stack the designer placed by hand along one axis
+        # reflows as a stack; placement in two dimensions is a drawing and
+        # keeps every position. On a SCALED canvas nothing is inferred:
+        # positioned children stay positioned, and inferring a flow anyway
+        # once promoted a chart's box to a Row and stripped its height.
+        inferred_flow, inferred_gap, is_drawing = _fluid_layout(element, is_grid)
 
     props = {}
     _attach_style_passthrough(props, attrs, preserve_absolute=preserve_abs)
+
+    # ON A FLUID CANVAS, A DRAWN BOX IS A MAXIMUM. See
+    # `_responsive_container_classes`; a decorative positioned node is a
+    # composition layer, not a container, and keeps its exact classes.
+    if fluid and not preserve_abs:
+        rewritten = _responsive_container_classes(
+            props.get("className", ""), element, drawing=is_drawing)
+        if rewritten:
+            props["className"] = rewritten
+        if inferred_flow in ("col", "row"):
+            # The inset the stack was drawn with becomes its padding. Along
+            # the flow axis only for a row: a chip's top offset inside a
+            # 56px box is how it was centred, not a margin, and as padding
+            # it made the row taller than drawn. The row centres instead.
+            left, top = _offset_padding(element.children)
+            pads = [f"px-[{left}px]"] if left else []
+            if inferred_flow == "col" and top:
+                pads.append(f"py-[{top}px]")
+            if inferred_flow == "row" and "items-center" not in props.get("className", ""):
+                pads.append("items-center")
+            if pads:
+                props["className"] = (props.get("className", "") + " " + " ".join(pads)).strip()
 
     # If this node has any absolutely-positioned immediate children, add
     # `relative` to its own className so the children resolve against it.
@@ -1202,7 +1688,7 @@ def _transform_node(element: JSXElement) -> dict | None:
     # card asking for `inset-[6.23%_93.93%_88%_3.08%]` against 48px of height
     # computed `inset: 0px 3902px 48px 0px` — zero by zero. Left static, the
     # wrapper establishes nothing and the frame stays the reference.
-    _was_contents = _CANVAS_MODE and "contents" in (cn or "").split()
+    _was_contents = _canvas_mode() and "contents" in (cn or "").split()
     if _children_have_absolute(element.children) and not _was_contents:
         existing_cn = props.get("className", "")
         existing_tokens = existing_cn.split() if existing_cn else []
@@ -1210,8 +1696,19 @@ def _transform_node(element: JSXElement) -> dict | None:
         if not any(t in position_keywords for t in existing_tokens):
             props["className"] = ("relative " + existing_cn).strip()
 
+    if is_grid and fluid and _spanned(element):
+        return _proportional_row(element, props, cn)
+
     if is_grid:
-        children = _transform_children(element.children)
+        children = _transform_children(element.children, in_drawing=is_drawing)
+        columns = _grid_columns(cn)
+        if columns is None:
+            # A Grid whose column count cannot be read is not a Grid we can
+            # declare. `Container` holds the same children and keeps the
+            # className, so the layout still renders from the CSS — emitting a
+            # Grid without `columns` costs the whole page instead.
+            return _make_node("Container", props, children)
+        props["columns"] = columns
         return _make_node("Grid", props, children)
 
     # Children's actual absolute-offset layout WINS over the parent's declared
@@ -1222,26 +1719,34 @@ def _transform_node(element: JSXElement) -> dict | None:
     # have monotonically-increasing offsets on ONE axis, so decorative SVG
     # overlays and mixed layouts still fall through to the className path.
     if inferred_flow == "row":
-        # Rewrite the className: drop flex-col if present, add flex + gap
-        cleaned = " ".join(t for t in cn.split() if t != "flex-col")
+        # Rewrite the className: drop flex-col if present, add flex + gap.
+        # FROM THE CLASS AS IT STANDS, not the source: on a fluid canvas the
+        # rewrite above already turned the drawn width into a maximum and
+        # dropped `shrink-0`; rebuilding from the raw source put them back,
+        # and a row of filter chips could neither shrink nor wrap.
+        base = props.get("className", cn)
+        cleaned = " ".join(t for t in base.split() if t != "flex-col")
         tokens = cleaned.split() if cleaned else []
         if not any(t in ("flex", "grid", "inline-flex", "inline-grid") for t in tokens):
             cleaned = f"flex gap-[{inferred_gap}px] {cleaned}".strip()
         else:
             cleaned = f"gap-[{inferred_gap}px] {cleaned}".strip()
+        if fluid and "flex-wrap" not in cleaned and _wide_containers(
+                [c for c in element.children if isinstance(c, JSXElement)]) >= 2:
+            cleaned += " flex-wrap"
         props["className"] = _filter_container_height(cleaned)
-        children = _transform_children(element.children)
+        children = _transform_children(element.children, strip_positions=True)
         return _make_node("Row", props, children)
 
     if "flex-col" in cn:
         # Stack (flex-col): strip fixed heights so content can grow past Figma height
         if "className" in props:
             props["className"] = _filter_container_height(props["className"])
-        children = _transform_children(element.children)
+        children = _transform_children(element.children, in_drawing=is_drawing)
         return _make_node("Stack", props, children)
 
     if _FLEX_ROW_RE.search(cn):
-        children = _transform_children(element.children)
+        children = _transform_children(element.children, in_drawing=is_drawing)
         return _make_node("Row", props, children)
 
     # Inferred flow from absolute-offset children (C.8 generalisation):
@@ -1263,7 +1768,7 @@ def _transform_node(element: JSXElement) -> dict | None:
         # Strip fixed heights — the new flex container should grow with content
         if "className" in props:
             props["className"] = _filter_container_height(props["className"])
-        children = _transform_children(element.children)
+        children = _transform_children(element.children, strip_positions=True)
         node_type = "Stack" if inferred_flow == "col" else "Row"
         return _make_node(node_type, props, children)
 
@@ -1285,22 +1790,33 @@ def _transform_node(element: JSXElement) -> dict | None:
     # makes it the containing block instead, which is the same collapse that
     # `display: contents` caused: percentages meant for the frame resolve
     # against a wrapper that is only as tall as its own flow content.
-    if not props.get("className") and not _CANVAS_MODE:
+    if not props.get("className") and not _canvas_mode():
         props["className"] = "relative w-full h-full"
-    children = _transform_children(element.children)
+    children = _transform_children(element.children, in_drawing=is_drawing)
     return _make_node("Container", props, children)
 
 
-def _transform_children(children: list) -> list:
-    """Transform a list of JSXElement/str children into schema nodes."""
+def _transform_children(children: list, *, strip_positions: bool = False,
+                        in_drawing: bool = False) -> list:
+    """Transform a list of JSXElement/str children into schema nodes.
+
+    `strip_positions`: the parent was a hand-placed stack that now flows, so
+    each child's own offsets go. `in_drawing`: the parent is a drawing, so
+    this subtree keeps every position and is never rewritten.
+    """
+    saved = _in_drawing()
+    _state.in_drawing = saved or in_drawing
     result = []
-    for child in children:
-        if isinstance(child, JSXElement):
-            node = _transform_node(child)
-            if node is not None:
-                result.append(node)
-        # str children are text nodes — skip at this level
-        # (they're consumed by _descendant_text in parent classification)
+    try:
+        for child in children:
+            if isinstance(child, JSXElement):
+                node = _transform_node(child, strip_positions=strip_positions)
+                if node is not None:
+                    result.append(node)
+            # str children are text nodes — skip at this level
+            # (they're consumed by _descendant_text in parent classification)
+    finally:
+        _state.in_drawing = saved
     return result
 
 
@@ -1328,13 +1844,17 @@ def transform_jsx_to_schema(
     Returns a PageV2-shaped dict: {schemaVersion: '2.0', id, title,
     dataSources: [], children: [<root_node>]}.
     """
-    global _CANVAS_MODE
     root_element = parse_jsx_tree(jsx_source)
-    _CANVAS_MODE = canvas is not None
+    _state.canvas_mode = canvas is not None
+    fit = frame_fit(root_element) if _state.canvas_mode else None
+    _state.canvas_fit = fit or "scale"
+    _state.in_drawing = False
     try:
         root_node = _transform_node(root_element)
     finally:
-        _CANVAS_MODE = False
+        _state.canvas_mode = False
+        _state.canvas_fit = "scale"
+        _state.in_drawing = False
 
     # The MCP root commonly carries `size-full` which collapses to zero
     # height when its scaffold parent isn't bounded — the entire design
@@ -1369,6 +1889,7 @@ def transform_jsx_to_schema(
         "id": str(_uuid.uuid4()),
         "title": "Figma Import",
         "dataSources": [],
+        **({"canvasFit": fit} if fit else {}),
         "children": [root_node] if root_node is not None else [],
     }
 
