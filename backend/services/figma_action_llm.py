@@ -97,8 +97,10 @@ Output JSON shape:
 STRICT rules:
   * If kind == "navigate", target MUST be one of the strings in \
 available_routes, verbatim. Never invent a route.
-  * If kind == "workflow", target MUST be one of the strings in \
-available_workflows, verbatim. Never invent a workflow name.
+  * If kind == "workflow", target MUST be the id of one entry in \
+available_workflows — the part before " — " — or the entry verbatim. The \
+name and trigger after it say what the workflow does; match the label to \
+them. Never invent a workflow.
   * If kind == "external", target MUST be a full URL (http:// or https://).
   * If nothing in the registry is a plausible match, or the label is \
 ambiguous, return {"kind":"none","target":null,"confidence":0.0}.
@@ -248,9 +250,16 @@ def _enforce_registry_safety(
         return binding
 
     if binding.kind == "workflow":
-        if not binding.target or binding.target not in workflows:
+        # An entry may read "FLOW-009 — Refund Approval Decision: …"; the
+        # model may answer with the entry or with the id. Either way the
+        # binding's target is the id — the only spelling a page may carry.
+        ids = {w.split(" — ")[0].strip(): w for w in workflows}
+        target = (binding.target or "").strip()
+        if target in workflows:
+            target = target.split(" — ")[0].strip()
+        if not target or target not in ids:
             return FigmaActionBinding(kind="none", target=None, confidence=0.0)
-        return binding
+        return FigmaActionBinding(kind="workflow", target=target, confidence=binding.confidence)
 
     if binding.kind == "external":
         t = (binding.target or "").strip()

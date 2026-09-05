@@ -1215,6 +1215,46 @@
             },
             "default": []
           },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "record",
+                    "field"
+                  ]
+                },
+                "entity": {
+                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                  "description": "Stable ENTITY identifier (§12)"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "description": {
+                  "type": "string",
+                  "default": ""
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -1265,6 +1305,119 @@
               "$ref": "#/properties/permissions/items/properties/subject"
             },
             "default": []
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "statement",
+              "condition_action"
+            ],
+            "default": "statement"
+          },
+          "entity": {
+            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "description": "Stable ENTITY identifier (§12)"
+          },
+          "when": {
+            "type": "string"
+          },
+          "then": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "set_field",
+                    "set_default",
+                    "clear_field",
+                    "show_error",
+                    "set_visibility",
+                    "set_required",
+                    "set_readonly",
+                    "set_options",
+                    "recommendation",
+                    "trigger_workflow",
+                    "send_notification"
+                  ]
+                },
+                "field": {
+                  "type": "string"
+                },
+                "valueMode": {
+                  "type": "string",
+                  "enum": [
+                    "literal",
+                    "field",
+                    "formula"
+                  ]
+                },
+                "value": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "visible": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "readonly": {
+                  "type": "boolean"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "workflow": {
+                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "description": "Stable FLOW identifier (§12)"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "otherwise": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/businessRules/items/properties/then/items"
+            },
+            "default": []
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "entity",
+              "form",
+              "server"
+            ],
+            "default": "form"
+          },
+          "salience": {
+            "type": "integer",
+            "default": 0
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"

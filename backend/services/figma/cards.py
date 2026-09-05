@@ -14,6 +14,7 @@ children and loses the action, which is what it was on the drawing.
 """
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 
@@ -23,6 +24,13 @@ def detail_route_for(route: str, routes: Iterable[str]) -> str | None:
         return None
     wanted = route.rstrip("/") + "/[id]"
     return wanted if wanted in set(routes) else None
+
+
+_ONE_THING = re.compile(r"(?i)^\s*(view|open|see|show)\b|(→|↗|›|»|➜|⟶)\s*$")
+
+
+def _opens_one_thing(label: object) -> bool:
+    return isinstance(label, str) and bool(_ONE_THING.search(label))
 
 
 def bind_cards(root: dict, page_route: str, routes: Iterable[str]) -> int:
@@ -54,6 +62,18 @@ def bind_cards(root: dict, page_route: str, routes: Iterable[str]) -> int:
                 props.pop("navigate", None)
             node["props"] = props
             changed += 1
+        # A CONTROL THAT SAYS "VIEW" OPENS ONE THING. A row action drawn as
+        # "View →" in a table of cases was bound to `/cases` — the list the
+        # reader is already looking at, one level up. The classifier had
+        # both routes and chose the shorter; the label had already chosen.
+        # An arrow, or the word view, aimed at a list that has an item route
+        # beneath it, opens the item.
+        if node.get("type") == "Button" and _opens_one_thing(props.get("label")):
+            item = detail_route_for(str(props.get("navigate") or ""), routes)
+            if item:
+                props["navigate"] = item
+                node["props"] = props
+                changed += 1
         for child in node.get("children") or []:
             walk(child)
 

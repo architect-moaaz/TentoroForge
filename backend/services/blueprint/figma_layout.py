@@ -205,6 +205,10 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     live_sources: list[dict] = []
     try:
         classified = _classify_regions(svc, page, code, screen, app_root)
+        # A TABLE DRAWN AS TEXT is read from its layers rather than looked
+        # at: header, first rows, the card's title. Bound to an entity it
+        # becomes a live Table whose rows open the entity's detail page.
+        classified = list(classified or []) + _classify_tables(svc, code)
         if classified:
             from services.figma import realize as _realize
 
@@ -285,17 +289,48 @@ def _set_action_vocabulary(doc: dict) -> None:
     # buttons bind to workflows. Routes carry their own meaning and do most of
     # the binding, and a button that binds to nothing now becomes Text rather
     # than an invalid control.
+    # THE ID IS THE ONLY LEGAL SPELLING; THE NAME IS WHAT A LABEL CAN MATCH.
+    # Offered as bare ids, "Approve" had nothing to match against FLOW-009
+    # and every drawn action fell to text — in one fifteen-screen build not a
+    # single button ran a workflow. Each entry now reads
+    # "FLOW-009 — Refund Approval Decision: <trigger>"; the classifier
+    # matches the label to the words and returns the id.
     workflows: list[str] = []
+    seen: set[str] = set()
     for flow in doc.get("workflows") or []:
         value = str(flow.get("id") or "").strip()
-        if value and value not in workflows:
-            workflows.append(value)
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        name = str(flow.get("name") or "").strip()
+        trigger = str((flow.get("trigger") or {}).get("detail") or "").strip()
+        workflows.append(value + (f" — {name}" if name else "") + (f": {trigger[:120]}" if trigger else ""))
 
     try:
         set_figma_llm_context(routes=routes or None,
                               workflows=workflows or None)
     except Exception:  # noqa: BLE001 — an enrichment, never the page
         logger.info("[figma] could not set the action vocabulary")
+
+
+def _classify_tables(svc: Any, code: str) -> list[dict]:
+    """Drawn tables bound to entities, with the row link resolved."""
+    from services.figma import tables as _tables
+    try:
+        drawn = _tables.drawn_tables(code)
+        if not drawn:
+            return []
+        from services.blueprint.executors import AnthropicModel
+        entities = (svc.doc.get("data") or {}).get("entities") or []
+        found = _tables.classify_tables(AnthropicModel(max_tokens=4000), drawn, entities)
+        for entry in found:
+            route = _tables.detail_route_for_entity(svc.doc, entry["entity"])
+            if route:
+                entry["rowHref"] = _tables.row_link(route)
+        return found
+    except Exception as exc:  # noqa: BLE001 — an enrichment, never the page
+        logger.warning("[figma] drawn-table binding failed: %s", exc)
+        return []
 
 
 def _classify_regions(svc: Any, page: dict, code: str, screen: Any,

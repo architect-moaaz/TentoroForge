@@ -1878,3 +1878,46 @@ def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, A
         "utf-8",
     )
     return {"files": ["src/lib/append-only-entities.ts"], "entities": len(set(names))}
+
+
+# ---------------------------------------------------------------------------
+# business rules with effects → the runtime's rules directory
+# ---------------------------------------------------------------------------
+
+def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``rules/blueprint-rules.json`` — the Blueprint's condition-action
+    rules, in the row shape the runtime's ``loadRules`` reads.
+
+    Only rules the panel authored reached the runtime before; a rule the
+    agent wrote had a statement and no effect on any form. This projects
+    the ones that declare effects, beside the panel's, in the same shape
+    (rule_type, model_name, config.whenFeel/then/otherwise/scope/salience),
+    so the form-rules route serves them together. Always written, so an
+    empty file and a never-run projection stay distinguishable.
+    """
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
+    rows = []
+    for rule in doc.get("businessRules") or []:
+        if not isinstance(rule, dict) or rule.get("status") == "DEPRECATED":
+            continue
+        if rule.get("kind") != "condition_action" or not rule.get("entity"):
+            continue
+        ent = entities.get(str(rule["entity"])) or {}
+        model = ent.get("name") or str(rule["entity"])
+        rows.append({
+            "id": rule.get("id"), "name": rule.get("name") or rule.get("id"),
+            "rule_type": "condition_action", "model_name": model,
+            "field_name": None, "is_active": True, "source": "blueprint",
+            "config": {
+                "whenFeel": rule.get("when") or rule.get("expression") or "true",
+                "then": [{"id": f"{rule.get('id')}-then-{i}", **a} for i, a in enumerate(rule.get("then") or [])],
+                "otherwise": [{"id": f"{rule.get('id')}-else-{i}", **a} for i, a in enumerate(rule.get("otherwise") or [])],
+                "scope": rule.get("scope") or "form",
+                "salience": int(rule.get("salience") or 0),
+            },
+        })
+    out = Path(app_root) / "rules"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "blueprint-rules.json").write_text(json.dumps(rows, indent=2), "utf-8")
+    return {"files": ["rules/blueprint-rules.json"], "rules": len(rows)}
+

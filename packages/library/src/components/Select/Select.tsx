@@ -5,6 +5,7 @@ import type { SelectPropsType } from "./Select.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { useDensity, useRadiusScale } from "../../theme/tokens-context";
+import { FormValuesContext } from "../Form/FormValuesContext";
 
 /**
  * Labeled native <select>. Options come from props.options[].
@@ -44,7 +45,18 @@ const SELECT_STATIC =
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Select(props: SelectProps) {
-  const { name, label, options, validators, style, value, onChange } = props;
+  const { name, label, options: allOptions, validators, style, value, onChange } = props;
+  // DEPENDENT OPTIONS. The renderer expanded `optionsFrom` and, when it
+  // declared `dependsOn`, kept each option's key on the parent column. The
+  // sibling's live value narrows the list; nothing chosen yet, nothing offered.
+  const dependsOn = (props as { dependsOn?: { field: string; keys: Record<string, string> } }).dependsOn;
+  const liveValues = React.useContext(FormValuesContext);
+  const options = React.useMemo(() => {
+    if (!dependsOn || !liveValues || !Array.isArray(allOptions)) return allOptions;
+    const parent = liveValues[dependsOn.field];
+    if (parent === undefined || parent === null || parent === "") return [];
+    return allOptions.filter((o) => dependsOn.keys?.[String(o.value)] === String(parent));
+  }, [allOptions, dependsOn, liveValues]);
   const inlineAdd = (props as { inlineAdd?: { route: string; label?: string } }).inlineAdd;
   const id = useSelectId(name);
   const required = validators?.required === true;

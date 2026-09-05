@@ -54,7 +54,7 @@ def test_a_different_vocabulary_is_a_different_question(monkeypatch):
 def test_a_cached_answer_is_a_copy():
     """A caller that mutates its result must not poison the next page."""
     jsx_to_schema._ACTION_MEMO.clear()
-    jsx_to_schema._ACTION_MEMO[("x", "", (), ())] = {"navigate": "/"}
+    jsx_to_schema._ACTION_MEMO[("x", "", "", (), ())] = {"navigate": "/"}
     reset_figma_llm_context()
     a = jsx_to_schema._classify_button_action_with_llm("x", "", "")
     a["navigate"] = "/changed"

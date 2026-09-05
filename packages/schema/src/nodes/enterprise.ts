@@ -228,6 +228,7 @@ export const MultiSelectNode = z.object({
       source: z.string().min(1),
       value:  z.string().min(1).default("id"),
       label:  z.string().min(1).default("name"),
+      dependsOn: z.object({ field: z.string().min(1), column: z.string().min(1) }).strict().optional(),
     }).optional(),
     selected: z.array(z.string()).optional(),  // initial value
     showSearch: z.boolean().optional(),  // auto when options.length > 8

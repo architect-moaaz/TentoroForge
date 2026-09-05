@@ -128,3 +128,16 @@ def test_on_a_fluid_canvas_a_cards_width_is_its_maximum():
     cn = _find(root, "1:2")["props"]["className"].split()
     assert "max-w-[355px]" in cn and "w-full" in cn and "w-[355px]" not in cn
 
+
+def test_a_card_without_a_fill_carries_no_variant():
+    """A quiet variant belongs to a Button; on a Container the validator
+    refused every page: "'variant' was unexpected"."""
+    from services.blueprint.page_planner import load_catalog, validate_props
+    jsx = CARD.replace('className="bg-white border border-[#e8e0cc] rounded-[8px] h-[66px] w-[355px] flex flex-col"',
+                       'className="border border-[#e8e0cc] rounded-[8px] h-[66px] w-[355px] flex flex-col"')
+    with patch("services.jsx_to_schema._classify_button_action_with_llm", _bind):
+        root = transform_jsx_to_schema(jsx, {}, canvas=(1440.0, 900.0))
+    card = _find(root, "1:2")
+    assert card["type"] == "Container" and "variant" not in card["props"]
+    assert not [e for e in validate_props({"root": root}, load_catalog()) if "variant" in e]
+

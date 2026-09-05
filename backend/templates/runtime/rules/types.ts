@@ -126,6 +126,7 @@ export type RuleActionType =
   | "set_visibility"
   | "set_required"
   | "set_readonly"
+  | "set_options"
   | "recommendation"
   | "trigger_workflow"
   | "send_notification";
@@ -140,6 +141,8 @@ export interface RuleAction {
   visible?: boolean;
   required?: boolean;
   readonly?: boolean;
+  /** set_options: what the field offers while the condition holds. */
+  options?: Array<{ value: string; label: string }>;
   workflow?: string;
 }
 
@@ -162,7 +165,10 @@ export interface FieldHint {
   hidden?: boolean;
   required?: boolean;
   readonly?: boolean;
-  recommendation?: { value?: string; message?: string };
+  recommendation?: { value?: string; message?: string
+  /** set_options — the options the field offers while a rule holds. */
+  options?: Array<{ value: string; label: string }>;
+};
 }
 
 /** A deferred side effect (fired after a successful write). */

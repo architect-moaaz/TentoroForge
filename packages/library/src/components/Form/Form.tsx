@@ -25,6 +25,7 @@ import { fallbackDispatch } from "../../util/fallbackDispatch";
 import { fallbackFetchData, type FormDataFetcher } from "../../util/fallbackFetchData";
 import { runOutcome, parentPath, withDefaults } from "../../util/formOutcome";
 import { hydrateFormValues, type HydrationFieldSpec } from "../../util/formValueHydration";
+import { FormValuesContext } from "./FormValuesContext";
 
 type FieldSpec =
   | { kind: "text" | "email" | "number"; name: string; label: string; required?: boolean; placeholder?: string }
@@ -88,6 +89,8 @@ export type FormOutcomeAction = {
 
 type Props = {
   workflow?: string;
+  /** The entity whose form this is — the model its form-side rules are evaluated for. */
+  entity?: string;
   fields?: Field[];
   defaultValues?: Record<string, unknown>;
   submitLabel?: string;
@@ -127,12 +130,13 @@ const FORM_SUBMIT =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 " +
   "disabled:pointer-events-none disabled:opacity-50 cursor-pointer";
 
-export function Form({ workflow, fields, defaultValues, submitLabel = "Save", onSuccess, onError, style, className, children, __dispatch, __fetchData }: Props) {
+export function Form({ workflow, fields, defaultValues, submitLabel = "Save", onSuccess, onError, style, className, children, __dispatch, __fetchData, entity }: Props) {
   const isDeclarative = Array.isArray(fields) && fields.length > 0;
   if (isDeclarative) {
     return (
       <DeclarativeForm
         workflow={workflow}
+        entity={entity}
         fields={fields!}
         defaultValues={defaultValues}
         submitLabel={submitLabel}
@@ -207,9 +211,9 @@ function DeclarativeForm({
   onError,
   style,
   __dispatch,
-  __fetchData,
-}: {
+  __fetchData, entity }: {
   workflow?: string;
+  entity?: string;
   fields: Field[];
   defaultValues?: Record<string, unknown>;
   submitLabel: string;
@@ -262,7 +266,8 @@ function DeclarativeForm({
   // same visibility/required/lock hints but from a rule DSL rather than
   // a per-field predicate. Both layers are additive; downstream field
   // resolution ORs them together.
-  const ruleHints = useFieldRules(modelFromWorkflow(workflow), control);
+  const ruleHints = useFieldRules(
+    entity || modelFromWorkflow(workflow), control);
   // Dependent dropdowns: a Select with `interaction.optionsFrom.filter` /
   // `dependsOn` re-fetches its options from the data resource whenever a
   // referenced field changes. Returns the live per-field option lists.
@@ -298,7 +303,10 @@ function DeclarativeForm({
     () => ({ getValues: () => (getValues() ?? {}) as Record<string, unknown>, setValue }),
     [getValues, setValue],
   );
+  // Live values for dependent fields (a city Select narrowing to its state).
+  const liveValues = (useWatch({ control }) as Record<string, unknown>) ?? {};
   return (
+    <FormValuesContext.Provider value={liveValues}>
     <FormComputeContext.Provider value={computeCtxValue}>
       <form onSubmit={handleSubmit(onSubmit)} style={resolveStyle(style)} {...useMotion(style?.motion)}>
         <div className={FORM_FIELD_GAP[density]}>
@@ -362,6 +370,7 @@ function DeclarativeForm({
         </button>
       </form>
     </FormComputeContext.Provider>
+    </FormValuesContext.Provider>
   );
 }
 
@@ -487,7 +496,7 @@ function modelFromWorkflow(workflow?: string): string {
 }
 
 /** Per-field outcome of the form-side business rules. */
-type RuleFieldHint = { hidden?: boolean; required?: boolean; readonly?: boolean };
+type RuleFieldHint = { hidden?: boolean; required?: boolean; readonly?: boolean; options?: Array<{ value: string; label: string }> };
 
 /**
  * Form-side business rules (visibility / required / lock). Posts the current
@@ -728,7 +737,7 @@ function FormFieldImpl({
   namePrefix?: string;
   optionsOverride?: Option[];
   conditional?: FieldConditionalState;
-  hint?: { hidden?: boolean; required?: boolean; readonly?: boolean };
+  hint?: RuleFieldHint;
 }) {
   // Form-side business rule outcomes: a rules-engine hint hiding the field
   // takes effect here too (belt + suspenders — interaction predicates were
@@ -826,7 +835,7 @@ function FormFieldImpl({
             {...register(name, { required: effRequired ? "required" : false })}
           >
             <option value="">—</option>
-            {(optionsOverride ?? field.options).map((o) => (
+            {(hint?.options ?? optionsOverride ?? field.options).map((o: { value: string; label: string }) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

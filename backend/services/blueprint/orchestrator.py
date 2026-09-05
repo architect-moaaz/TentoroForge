@@ -1414,6 +1414,8 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     )
 
     apply_data_projection(svc, app_root)
+    from services.blueprint.projection import project_business_rules
+    project_business_rules(svc.doc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)

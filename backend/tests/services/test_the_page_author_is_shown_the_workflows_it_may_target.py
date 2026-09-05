@@ -39,7 +39,7 @@ def test_each_entry_says_what_the_workflow_is_for():
     author choose the right one."""
     first = page_brief(DOC, "PAGE-009")["workflows"][0]
     assert first == {"id": "FLOW-007", "name": "Case Assignment",
-                     "trigger": "Manager picks an assignee."}
+                     "trigger": "Manager picks an assignee.", "inputs": []}
 
 
 def test_a_scheduled_workflow_still_states_its_kind():

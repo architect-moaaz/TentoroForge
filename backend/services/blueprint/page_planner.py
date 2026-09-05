@@ -1011,6 +1011,14 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
     root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
                           workflow_for_page(doc, page, entity))
+    # THE PAGE'S RECORD IS A PAGE-LEVEL FACT: on a detail page every control
+    # that runs a workflow needing this entity's record carries its id.
+    from services.blueprint.record_scope import carry_entity, carry_record
+    carry_record(doc, page, {"root": root, "dataSources": template.get("dataSources") or []})
+    carry_entity(doc, page, root)
+    # A CITY SELECT NARROWS TO ITS STATE because the data model says so.
+    from services.blueprint.dependent_options import wire_dependent_options
+    wire_dependent_options(doc, {"root": root, "dataSources": template.get("dataSources") or []})
     # The composer's binder already resolved this tree's fetches, in the pass
     # that rewrote its pointers. Prefer them; derive only for a layout that
     # carries none. See `data_sources` for what re-deriving costs.
@@ -1298,7 +1306,11 @@ def page_brief(doc: dict, page_id: str) -> dict:
         "workflows": [
             {"id": w.get("id"), "name": w.get("name"),
              "trigger": (w.get("trigger") or {}).get("detail")
-                        or (w.get("trigger") or {}).get("kind")}
+                        or (w.get("trigger") or {}).get("kind"),
+             # What the control that runs it must supply: a record the page
+             # shows, or fields a form on the page collects.
+             "inputs": [{k: v for k, v in i.items() if k in ("name", "kind", "entity", "type", "required")}
+                        for i in (w.get("inputs") or [])]}
             for w in _live(doc.get("workflows")) if w.get("id")
         ],
     }

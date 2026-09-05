@@ -724,6 +724,10 @@ function dispatchActions(
         if (action.field)
           out.formHints.push({ field: action.field, required: action.required !== false });
         break;
+      case "set_options":
+        if (action.field && Array.isArray(action.options))
+          out.formHints.push({ field: action.field, options: action.options });
+        break;
       case "set_readonly":
         if (action.field)
           out.formHints.push({ field: action.field, readonly: action.readonly !== false });

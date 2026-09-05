@@ -481,17 +481,55 @@ def _classify_button_action_with_llm(
     Registry-safety is enforced inside classify_figma_action_llm — the
     LLM cannot invent a target that isn't in the supplied lists.
     """
-    key = (label, data_name, tuple(_get_routes()), tuple(_get_workflows()))
+    heading = _context_heading()
+    key = (label, data_name, heading, tuple(_get_routes()), tuple(_get_workflows()))
     hit = _ACTION_MEMO.get(key)
     if hit is not None:
         return dict(hit)
-    result = _classify_button_action_uncached(label, data_name, class_name)
+    result = _classify_button_action_uncached(label, data_name, class_name, heading=heading)
     _ACTION_MEMO[key] = dict(result)
     return result
 
 
+def _context_heading() -> str:
+    """What the control sits under, for the classifier. "View →" says nothing
+    about what is viewed; the title of the card it sits in — "Active Cases",
+    the first text of the bordered box that holds the table — does. Outside
+    any card, the page's heading. Font size alone was the wrong notion: a
+    KPI's 28px number became "the heading 1", and a 14px semi-bold card
+    title was never a heading at all."""
+    return getattr(_state, "section", "") or getattr(_state, "heading", "") or ""
+
+
+def _is_root(element: "JSXElement") -> bool:
+    return getattr(_state, "root", None) is element
+
+
+def _is_surface(cn: str) -> bool:
+    """A filled box — a card. Its first words are its title.
+
+    A fill, not a border: a table's header row and every cell carry a
+    bottom border, and counting those put "View →" under the column label
+    "Case No" instead of the card title "Active Cases"."""
+    return any(t.startswith("bg-[") or (t.startswith("bg-") and t not in ("bg-transparent", "bg-none"))
+               for t in (cn.split() if cn else []))
+
+
+def _first_text(element: "JSXElement") -> str:
+    """The first text WITH A WORD in it, in document order. A notification
+    card opens with a ✓ glyph; its title is the line after."""
+    for c in element.children:
+        if isinstance(c, str) and re.search(r"[A-Za-z0-9]", c):
+            return c.strip()
+        if isinstance(c, JSXElement):
+            t = _first_text(c)
+            if t:
+                return t
+    return ""
+
+
 def _classify_button_action_uncached(
-    label: str, data_name: str, class_name: str,
+    label: str, data_name: str, class_name: str, heading: str = "",
 ) -> dict:
     if _figma_llm_enabled():
         routes = _get_routes()
@@ -501,7 +539,8 @@ def _classify_button_action_uncached(
                 from .figma_action_llm import classify_figma_action_llm
                 binding = classify_figma_action_llm(
                     label,
-                    surrounding_text=data_name,
+                    surrounding_text=(f"{data_name} · under the heading “{heading}”"
+                                      if heading else data_name),
                     available_routes=routes,
                     available_workflows=workflows,
                     query_fn=_get_action_query_fn(),
@@ -1156,7 +1195,8 @@ def _strip_overflow_clip(cn: str) -> str:
 _DATA_NAME_TO_TYPE: dict[str, tuple[str, dict]] = {
     "Email Input": ("Input", {"type": "email"}),
     "Password Input": ("Input", {"type": "password"}),
-    "Search Input": ("Input", {"type": "text"}),
+    # The page's search box: writes `q`, which the page's list source searches.
+    "Search Input": ("Input", {"type": "search"}),
     "Input": ("Input", {"type": "text"}),
     "Button": ("Button", {}),
     "Checkbox": ("Checkbox", {}),
@@ -1249,7 +1289,8 @@ def _clickable_card(element: "JSXElement", attrs: dict, data_name: str,
                 extra.append(f"py-[{top}px]")
             props["className"] = _filter_container_height(
                 " ".join(extra) + " " + props.get("className", "")).strip()
-    children = _transform_children(element.children, strip_positions=strip, in_drawing=drawing)
+    children = _transform_children(element.children, strip_positions=strip, in_drawing=drawing,
+                                   section=_first_text(element) or None)
     return _make_node("Container", props, children)
 
 
@@ -1303,6 +1344,43 @@ def _make_node(node_type: str, props: dict, children: list | None = None) -> dic
         "props": props,
         "children": children if children is not None else [],
     }
+
+
+#: A layer a designer named as a control, in any of the spellings they use.
+_CONTROL_NAME_RE = re.compile(r"(?i)(?:^|[^a-z])(btn|button|cta|link|action)(?:[^a-z]|$)")
+#: A label that points somewhere: "View →", "Open ›", "Details »".
+_ARROW_LABEL_RE = re.compile(r"\s*(→|↗|›|»|>|➜|⟶)\s*$")
+
+
+def _looks_like_a_control(data_name: str, text: str, leaves: int = 1) -> bool:
+    """A control is known by the evidence a designer left, not by one exact
+    layer name. The map below binds `data-name="Button"` and nothing else,
+    so a row action drawn as "View →" in a `Table Cell`, and "View Case" in
+    a layer called `Btn`, were never asked about and rendered as text.
+
+    ARROW EVIDENCE IS ABOUT ONE LABEL. Tested on the joined text of a whole
+    subtree, a table whose last cell said "View →" became one clickable
+    card titled by its first column, and its row actions never reached the
+    classifier. A name says what a layer is at any size; an arrow only
+    says it of a single line."""
+    if not (text and text.strip()):
+        return False
+    if _CONTROL_NAME_RE.search(data_name or ""):
+        return True
+    return leaves == 1 and bool(_ARROW_LABEL_RE.search(text))
+
+
+_INPUT_NAME_RE = re.compile(r"(?i)(?:^|[^a-z])(input|search|field|textbox)(?:[^a-z]|$)")
+
+
+def _looks_like_an_input(data_name: str, text: str, leaves: int = 1) -> bool:
+    """A layer named as an input, holding one line of text — its placeholder."""
+    return leaves <= 1 and bool(_INPUT_NAME_RE.search(data_name or "")) \
+        and not _CONTROL_NAME_RE.search(data_name or "")
+
+
+def _is_search(data_name: str, text: str) -> bool:
+    return "search" in (data_name or "").lower() or (text or "").strip().lower().startswith("search")
 
 
 _FONT_CLASS_RE = re.compile(r"^font-\['([^':\]]+)(?::[^'\]]*)?'\]$")
@@ -1396,6 +1474,15 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
         text_content = _descendant_text(element)
         props = {}
 
+        # "View →" in a table cell is a row action drawn as text. Ask the
+        # classifier; bound, it is a Button, unbound it is the text it was.
+        if _ARROW_LABEL_RE.search(text_content or ""):
+            action = _classify_button_action_with_llm(text_content, attrs.get("data-name", ""), cn)
+            if set(action) & _ACTION_PROPS:
+                props = {"label": text_content, **{k: v for k, v in action.items() if k in _ACTION_PROPS}}
+                _attach_style_passthrough(props, attrs)
+                return _make_node("Button", props, [])
+
         # Check for big font size: text-[Npx] with N >= 18
         m = _BIG_FONT_RE.search(cn)
         if m and int(m.group(1)) >= 18:
@@ -1404,6 +1491,7 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
             props["level"] = level
             props["content"] = text_content
             _attach_style_passthrough(props, attrs)
+            _state.heading = _state.heading or text_content  # the page's title is its FIRST big heading
             return _make_node("Heading", props)
 
         # Check for font-bold or font-semibold (but no big text class)
@@ -1411,6 +1499,10 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
             props["level"] = 3
             props["content"] = text_content
             _attach_style_passthrough(props, attrs)
+            # NOT THE CONTEXT. Small bold text is typed as a heading for
+            # rendering, but a table's column labels are not what a row
+            # action sits under: with them counted, "View →" arrived at the
+            # classifier "under the heading Created" and bound to nothing.
             return _make_node("Heading", props)
 
         # Otherwise → Text; strip Figma hex colors from body text
@@ -1466,6 +1558,7 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
 
         props = {"level": level, "content": text_content}
         _attach_style_passthrough(props, attrs)
+        _state.heading = _state.heading or text_content  # the page's title is its FIRST big heading
         # Merge leaf style tokens into the Heading's className
         if leaf_style_cn:
             existing_cn = props.get("className", "")
@@ -1493,11 +1586,26 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
         _attach_style_passthrough(props, attrs)
         return _make_node("Text", props)
 
-    # 3d. Known data-name composites
+    # 3d. Known data-name composites — and the spellings of "button" the map
+    # does not list, when the layer carries a label.
+    if data_name not in _DATA_NAME_TO_TYPE and _looks_like_a_control(
+            data_name, _descendant_text(element), _text_leaf_count(element)):
+        data_name = "Button"
+    # AN INPUT LAYER IS KNOWN BY ITS NAME TOO. The map binds "Input" and
+    # "Search Input"; the drawn search box was a layer called "Text Input"
+    # holding its placeholder, and it became a paragraph of grey text.
+    if data_name not in _DATA_NAME_TO_TYPE and _looks_like_an_input(
+            data_name, _descendant_text(element), _text_leaf_count(element)):
+        data_name = "Search Input" if _is_search(data_name, _descendant_text(element)) else "Input"
     if data_name in _DATA_NAME_TO_TYPE:
         schema_type, extra_props = _DATA_NAME_TO_TYPE[data_name]
         props = dict(extra_props)
-        _attach_style_passthrough(props, attrs)
+        # A POSITIONED CELL THAT BECOMES A CONTROL KEEPS ITS PLACE. On a
+        # canvas every positioned node is composition; a row action drawn
+        # in a table cell is placed by that cell, and stripping the offsets
+        # piled six "View →" buttons at the table's top-left corner.
+        _attach_style_passthrough(props, attrs, preserve_absolute=_is_decorative_positioned(
+            attrs.get("className", "")))
 
         if schema_type == "Form":
             # Form recurses — strip fixed heights so the form expands to its content.
@@ -1573,8 +1681,17 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
                 )
                 if input_name:
                     props["name"] = input_name
+                if props.get("type") == "search":
+                    props["name"] = "q"
             elif schema_type == "Button":
                 props["label"] = text_content
+                # A CONTROL DRAWN AS PLAIN TEXT IS A QUIET CONTROL. Without a
+                # fill of its own it is a link, not the filled primary button
+                # the component paints by default. Set here, on the Button
+                # alone: set earlier it rode into a clickable card's props,
+                # and Container does not take a variant.
+                if not any(t.startswith("bg-") for t in (attrs.get("className", "") or "").split()):
+                    props["variant"] = "ghost"
                 # Infer workflow / navigate from label text.
                 # Spec D W5: LLM classifier runs first when
                 # FORGE_FIGMA_LLM is set AND a caller has populated the
@@ -1651,6 +1768,9 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
     props = {}
     _attach_style_passthrough(props, attrs, preserve_absolute=preserve_abs)
 
+    # A CARD'S FIRST TEXT IS ITS TITLE, and what its controls sit under.
+    section = _first_text(element) if _is_surface(cn) and not _is_root(element) else None
+
     # ON A FLUID CANVAS, A DRAWN BOX IS A MAXIMUM. See
     # `_responsive_container_classes`; a decorative positioned node is a
     # composition layer, not a container, and keeps its exact classes.
@@ -1700,7 +1820,7 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
         return _proportional_row(element, props, cn)
 
     if is_grid:
-        children = _transform_children(element.children, in_drawing=is_drawing)
+        children = _transform_children(element.children, in_drawing=is_drawing, section=section)
         columns = _grid_columns(cn)
         if columns is None:
             # A Grid whose column count cannot be read is not a Grid we can
@@ -1735,18 +1855,18 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
                 [c for c in element.children if isinstance(c, JSXElement)]) >= 2:
             cleaned += " flex-wrap"
         props["className"] = _filter_container_height(cleaned)
-        children = _transform_children(element.children, strip_positions=True)
+        children = _transform_children(element.children, strip_positions=True, section=section)
         return _make_node("Row", props, children)
 
     if "flex-col" in cn:
         # Stack (flex-col): strip fixed heights so content can grow past Figma height
         if "className" in props:
             props["className"] = _filter_container_height(props["className"])
-        children = _transform_children(element.children, in_drawing=is_drawing)
+        children = _transform_children(element.children, in_drawing=is_drawing, section=section)
         return _make_node("Stack", props, children)
 
     if _FLEX_ROW_RE.search(cn):
-        children = _transform_children(element.children, in_drawing=is_drawing)
+        children = _transform_children(element.children, in_drawing=is_drawing, section=section)
         return _make_node("Row", props, children)
 
     # Inferred flow from absolute-offset children (C.8 generalisation):
@@ -1768,7 +1888,7 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
         # Strip fixed heights — the new flex container should grow with content
         if "className" in props:
             props["className"] = _filter_container_height(props["className"])
-        children = _transform_children(element.children, strip_positions=True)
+        children = _transform_children(element.children, strip_positions=True, section=section)
         node_type = "Stack" if inferred_flow == "col" else "Row"
         return _make_node(node_type, props, children)
 
@@ -1792,12 +1912,12 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
     # against a wrapper that is only as tall as its own flow content.
     if not props.get("className") and not _canvas_mode():
         props["className"] = "relative w-full h-full"
-    children = _transform_children(element.children, in_drawing=is_drawing)
+    children = _transform_children(element.children, in_drawing=is_drawing, section=section)
     return _make_node("Container", props, children)
 
 
 def _transform_children(children: list, *, strip_positions: bool = False,
-                        in_drawing: bool = False) -> list:
+                        in_drawing: bool = False, section: str | None = None) -> list:
     """Transform a list of JSXElement/str children into schema nodes.
 
     `strip_positions`: the parent was a hand-placed stack that now flows, so
@@ -1805,7 +1925,10 @@ def _transform_children(children: list, *, strip_positions: bool = False,
     this subtree keeps every position and is never rewritten.
     """
     saved = _in_drawing()
+    saved_section = getattr(_state, "section", "")
     _state.in_drawing = saved or in_drawing
+    if section:
+        _state.section = section
     result = []
     try:
         for child in children:
@@ -1817,6 +1940,7 @@ def _transform_children(children: list, *, strip_positions: bool = False,
             # (they're consumed by _descendant_text in parent classification)
     finally:
         _state.in_drawing = saved
+        _state.section = saved_section
     return result
 
 
@@ -1845,16 +1969,22 @@ def transform_jsx_to_schema(
     dataSources: [], children: [<root_node>]}.
     """
     root_element = parse_jsx_tree(jsx_source)
+    _state.root = root_element
     _state.canvas_mode = canvas is not None
     fit = frame_fit(root_element) if _state.canvas_mode else None
     _state.canvas_fit = fit or "scale"
     _state.in_drawing = False
+    _state.heading = ""
+    _state.section = ""
     try:
         root_node = _transform_node(root_element)
     finally:
         _state.canvas_mode = False
         _state.canvas_fit = "scale"
         _state.in_drawing = False
+        _state.heading = ""
+        _state.section = ""
+        _state.root = None
 
     # The MCP root commonly carries `size-full` which collapses to zero
     # height when its scaffold parent isn't bounded — the entire design

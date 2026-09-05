@@ -60,3 +60,26 @@ def test_on_a_detail_page_a_card_aimed_at_the_list_opens_another_item():
     root = {"type": "Stack", "props": {}, "children": [_card("/policies", "Legal Hold", "v1.4")]}
     assert bind_cards(root, "/policies/[id]", ROUTES) == 1
     assert root["children"][0]["props"]["navigate"] == "/policies/[id]"
+
+
+def _button(label, navigate):
+    return {"type": "Button", "props": {"label": label, "navigate": navigate}, "children": []}
+
+
+def test_a_view_control_aimed_at_a_list_opens_the_item():
+    """"View →" in a table of cases was bound to `/cases`, the list the
+    reader is already on. The label had already chosen: one case."""
+    root = {"type": "Stack", "props": {}, "children": [_button("View →", "/policies"), _button("View Case", "/policies")]}
+    assert bind_cards(root, "/dashboard", ROUTES) == 2
+    assert all(c["props"]["navigate"] == "/policies/[id]" for c in root["children"])
+
+
+def test_a_control_that_does_not_say_view_keeps_its_list():
+    root = {"type": "Stack", "props": {}, "children": [_button("All policies", "/policies"), _button("+ New", "/policies")]}
+    assert bind_cards(root, "/dashboard", ROUTES) == 0
+
+
+def test_a_view_control_with_no_item_route_is_left_alone():
+    root = {"type": "Stack", "props": {}, "children": [_button("View →", "/dashboard")]}
+    assert bind_cards(root, "/policies", ROUTES) == 0
+

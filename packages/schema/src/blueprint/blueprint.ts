@@ -958,7 +958,48 @@ export const Workflow = z.object({
   steps: z.array(WorkflowStep).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */
   launchedFrom: z.array(PageId).default([]),
+  /**
+   * What the workflow needs to start. A control that runs it must supply
+   * every required input from what its page has in scope — the record a
+   * detail page shows, the fields a form collects — and the composer refuses
+   * a control that cannot. Undeclared, nothing could be checked: a button on
+   * a case page sent `{}` and the first step failed to find the case.
+   */
+  inputs: z.array(z.object({
+    name: z.string().min(1),
+    kind: z.enum(["record", "field"]),
+    /** For a record input: the entity whose record is needed. */
+    entity: EntityId.optional(),
+    /** For a field input: string, number, boolean, date, enum, text, … */
+    type: z.string().optional(),
+    required: z.boolean().default(true),
+    description: z.string().default(""),
+  })).default([]),
   ...artifactBase,
+});
+
+/**
+ * What a rule does when its condition holds. The same actions the rules
+ * panel authors and the runtime applies: a form effect (show or hide,
+ * require, lock, narrow the options of a field), a value (set, default,
+ * clear), a refusal (show_error), or a side effect.
+ */
+export const RuleAction = z.object({
+  type: z.enum([
+    "set_field", "set_default", "clear_field", "show_error",
+    "set_visibility", "set_required", "set_readonly", "set_options",
+    "recommendation", "trigger_workflow", "send_notification",
+  ]),
+  field: z.string().optional(),
+  valueMode: z.enum(["literal", "field", "formula"]).optional(),
+  value: z.string().optional(),
+  message: z.string().optional(),
+  visible: z.boolean().optional(),
+  required: z.boolean().optional(),
+  readonly: z.boolean().optional(),
+  /** set_options: the options the field offers while the condition holds. */
+  options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+  workflow: WorkflowId.optional(),
 });
 
 export const BusinessRule = z.object({
@@ -969,6 +1010,22 @@ export const BusinessRule = z.object({
   /** Machine-evaluable form. */
   expression: z.string().optional(),
   appliesTo: z.array(AnyArtifactId).default([]),
+  /**
+   * A rule with effects. `kind: "condition_action"` names the entity whose
+   * form it governs, a FEEL condition over that entity's fields, and what
+   * happens when it holds (and, optionally, when it does not). Projected
+   * into the runtime's rules directory beside the panel's own rules, so a
+   * rule the agent authored fires on the form exactly as one a person
+   * authored. A rule with only a statement is prose; it constrains people,
+   * not forms.
+   */
+  kind: z.enum(["statement", "condition_action"]).default("statement"),
+  entity: EntityId.optional(),
+  when: z.string().optional(),
+  then: z.array(RuleAction).default([]),
+  otherwise: z.array(RuleAction).default([]),
+  scope: z.enum(["entity", "form", "server"]).default("form"),
+  salience: z.number().int().default(0),
   ...artifactBase,
 });
 

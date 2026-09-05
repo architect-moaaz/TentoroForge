@@ -23,7 +23,10 @@ export const InputNode = z.object({
   type: z.literal("Input"),
   props: z.object({
     ...baseField,
-    type: z.enum(["text", "email", "password", "number", "url", "tel"]),
+    // `search`: the page's search box. It writes `q` to the URL, which the
+    // page passes to its list source's `search`; the searchable-columns
+    // manifest decides what it matches.
+    type: z.enum(["text", "email", "password", "number", "url", "tel", "search"]),
     placeholder: z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
@@ -42,10 +45,20 @@ const SelectOption = z.object({
 // as the fallback shown when the source is missing/empty. This is what turns a
 // Task→Project FK into a real list of selectable projects instead of one
 // hard-coded `{{projects[0].id}}` entry.
+// Options that depend on another field: the rows of `source` whose `column`
+// equals the current value of the sibling field `field` (a state Select
+// narrowing a city Select). Derived by the composer from a relationship in
+// the data model, never invented; checked against the form and the entity.
+const DependsOn = z.object({
+  field:  z.string().min(1),
+  column: z.string().min(1),
+}).strict();
+
 const OptionsFrom = z.object({
   source: z.string().min(1),
   value:  z.string().min(1).default("id"),
   label:  z.string().min(1).default("name"),
+  dependsOn: DependsOn.optional(),
 }).strict();
 
 export const SelectNode = z.object({

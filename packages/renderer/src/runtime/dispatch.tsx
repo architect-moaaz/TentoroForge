@@ -54,7 +54,7 @@ const OPTION_SOURCE_TYPES = new Set(["Select", "Combobox", "MultiSelect"]);
 function expandOptionsFrom(node: any, data: Record<string, unknown>): any {
   const props = node.props as Record<string, unknown>;
   const of = props.optionsFrom as
-    | { source?: unknown; value?: unknown; label?: unknown }
+    | { source?: unknown; value?: unknown; label?: unknown; dependsOn?: { field?: unknown; column?: unknown } }
     | undefined;
   if (!of || typeof of.source !== "string") return node;
 
@@ -66,6 +66,12 @@ function expandOptionsFrom(node: any, data: Record<string, unknown>): any {
   const valueKey = typeof of.value === "string" && of.value ? of.value : "id";
   const labelKey = typeof of.label === "string" && of.label ? of.label : "name";
   const options: Array<{ value: string; label: string }> = [];
+  // Dependent options keep, per option, the value of the column the parent
+  // field is matched on, so the Select can narrow itself to the parent's
+  // current value without another fetch.
+  const dep = of.dependsOn && typeof of.dependsOn.field === "string" && typeof of.dependsOn.column === "string"
+    ? { field: of.dependsOn.field, column: of.dependsOn.column } : null;
+  const keys: Record<string, string> = {};
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const raw = (row as Record<string, unknown>)[valueKey];
@@ -77,10 +83,14 @@ function expandOptionsFrom(node: any, data: Record<string, unknown>): any {
         ? value
         : String(labelRaw);
     options.push({ value, label });
+    if (dep) {
+      const k = (row as Record<string, unknown>)[dep.column];
+      if (k !== undefined && k !== null) keys[value] = String(k);
+    }
   }
   // No usable rows (e.g. every item lacked the value field) → keep the fallback.
   if (options.length === 0) return { ...node, props: rest };
-  return { ...node, props: { ...rest, options } };
+  return { ...node, props: { ...rest, options , ...(dep ? { dependsOn: { field: dep.field, keys } } : {}) } };
 }
 
 export function renderNode(node: any, ctx: DispatchContext): ReactNode {

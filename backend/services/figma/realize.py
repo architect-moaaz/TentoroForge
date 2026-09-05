@@ -91,13 +91,18 @@ def _chart(entry: dict, source: str) -> dict:
 
 
 def _table(entry: dict, source: str) -> dict:
-    columns = [{"key": c, "label": _label_for(c)} for c in entry["columns"]]
+    # The labels the designer wrote head the columns when they are known
+    # ("Case No", not "Case Number"); a row link makes each row the "View →"
+    # the designer drew beside it.
+    labels = entry.get("columnLabels") or {}
+    columns = [{"key": c, "label": labels.get(c) or _label_for(c)} for c in entry["columns"]]
     return {
         "type": "Table",
         "props": {
             "columns": columns,
             "data": f"{{{{{source}}}}}",
             **({"title": entry["title"]} if entry.get("title") else {}),
+            **({"rowHref": entry["rowHref"]} if entry.get("rowHref") else {}),
         },
         "children": [],
     }
