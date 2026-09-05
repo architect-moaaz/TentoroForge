@@ -387,7 +387,7 @@ class InvalidWorkflowStep(ValueError):
     leaves a node's declared configuration empty."""
 
 
-def check_workflow_steps(result: "AgentResult") -> None:
+def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
 
     The same argument as :func:`check_pattern_templates`: accepting a step
@@ -407,8 +407,37 @@ def check_workflow_steps(result: "AgentResult") -> None:
     for proposal in proposals:
         name = proposal.body.get("name") or proposal.natural_key
         problems.extend(f"{name}/{e}" for e in catalog.workflow_errors(proposal.body))
+    # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
+    # refuses, a function the engine lacks, a template naming what the engine
+    # never holds — each is a workflow the author can fix now and nobody can
+    # fix later. Checked here, at the author, never at the pages that bind it.
+    from services.blueprint.functional_completeness import authoring_findings
+    problems.extend(f["detail"] for f in authoring_findings(
+        {"workflows": [p.body for p in proposals], "businessRules": [],
+         "data": (doc or {}).get("data") or {}}))
     if problems:
         raise InvalidWorkflowStep("; ".join(problems[:8]))
+
+
+class InvalidBusinessRule(ValueError):
+    """A rule the engine could not evaluate as written."""
+
+
+def check_business_rules(result: "AgentResult", doc: dict | None) -> None:
+    """A rule names an entity the data model has, fields that entity has, and
+    a condition the engine's parser reads — refused at the author, with the
+    fault named, never at the forms that later fire it."""
+    proposals = [p for p in result.proposals if p.section == "businessRules"]
+    if not proposals:
+        return
+    from services.blueprint.functional_completeness import authoring_findings
+    findings = authoring_findings({
+        "businessRules": [p.body for p in proposals],
+        "workflows": [],
+        "data": (doc or {}).get("data") or {},
+    })
+    if findings:
+        raise InvalidBusinessRule("; ".join(f["detail"] for f in findings[:8]))
 
 
 class InvalidPatternTemplate(ValueError):
@@ -501,16 +530,16 @@ def check_pattern_templates(result: AgentResult,
     # caller that cannot say which workflows exist would otherwise reject every
     # real binding as invented.
     if doc is not None:
-        from services.blueprint.functional_completeness import (
-            functional_findings,
-        )
+        from services.blueprint.functional_completeness import page_findings
 
         pages = {p.get("id"): p for p in (doc.get("pages") or [])}
         for proposal in proposals:
             page_id = proposal.body.get("page")
-            findings = functional_findings({
+            findings = page_findings({
                 "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
                 "workflows": doc.get("workflows") or [],
+                "data": doc.get("data") or {},
+                "businessRules": [],
                 "pageLayouts": [proposal.body],
             })
             problems.extend(f["detail"] for f in findings)
@@ -543,7 +572,8 @@ def apply_agent_result(
     result.validate()
     check_capability(result)
     check_pattern_templates(result, svc.doc)
-    check_workflow_steps(result)
+    check_workflow_steps(result, svc.doc)
+    check_business_rules(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

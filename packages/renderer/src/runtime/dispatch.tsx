@@ -40,6 +40,10 @@ export type DispatchContext = {
 };
 
 
+/** Props a component fills from each row (or event, or card), never from
+ *  the page: `{{id}}` inside them belongs to the row. */
+const ROW_TEMPLATE_PROPS = new Set(["rowHref", "eventHref", "cardHref", "rowActions", "bulkActions"]);
+
 /** Input nodes that support `props.optionsFrom` dataSource-driven options. */
 const OPTION_SOURCE_TYPES = new Set(["Select", "Combobox", "MultiSelect"]);
 
@@ -113,7 +117,17 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // using the formal `bind` field. Children stay un-walked here; each child's
   // own renderNode call will run its own interpolation pass.
   if (node.props && typeof node.props === "object") {
-    const interp = interpolateDeep(node.props, { ...ctx.data, user: ctx.user });
+    // A ROW TEMPLATE IS NOT A PAGE BINDING. `rowHref: "/cases/{{id}}"` is
+    // filled by the Table from each row; interpolated here against the page
+    // data, where there is no `id`, the placeholder was dropped and every
+    // row opened `/cases/` — the list the reader was already on. The props
+    // that components fill per row pass through untouched.
+    const rowTemplated: Record<string, unknown> = {};
+    const pageBound: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries((node.props ?? {}) as Record<string, unknown>)) {
+      (ROW_TEMPLATE_PROPS.has(k) ? rowTemplated : pageBound)[k] = v;
+    }
+    const interp = { ...(interpolateDeep(pageBound, { ...ctx.data, user: ctx.user }) as Record<string, unknown>), ...rowTemplated };
     node = { ...node, props: interp };
   }
 

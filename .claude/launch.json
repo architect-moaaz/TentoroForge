@@ -85,6 +85,19 @@
       ],
       "cwd": "output/wzja848q/app",
       "port": 6515
+    },
+    {
+      "name": "figma-case",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6516"
+      ],
+      "cwd": "output/objs36l0/app",
+      "port": 6516
     }
   ]
 }

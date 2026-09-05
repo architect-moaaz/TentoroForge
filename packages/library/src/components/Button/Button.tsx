@@ -194,21 +194,24 @@ export function Button({
           // ctxDispatch can be undefined when Provider/library resolve different
           // renderer copies in a standalone app — fall back to a direct API POST.
           const dispatch = __dispatch ?? ctxDispatch ?? fallbackDispatch;
-          // If no explicit args and we're inside a form, send its field values so
-          // a workflow-bearing submit button still carries the user's input.
-          let dispatchArgs = args as Record<string, unknown> | undefined;
-          if (dispatchArgs === undefined) {
+          // The enclosing form's values carry the user's input; explicit
+          // `args` are what the control itself decides (an Approve button is
+          // the decision) and win over a field of the same name. Both reach
+          // the workflow — replacing one with the other dropped whichever
+          // the author had not repeated.
+          const vals: Record<string, unknown> = {};
+          {
             const el = (e && (e.currentTarget as HTMLElement)) || null;
             const form =
               (el && typeof el.closest === "function" && el.closest("form")) ||
               (typeof document !== "undefined" ? document.querySelector("form") : null);
             if (form) {
               const fd = new FormData(form as HTMLFormElement);
-              const vals: Record<string, unknown> = {};
               fd.forEach((v, k) => { vals[k] = v; });
-              if (Object.keys(vals).length > 0) dispatchArgs = vals;
             }
           }
+          const merged = { ...vals, ...((args as Record<string, unknown> | undefined) ?? {}) };
+          const dispatchArgs = Object.keys(merged).length > 0 ? merged : undefined;
           setRunning(true);
           try {
             await dispatch(workflow, dispatchArgs);

@@ -90,3 +90,32 @@ def test_a_search_over_an_entity_with_no_text_says_which_fields_it_has():
     doc = _doc(SEARCH, [{"name": "counters", "op": "list", "entity": "Counter"}], [COUNTER])
     rules = [(f["rule"], f["detail"]) for f in functional_findings(doc)]
     assert any(r == "search-without-columns" and "Counter" in d and "count" in d for r, d in rules), rules
+
+
+def test_a_drawn_search_box_is_given_the_pages_list():
+    """The frame has no sources; the page says which entity it is about."""
+    from services.blueprint.figma_layout import _search_source_for
+    doc = {"data": {"entities": [POLICY]}}
+    page = {"data": {"primaryEntity": "ENTITY-005"}}
+    assert _search_source_for(doc, page, SEARCH, []) == [{"name": "policyList", "op": "list", "entity": "Policy", "limit": 50}]
+    assert _search_source_for(doc, page, SEARCH, [{"name": "x", "op": "list", "entity": "Policy"}]) == []
+    assert _search_source_for(doc, {"data": {}}, SEARCH, []) == []
+
+
+def test_a_drawn_search_box_with_nothing_to_search_stays_text():
+    """A page for an entity the model never defined: the box keeps its words
+    and loses the affordance, and the page is not refused."""
+    from services.blueprint.figma_layout import _demote_search_boxes
+    import copy
+    root = copy.deepcopy(SEARCH)
+    assert _demote_search_boxes(root) == 1
+    box = root["children"][0]
+    assert box["type"] == "Text" and box["props"]["content"] == "Search" and "placeholder" not in box["props"]
+
+
+def test_the_composer_demotes_only_when_no_source_can_be_given():
+    import inspect
+    from services.blueprint import figma_layout
+    src = inspect.getsource(figma_layout.compose)
+    assert "_demote_search_boxes(" in src and src.index("_search_source_for(") < src.index("_demote_search_boxes(")
+

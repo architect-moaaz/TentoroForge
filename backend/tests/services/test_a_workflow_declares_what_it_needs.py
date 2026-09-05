@@ -91,7 +91,7 @@ def test_a_form_missing_the_field_says_which_input_to_add():
     form = {"type": "Form", "props": {}, "children": [
         {"type": "Input", "props": {"name": "other"}, "children": []}, _btn("FLOW-010")]}
     doc = _doc("/cases/[id]", {"type": "Stack", "props": {}, "children": [form]})
-    assert any("add an Input named 'note'" in d for _r, d in _rules(doc))
+    assert any("add a field named 'note'" in d for _r, d in _rules(doc))
 
 
 def test_a_workflow_that_declares_nothing_is_not_judged():
@@ -130,3 +130,84 @@ def test_projection_carries_the_record_where_the_form_is_bound():
     from services.blueprint import page_planner
     src = inspect.getsource(page_planner.plan_page)
     assert "carry_record(doc, page" in src
+
+
+# ------------------------------------------ what a real run taught the rule
+
+def test_a_declarative_forms_fields_count():
+    """A generated Form declares its fields in props; the rule refused
+    /cases/new for lacking a field the Form plainly collected."""
+    form = {"type": "Form", "props": {"workflow": "FLOW-010", "fields": [{"name": "note", "type": "text"}]}, "children": []}
+    doc = _doc("/cases/[id]", {"type": "Stack", "props": {}, "children": [form]})
+    assert not [r for r, _ in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+
+
+def test_a_detail_page_reaches_the_record_its_record_links_to():
+    """A write-off's page reaches its case through `caseId`."""
+    doc = _doc("/write-offs/[id]", {"type": "Stack", "props": {}, "children": [_btn("FLOW-008")]})
+    doc["data"]["entities"].append({"id": "ENTITY-009", "name": "WriteOff", "fields": [{"name": "id"}, {"name": "caseId"}]})
+    doc["data"]["relationships"] = [{"from": "ENTITY-009", "to": "ENTITY-002", "kind": "one_to_many", "fromField": "caseId"}]
+    doc["pages"][0]["data"]["primaryEntity"] = "ENTITY-009"
+    assert not [r for r, _ in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+    layout = {"root": doc["pageLayouts"][0]["root"], "dataSources": [{"name": "writeOffs", "op": "get", "entity": "WriteOff"}]}
+    assert carry_record(doc, doc["pages"][0], layout) == 1
+    assert layout["root"]["children"][0]["props"]["args"]["case"] == "{{writeOffs.caseId}}"
+
+
+def test_a_tables_row_action_carries_the_row():
+    table = {"type": "Table", "props": {"label": "Cases", "data": "{{cases}}", "columns": [], "rowActions": [{"label": "Approve", "workflow": "FLOW-008"}]}, "children": []}
+    doc = _doc("/approvals", {"type": "Stack", "props": {}, "children": [table]}, [{"name": "cases", "op": "list", "entity": "Case"}])
+    assert not [r for r, _ in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+
+
+def test_a_table_cannot_collect_fields_and_says_what_can():
+    table = {"type": "Table", "props": {"label": "Cases", "data": "{{cases}}", "columns": [], "emptyAction": {"label": "Create", "workflow": "FLOW-010"}}, "children": []}
+    doc = _doc("/approvals", {"type": "Stack", "props": {}, "children": [table]}, [{"name": "cases", "op": "list", "entity": "Case"}])
+    rules = [d for r, d in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+    assert any("a table collects no fields" in d and "navigates" in d for d in rules), rules
+
+
+def test_the_refusal_names_the_entity_not_its_id():
+    doc = _doc("/cases", {"type": "Stack", "props": {}, "children": [_btn("FLOW-008")]})
+    rules = [d for r, d in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+    assert any("needs a Case record" in d for d in rules), rules
+
+
+def test_a_control_inside_a_repeated_item_carries_the_item():
+    """An Approve button drawn once per pending case, inside a Repeat over
+    the cases list, has the case in scope."""
+    rep = {"type": "Repeat", "props": {"source": "{{cases}}"}, "children": [
+        {"type": "Card", "props": {}, "children": [_btn("FLOW-008")]}]}
+    doc = _doc("/approvals", {"type": "Stack", "props": {}, "children": [rep]}, [{"name": "cases", "op": "list", "entity": "Case"}])
+    assert not [r for r, _ in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+
+
+def test_a_repeat_over_another_entity_does_not_count():
+    rep = {"type": "Repeat", "props": {"source": "{{users}}"}, "children": [_btn("FLOW-008")]}
+    doc = _doc("/approvals", {"type": "Stack", "props": {}, "children": [rep]}, [{"name": "users", "op": "list", "entity": "User"}])
+    doc["data"]["entities"].append({"id": "ENTITY-001", "name": "User", "fields": [{"name": "id"}]})
+    assert [r for r, _ in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+
+
+def test_a_control_that_opens_a_dialog_the_page_lacks_is_refused():
+    """Five buttons on a real case page opened dialogs by id, and no dialog
+    existed on the page: five controls that did nothing."""
+    btn = {"type": "Button", "props": {"label": "Decide Approval", "opensDialog": "formDecision"}, "children": []}
+    doc = _doc("/cases/[id]", {"type": "Stack", "props": {}, "children": [btn]})
+    rules = [(r, d) for r, d in _rules(doc) if r == "dialog-not-defined"]
+    assert rules and "'formDecision'" in rules[0][1]
+
+
+def test_a_dialog_the_page_contains_satisfies_it():
+    btn = {"type": "Button", "props": {"label": "Decide Approval", "opensDialog": "formDecision"}, "children": []}
+    dlg = {"id": "formDecision", "type": "Dialog", "props": {"title": "Decide"}, "children": []}
+    doc = _doc("/cases/[id]", {"type": "Stack", "props": {}, "children": [btn, dlg]})
+    assert not [r for r, _ in _rules(doc) if r == "dialog-not-defined"]
+
+
+def test_the_refusal_says_where_the_control_sits():
+    card = {"type": "Card", "props": {}, "children": [_btn("FLOW-008")]}
+    doc = _doc("/approvals", {"type": "Stack", "props": {}, "children": [card]})
+    rules = [d for r, d in _rules(doc) if r == "workflow-inputs-unsatisfied"]
+    assert any("(inside Stack > Card)" in d and "`rowActions`" in d for d in rules), rules
+

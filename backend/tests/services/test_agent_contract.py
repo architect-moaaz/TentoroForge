@@ -493,7 +493,7 @@ def workflow_result(steps, trigger=None) -> AgentResult:
         proposals=[ArtifactProposal(
             section="workflows", natural_key=workflow_key("Approve expense"),
             body={"name": "Approve expense", "trigger": trigger or {"kind": "manual"},
-                  "steps": steps},
+                  "inputs": [{"name": "amount", "kind": "field"}], "steps": steps},
         )],
     )
 

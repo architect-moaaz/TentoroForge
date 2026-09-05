@@ -118,6 +118,12 @@ Tests: `__tests__/run-ownership-tests.sh` (renders the manifest with the real
 projection, then runs the shipped `data-engine.ts` against it with `drizzle-orm`
 and `@/db` stubbed — no bundler, no `node_modules`).
 
+`__tests__/run-insert-tests.sh` runs the shipped `workflows/index.ts`
+`_finalizeInsert` the same way: a value is shaped by drizzle's own `dataType`
+(a Date for `timestamp()`, text for a string-mode `date()`), because
+postgres.js has no serializer for a Date on a text-bound parameter and throws
+from `Buffer.byteLength` — the Create Case insert failed on its due date.
+
 ## API Route Example
 
 ```ts

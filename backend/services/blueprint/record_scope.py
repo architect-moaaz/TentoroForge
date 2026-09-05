@@ -58,9 +58,25 @@ def carry_record(doc: dict, page: dict, layout: dict) -> int:
             args = dict(props.get("args") or {}) if isinstance(props.get("args"), dict) else {}
             before = dict(args)
             for inp in wf.get("inputs") or []:
-                if inp.get("kind") == "record" and str(inp.get("entity") or "") in (primary, name_of):
+                if inp.get("kind") != "record":
+                    continue
+                wanted = str(inp.get("entity") or "")
+                if wanted in (primary, name_of):
                     args.setdefault(str(inp.get("name") or "id"), f"{{{{{source}.id}}}}")
                     args.setdefault("id", f"{{{{{source}.id}}}}")
+                    continue
+                # A record the page's record links to: a write-off's page
+                # reaches its case through `caseId`.
+                fk = next((str(r.get("fromField")) for r in _live((doc.get("data") or {}).get("relationships"))
+                           if str(r.get("from")) == primary and str(r.get("to")) in (wanted, entities.get(wanted, ""))
+                           and r.get("fromField")), None)
+                if not fk:
+                    fk = next((str(r.get("fromField")) for r in _live((doc.get("data") or {}).get("relationships"))
+                               if str(r.get("from")) == primary and entities.get(str(r.get("to")), "") == wanted
+                               and r.get("fromField")), None)
+                if fk:
+                    args.setdefault(str(inp.get("name") or "id"), f"{{{{{source}.{fk}}}}}")
+                    args.setdefault("id", f"{{{{{source}.{fk}}}}}")
             if args != before:
                 props["args"] = args
                 node["props"] = props

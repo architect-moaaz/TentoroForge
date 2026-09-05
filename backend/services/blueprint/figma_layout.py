@@ -192,6 +192,18 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
 
     routes = [str(p.get("route") or "") for p in (svc.doc.get("pages") or [])]
     retargeted = _cards.bind_cards(schema["children"][0], str(page.get("route") or ""), routes)
+    # A DRAWN SEARCH BOX SEARCHES THE PAGE'S ENTITY. The frame has no data
+    # sources of its own; the box needs a list to search, and the page says
+    # which entity it is about. The list source is derived from that, not
+    # invented, so the completeness rule sees a search with something to
+    # search rather than refusing the drawn page.
+    extra_sources = _search_source_for(svc.doc, page, schema["children"][0], list(schema.get("dataSources") or []))
+    if not extra_sources and not any(isinstance(x, dict) and x.get("op") in (None, "list") for x in (schema.get("dataSources") or [])):
+        # NOTHING TO SEARCH: a page with no entity of its own (a policy
+        # manager drawn for an entity the model never defined). The box
+        # stays the text it was drawn as, without the affordance — the same
+        # answer an unbound button gets — rather than the page being refused.
+        _demote_search_boxes(schema["children"][0])
     if retargeted:
         logger.info("[figma] %s: %d card(s) retargeted from the page itself",
                     page.get("id"), retargeted)
@@ -252,7 +264,7 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
 
     out = {
         "root": root,
-        "dataSources": list(schema.get("dataSources") or []) + live_sources,
+        "dataSources": list(schema.get("dataSources") or []) + live_sources + extra_sources,
         "assets": dict(assets or {}),
     }
     if schema.get("_figmaCanvas"):
@@ -311,6 +323,41 @@ def _set_action_vocabulary(doc: dict) -> None:
                               workflows=workflows or None)
     except Exception:  # noqa: BLE001 — an enrichment, never the page
         logger.info("[figma] could not set the action vocabulary")
+
+
+def _demote_search_boxes(node: Any) -> int:
+    """Search inputs with nothing to search become the text they were drawn as."""
+    n = 0
+    if isinstance(node, dict):
+        props = node.get("props") or {}
+        if node.get("type") == "Input" and props.get("type") == "search":
+            node["type"] = "Text"
+            node["props"] = {k: v for k, v in props.items() if k in ("className", "style", "_figmaNodeId")}
+            node["props"]["content"] = str(props.get("placeholder") or "")
+            node["children"] = []
+            n += 1
+        for c in node.get("children") or []:
+            n += _demote_search_boxes(c)
+    return n
+
+
+def _search_source_for(doc: dict, page: dict, root: dict, existing: list[dict]) -> list[dict]:
+    """The list source a drawn search box needs, when the page has none."""
+    def has_search(n):
+        if isinstance(n, dict):
+            p = n.get("props") or {}
+            if n.get("type") == "Input" and p.get("type") == "search":
+                return True
+            return any(has_search(c) for c in n.get("children") or [])
+        return False
+    if not has_search(root) or any(isinstance(s, dict) and s.get("op") in (None, "list") for s in existing):
+        return []
+    primary = str((page.get("data") or {}).get("primaryEntity") or "")
+    ent = next((e for e in (doc.get("data") or {}).get("entities") or [] if e.get("id") == primary), None)
+    if not ent:
+        return []
+    name = str(ent.get("name") or "")
+    return [{"name": name[:1].lower() + name[1:] + "List", "op": "list", "entity": name, "limit": 50}]
 
 
 def _classify_tables(svc: Any, code: str) -> list[dict]:
