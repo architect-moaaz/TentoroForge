@@ -204,7 +204,7 @@ def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
                 continue
     finally:
         set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
-    shared = _chrome.shared_chrome(roots)
+    shared = _chrome.chrome_for(roots)
     if not shared or not roots:
         return {}
     _content, removed = _chrome.split(roots[0], shared)
@@ -242,7 +242,7 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
                 continue
     finally:
         set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
-    shared = _chrome.shared_chrome(list(trees.values()))
+    shared = _chrome.chrome_for(list(trees.values()))
 
     def _words(text) -> bool:
         return isinstance(text, str) and len(text.strip()) >= 3 and any(ch.isalpha() for ch in text)

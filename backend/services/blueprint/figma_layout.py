@@ -481,6 +481,6 @@ def _shared_chrome_for(svc: Any) -> set[str]:
     finally:
         set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
 
-    shared = _chrome.shared_chrome(roots)
+    shared = _chrome.chrome_for(roots)
     _CHROME_CACHE[key] = shared
     return shared

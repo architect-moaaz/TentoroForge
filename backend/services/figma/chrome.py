@@ -128,6 +128,49 @@ def shared_chrome(roots: Iterable[dict]) -> set[str]:
             if n >= needed and labelled.get(fp, 0) >= MIN_LABELS}
 
 
+def lone_chrome(root: dict) -> set[str]:
+    """The rail of a design that has only one screen.
+
+    `shared_chrome` reads a rail as what MOST screens share; a single frame
+    shares nothing with itself, so its rail composed as page content and the
+    application rendered two navigations — the shell's beside the drawing's.
+    On one screen the rail is the column of the first row that carries the
+    most labels while being narrower than the content beside it: a design
+    draws its destinations down the side, its content across the rest.
+    """
+    if not isinstance(root, dict):
+        return set()
+    first = next((c for c in root.get("children") or [] if isinstance(c, dict)), None)
+    columns = [c for c in (first or {}).get("children") or [] if isinstance(c, dict)]
+    if len(columns) < 2:
+        return set()
+
+    def width(node: dict) -> float:
+        cls = str((node.get("props") or {}).get("className") or "")
+        for pat in (r"flex-\[(\d+(?:\.\d+)?)_0_0\]", r"max-w-\[(\d+(?:\.\d+)?)px\]", r"\bw-\[(\d+(?:\.\d+)?)px\]"):
+            m = re.search(pat, cls)
+            if m:
+                return float(m.group(1))
+        return 0.0
+
+    widest = max(columns, key=width)
+    rails = [c for c in columns if c is not widest and len(_labels(c, [])) >= MIN_LABELS
+             and (width(c) == 0.0 or width(c) < width(widest))]
+    if not rails:
+        return set()
+    rail = max(rails, key=lambda c: len(_labels(c, [])))
+    return {fingerprint(rail)}
+
+
+def chrome_for(roots: Iterable[dict]) -> set[str]:
+    """What the screens share when there are several; the lone rail when
+    there is one."""
+    roots = [r for r in roots if isinstance(r, dict)]
+    if len(roots) >= 2:
+        return shared_chrome(roots)
+    return lone_chrome(roots[0]) if roots else set()
+
+
 # --------------------------------------------------------------------------
 # splitting
 # --------------------------------------------------------------------------
@@ -230,13 +273,64 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
     """
     entries: list[tuple[str, dict]] = []   # (label, props) in document order
 
+    def _px(node: dict) -> float:
+        cls = str((node.get("props") or {}).get("className") or "")
+        m = re.search(r"\b(?:size|w|h)-\[(\d+(?:\.\d+)?)px\]", cls)
+        return float(m.group(1)) if m else 0.0
+
+    def _icon_size(node: dict, inherited: float = 0.0) -> float:
+        # A logo is often a sized box holding a `size-full` image (a flag
+        # emblem drawn as vectors); the box's size is the icon's size.
+        for child in node.get("children") or []:
+            if not isinstance(child, dict):
+                continue
+            if child.get("type") in ("Image", "Icon"):
+                return _px(child) or inherited
+            if child.get("type") not in ("Button", "Text", "Heading"):
+                found = _icon_size(child, _px(child) or inherited)
+                if found:
+                    return found
+        return 0.0
+
+    def _has_icon(node: dict) -> bool:
+        for child in node.get("children") or []:
+            if not isinstance(child, dict):
+                continue
+            if child.get("type") in ("Image", "Icon"):
+                return True
+            if child.get("type") not in ("Button", "Text", "Heading") and _has_icon(child):
+                return True
+        return False
+
     def walk(node: Any) -> None:
         if not isinstance(node, dict):
             return
         props = node.get("props") or {}
+        # AN ICON BESIDE A LABEL IS A DESTINATION. A rail item drawn as icon +
+        # label + caption (+ badge) is one item, not three labels: its first
+        # words are the destination and the rest describe it. Read as three,
+        # the caption of one item became the heading of the next.
+        labels = _labels(node, [])
+        cls = str(props.get("className") or "")
+        filled = any(t.startswith("bg-") and t not in ("bg-transparent", "bg-none") for t in cls.split())
+        # A FILLED BLOCK OF SEVERAL LABELS IS A STATUS CARD, NOT NAVIGATION —
+        # "session in progress / 2026/15 / Sunday 31 August" drawn in the rail.
+        # Read as labels, its last line became the heading of the items below.
+        if node.get("type") not in ("Button",) and filled and not _has_icon(node) and len(labels) >= 2:
+            return
+        if node.get("type") != "Button" and labels and len(labels) <= 3 and _has_icon(node):
+            # THE BRAND IS THE BIG ICON. A logo beside a name reads as icon +
+            # label like any destination; what sets it apart is size — a
+            # destination's glyph is 16-24px, a logo 32px and up — and place,
+            # before any destination has been read.
+            if not entries and _icon_size(node) >= 32:
+                entries.append((labels[0], {**props, "_brand": True}))
+                return
+            entries.append((labels[0], {**props, "_item": True}))
+            return
         text = props.get("label") or props.get("content") or props.get("text")
         if isinstance(text, str) and text.strip():
-            entries.append((text.strip(), props))
+            entries.append((text.strip(), {**props, "_item": node.get("type") == "Button"}))
         for child in node.get("children") or []:
             walk(child)
 
@@ -252,7 +346,7 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
     def _is_item(idx: int) -> bool:
         raw, props = entries[idx]
         return bool(_clean(raw)) and (
-            any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw)))
+            any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw)) or bool(props.get("_item")))
 
     heading_at = {i for i, (raw, props) in enumerate(entries)
                   if _clean(raw) and not _is_item(i)
@@ -266,8 +360,11 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
         label = _clean(raw)
         if not label:
             continue
+        if props.get("_brand"):
+            brand.append(label)
+            continue
         if _is_item(i):
-            action = {k: props[k] for k in _ACTIONS if props.get(k)}
+            action = {k: props[k] for k in _ACTIONS if props.get(k) and k != "_item"}
             if current is None:
                 current = {"label": "", "items": []}
                 groups.append(current)
@@ -280,6 +377,12 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
         # Any other unactioned label — a footer, a version string — is noise.
 
     groups = [g for g in groups if g["items"]]
+    # A LONE ITEM AHEAD OF THE REST IS THE BRAND: a logo beside a name reads
+    # as icon + label, exactly like a destination, but a destination comes
+    # in a run and the brand stands alone at the top.
+    if len(groups) >= 2 and not groups[0]["label"] and len(groups[0]["items"]) == 1:
+        brand.insert(0, groups[0]["items"][0]["label"])
+        groups = groups[1:]
     return {"brand": brand, "groups": groups}
 
 

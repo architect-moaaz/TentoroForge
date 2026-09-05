@@ -1241,6 +1241,14 @@ def _descendant_text(node) -> str:
     return ""
 
 
+def _label_leaf_count(node: "JSXElement") -> int:
+    """How many pieces of WORDED text an element says. An arrow, a glyph or a
+    bare badge number beside a label is decoration: "View all →" drawn as
+    two leaves is one label, and counting the arrow made every such button a
+    card."""
+    return sum(1 for t in _text_leaves(node) if any(ch.isalpha() for ch in t))
+
+
 def _text_leaf_count(node: "JSXElement") -> int:
     """How many separate pieces of text an element says."""
     if isinstance(node, str):
@@ -1644,7 +1652,7 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
             children = _transform_children(element.children)
             return _make_node("Form", props, children)
 
-        if schema_type == "Button" and _text_leaf_count(element) >= 2:
+        if schema_type == "Button" and _label_leaf_count(element) >= 2:
             return _clickable_card(element, attrs, data_name, props)
 
         if schema_type in _TEXT_CONSUMING:
@@ -1731,6 +1739,13 @@ def _transform_node(element: JSXElement, *, strip_positions: bool = False) -> di
             if schema_type == "Button" and not (set(props) & _ACTION_PROPS):
                 text_props = {k: v for k, v in props.items()
                               if k in ("className", "style")}
+                # WHAT IT SHOWS IS KEPT. A button drawn as icon + label that
+                # binds to nothing is still that drawing: emitted as bare text
+                # it lost its icon, and a rail item without its glyph stopped
+                # reading as a destination.
+                if _has_visual_children(element):
+                    return _make_node("Container", text_props,
+                                      _transform_children(element.children))
                 text_props["content"] = props.get("label", "")
                 return _make_node("Text", text_props, [])
 
