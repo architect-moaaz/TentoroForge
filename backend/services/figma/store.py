@@ -244,22 +244,49 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
         set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
     shared = _chrome.shared_chrome(list(trees.values()))
 
-    def first_heading(node):
+    def _words(text) -> bool:
+        return isinstance(text, str) and len(text.strip()) >= 3 and any(ch.isalpha() for ch in text)
+
+    def first_text(node, kinds):
         if isinstance(node, dict):
             props = node.get("props") or {}
-            text = props.get("content") if node.get("type") == "Heading" else None
-            if isinstance(text, str) and len(text.strip()) >= 3:
+            text = props.get("content") if node.get("type") in kinds else None
+            if _words(text):
                 return text.strip()
             for child in node.get("children") or []:
-                found = first_heading(child)
+                found = first_text(child, kinds)
                 if found:
                     return found
         return None
 
+    def _width(node) -> float:
+        cls = str((node.get("props") or {}).get("className") or "")
+        for pat in (r"flex-\[(\d+(?:\.\d+)?)_0_0\]", r"max-w-\[(\d+(?:\.\d+)?)px\]", r"\bw-\[(\d+(?:\.\d+)?)px\]"):
+            m = re.search(pat, cls)
+            if m:
+                return float(m.group(1))
+        return 0.0
+
+    def content_region(tree):
+        """The widest region of the frame's first row. A lone frame has no
+        shared chrome to remove, and its rail comes first in document order:
+        its brand is not what the screen shows."""
+        first = next((c for c in tree.get("children") or [] if isinstance(c, dict)), None)
+        kids = [c for c in (first or {}).get("children") or [] if isinstance(c, dict)]
+        if len(kids) >= 2 and any(_width(k) for k in kids):
+            return max(kids, key=_width)
+        return tree
+
+    # WHAT A FRAME SHOWS IS ITS TITLE, NOT ITS LARGEST TEXT. On a legislative
+    # dashboard the only text large enough to be a Heading was the KPI "132",
+    # and every real title was set small in Cairo — so the page was named
+    # "132" and routed to /132. A title has letters and comes first: the
+    # first lettered text of the content region in document order, whatever
+    # its size — the header's title precedes any section heading.
     out: dict[str, str] = {}
     for node_id, tree in trees.items():
-        content, _removed = _chrome.split(tree, shared) if shared else (tree, [])
-        heading = first_heading(content)
+        content, _removed = _chrome.split(tree, shared) if shared else (content_region(tree), [])
+        heading = first_text(content, ("Heading", "Text"))
         if heading:
             out[node_id] = heading
     return out

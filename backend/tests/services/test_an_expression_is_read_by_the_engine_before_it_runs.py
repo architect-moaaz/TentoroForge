@@ -178,3 +178,14 @@ def test_the_workflow_author_is_refused_for_the_missing_column():
     result = SimpleNamespace(proposals=[SimpleNamespace(section="workflows", body=body, natural_key="FLOW-016")])
     with pytest.raises(InvalidWorkflowStep, match="caseNumber"):
         check_workflow_steps(result, {"data": _case_model()})
+
+
+def test_each_proposal_is_blamed_only_for_its_own_expression():
+    from services.blueprint.functional_completeness import expression_findings
+    doc = {"data": {"entities": []}, "workflows": [], "pages": [], "pageLayouts": [], "businessRules": [
+        {"name": "closed", "kind": "condition_action", "when": 'stage != "DRAFT"', "then": []},
+        {"name": "broken", "kind": "condition_action", "when": 'stage == "DRAFT" && x', "then": []},
+        {"name": "held", "kind": "condition_action", "when": 'status = "HELD"', "then": []},
+    ]}
+    found = expression_findings(doc)
+    assert [f["detail"].split(":")[0] for f in found] == ["rule broken"]

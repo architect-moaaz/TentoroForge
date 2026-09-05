@@ -313,3 +313,4 @@ def test_blueprint_reads_entities_from_normalized_plan(tmp_path):
     assert names == {"Application", "Candidate"}, (
         f"blueprint should read from `entities` dict; got {names}"
     )
+

@@ -753,6 +753,10 @@ def _responsive_container_classes(cn: str, element: "JSXElement", drawing: bool 
     for t in tokens:
         m = _PX_W_RE.match(t)
         if m:
+            # THE DRAWN WIDTH IS THE MAXIMUM. `_attach_style_passthrough` had
+            # already capped the pixel width with `max-w-full`; kept after
+            # `max-w-[240px]` it won the cascade and a 240px rail filled its
+            # row, pushing the content beneath it.
             out += [f"max-w-[{m.group(1)}px]", "w-full"]
             continue
         m = _PX_H_RE.match(t)
@@ -790,6 +794,10 @@ def _responsive_container_classes(cn: str, element: "JSXElement", drawing: bool 
     if "flex" in out and "flex-col" not in out and "flex-wrap" not in out \
             and _wide_containers(kids) >= 2:
         out.append("flex-wrap")
+    # The pass-through appends its viewport cap last; once a drawn maximum
+    # is in place the cap must go, or it wins the cascade.
+    if any(t.startswith("max-w-[") for t in out):
+        out = [t for t in out if t != "max-w-full"]
     return " ".join(out)
 
 

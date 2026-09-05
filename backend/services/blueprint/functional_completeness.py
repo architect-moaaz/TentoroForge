@@ -547,19 +547,22 @@ def rule_findings(doc: dict) -> list[dict]:
 
 def _expressions(doc: dict) -> list[tuple[str, str, str]]:
     """(id, where, expression) for every condition the engine will parse."""
+    # KEYED BY POSITION, NOT BY ID. A proposal has no id until it is applied,
+    # so every rule the author sent shared the key "None/when" and one rule's
+    # parse error was reported against all thirty of them.
     out = []
-    for wf in _live(doc.get("workflows")):
-        for step in wf.get("steps") or []:
+    for n, wf in enumerate(_live(doc.get("workflows"))):
+        for m, step in enumerate(wf.get("steps") or []):
             if not isinstance(step, dict):
                 continue
             cfg = step.get("config") or {}
             expr = cfg.get("expression") or cfg.get("condition")
             if isinstance(expr, str) and expr.strip():
-                out.append((f"{wf.get('id')}/{step.get('key') or step.get('id')}",
+                out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}",
                             f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}", expr))
-    for rule in _live(doc.get("businessRules")):
+    for n, rule in enumerate(_live(doc.get("businessRules"))):
         if rule.get("kind") == "condition_action" and isinstance(rule.get("when"), str) and rule["when"].strip():
-            out.append((f"{rule.get('id')}/when", f"rule {rule.get('name') or rule.get('id')}", rule["when"]))
+            out.append((f"rule#{n}/when", f"rule {rule.get('name') or rule.get('id')}", rule["when"]))
     return out
 
 
@@ -574,8 +577,9 @@ def expression_findings(doc: dict) -> list[dict]:
         if i in errors:
             out.append({"rule": "expression-invalid", "page": i.split("/")[0],
                         "detail": f"{where}: the engine cannot parse {expr!r} — {errors[i]}. "
-                                  f"Conditions are FEEL: `=` not `==`, `and`/`or`/`not`, "
-                                  f"names like input.caseType without braces"})
+                                  f"Conditions are FEEL: `=` not `==`, `and`/`or`/`not`, field names "
+                                  f"without braces (`caseType`, never `input.caseType`), membership as "
+                                  f"`stage in [\"A\",\"B\"]` with square brackets, never parentheses"})
     return out
 
 

@@ -541,8 +541,11 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """
     nav = doc.get("navigation") or {}
     tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
-    if not any(n.get("children") for n in tree):
-        return {"files": [], "groups": 0, "reason": "no grouped navigation"}
+    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
+    # had children, so a one-screen application had no shell file at all and
+    # the root page, which reads it, failed to compile.
+    if not tree:
+        return {"files": [], "groups": 0, "reason": "no navigation"}
 
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
@@ -569,12 +572,23 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             groups.append(item(node))
 
     app_name = str((doc.get("application") or {}).get("name") or "App")
+    # WHERE THE APPLICATION OPENS. The scaffold's root page redirected to a
+    # hard-coded /home, which no application has: every signed-in user landed
+    # on a 404 and had to find the rail. The Blueprint's navigation names the
+    # initial route; failing that, the first destination in the rail.
+    initial = ((nav.get("initialRoute") or {}).get("default")
+               if isinstance(nav.get("initialRoute"), dict) else nav.get("initialRoute"))
+    if not initial or str(initial) in ("/", "/home"):
+        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route") or it.get("href")), None)
+        initial = (first.get("route") or first.get("href")) if first else None
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
         "children": [{"type": "SideNav",
                       "props": {"groups": groups, "appName": app_name, "mode": "dark"}}],
     }
+    if initial:
+        shell["initialRoute"] = str(initial)
     out = Path(app_root) / "src" / "schemas"
     out.mkdir(parents=True, exist_ok=True)
     (out / "shell.json").write_text(json.dumps(shell, indent=2), "utf-8")

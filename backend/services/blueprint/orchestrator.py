@@ -1244,7 +1244,10 @@ def _apply_round(
             application = apply_agent_result(
                 svc, outcome, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+            # The author's refusals are outcomes here too. InvalidBusinessRule
+            # escaped this path on 2026-09-06 and took a whole build down with
+            # no end event written.
             _rejected(subject, label, _reason(exc))
             continue
 

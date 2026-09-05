@@ -98,6 +98,19 @@
       ],
       "cwd": "output/objs36l0/app",
       "port": 6516
+    },
+    {
+      "name": "plc",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6517"
+      ],
+      "cwd": "output/fnm4etij/app",
+      "port": 6517
     }
   ]
 }

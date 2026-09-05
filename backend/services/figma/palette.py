@@ -32,7 +32,7 @@ _TEXT = re.compile(r"\btext-\[(#[0-9a-fA-F]{6})\]")
 _BORDER = re.compile(r"\bborder-\[(#[0-9a-fA-F]{6})\]")
 _FONT = re.compile(r"\bfont-\['([^':\]]+)")
 
-#: Fewer fills than this and the file is a sketch, not a scheme.
+#: Fewer filled elements than this and the file is a sketch, not a scheme.
 MIN_FILLS = 12
 
 
@@ -61,62 +61,169 @@ def _is_serif_or_display(family: str) -> bool:
     return "mono" not in family.lower()
 
 
-def from_code(codes: Iterable[str]) -> dict[str, Any]:
-    """The scheme the frames use, with the counts that justify it.
+_TAG_RE = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9]*)([^>]*?)(/?)>")
+_CLASS_RE = re.compile(r'className="([^"]*)"')
+_PX_RE = {
+    "w": re.compile(r"\bw-\[(\d+(?:\.\d+)?)px\]"),
+    "h": re.compile(r"\bh-\[(\d+(?:\.\d+)?)px\]"),
+    "size": re.compile(r"\bsize-\[(\d+(?:\.\d+)?)px\]"),
+}
+#: Tailwind's named fills Dev Mode still writes for pure black and white.
+_NAMED = {"bg-white": "#ffffff", "bg-black": "#000000"}
+# No trailing \b: after `]` there is no word boundary before a space, which is
+# the same slip that once hid `left-0`.
+_BG_ANY = re.compile(r"\bbg-(?:\[(#[0-9a-fA-F]{6})\]|(white|black))(?=\s|$|\")")
 
-    Returns ``{"colors": {...}, "typography": {...}, "evidence": {...}}`` or
-    ``{}`` when the frames do not carry enough to say.
+
+def _surfaces(code: str, size: tuple[float, float] | None = None) -> list[dict[str, Any]]:
+    """Every filled element in a frame's code: fill, painted area, depth, and
+    whether it carries a label of its own.
+
+    Dev Mode writes each element's size as `w-[Npx] h-[Npx]` (or `*-full`,
+    which is the parent's); walking the tags with a stack gives every fill
+    the area it paints. Counting occurrences instead made a status bar's
+    colour the page ground: on one real frame the green of eleven 6px bars
+    outnumbered the light ground that one 1031x764 container painted.
     """
-    bg: Counter = Counter()
+    out: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
+    pos = 0
+    # THE ROOT IS THE FRAME. Its code says `size-full`, and the frame's own
+    # width and height come from the screen record, so the root always has
+    # the area it paints even when nothing inside is sized.
+    frame = {"w": float(size[0]) if size else None, "h": float(size[1]) if size else None}
+    for m in _TAG_RE.finditer(code):
+        closing, tag, attrs, selfclose = m.group(1), m.group(2), m.group(3), m.group(4)
+        # Text between the previous tag and this one belongs to the open element.
+        between = code[pos:m.start()].strip()
+        pos = m.end()
+        if between and stack and any(ch.isalnum() for ch in between):
+            # The label belongs to the nearest PAINTED ancestor: a button's
+            # text sits in a <p> inside it, and the <p> has no fill.
+            for el in reversed(stack):
+                if el["fill"]:
+                    el["label"] = True
+                    break
+        if closing:
+            if stack:
+                stack.pop()
+            continue
+        cls = (_CLASS_RE.search(attrs) or [None, ""])[1]
+        parent = stack[-1] if stack else frame
+        size = _PX_RE["size"].search(cls)
+        w = float(size.group(1)) if size else None
+        h = float(size.group(1)) if size else None
+        mw, mh = _PX_RE["w"].search(cls), _PX_RE["h"].search(cls)
+        if mw: w = float(mw.group(1))
+        if mh: h = float(mh.group(1))
+        # An axis is the parent's only when the element says so (`w-full`,
+        # `size-full`, `flex-1`, `grow`, `self-stretch`); an axis nothing sets
+        # is unknown, and an unknown area is no area. Giving every unsized
+        # element its parent's size made a 6px-tall status chip the largest
+        # surface on the page.
+        fills_w = size is not None or bool(re.search(r"\b(w-full|flex-1|grow|self-stretch|basis-full)\b", cls))
+        fills_h = size is not None or bool(re.search(r"\b(h-full|flex-1|grow|self-stretch)\b", cls))
+        if w is None: w = parent["w"] if (fills_w or not stack) else None
+        if h is None: h = parent["h"] if (fills_h or not stack) else None
+        fill = None
+        bg = _BG_ANY.search(cls)
+        if bg:
+            fill = _hex(bg.group(1)) if bg.group(1) else _NAMED["bg-" + bg.group(2)]
+        el = {"tag": tag, "w": w, "h": h, "fill": fill, "depth": len(stack), "label": False,
+              "cls": cls}
+        if fill:
+            out.append(el)
+        if not selfclose and tag not in ("img", "br", "input"):
+            stack.append(el)
+    for el in out:
+        el["area"] = (el["w"] or 0.0) * (el["h"] or 0.0)
+    return out
+
+
+def from_code(codes: Iterable[str],
+              sizes: Iterable[tuple[float, float] | None] | None = None) -> dict[str, Any]:
+    """The scheme the frames use, with the evidence that justifies it.
+
+    ``sizes`` gives each frame's width and height, so its root paints an area
+    even when nothing inside is sized. Returns ``{"colors": {...},
+    "typography": {...}, "evidence": {...}}`` or ``{}`` when the frames do
+    not carry enough to say.
+    """
     text: Counter = Counter()
     border: Counter = Counter()
     fonts: Counter = Counter()
-    for code in codes:
+    surfaces: list[dict[str, Any]] = []
+    sizes = list(sizes or [])
+    for i, code in enumerate(codes):
         code = code or ""
-        bg.update(_hex(c) for c in _BG.findall(code))
         text.update(_hex(c) for c in _TEXT.findall(code))
         border.update(_hex(c) for c in _BORDER.findall(code))
         fonts.update(_FONT.findall(code))
+        surfaces.extend(_surfaces(code, sizes[i] if i < len(sizes) else None))
 
-    if sum(bg.values()) < MIN_FILLS:
+    if len(surfaces) < MIN_FILLS:
         return {}
 
     colors: dict[str, str] = {}
     evidence: dict[str, Any] = {}
+    uses: Counter = Counter(el["fill"] for el in surfaces)
 
-    # THE GROUND IS THE FILL USED MOST. Pages are mostly background.
-    background, n_bg = bg.most_common(1)[0]
+    # THE GROUND IS THE LARGEST SURFACE PAINTED. A tie goes to the deeper
+    # element — it paints over the other. `bg-white` on the root behind a
+    # full-size `#f3f3f1` app container is the app container.
+    # When nothing is sized — a fixture, a file whose code carries no sizes —
+    # the count stands in for the area, as it did before areas were read.
+    sized = any(el["area"] > 0 for el in surfaces)
+    largest = (max(surfaces, key=lambda el: (el["area"], el["depth"])) if sized
+               else max(surfaces, key=lambda el: uses[el["fill"]]))
+    background = largest["fill"]
     colors["background"] = background
-    evidence["background"] = n_bg
+    # Evidence is a number per key (the contract says so): the area painted
+    # when sizes are known, else how often the fill is used.
+    evidence["background"] = round(largest["area"]) if sized else uses[background]
 
-    # THE RAIL IS THE DARKEST FILL USED ON MORE THAN ONE SCREEN — a light design
-    # has a dark sidebar (and vice versa), and it is used once per screen.
+    # THE RAIL IS THE LARGEST SURFACE THAT CONTRASTS WITH THE GROUND — a light
+    # design has a dark sidebar (and vice versa), one per screen, tall.
     lum_bg = _luminance(background)
-    candidates = [(c, n) for c, n in bg.items() if n >= 2 and abs(_luminance(c) - lum_bg) > 0.4]
-    if candidates:
-        rail = max(candidates, key=lambda cn: (abs(_luminance(cn[0]) - lum_bg), cn[1]))
-        colors["sidebarBackground"] = rail[0]
-        evidence["sidebarBackground"] = rail[1]
+    contrasting = [el for el in surfaces
+                   if el["fill"] != background and abs(_luminance(el["fill"]) - lum_bg) > 0.4]
+    if contrasting:
+        # Unsized, the rail is the fill that contrasts MOST, then the one used
+        # most — a light design's dark sidebar, not its gold buttons.
+        rail = (max(contrasting, key=lambda el: (el["area"], el["depth"])) if any(el["area"] > 0 for el in contrasting)
+                else max(contrasting, key=lambda el: (abs(_luminance(el["fill"]) - lum_bg), uses[el["fill"]])))
+        colors["sidebarBackground"] = rail["fill"]
+        evidence["sidebarBackground"] = round(rail["area"]) if rail["area"] > 0 else uses[rail["fill"]]
 
-    # THE ACCENT IS THE MOST-USED SATURATED FILL that is neither ground nor rail.
-    # Status chips (green/amber/red) are saturated too, so the accent must also
-    # out-count each of them — an accent is used everywhere, a chip in one place.
-    saturated = [(c, n) for c, n in bg.items()
-                 if c not in (background, colors.get("sidebarBackground")) and _saturation(c) > 0.25]
-    if saturated:
-        accent, n_acc = max(saturated, key=lambda cn: cn[1])
+    # THE ACCENT IS THE COLOUR OF THINGS YOU PRESS: the saturated fill used
+    # most on elements that carry a label — a button, an active nav item, a
+    # chip. A progress bar is saturated too and has no label, which is how
+    # eleven green bars were once taken for the brand over two red buttons.
+    excluded = {background, colors.get("sidebarBackground")}
+    labelled: Counter = Counter(el["fill"] for el in surfaces
+                                if el["label"] and el["fill"] not in excluded
+                                and _saturation(el["fill"]) > 0.25)
+    saturated: Counter = Counter(el["fill"] for el in surfaces
+                                 if el["fill"] not in excluded and _saturation(el["fill"]) > 0.25)
+    pick = labelled or saturated
+    if pick:
+        accent, n_acc = pick.most_common(1)[0]
         colors["primary"] = accent
         colors["accent"] = accent
-        evidence["primary"] = n_acc
+        evidence["primary"] = labelled.get(accent, 0) or uses[accent]
 
-    # FOREGROUND IS THE MOST-USED TEXT COLOUR THAT READS ON THE GROUND.
+    # FOREGROUND IS THE TEXT COLOUR THAT CONTRASTS MOST WITH THE GROUND among
+    # those used substantially — a dashboard writes more captions than
+    # headings, so "most used" named the muted grey-green over the black the
+    # values and titles are set in. MUTED is the most-used other legible colour.
     legible = [(c, n) for c, n in text.items() if abs(_luminance(c) - lum_bg) > 0.3]
     if legible:
-        fg, n_fg = max(legible, key=lambda cn: cn[1])
+        top = max(n for _c, n in legible)
+        substantial = [(c, n) for c, n in legible if n * 3 >= top]
+        fg, n_fg = max(substantial, key=lambda cn: (abs(_luminance(cn[0]) - lum_bg), cn[1]))
         colors["foreground"] = fg
         evidence["foreground"] = n_fg
-        # Muted text: the next most-used legible colour, lighter than the foreground.
-        muted = [(c, n) for c, n in legible if c != fg and _luminance(c) > _luminance(fg)]
+        muted = [(c, n) for c, n in legible if c != fg]
         if muted:
             colors["mutedForeground"] = max(muted, key=lambda cn: cn[1])[0]
 
@@ -146,6 +253,9 @@ def from_code(codes: Iterable[str]) -> dict[str, Any]:
 
 def from_screens(screens: Iterable[Any]) -> dict[str, Any]:
     """`from_code` over a DesignReference's screens."""
+    screens = list(screens)
     return from_code(
-        str((getattr(s, "structure", None) or {}).get("code") or "") for s in screens
+        [str((getattr(s, "structure", None) or {}).get("code") or "") for s in screens],
+        [((getattr(s, "width", None) or 0), (getattr(s, "height", None) or 0))
+         if getattr(s, "width", None) and getattr(s, "height", None) else None for s in screens],
     )

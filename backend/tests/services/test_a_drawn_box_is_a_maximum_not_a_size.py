@@ -427,3 +427,33 @@ def test_chips_wrapped_by_hand_are_one_row_with_no_inset():
     cn = _cn(_split(), "5:4")
     assert "flex" in cn and "flex-wrap" in cn
     assert not any(t.startswith("px-[") for t in cn), cn
+
+
+def test_a_drawn_rail_keeps_its_width_beside_the_content_column():
+    """The pass-through capped `w-[240px]` with `max-w-full`; the responsive
+    rewrite then added `max-w-[240px]` before it, and the later class won:
+    a 240px rail filled the row and the content fell beneath it."""
+    from services.jsx_to_schema import transform_jsx_to_schema
+    code = '''<div className="bg-white flex flex-col size-full" data-node-id="1:2">
+  <div className="bg-[#f3f3f1] flex h-[764px] items-start overflow-clip w-[1031px]" data-node-id="1:5">
+    <div className="bg-[#0d0d0d] flex flex-col h-full items-start shrink-0 w-[240px]" data-node-id="1:6">
+      <p className="text-[#ffffff]">Overview</p><p className="text-[#ffffff]">Sessions</p><p className="text-[#ffffff]">Committees</p>
+    </div>
+    <div className="flex flex-[791_0_0] flex-col h-full items-start" data-node-id="1:7">
+      <p className="text-[#0d0d0d]">Dashboard</p>
+    </div>
+  </div>
+</div>'''
+    tree = transform_jsx_to_schema(code, {}, canvas=(1031, 764))["children"][0]
+    def find(n):
+        if isinstance(n, dict):
+            cls = str((n.get("props") or {}).get("className") or "")
+            if "bg-[#0d0d0d]" in cls:
+                return cls
+            for c in n.get("children") or []:
+                r = find(c)
+                if r:
+                    return r
+        return None
+    cls = find(tree)
+    assert cls and "max-w-[240px]" in cls and "max-w-full" not in cls, cls

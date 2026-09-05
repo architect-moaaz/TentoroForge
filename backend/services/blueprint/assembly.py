@@ -146,6 +146,11 @@ def _template_dirs() -> list[Path]:
     return [_TEMPLATE_DIR.parent / "app-foundation", _TEMPLATE_DIR]
 
 
+#: Scaffold files a template used to ship and no longer does; deleted from an
+#: application on every assembly so the old copy cannot shadow the new shape.
+RETIRED_SCAFFOLD_FILES: tuple[str, ...] = ("src/app/page.tsx",)
+
+
 def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
     """Copy the scaffold layers in order, interpolating ``.tmpl`` files.
 
@@ -184,6 +189,16 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
             else:
                 shutil.copyfile(src, dst)
             written.append(str(dst_rel))
+    # WHAT THE SCAFFOLD NO LONGER SHIPS IS REMOVED. Copying only adds, so a
+    # file a template retired stayed in every application built before: the
+    # root page that redirected to a hard-coded /home sat beside the group's
+    # index at "/", two pages at one path, until deleted here.
+    for rel in RETIRED_SCAFFOLD_FILES:
+        if rel in written:
+            continue
+        stale = out / rel
+        if stale.is_file():
+            stale.unlink()
     return written
 
 
