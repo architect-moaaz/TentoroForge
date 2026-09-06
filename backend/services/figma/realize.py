@@ -29,9 +29,10 @@ subtree is gone, so its children are no longer there to replace.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
-from typing import Any
+from typing import Callable, Sequence, Any
 
 from services.figma.vision import ACTIONABLE
 
@@ -202,6 +203,19 @@ def _bind_number(node: dict, template: str) -> dict | None:
     return bound if found else None
 
 
+def _swap(root: Any, target: dict, replacement: dict) -> Any:
+    """The tree with one subtree (by identity) replaced."""
+    if root is target:
+        return replacement
+    if not isinstance(root, dict):
+        return root
+    out = dict(root)
+    kids = root.get("children")
+    if isinstance(kids, list):
+        out["children"] = [_swap(c, target, replacement) for c in kids]
+    return out
+
+
 def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
     """Rebuild the tree, swapping any node whose Figma id was classified.
 
@@ -221,6 +235,25 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
             bound = _bind_number(node, entry["_bind"])
             if bound is not None:
                 return bound
+        if entry.get("_rows"):
+            # A DRAWN LIST STAYS DRAWN. Its example rows become one Repeat
+            # over the entity's list source, the first row as the template
+            # with its leaves bound; the Table is what a region with no
+            # readable rows becomes.
+            from services.figma import rows as _rows
+            source, mapper = entry["_rows"]
+            try:
+                found = _rows.row_blocks(node)
+                if found:
+                    container, drawn = found
+                    leaves = [str((leaf.get("props") or {}).get("content") or "")
+                              for leaf in _rows._leaves(drawn[0], [])]
+                    mapping = mapper(leaves, entry["entity"])
+                    bound_list = _rows.bind_rows(container, drawn, mapping, source=source)
+                    if bound_list is not None:
+                        return _swap(node, container, bound_list)
+            except Exception as exc:  # noqa: BLE001 — a row that cannot be read leaves the Table
+                logger.info("[figma-realize] rows of %s not bound: %s", node_id, exc)
         return entry["_node"]
 
     children = node.get("children")
@@ -230,7 +263,9 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
 
 
 def realize(root: dict, classifications: list[dict], *,
-            min_confidence: float = MIN_CONFIDENCE) -> tuple[dict, list[dict], list[dict]]:
+            min_confidence: float = MIN_CONFIDENCE,
+            row_mapper: Callable[[Sequence[str], str], Sequence[dict]] | None = None,
+            ) -> tuple[dict, list[dict], list[dict]]:
     """Apply the confident, bindable classifications to ``root``.
 
     Returns ``(root, dataSources, applied)``. ``applied`` is what changed, for
@@ -239,6 +274,11 @@ def realize(root: dict, classifications: list[dict], *,
     """
     if not classifications:
         return root, [], []
+    # THE INPUT IS NOT TOUCHED. `_replace` rebuilds nodes as it goes, but it
+    # rebuilt them into the caller's tree; a failure halfway — a row mapper
+    # raising after the metric tiles were rewritten — left the page binding
+    # sources this function never returned, and the page was refused.
+    root = json.loads(json.dumps(root))
 
     # Largest first is already `regions`' order and is the order that makes
     # containment work: an outer card is replaced before anything inside it is
@@ -269,7 +309,8 @@ def realize(root: dict, classifications: list[dict], *,
             component, source = _table(entry, name), _list_source(entry, name)
 
         wanted[entry["nodeId"]] = {**entry, "_node": component,
-                                   "_bind": f"{{{{{name}.value}}}}" if entry["kind"] == "metric" else None}
+                                   "_bind": f"{{{{{name}.value}}}}" if entry["kind"] == "metric" else None,
+                                   "_rows": (name, row_mapper) if entry["kind"] == "table" and row_mapper else None}
         sources.append(source)
         applied.append({"nodeId": entry["nodeId"], "kind": entry["kind"],
                         "entity": entry["entity"], "source": name,

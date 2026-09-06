@@ -85,6 +85,25 @@ function applyFormatter(value: unknown, formatter: string, arg?: string): unknow
         maximumFractionDigits: Number.isNaN(digits) ? 0 : digits,
       }).format(n);
     }
+    // A DRAWN ROW SHOWS ONE TIMESTAMP THREE WAYS — "10:00", "Monday", "1
+    // September" — so a bound row needs to as well. Locale-aware through Intl;
+    // `arg` is a BCP-47 locale ("ar", "en-GB"), else the viewer's.
+    case "time":
+    case "date":
+    case "weekday": {
+      const t = value instanceof Date ? value.getTime() : Date.parse(String(value));
+      if (Number.isNaN(t)) return String(value);
+      const locale = arg || undefined;
+      const opts: Intl.DateTimeFormatOptions =
+        formatter === "time" ? { hour: "2-digit", minute: "2-digit" }
+        : formatter === "weekday" ? { weekday: "long" }
+        : { day: "numeric", month: "long" };
+      try {
+        return new Intl.DateTimeFormat(locale, opts).format(new Date(t));
+      } catch {
+        return String(value);
+      }
+    }
     case "relative": {
       const t = value instanceof Date ? value.getTime() : Date.parse(String(value));
       if (Number.isNaN(t)) return String(value);

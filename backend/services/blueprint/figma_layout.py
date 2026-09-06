@@ -239,8 +239,29 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
         if classified:
             from services.figma import realize as _realize
 
+            # The row mapper is the same model the classifier used, given the
+            # entity's fields; a row it cannot read leaves the region to the Table.
+            from services.blueprint.executors import AnthropicModel
+            from services.figma import rows as _rows
+            _entities = {e.get("name"): e for e in (svc.doc.get("data") or {}).get("entities") or []}
+            _ask = AnthropicModel(max_tokens=2000)
+
+            def _map_row(leaves, entity_name):
+                ent = _entities.get(entity_name)
+                return _rows.map_row(_ask, leaves, ent) if ent else []
+
+            # THE VERDICTS ARE SAID. A classification nobody can see is a
+            # design decision nobody can correct; on 2026-09-06 a page was
+            # refused for binding what no source declared and the run left
+            # no trace of what the classifier had called each region.
+            logger.info("[figma] %s: classifier verdicts %s", page.get("id"),
+                        [(c.get("nodeId"), c.get("kind"), c.get("entity") or "-",
+                          round(float(c.get("confidence") or 0), 2)) for c in classified])
             schema["children"][0], live_sources, applied = _realize.realize(
-                schema["children"][0], classified)
+                schema["children"][0], classified, row_mapper=_map_row)
+            logger.info("[figma] %s: realized %s | sources %s", page.get("id"),
+                        [(a.get("nodeId"), a.get("kind"), a.get("source")) for a in applied],
+                        [s.get("name") for s in live_sources])
             if applied:
                 logger.info("[figma] %s: %d region(s) now live", page.get("id"),
                             len(applied))
