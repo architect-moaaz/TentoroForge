@@ -595,20 +595,31 @@ export function SmithPanel({
   // and the design was never fetched. There is nothing to time any more.
   useEffect(() => {
     if (!projectId) return;
-    const key = `figma_connect_${projectId}`;
-    const raw = sessionStorage.getItem(key);
+    // `design_connect_` carries either provider; `figma_connect_` is the
+    // older key a tab may still hold.
+    const key = `design_connect_${projectId}`;
+    const legacyKey = `figma_connect_${projectId}`;
+    const raw = sessionStorage.getItem(key) ?? sessionStorage.getItem(legacyKey);
     if (!raw) return;
     sessionStorage.removeItem(key);
+    sessionStorage.removeItem(legacyKey);
     try {
-      const { figma_url, treat_as, brief } = JSON.parse(raw);
-      const scope = treat_as === "specification" ? "the specification" : "a reference";
-      const opening = [
-        String(brief || "").trim(),
-        figma_url
-          ? `Connect this Figma design as ${scope}: ${figma_url} — the access token ` +
-            `is in the environment variable FIGMA_TOKEN.`
-          : "",
-      ].filter(Boolean).join("\n\n");
+      const parsed = JSON.parse(raw);
+      const provider: string = parsed.provider === "uxpilot" ? "uxpilot" : "figma";
+      const ref: string = String(parsed.ref || parsed.figma_url || "").trim();
+      const scope = parsed.treat_as === "specification" ? "the specification" : "a reference";
+      // The credential is named, never pasted (§42): the message tells Smith
+      // which environment variable holds it, and the server resolves the
+      // value from the organisation's integrations at the moment of the call.
+      const connect = !ref
+        ? ""
+        : provider === "uxpilot"
+          ? `Connect this UX Pilot page as ${scope}: ${ref} — the API key ` +
+            `is in the environment variable UXPILOT_API_KEY.`
+          : `Connect this Figma design as ${scope}: ${ref} — the access token ` +
+            `is in the environment variable FIGMA_TOKEN.`;
+      const opening = [String(parsed.brief || "").trim(), connect]
+        .filter(Boolean).join("\n\n");
       if (opening) sendText(opening);
     } catch {
       // A malformed trigger is not worth a broken panel.

@@ -111,6 +111,7 @@ export const EvidenceType = z.enum([
   "conversation",
   "document",
   "figma",
+  "uxpilot",
   "screenshot",
   "spreadsheet",
   "existing_implementation",

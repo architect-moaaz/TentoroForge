@@ -112,8 +112,15 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     "composing instead", page.get("id"), node_id)
         return None
 
-    code = str((screen.structure or {}).get("code") or "")
-    if not code:
+    structure = screen.structure or {}
+    code = str(structure.get("code") or "")
+    # A UX PILOT DESIGN IS HTML, NOT JSX. Same seam, same tree out: the HTML
+    # front end maps semantic tags and plain-CSS layout onto the element
+    # vocabulary `jsx_to_schema` reads, so the page that comes back is the
+    # same kind of object a Figma frame produces.
+    html = str(structure.get("html") or "") if structure.get("source") == "uxpilot_html" else ""
+    provider = "uxpilot" if html else "figma"
+    if not code and not html:
         # An extraction that recorded the node tree rather than the code. §102
         # wants that visible as a thin reference, not as a broken page.
         logger.info("[figma] %s has no design_context code for %s — composing "
@@ -153,13 +160,19 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     page.get("id"))
 
     try:
-        schema, assets = _run(build_schema_from_jsx(
-            code,
-            str(app_root),
-            route=str(page.get("route") or "") or None,
-            title=str(page.get("name") or "") or None,
-            canvas=canvas,
-        ))
+        if html:
+            schema, assets = _run(_build_from_html(
+                html, list(structure.get("assets") or []), str(app_root),
+                title=str(page.get("name") or "") or None,
+            ))
+        else:
+            schema, assets = _run(build_schema_from_jsx(
+                code,
+                str(app_root),
+                route=str(page.get("route") or "") or None,
+                title=str(page.get("name") or "") or None,
+                canvas=canvas,
+            ))
     except Exception as exc:  # noqa: BLE001 — one frame, never the run
         logger.warning("[figma] %s: %s", page.get("id"), exc)
         return None
@@ -216,11 +229,13 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the tree exactly as composed, which is the page that already renders.
     live_sources: list[dict] = []
     try:
-        classified = _classify_regions(svc, page, code, screen, app_root)
+        # The region and table passes read the frame's JSX layers; HTML has
+        # no layers to read, so a UX Pilot page keeps the tree as mapped.
+        classified = _classify_regions(svc, page, code, screen, app_root) if code else []
         # A TABLE DRAWN AS TEXT is read from its layers rather than looked
         # at: header, first rows, the card's title. Bound to an entity it
         # becomes a live Table whose rows open the entity's detail page.
-        classified = list(classified or []) + _classify_tables(svc, code)
+        classified = list(classified or []) + (_classify_tables(svc, code) if code else [])
         if classified:
             from services.figma import realize as _realize
 
@@ -266,10 +281,24 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
         "root": root,
         "dataSources": list(schema.get("dataSources") or []) + live_sources + extra_sources,
         "assets": dict(assets or {}),
+        "provider": provider,
     }
     if schema.get("_figmaCanvas"):
         out["canvas"] = schema["_figmaCanvas"]
     return out
+
+
+async def _build_from_html(
+    html: str, asset_urls: list[str], app_root: str, *, title: str | None,
+) -> tuple[dict, dict[str, str]]:
+    """A UX Pilot design's HTML as a PageV2 tree, its images cached under
+    ``public/figma/`` like a frame's — the same downloader, the same paths."""
+    from services.figma_asset_downloader import download_figma_assets
+    from services.html_to_schema import transform_html_to_schema
+
+    assets = await download_figma_assets(list(asset_urls), app_root) if asset_urls else {}
+    schema = transform_html_to_schema(html, assets, title=title or "Design Import")
+    return schema, assets
 
 
 def _set_action_vocabulary(doc: dict) -> None:
