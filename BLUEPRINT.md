@@ -11905,6 +11905,67 @@ the run completes.
   deleting a row above the open one jumped the editor to the wrong variable; also
   unique-per-row input ids.
 
+### 32.7.3 Workflow section — full certification pass (2026-09-07, branch `component-fixes`)
+
+A whole-section audit (four parallel deep code audits — engine, FEEL-lite parity,
+editor components, routers + simulator — plus live testing). Every confirmed bug
+below is fixed and tested; the honest known-limitations follow.
+
+**Fixed — engine / runtime:**
+- **A regression in my own W9: a human-task workflow never completed.** It stayed
+  `waiting` forever after the task resumed, because `complete_task`/`timer_scheduler`
+  never returned the instance to `running`, so the W9 completion guard skipped it.
+  Reset `waiting`→`running` on resume (+ prune the finished node in the timer path).
+  Locked by `tests/test_workflow_engine_lifecycle.py`.
+- `_get_org_id_from_instance` honored its own "falls back if not loaded" docstring
+  (it read `instance.project` unconditionally, raising `MissingGreenlet` on an async
+  lazy-load) by checking `sa_inspect().unloaded` first.
+- `step_count` no longer counts the terminal `end` node (was N+1).
+
+**Fixed — FEEL-lite:**
+- **Shipped-app correctness:** ordering (`<`/`<=`/`>`/`>=`) now coerces numeric
+  STRINGS in both TS engines, so `age >= 18` with age="9" (numeric columns arrive
+  from node-postgres as strings) compares 9 ≥ 18, not lexicographic `"9" >= "18"`
+  (which was true → wrong branch on the commonest condition shape).
+- **Simulator parity (Python):** negative numbers in list/range literals
+  (`[-10, -5]`) no longer crash the parser; `starts with(…)`/`ends with(…)`
+  multi-word calls parse instead of dropping the call.
+- **Author-time:** `starts_with`/`ends_with` (underscore) no longer falsely refused.
+
+**Fixed — editor:**
+- **A crash that blank-screened the whole editor** (no error boundary exists): a
+  malformed `decisionTable`, or an object-valued `expression`/`duration`, threw in
+  `WorkflowNode` during canvas render. Guarded `decision.rules` and coerced every
+  subtitle/pill value to text. (W16 had only guarded the *panel*, not the card.)
+- Action node cards now reflect v2-contract config (read `config.inputMappings`,
+  not just legacy flat keys); db_query pill relabeled.
+- `NodePropertiesPanel` keyed by node id so per-node local state (escalation type,
+  cron mode, KeyValueMapper source, output-row editing) no longer leaks between two
+  nodes of the same type — completing W15/W17.
+- `set_variable`/`custom` name fields default to "type it in", not the existing-
+  variable picker.
+
+**Fixed — simulator store:** one transient poll blip no longer permanently fails a
+healthy run (tolerate 3 consecutive, reset on any good poll); `INITIAL` is a factory
+so resets never alias shared arrays.
+
+**Known limitations (documented, not yet fixed — none reachable by the current
+generated apps):**
+- **Parallel join + a blocking task in one branch deadlocks** (and a plain
+  convergent node downstream of such a fork double-executes) because the join /
+  processed bookkeeping (`completed_in_this_pass`, `processed`) is per-`_execute_nodes`
+  pass, and a blocking task splits execution across passes. The proper fix is a
+  DURABLE completed-node set (derive from `NodeExecutionLog`). No generated workflow
+  uses `parallel_gateway`/`fork` today, so it is latent — but it must be fixed before
+  parallel branches with human tasks are generated.
+- **Human-task forms render as a raw JSON box:** the executor classifies every human
+  node to `TaskType.user_task` (no `approval` type) and writes no `expectedOutputs`,
+  so `TaskInputPanel` never shows the approve/reject or typed-field form. Needs a
+  backend↔frontend contract alignment (task_type/form hint), out of scope for this pass.
+- Minor editor UX: `wait` duration has two representations (catalog `"1 hour"` vs
+  raw-ms after edit); the bottom VariablePicker only inserts into `description`;
+  `KeyValueMapper` "Add" is a no-op when an unnamed row already exists.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
