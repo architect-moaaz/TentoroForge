@@ -111,6 +111,7 @@ export const EvidenceType = z.enum([
   "conversation",
   "document",
   "figma",
+  "uxpilot",
   "screenshot",
   "spreadsheet",
   "existing_implementation",
@@ -121,7 +122,7 @@ export const Evidence = z.object({
   type: EvidenceType,
   /** Source artifact handle: document id, FIGMA-001, upload id, … */
   source: z.string().optional(),
-  /** Figma node id, e.g. "220:144". */
+  /** Design node id: Figma "220:144", UX Pilot design id. */
   node: z.string().optional(),
   /** Conversation message id, e.g. "MSG-052". */
   message: z.string().optional(),

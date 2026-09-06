@@ -81,84 +81,9 @@ class TestPhaseFrontendFigma:
 
 
 # ---------------------------------------------------------------------------
-# phase_figma_pre — 4 Figma-only pre-frontend phases
+# phase_figma_pre — the Figma-only binding pass (the mapper, refiner and MCP
+# phases became the Figma adapter + services.pipeline.phase_design_import)
 # ---------------------------------------------------------------------------
-
-
-class TestPhaseFigmaDeterministicMap:
-    def test_signature_accepts_expected_kwargs(self):
-        sig = inspect.signature(phase_figma_pre.phase_figma_deterministic_map)
-        for name in (
-            "state", "plan", "figma_url", "figma_token",
-            "deterministic_pages", "deterministic_failures",
-        ):
-            assert name in sig.parameters, f"missing arg: {name}"
-
-    @pytest.mark.asyncio
-    async def test_raises_not_implemented_with_source_range(self, tmp_path):
-        state = PipelineState.create(
-            output_dir=str(tmp_path),
-            source=PlanSource.figma(url="https://figma.com/file/x"),
-        )
-        with pytest.raises(NotImplementedError, match=r"3722-4011"):
-            async for _ in phase_figma_pre.phase_figma_deterministic_map(
-                state, {}, figma_url="u", figma_token=None,
-                deterministic_pages=set(), deterministic_failures=[],
-            ):
-                pass
-
-
-class TestPhaseFigmaSchemaRefine:
-    """Phase 1e-lifted — the body now lives here (was:
-    ``routers.generate._run_figma_relay_pipeline`` lines 3949-4003).
-    The legacy wrapper delegates to this function.
-
-    Behavioral tests are the caller's responsibility (runs against the
-    live Figma refiner). This stub-test asserts the phase is callable —
-    the empty-plan no-op path yields nothing and does not raise.
-    """
-
-    @pytest.mark.asyncio
-    async def test_empty_plan_is_a_noop(self, tmp_path):
-        state = PipelineState.create(
-            output_dir=str(tmp_path),
-            source=PlanSource.figma(url="https://figma.com/file/x"),
-        )
-        # deterministic_pages empty → the gate short-circuits and the
-        # phase yields nothing.
-        events = []
-        async for evt in phase_figma_pre.phase_figma_schema_refine(
-            state,
-            {"pages": []},
-            output_dir=str(tmp_path),
-            deterministic_pages=set(),
-            figma_url="https://figma.com/file/x",
-            figma_token=None,
-        ):
-            events.append(evt)
-        assert events == []
-
-
-class TestPhaseFigmaMcp:
-    """Phase 1e-lifted — body now lives in phase_figma_pre. When the MCP
-    server is unreachable (the default in test environments) the phase
-    emits one 'not reachable' log line and returns without raising."""
-
-    @pytest.mark.asyncio
-    async def test_unreachable_mcp_emits_log_and_returns(self, tmp_path):
-        state = PipelineState.create(
-            output_dir=str(tmp_path),
-            source=PlanSource.figma(url="https://figma.com/file/x"),
-        )
-        events = []
-        async for evt in phase_figma_pre.phase_figma_mcp(
-            state, {"pages": []},
-            output_dir=str(tmp_path),
-            figma_url="https://figma.com/file/x",
-        ):
-            events.append(evt)
-        # The phase always ends cleanly, whether MCP is reachable or not.
-        assert isinstance(events, list)
 
 
 class TestPhaseFigmaBindingPass_LIFTED:

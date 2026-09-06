@@ -571,6 +571,36 @@ class BlueprintService:
         self.save()
         return record
 
+    def record_run(
+        self,
+        *,
+        run_id: str,
+        node: str,
+        agent: str,
+        outcome: str,
+        subject: str = "",
+        task_id: str | None = None,
+        artifacts: Iterable[str] = (),
+    ) -> dict:
+        """Append a §28 run record and save. The ledger is what resume reads:
+        a node is done because a record says it ran, never because its
+        sections look populated."""
+        record = {
+            "runId": run_id,
+            "node": node,
+            "agent": agent,
+            "subject": subject,
+            "outcome": outcome,
+            "version": int(self.doc.get("version") or 1),
+            "at": _now(),
+            "artifacts": list(artifacts),
+        }
+        if task_id:
+            record["taskId"] = task_id
+        self.doc.setdefault("runs", []).append(record)
+        self.save()
+        return record
+
     def snapshot(self) -> dict:
         """Deep copy of the current document, for passing to :meth:`commit`."""
         return json.loads(json.dumps(self.doc))

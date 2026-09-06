@@ -9,7 +9,7 @@ import {
   SearchCheck,
   ShieldCheck,
   BookOpen,
-  Figma,
+  PenTool,
 } from "lucide-react";
 
 export interface QuestPhase {
@@ -32,13 +32,17 @@ export const QUEST_PHASES: QuestPhase[] = [
   { id: "index", questName: "Chronicle the Knowledge", statusPattern: "Indexing application", xp: 50, icon: BookOpen },
 ];
 
-export const FIGMA_UI_PHASE: QuestPhase = {
-  id: "figma-ui",
+/** Replaces the components + pages phases when the app is built from an
+ *  imported design (Figma or UX Pilot): the design supplies the UI. */
+export const DESIGN_UI_PHASE: QuestPhase = {
+  id: "design-ui",
   questName: "Channel the Design",
   statusPattern: "",
   xp: 450,
-  icon: Figma,
+  icon: PenTool,
 };
+/** @deprecated use DESIGN_UI_PHASE */
+export const FIGMA_UI_PHASE = DESIGN_UI_PHASE;
 
 export const MAX_XP = QUEST_PHASES.reduce((sum, p) => sum + p.xp, 0);
 
@@ -54,13 +58,14 @@ export function detectPhaseIndex(statusMsg: string): number {
 }
 
 /**
- * Get the display phases, replacing components+pages with Figma phase when applicable.
+ * Get the display phases, replacing components+pages with the design phase
+ * when the app is built from an imported design.
  */
-export function getDisplayPhases(isFigma: boolean): QuestPhase[] {
-  if (!isFigma) return QUEST_PHASES;
+export function getDisplayPhases(isDesign: boolean): QuestPhase[] {
+  if (!isDesign) return QUEST_PHASES;
   return QUEST_PHASES.filter(
     (p) => p.id !== "components" && p.id !== "pages",
   ).flatMap((p) =>
-    p.id === "backend" ? [p, FIGMA_UI_PHASE] : [p],
+    p.id === "backend" ? [p, DESIGN_UI_PHASE] : [p],
   );
 }

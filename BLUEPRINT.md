@@ -8966,6 +8966,20 @@ Decision 24: Socket.IO for real-time push, SSE for agent streaming
        SSE and Socket.IO is intentional: right tool for each job.
        Real-time files live in src/infrastructure/realtime/ — isolated
        from business logic per Clean Architecture.
+
+Decision 25: Design provenance names a provider, not Figma (2026-09-06)
+  Why: PRD §45–47 describe page, component and design-system provenance
+       as Figma fields (figmaFrame, figmaComponent, derivedFromFigma).
+       The platform now imports designs from UX Pilot as well, and a
+       second set of per-provider fields would be two ways to say the
+       same thing. The Blueprint carries one DesignOrigin {provider,
+       ref, container} on pages and components, designSystem.derivedFrom
+       names the provider, and the §20 decision source set and the §14
+       evidence types gain "uxpilot". Deliberate deviation from the PRD
+       field names; the sections' intent is unchanged.
+  Where: packages/schema/src/blueprint/blueprint.ts, ids.ts; the
+       Figma-only pipeline becomes a DesignSource adapter (see
+       backend/services/design_source/).
 ```
 
 ---

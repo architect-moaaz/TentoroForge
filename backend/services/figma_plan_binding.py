@@ -68,6 +68,24 @@ def build_binding_analysis_input(plan: dict, file_meta: dict) -> dict:
     return {"app_name": (plan or {}).get("name"), "pages": pages}
 
 
+def build_binding_analysis_input_from_texts(plan: dict, texts_by_route: dict[str, list[str]]) -> dict:
+    """The same per-page summary, from visible text the caller already has —
+    a provider without a layer tree (UX Pilot HTML) supplies text per route."""
+    pages = []
+    for p in (plan or {}).get("pages") or []:
+        texts = list(texts_by_route.get(p.get("route") or "", []))
+        if p.get("prompt"):
+            texts.insert(0, str(p["prompt"]))
+        pages.append({
+            "route": p.get("route"),
+            "name": p.get("name"),
+            "type": p.get("type"),
+            "file": p.get("file"),
+            "texts": texts,
+        })
+    return {"app_name": (plan or {}).get("name"), "pages": pages}
+
+
 def merge_binding_analysis(plan: dict, analysis: dict) -> dict:
     """Merge LLM analysis into the plan: set top-level data_models/workflows and
     per-page entity + actions. Drops actions whose workflow isn't declared.
@@ -127,6 +145,27 @@ async def enrich_figma_plan_with_bindings(plan: dict, file_meta: dict, *, call_l
         return merge_binding_analysis(plan, analysis)
     except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
         logger.warning("Figma binding enrichment failed: %s — plan left unbound", exc)
+        return plan
+
+
+async def enrich_plan_with_bindings_from_texts(
+    plan: dict, texts_by_route: dict[str, list[str]], *, call_llm,
+) -> dict:
+    """Text-only twin of :func:`enrich_figma_plan_with_bindings`. Same prompt,
+    same merge, best-effort."""
+    plan.setdefault("data_models", [])
+    plan.setdefault("workflows", [])
+    for p in plan.get("pages") or []:
+        p.setdefault("actions", [])
+    try:
+        analysis_input = build_binding_analysis_input_from_texts(plan, texts_by_route)
+        prompt = _ANALYSIS_PROMPT.replace("__SCREENS__", json.dumps(analysis_input["pages"], indent=1))
+        analysis = await call_llm(prompt)
+        if not isinstance(analysis, dict):
+            raise ValueError("analysis not a dict")
+        return merge_binding_analysis(plan, analysis)
+    except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+        logger.warning("Design binding enrichment failed: %s — plan left unbound", exc)
         return plan
 
 

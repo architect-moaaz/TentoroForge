@@ -146,31 +146,41 @@ def _build_headers(server: PlatformMcpServer, secret: str | None) -> dict[str, s
 async def _open_session(server: PlatformMcpServer) -> AsyncIterator["ClientSession"]:
     """Open + initialize an MCP ClientSession for `server`. Handles both http
     (streamable_http) and sse transports. Cleans up cleanly on exit."""
+    secret = _decode_secret(server)
+    headers = _build_headers(server, secret)
+    async with _open_session_at(server.server_url, headers, server.transport) as session:
+        yield session
+
+
+@asynccontextmanager
+async def _open_session_at(
+    url: str, headers: dict[str, str], transport: str = "http",
+) -> AsyncIterator["ClientSession"]:
+    """The session opener behind :func:`_open_session`, for callers that hold
+    a decrypted credential already (a design import resolves the row once at
+    the entry point and hands the pipeline the key, not the row)."""
     if not _MCP_AVAILABLE:
         raise McpClientError("config", "mcp SDK is not installed (pip install mcp)")
 
-    secret = _decode_secret(server)
-    headers = _build_headers(server, secret)
-
     try:
-        if server.transport == "http":
+        if transport == "http":
             async with streamablehttp_client(
-                url=server.server_url,
+                url=url,
                 headers=headers or None,
             ) as (read_stream, write_stream, _get_session_id):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     yield session
-        elif server.transport == "sse":
+        elif transport == "sse":
             async with sse_client(
-                url=server.server_url,
+                url=url,
                 headers=headers or None,
             ) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     yield session
         else:
-            raise McpClientError("config", f"unknown transport: {server.transport}")
+            raise McpClientError("config", f"unknown transport: {transport}")
     except McpClientError:
         raise
     except asyncio.TimeoutError as e:
@@ -204,19 +214,41 @@ async def list_tools(server: PlatformMcpServer, *, use_cache: bool = True) -> li
             return cached
 
     async with _open_session(server) as session:
-        result = await session.list_tools()
-        tools = [
-            McpTool(
-                name=t.name,
-                description=(t.description or ""),
-                input_schema=dict(t.inputSchema or {}),
-            )
-            for t in (result.tools or [])
-        ]
+        tools = _tools_from_result(await session.list_tools())
 
     if use_cache:
         _cache_set(cache_key, tools)
     return tools
+
+
+def _tools_from_result(result: Any) -> list[McpTool]:
+    return [
+        McpTool(
+            name=t.name,
+            description=(t.description or ""),
+            input_schema=dict(t.inputSchema or {}),
+        )
+        for t in (result.tools or [])
+    ]
+
+
+def _call_result_to_dict(result: Any) -> dict[str, Any]:
+    # `result.content` is a list of typed content blocks (TextContent,
+    # ImageContent, etc.). Serialise each to a plain dict for JSON output.
+    content_out: list[dict[str, Any]] = []
+    for block in (result.content or []):
+        if hasattr(block, "model_dump"):
+            content_out.append(block.model_dump())
+        else:
+            content_out.append({"type": "text", "text": str(block)})
+    out: dict[str, Any] = {
+        "content": content_out,
+        "isError": bool(getattr(result, "isError", False)),
+    }
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        out["structuredContent"] = structured
+    return out
 
 
 async def call_tool(
@@ -231,19 +263,32 @@ async def call_tool(
             result = await session.call_tool(tool_name, arguments or {})
         except _SdkMcpError as e:  # type: ignore[misc]
             raise McpClientError("tool_error", f"tool call failed: {e}") from e
+    return _call_result_to_dict(result)
 
-    # `result.content` is a list of typed content blocks (TextContent,
-    # ImageContent, etc.). Serialise each to a plain dict for JSON output.
-    content_out: list[dict[str, Any]] = []
-    for block in (result.content or []):
-        if hasattr(block, "model_dump"):
-            content_out.append(block.model_dump())
-        else:
-            content_out.append({"type": "text", "text": str(block)})
-    return {
-        "content": content_out,
-        "isError": bool(getattr(result, "isError", False)),
-    }
+
+async def list_tools_at(
+    url: str, headers: dict[str, str] | None = None, transport: str = "http",
+) -> list[McpTool]:
+    """``tools/list`` against a server addressed directly (no row, no cache)."""
+    async with _open_session_at(url, headers or {}, transport) as session:
+        return _tools_from_result(await session.list_tools())
+
+
+async def call_tool_at(
+    url: str,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    transport: str = "http",
+) -> dict[str, Any]:
+    """``tools/call`` against a server addressed directly. Same result shape
+    as :func:`call_tool`."""
+    async with _open_session_at(url, headers or {}, transport) as session:
+        try:
+            result = await session.call_tool(tool_name, arguments or {})
+        except _SdkMcpError as e:  # type: ignore[misc]
+            raise McpClientError("tool_error", f"tool call failed: {e}") from e
+    return _call_result_to_dict(result)
 
 
 async def probe(server: PlatformMcpServer) -> dict[str, Any]:

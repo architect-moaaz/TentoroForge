@@ -437,22 +437,31 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Auto-trigger Figma generation if params are in sessionStorage
+  // Auto-trigger design import if NewAppDialog left params in sessionStorage.
+  // `design` is { provider, ref, credential_id?, token? }; the older
+  // figma_url/figma_token shape is still read so an in-flight tab survives.
   useEffect(() => {
-    const key = `figma_generate_${projectId}`;
-    const raw = sessionStorage.getItem(key);
+    const key = `design_generate_${projectId}`;
+    const legacyKey = `figma_generate_${projectId}`;
+    const raw = sessionStorage.getItem(key) ?? sessionStorage.getItem(legacyKey);
     if (!raw) return;
     sessionStorage.removeItem(key);
+    sessionStorage.removeItem(legacyKey);
     try {
-      const { figma_url, figma_token, description } = JSON.parse(raw);
-      if (figma_url && figma_token) {
+      const parsed = JSON.parse(raw);
+      const design = parsed.design ??
+        (parsed.figma_url && parsed.figma_token
+          ? { provider: "figma", ref: parsed.figma_url, token: parsed.figma_token }
+          : null);
+      if (design && design.provider && design.ref) {
+        const providerLabel = design.provider === "uxpilot" ? "UX Pilot" : "Figma";
         // Prefer the user-provided app brief (from NewAppDialog's textarea)
-        // over the URL-only boilerplate — the planner / discovery / bizlogic
+        // over the ref-only boilerplate — the planner / discovery / bizlogic
         // agents get real intent instead of "Import from Figma: <url>".
         const desc: string =
-          typeof description === "string" && description.trim()
-            ? description.trim()
-            : `Import from Figma: ${figma_url}`;
+          typeof parsed.description === "string" && parsed.description.trim()
+            ? parsed.description.trim()
+            : `Import from ${providerLabel}: ${design.ref}`;
         useChatStore.getState().addMessage({
           id: crypto.randomUUID(),
           project_id: projectId,
@@ -462,9 +471,15 @@ export function ChatPanel({
           metadata: null,
           created_at: new Date().toISOString(),
         });
+        const body: Record<string, unknown> = { description: desc, design };
+        if (design.provider === "figma") {
+          // The backend's Figma branch still keys off these two fields.
+          body.figma_url = design.ref;
+          body.figma_token = design.token;
+        }
         startStream(
           `/api/projects/${projectId}/generate`,
-          { description: desc, figma_url, figma_token },
+          body,
           onGenerationComplete,
         );
       }

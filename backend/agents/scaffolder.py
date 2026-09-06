@@ -36,8 +36,8 @@ SCAFFOLDER_SYSTEM_PROMPT = r"""You are a developer adding a new feature to an ex
 - Add realistic seed data for any new tables.
 - Keep it simple — implement the core feature, not every edge case.
 
-## Figma Design Context
-If src/contracts/figma-context.json exists, this project was generated from a Figma design.
+## Design Context
+If src/contracts/design-context.json exists, this project was generated from an imported design (Figma or UX Pilot).
 Read it to understand the design tokens (colors, typography, spacing, border radii).
 When adding UI for new features, use the same design system values for visual consistency.
 Also read reference.png to see the original design if helpful.
@@ -55,8 +55,8 @@ async def run_scaffolder(
     os.environ.pop("CLAUDECODE", None)
 
     # Check for Figma design context
-    from services.figma_context import get_figma_context_for_prompt
-    figma_section = get_figma_context_for_prompt(output_dir)
+    from services.design_context import get_design_context_for_prompt
+    figma_section = get_design_context_for_prompt(output_dir)
 
     user_prompt = f"""Add this feature to the project:
 
@@ -65,7 +65,7 @@ async def run_scaffolder(
 {figma_section}
 ## Steps:
 1. Read app-model.json to understand the current app structure
-2. {"Read src/contracts/figma-context.json for design tokens, then plan" if figma_section else "Plan"} the implementation (new files, modified files, new dependencies)
+2. {"Read src/contracts/design-context.json for design tokens, then plan" if figma_section else "Plan"} the implementation (new files, modified files, new dependencies)
 3. Implement the feature
 4. Run `npm run build` to verify compilation
 

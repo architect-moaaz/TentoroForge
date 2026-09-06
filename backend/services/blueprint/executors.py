@@ -670,10 +670,28 @@ NODE_TASKS: dict[str, str] = {
         "testable statement of something a user can do, with the evidence it came "
         "from. Do not design the solution."
     ),
+    "domain_intelligence": (
+        "Supply what an expert in this domain knows before anything is designed: "
+        "who the personas really are and what they do all day, the terminology "
+        "the product must use in its labels, the conventions and compliance "
+        "regimes that apply, and the pitfalls generic apps in this domain fall "
+        "into. Write it as evidence into the product frame; product analysis "
+        "composes the frame from it. Do not design pages or data."
+    ),
     "application_model": (
         "Establish the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
         "offer."
+    ),
+    "design_intelligence": (
+        "The application was imported from a design. For the design named as "
+        "this task's subject (`<provider>:<container>`), report what the design "
+        "itself establishes as evidence for the design-system agent: the colour "
+        "roles, type scale, spacing and radius it actually uses, its navigation "
+        "approach and information density, and the reusable components and "
+        "patterns the pages share (for `uiRegistry`). Set `derivedFrom` to the "
+        "provider. Record what you observed, not what you would prefer — the "
+        "design-system agent decides; you supply evidence. Never author pages."
     ),
     "data_model": (
         "Model the entities behind the requirements: fields with real types, which "

@@ -14,8 +14,16 @@ import json
 import re
 from pathlib import Path
 
+from typing import TYPE_CHECKING, Awaitable, Callable
+
 from services.figma_asset_downloader import extract_asset_urls, download_figma_assets
 from services.jsx_to_schema import transform_jsx_to_schema
+
+if TYPE_CHECKING:  # pragma: no cover
+    from services.design_source.base import DesignMarkup
+
+#: (urls, output_dir, project_id) → {url: local public path}
+AssetFetcher = Callable[[list[str], str, "str | None"], Awaitable[dict[str, str]]]
 
 _NAV_FLOW_PATH = "src/contracts/nav-flow.json"
 _SCHEMAS_DIR = "src/schemas"
@@ -107,6 +115,98 @@ def _upsert_nav_flow(output_dir: str, route: str, title: str, schema_file: str) 
         nav["post_logout_redirect"] = nav["auth_routes"][0]
 
     nav_path.write_text(json.dumps(nav, indent=2) + "\n")
+
+
+async def build_schema_from_markup(
+    markup: "DesignMarkup",
+    output_dir: str,
+    project_id: str | None = None,
+    route: str | None = None,
+    title: str | None = None,
+    schema_filename: str | None = None,
+    assets: "AssetFetcher | None" = None,
+    origin: dict | None = None,
+) -> tuple[dict, dict[str, str]]:
+    """Build a PageV2 schema from one page of an imported design, whichever
+    provider it came from.
+
+    ``markup.kind`` picks the transformer front end (``jsx`` for Figma Dev
+    Mode, ``html`` for UX Pilot); the element mapping behind both is the
+    same. ``assets`` is the provider's downloader (URL list → local path
+    map); the shared CDN downloader is used when none is given. ``origin``
+    is stamped on the schema as ``_designOrigin`` beside the renderer's
+    ``_figmaDerived`` marker, which every imported page sets because the
+    design supplies its own chrome.
+    """
+    urls = list(markup.asset_urls)
+    if urls:
+        if assets is not None:
+            asset_paths = await assets(urls, output_dir, project_id)
+        else:
+            asset_paths = await download_figma_assets(urls, output_dir, project_id=project_id)
+    else:
+        asset_paths = {}
+
+    if markup.kind == "html":
+        from services.html_to_schema import transform_html_to_schema
+        schema = transform_html_to_schema(markup.source, asset_paths)
+    elif markup.kind == "schema":
+        schema = json.loads(markup.source)
+        if not isinstance(schema, dict):
+            raise ValueError("schema markup must be a PageV2 object")
+    else:
+        schema = transform_jsx_to_schema(markup.source, asset_paths)
+
+    if isinstance(schema, dict):
+        schema["_figmaDerived"] = True
+        if origin:
+            schema["_designOrigin"] = dict(origin)
+
+    _bind_and_name(schema, output_dir, route, title, schema_filename)
+    return schema, asset_paths
+
+
+def _bind_and_name(
+    schema: dict,
+    output_dir: str,
+    route: str | None,
+    title: str | None,
+    schema_filename: str | None,
+) -> None:
+    """The steps shared by every markup kind once a PageV2 tree exists:
+    registry-driven auto-binding, then id/title + nav-flow when a route is
+    known. Mutates ``schema`` in place."""
+    # ── Auto-binding pass ─────────────────────────────────────────────
+    # Attach dataSources + Repeat wrappers + {{item.field}} bindings by
+    # matching the tree against the app's resource registry.
+    # No-op when registry.json isn't there yet (early in the pipeline).
+    try:
+        from services.figma_binding_extractor import extract_bindings
+        reg_path = Path(output_dir) / "registry.json"
+        if reg_path.is_file():
+            try:
+                registry = json.loads(reg_path.read_text())
+            except Exception:
+                registry = {}
+            if registry:
+                bound = extract_bindings(schema, registry)
+                if isinstance(bound, dict) and bound is not schema:
+                    schema.clear()
+                    schema.update(bound)
+    except Exception:
+        # Best-effort: never break the pipeline if the extractor fails.
+        pass
+
+    if route:
+        page_slug = _slug_from_route(route)
+        page_title = title or page_slug.replace("-", " ").title()
+        schema["id"] = page_slug
+        schema["title"] = page_title
+        if schema_filename:
+            sf = f"{_SCHEMAS_DIR}/{schema_filename}"
+        else:
+            sf = _schema_file_from_route(route)
+        _upsert_nav_flow(output_dir, route, page_title, sf)
 
 
 async def build_schema_from_jsx(

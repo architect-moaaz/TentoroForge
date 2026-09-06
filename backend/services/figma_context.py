@@ -1,20 +1,28 @@
-"""Figma design context persistence — extracts design tokens from styles.json.
+"""Figma design context — the Figma adapter's token extraction.
 
-Provides:
-- extract_figma_context(): parse styles.json, collect unique design tokens, write figma-context.json
+The persisted file and the prompt section are provider-neutral and live in
+:mod:`services.design_context`; this module keeps the Figma-specific half,
+walking a ``styles.json`` tree for colours, fonts, sizes, radii and spacing,
+and the three names its callers already import:
+
+- extract_figma_context(): read styles.json, measure tokens, persist the design context
 - should_refetch_figma(): detect if Figma data needs re-fetching (new URL or missing artifacts)
-- get_figma_context_for_prompt(): return a prompt section string for agents to include
+- get_figma_context_for_prompt(): the design-context prompt section
 """
 
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from services.design_context import (
+    context_ref_changed,
+    get_design_context_for_prompt,
+    read_design_context,
+    write_design_context,
+)
 
-_CONTEXT_PATH = "src/contracts/figma-context.json"
+logger = logging.getLogger(__name__)
 
 
 def extract_figma_context(output_dir: str, figma_url: str) -> dict:
@@ -36,6 +44,20 @@ def extract_figma_context(output_dir: str, figma_url: str) -> dict:
         logger.warning("[figma_context] Failed to parse styles.json")
         return {}
 
+    tokens = tokens_from_styles(styles)
+    return write_design_context(
+        output_dir,
+        provider="figma",
+        design_ref=figma_url,
+        tokens=tokens,
+        extra={"styles_json_hash": styles_hash},
+    )
+
+
+def tokens_from_styles(styles: dict) -> dict:
+    """Walk a Figma ``styles.json`` tree (one frame, or a dict of frames keyed
+    by node id) and return the ``design_tokens`` dict: sorted, deduplicated
+    colours, fonts, font sizes, border radii and spacings."""
     # Collect design tokens by walking the style tree
     colors: set[str] = set()
     fonts: set[str] = set()
@@ -110,27 +132,13 @@ def extract_figma_context(output_dir: str, figma_url: str) -> dict:
             if isinstance(tree, dict):
                 _walk(tree)
 
-    context = {
-        "figma_url": figma_url,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "styles_json_hash": styles_hash,
-        "design_tokens": {
-            "colors": sorted(colors),
-            "fonts": sorted(fonts),
-            "font_sizes": sorted(font_sizes),
-            "border_radii": sorted(border_radii),
-            "spacings": sorted(spacings),
-        },
+    return {
+        "colors": sorted(colors),
+        "fonts": sorted(fonts),
+        "font_sizes": sorted(font_sizes),
+        "border_radii": sorted(border_radii),
+        "spacings": sorted(spacings),
     }
-
-    # Write to src/contracts/figma-context.json
-    ctx_path = Path(output_dir) / _CONTEXT_PATH
-    ctx_path.parent.mkdir(parents=True, exist_ok=True)
-    ctx_path.write_text(json.dumps(context, indent=2))
-    logger.info("[figma_context] Wrote %s with %d colors, %d fonts",
-                ctx_path, len(colors), len(fonts))
-
-    return context
 
 
 def should_refetch_figma(output_dir: str, new_figma_url: str | None) -> bool:
@@ -138,7 +146,6 @@ def should_refetch_figma(output_dir: str, new_figma_url: str | None) -> bool:
     if not new_figma_url:
         return False
 
-    ctx_path = Path(output_dir) / _CONTEXT_PATH
     styles_path = Path(output_dir) / "styles.json"
     ref_path = Path(output_dir) / "reference.png"
 
@@ -147,60 +154,16 @@ def should_refetch_figma(output_dir: str, new_figma_url: str | None) -> bool:
         return True
 
     # No context file → need to extract (not necessarily re-fetch)
-    if not ctx_path.exists():
+    if read_design_context(output_dir) is None:
         return False  # styles.json exists, just need extract_figma_context()
 
-    # Compare URLs
-    try:
-        existing = json.loads(ctx_path.read_text())
-        existing_url = existing.get("figma_url", "")
-        if existing_url != new_figma_url:
-            logger.info("[figma_context] URL changed: %s → %s", existing_url, new_figma_url)
-            return True
-    except (json.JSONDecodeError, OSError):
+    if context_ref_changed(output_dir, new_figma_url):
+        logger.info("[figma_context] URL changed → %s", new_figma_url)
         return True
-
     return False
 
 
 def get_figma_context_for_prompt(output_dir: str) -> str:
-    """Return a prompt section string for agents to include.
-
-    Returns empty string if no figma-context.json exists.
-    """
-    ctx_path = Path(output_dir) / _CONTEXT_PATH
-    if not ctx_path.exists():
-        return ""
-
-    try:
-        ctx = json.loads(ctx_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return ""
-
-    tokens = ctx.get("design_tokens", {})
-    colors = tokens.get("colors", [])
-    fonts = tokens.get("fonts", [])
-    font_sizes = tokens.get("font_sizes", [])
-    border_radii = tokens.get("border_radii", [])
-    spacings = tokens.get("spacings", [])
-
-    sections = [
-        "\n## Figma Design Context",
-        "This project was generated from a Figma design. Use these design tokens for visual consistency:",
-    ]
-
-    if colors:
-        sections.append(f"- Colors: {', '.join(colors[:20])}")
-    if fonts:
-        sections.append(f"- Fonts: {', '.join(fonts)}")
-    if font_sizes:
-        sections.append(f"- Font sizes: {', '.join(str(s) + 'px' for s in font_sizes)}")
-    if border_radii:
-        sections.append(f"- Border radii: {', '.join(str(r) + 'px' for r in border_radii)}")
-    if spacings:
-        sections.append(f"- Spacings: {', '.join(str(s) + 'px' for s in spacings)}")
-
-    sections.append("- Reference design: reference.png (read if helpful)")
-    sections.append("When making visual changes, prefer values from the original design system.")
-
-    return "\n".join(sections)
+    """The design-context prompt section (empty when the project was not
+    built from a design). Kept under its Figma-era name for its callers."""
+    return get_design_context_for_prompt(output_dir)

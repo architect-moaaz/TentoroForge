@@ -198,7 +198,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   { id: "indexer", name: "Indexer", spriteKey: "indexer", room: "library", role: "Indexes app model", color: "#92400E" },
   { id: "agent_builder", name: "Agent Builder", spriteKey: "agent_builder", room: "library", role: "Builds AI agents", color: "#BE185D" },
   { id: "portal_builder", name: "Portal Builder", spriteKey: "portal_builder", room: "dev_api", role: "Builds portal features", color: "#0E7490" },
-  { id: "figma_importer", name: "Figma Importer", spriteKey: "figma_importer", room: "design_studio", role: "Imports Figma designs", color: "#A21CAF" },
+  { id: "design_importer", name: "Design Importer", spriteKey: "figma_importer", room: "design_studio", role: "Imports Figma and UX Pilot designs", color: "#A21CAF" },
   { id: "chat_refiner", name: "Chat Refiner", spriteKey: "chat_refiner", room: "planning", role: "Refines via chat", color: "#E11D48" },
   { id: "appmodel_manager", name: "AppModel Manager", spriteKey: "appmodel_manager", room: "library", role: "Manages app model index", color: "#475569" },
 ];
@@ -249,7 +249,7 @@ export const AGENT_PHASE_MAP: Record<string, string> = {
   indexer: "indexing",
   agent_builder: "indexing",
   portal_builder: "api",
-  figma_importer: "schema",
+  design_importer: "schema",
   chat_refiner: "planning",
   appmodel_manager: "indexing",
 };

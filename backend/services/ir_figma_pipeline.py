@@ -96,12 +96,11 @@ async def run_figma_ir_pipeline(
 
     # Load Figma design tokens if available
     figma_tokens = None
-    figma_context_path = os.path.join(output_dir, "src", "contracts", "figma-context.json")
-    if os.path.exists(figma_context_path):
-        try:
-            figma_tokens = json.loads(open(figma_context_path).read()).get("design_tokens")
-        except Exception:
-            pass
+    try:
+        from services.design_context import read_design_context
+        figma_tokens = (read_design_context(output_dir) or {}).get("design_tokens")
+    except Exception:
+        pass
 
     # Generate the standard IR from the plan (entities, CRUD pages, auth) with industry design
     app_spec = plan_to_app_spec(plan, app_name, domain_context=domain_ctx, figma_tokens=figma_tokens)

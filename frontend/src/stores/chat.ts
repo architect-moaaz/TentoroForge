@@ -71,7 +71,7 @@ const LOG_TAG_TO_AGENT: Record<string, string> = {
   Workflow: "workflow_agent",
   Rules: "rules_writer",
   Export: "export_agent",
-  Figma: "figma_importer",
+  Figma: "design_importer",
   Refine: "chat_refiner",
   Agent: "agent_builder",
 };
@@ -290,7 +290,8 @@ export interface QuestState {
   activePhaseIndex: number;
   completedPhaseIndices: number[];
   totalXp: number;
-  isFigma: boolean;
+  /** The app is built from an imported design (Figma or UX Pilot). */
+  isDesign: boolean;
   showCompletionBanner: boolean;
   completionStats: CompletionStats | null;
   /** Wall-clock ms per phaseIndex when that phase became active.
@@ -320,7 +321,7 @@ const emptyQuest: QuestState = {
   activePhaseIndex: -1,
   completedPhaseIndices: [],
   totalXp: 0,
-  isFigma: false,
+  isDesign: false,
   showCompletionBanner: false,
   completionStats: null,
   phaseStartTimes: {},
@@ -461,8 +462,12 @@ export const useChatStore = create<ChatState>((set) => ({
           if (phaseIdx >= 0 && q.progress) {
             q.progress = null;
           }
-          if (statusMsg.includes("Generating UI from Figma")) {
-            q.isFigma = true;
+          if (
+            statusMsg.includes("Generating UI from Figma") ||
+            /Importing \d+ page\(s\) from /.test(statusMsg) ||
+            /Generating \d+ page\(s\) from Figma/.test(statusMsg)
+          ) {
+            q.isDesign = true;
           }
           if (phaseIdx >= 0 && phaseIdx !== q.activePhaseIndex) {
             // Complete the previous active phase

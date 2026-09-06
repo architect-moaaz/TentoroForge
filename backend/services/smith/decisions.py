@@ -49,7 +49,7 @@ from services.blueprint.agent_contract import AUTO_DECIDE
 from services.blueprint.service import ArtifactNotFound, BlueprintService
 
 #: §20's closed source set, mirrored from the contract.
-SOURCES: tuple[str, ...] = ("user", "smith_recommendation", "domain_default", "figma")
+SOURCES: tuple[str, ...] = ("user", "smith_recommendation", "domain_default", "figma", "uxpilot")
 
 #: Where an answered artifact's confidence lands. See the module docstring —
 #: these are authority grants, not beliefs.

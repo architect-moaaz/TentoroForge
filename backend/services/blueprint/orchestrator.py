@@ -171,7 +171,13 @@ def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
 #: §28's graph. Tier names follow the PRD's diagram.
 DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("requirements", "requirement", (), ("requirements",)),
-    _n("application_model", "product_analysis", ("requirements",), ("product",)),
+    # §27 — domain intelligence supplies the product frame's vocabulary and
+    # conventions before product analysis composes it. Both write `product`;
+    # the run ledger, not section content, says which of them has run.
+    _n("domain_intelligence", "domain_intelligence", ("requirements",), ("product",),
+       note="§27; personas, terminology and domain conventions as evidence"),
+    _n("application_model", "product_analysis", ("requirements", "domain_intelligence"),
+       ("product",)),
 
     # left branch — data
     _n("data_model", "data_model", ("application_model",), ("data.entities",)),
@@ -187,10 +193,18 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("ux_architecture", "solution_architecture", ("application_model",),
        ("modules", "navigation")),
     # §37 — the design language, authored before anything composes against it.
-    # It had owners (accessibility, figma_intelligence) but no node, so nobody
+    # It had owners (accessibility, design_intelligence) but no node, so nobody
     # ever invoked them and `designSystem` stayed empty through every run —
     # which is also what blocks the theme-token projection.
-    _n("design_system", "accessibility", ("application_model",), ("designSystem",),
+    # §31/§34/§101 — what an imported design (Figma, UX Pilot) says about the
+    # design language and the reusable UI, as evidence for the design-system
+    # agent to decide from. One call per imported design container; an app
+    # with no design origin runs it zero times and the node completes empty.
+    _n("design_intelligence", "design_intelligence", ("application_model",),
+       ("designSystem", "uiRegistry"), fanout="design_origins",
+       note="§101; evidence from imported designs, never page authoring"),
+    _n("design_system", "accessibility", ("application_model", "design_intelligence"),
+       ("designSystem",),
        note="§37; must precede page design so composition has a language"),
     _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",)),
     _n("page_designs", "page_design", ("page_contracts",), ("components", "uiRegistry")),
@@ -248,7 +262,43 @@ FANOUT: dict[str, Any] = {
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
     ],
+    # Distinct imported designs, as "<provider>:<container>". Empty when the
+    # app was not built from a design, so the node runs zero times.
+    "design_origins": lambda doc: sorted({
+        f"{o['provider']}:{o.get('container') or o.get('ref') or ''}"
+        for o in (
+            [p.get("origin") for p in (doc.get("pages") or [])]
+            + [c.get("origin") for c in (doc.get("components") or [])]
+        )
+        if isinstance(o, dict) and o.get("provider")
+    }),
 }
+
+
+# ---------------------------------------------------------------------------
+# §28 — the run ledger
+# ---------------------------------------------------------------------------
+
+def completed_nodes(doc: dict, run_id: str) -> set[str]:
+    """Nodes with a completed record under ``run_id``.
+
+    A fanning-out node counts only when every subject it has *now* has a
+    completed record — a page added between attempts is not covered by an
+    earlier run.
+    """
+    done: dict[str, set[str]] = {}
+    for rec in doc.get("runs") or []:
+        if rec.get("runId") == run_id and rec.get("outcome") == "completed":
+            done.setdefault(rec["node"], set()).add(rec.get("subject") or "")
+    out: set[str] = set()
+    for key, subjects in done.items():
+        node = DAG.get(key)
+        if node is None:
+            continue
+        needed = set(subjects_for(node, doc)) or {""}
+        if needed <= subjects or (not node.fanout and "" in subjects):
+            out.add(key)
+    return out
 
 
 def subjects_for(node: "DagNode", doc: dict) -> list[str]:
@@ -587,9 +637,17 @@ class TaskSpec:
     feedback: str = ""
 
 
+def _new_run_id() -> str:
+    import datetime as _dt
+    return "RUN-" + _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
 @dataclass
 class RunReport:
     completed: list[str] = field(default_factory=list)
+    #: Groups this run's ledger records; pass it back as ``resume`` to skip
+    #: what already completed.
+    run_id: str = ""
     skipped: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
@@ -613,8 +671,15 @@ def run(
     commit: bool = False,
     user_request: str = "",
     app_root: str | None = None,
+    resume: str | None = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
+
+    Every agent node's outcome is written to the Blueprint's ``runs`` ledger
+    under this run's id. ``resume`` names an earlier run: its completed nodes
+    are treated as done and skipped, and new records join it. Completion is
+    never inferred from whether a section has content — two nodes that write
+    the same section would otherwise mark each other done.
 
     ``executor`` performs the actual agent call — injected so this module never
     depends on an LLM. Retries are bounded by ``max_attempts`` (§103: tasks must
@@ -626,11 +691,15 @@ def run(
     a swarm produces confident nonsense.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
-    report = RunReport()
-    done: set[str] = set()
+    run_id = resume or _new_run_id()
+    report = RunReport(run_id=run_id)
+    done: set[str] = completed_nodes(svc.doc, run_id) if resume else set()
 
     for key in order:
         node = DAG[key]
+        if key in done:
+            report.completed.append(key)
+            continue
         unmet = {d for d in node.depends_on if d in order and d not in done}
         if unmet:
             report.skipped.append(key)
@@ -678,7 +747,7 @@ def run(
             outcome = _run_agent_subject(
                 svc, executor, key, node, subject,
                 max_attempts=max_attempts, commit=commit,
-                user_request=user_request, report=report,
+                user_request=user_request, report=report, run_id=run_id,
             )
             if outcome is None:
                 node_failed = True
@@ -703,8 +772,12 @@ def _run_agent_subject(
     commit: bool,
     user_request: str,
     report: RunReport,
+    run_id: str = "",
 ) -> str | None:
     """One agent call (with retries) for one subject.
+
+    Every terminal outcome is written to the run ledger (§28) so a resumed run
+    knows what happened here without re-reading the sections.
 
     Returns ``"completed"`` or ``None``; a ``None`` means the caller must stop,
     because the node cannot be considered done. Retries are bounded by
@@ -713,6 +786,14 @@ def _run_agent_subject(
     """
     label = f"{key}:{subject}" if subject else key
     feedback = ""
+
+    def _ledger(outcome: str, task_id: str | None = None, artifacts=()) -> None:
+        if run_id:
+            svc.record_run(
+                run_id=run_id, node=key, agent=node.agent, outcome=outcome,
+                subject=subject, task_id=task_id, artifacts=artifacts,
+            )
+
     for attempt in range(1, max_attempts + 1):
         spec = TaskSpec(
             task_id=f"TASK-{label}-{attempt}", node=key,
@@ -728,6 +809,7 @@ def _run_agent_subject(
             feedback = str(exc)
             if attempt == max_attempts:
                 report.failed.append(label)
+                _ledger("failed", spec.task_id)
                 return None
             continue
 
@@ -744,18 +826,22 @@ def _run_agent_subject(
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
                 report.failed.append(label)
+                _ledger("failed", spec.task_id)
                 return None
             continue
         if application.applied:
             report.artifacts.extend(application.artifacts)
             report.change_requests.extend(application.change_requests)
+            _ledger("completed", spec.task_id, application.artifacts)
             return "completed"
         if application.needs_clarification or result.status == "blocked":
             report.blocked.append(label)
             report.change_requests.extend(application.change_requests)
+            _ledger("blocked", spec.task_id)
             return None
         if attempt == max_attempts:
             report.failed.append(label)
+            _ledger("failed", spec.task_id)
             return None
     return None
 

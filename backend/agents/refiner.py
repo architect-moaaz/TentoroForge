@@ -51,8 +51,8 @@ When modifying the Drizzle schema:
 - Add proper constraints (notNull, unique, default, references)
 - Add indexes for frequently queried columns
 
-## Figma Design Context
-If src/contracts/figma-context.json exists, this project was generated from a Figma design.
+## Design Context
+If src/contracts/design-context.json exists, this project was generated from an imported design (Figma or UX Pilot).
 Read it to understand the design tokens (colors, typography, spacing, border radii).
 When making visual changes, prefer using values from the original design system.
 Also read reference.png to see the original design if helpful.
@@ -98,8 +98,8 @@ async def run_refiner(
     os.environ.pop("CLAUDECODE", None)
 
     # Check for Figma design context
-    from services.figma_context import get_figma_context_for_prompt
-    figma_section = get_figma_context_for_prompt(output_dir)
+    from services.design_context import get_design_context_for_prompt
+    figma_section = get_design_context_for_prompt(output_dir)
 
     contracts = _context_engine_block(output_dir)
     convo = (
@@ -134,7 +134,7 @@ async def run_refiner(
         )
 
     steps = f"""## Steps:
-1. {"You already have the relevant files pre-loaded above — skip re-reading them" if scope_block else f'{"Read src/contracts/figma-context.json for design tokens, then identify" if figma_section else "Identify"} the files that need to change and Read them'}.
+1. {"You already have the relevant files pre-loaded above — skip re-reading them" if scope_block else f'{"Read src/contracts/design-context.json for design tokens, then identify" if figma_section else "Identify"} the files that need to change and Read them'}.
 2. Make targeted edits using Edit (not Write). Reference ONLY components, props, and fields that appear in the contracts above.
 3. Type-check: `npx tsc --noEmit --pretty false 2>&1 | tail -60`. tsc catches import errors, missing exports, and type mismatches without the 60–120s cost of a full production build (that runs at deploy).
 4. Runtime check — a green tsc is NOT proof it runs. Import/boundary mistakes (e.g. "Cannot read properties of undefined (reading 'call')") only crash at runtime. Re-read every file you edited and confirm: every import resolves to a real export (no default-vs-named mismatch), any component using hooks/state has "use client", and every component/prop/field you used exists in the contracts above.

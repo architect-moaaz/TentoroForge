@@ -72,12 +72,11 @@ async def run_ir_frontend_pipeline(
     yield sse_event("log", {"text": f"[IR] Domain: {domain_label}"})
 
     figma_tokens = None
-    figma_context_path = os.path.join(output_dir, "src", "contracts", "figma-context.json")
-    if os.path.exists(figma_context_path):
-        try:
-            figma_tokens = json.loads(open(figma_context_path).read()).get("design_tokens")
-        except Exception:
-            pass
+    try:
+        from services.design_context import read_design_context
+        figma_tokens = (read_design_context(output_dir) or {}).get("design_tokens")
+    except Exception:
+        pass
 
     # --- Step 3: Convert plan to AppSpec ---
     yield sse_event("status", {"message": f"Preparing IR generation ({domain_label})..."})

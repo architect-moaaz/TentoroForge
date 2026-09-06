@@ -482,8 +482,11 @@ def test_foundational_nodes_are_classified_by_what_they_produce():
     from services.blueprint.orchestrator import is_foundational
 
     frame = {k for k, n in DAG.items() if is_foundational(n)}
+    # The two intelligence nodes write frame sections (product, designSystem)
+    # as evidence, so they classify as frame too — re-running them on an
+    # incremental change would re-author the frame's evidence.
     assert frame == {"application_model", "design_system", "integrations",
-                     "ux_architecture"}
+                     "ux_architecture", "domain_intelligence", "design_intelligence"}
 
 
 def test_service_and_projection_nodes_are_never_foundational():
@@ -618,3 +621,174 @@ def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
     plan = incremental_plan(ats, ["CMP-033"])
     for required in ("patterns", "frontend", "integration", "verification", "preview"):
         assert required in plan, required
+
+
+# --- §28: the run ledger ----------------------------------------------------
+#
+# Completion is a fact the ledger records, never a guess from section
+# content. Two nodes write `designSystem` (design_intelligence as evidence,
+# design_system as the decision); inferring "done" from a populated section
+# would let whichever ran first mark the other complete on every resume.
+
+def test_every_agent_node_outcome_is_written_to_the_ledger(svc):
+    report = run(svc, page_agent_result, plan=["page_contracts"])
+    assert report.run_id.startswith("RUN-")
+    runs = svc.doc["runs"]
+    assert len(runs) == 1
+    rec = runs[0]
+    assert rec["runId"] == report.run_id
+    assert (rec["node"], rec["agent"], rec["outcome"]) == ("page_contracts", "page_design", "completed")
+    assert rec["artifacts"] == ["PAGE-001"]
+    assert rec["version"] == svc.doc["version"]
+    # The ledger is part of the document and survives a reload.
+    reloaded = BlueprintService.load(output_dir=svc.output_dir)
+    assert reloaded.doc["runs"][0]["node"] == "page_contracts"
+
+
+def test_failed_and_blocked_outcomes_are_recorded_too(svc):
+    def failing(spec: TaskSpec) -> AgentResult:
+        raise RuntimeError("down")
+
+    report = run(svc, failing, plan=["page_contracts"], max_attempts=1)
+    assert report.failed == ["page_contracts"]
+    assert [r["outcome"] for r in svc.doc["runs"]] == ["failed"]
+
+    def blocked(spec: TaskSpec) -> AgentResult:
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, status="blocked")
+
+    run(svc, blocked, plan=["page_contracts"], max_attempts=1)
+    assert [r["outcome"] for r in svc.doc["runs"]] == ["failed", "blocked"]
+
+
+def test_resume_skips_what_the_ledger_says_completed_and_runs_the_rest(svc):
+    attempted: list[str] = []
+
+    def flaky(spec: TaskSpec) -> AgentResult:
+        attempted.append(spec.node)
+        if spec.node == "page_designs":
+            raise RuntimeError("crashed mid-run")
+        return page_agent_result(spec)
+
+    first = run(svc, flaky, plan=["page_contracts", "page_designs"], max_attempts=1)
+    assert first.completed == ["page_contracts"] and first.failed == ["page_designs"]
+
+    attempted.clear()
+
+    def recording(spec: TaskSpec) -> AgentResult:
+        attempted.append(spec.node)
+        return page_agent_result(spec)
+
+    second = run(svc, recording, plan=["page_contracts", "page_designs"],
+                 resume=first.run_id)
+    assert second.run_id == first.run_id
+    assert second.ok
+    # page_contracts was not re-run: the ledger, not its populated section, said so.
+    assert attempted == ["page_designs"]
+    assert second.completed == ["page_contracts", "page_designs"]
+    outcomes = [(r["node"], r["outcome"]) for r in svc.doc["runs"]]
+    assert outcomes == [("page_contracts", "completed"), ("page_designs", "failed"),
+                        ("page_designs", "completed")]
+
+
+def test_a_different_run_id_does_not_count_as_done(svc):
+    first = run(svc, page_agent_result, plan=["page_contracts"])
+    attempted: list[str] = []
+
+    def executor(spec: TaskSpec) -> AgentResult:
+        attempted.append(spec.node)
+        return page_agent_result(spec)
+
+    run(svc, executor, plan=["page_contracts"])  # a new run, no resume
+    assert attempted == ["page_contracts"]
+    assert len({r["runId"] for r in svc.doc["runs"]}) == 2
+    assert first.run_id in {r["runId"] for r in svc.doc["runs"]}
+
+
+def test_completed_nodes_requires_every_current_subject(svc):
+    from services.blueprint.orchestrator import completed_nodes
+    svc.doc["pages"] = [
+        {"id": "PAGE-001", "name": "A", "route": "/a", "purpose": "x"},
+        {"id": "PAGE-002", "name": "B", "route": "/b", "purpose": "x"},
+    ]
+    svc.record_run(run_id="R", node="page_layouts", agent="a2ui_pages",
+                   outcome="completed", subject="PAGE-001")
+    assert "page_layouts" not in completed_nodes(svc.doc, "R")
+    svc.record_run(run_id="R", node="page_layouts", agent="a2ui_pages",
+                   outcome="completed", subject="PAGE-002")
+    assert "page_layouts" in completed_nodes(svc.doc, "R")
+
+
+# --- §27/§101: the intelligence nodes ------------------------------------------
+
+def test_domain_intelligence_precedes_product_analysis():
+    assert "domain_intelligence" in DAG["application_model"].depends_on
+    assert DAG["domain_intelligence"].produces == frozenset({"product"})
+    assert DAG["design_intelligence"].produces == frozenset({"designSystem", "uiRegistry"})
+    assert "design_intelligence" in DAG["design_system"].depends_on
+    lvls = levels()
+    idx = {k: i for i, lvl in enumerate(lvls) for k in lvl}
+    assert idx["domain_intelligence"] < idx["application_model"]
+    assert idx["design_intelligence"] < idx["design_system"]
+
+
+def test_design_intelligence_runs_once_per_imported_design_and_never_without_one(svc):
+    from services.blueprint.orchestrator import subjects_for
+    node = DAG["design_intelligence"]
+    assert subjects_for(node, svc.doc) == []
+    svc.doc["pages"] = [
+        {"id": "PAGE-001", "name": "A", "route": "/a", "purpose": "x",
+         "origin": {"provider": "uxpilot", "ref": "d1", "container": "pg_9"}},
+        {"id": "PAGE-002", "name": "B", "route": "/b", "purpose": "x",
+         "origin": {"provider": "uxpilot", "ref": "d2", "container": "pg_9"}},
+        {"id": "PAGE-003", "name": "C", "route": "/c", "purpose": "x",
+         "origin": {"provider": "figma", "ref": "1:2", "container": "FILEKEY"}},
+    ]
+    assert subjects_for(node, svc.doc) == ["figma:FILEKEY", "uxpilot:pg_9"]
+
+    # With no imported design the node completes without a model call.
+    svc.doc["pages"] = []
+    called: list[str] = []
+
+    def executor(spec: TaskSpec) -> AgentResult:
+        called.append(spec.node)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent)
+
+    report = run(svc, executor, plan=["design_intelligence"])
+    assert report.completed == ["design_intelligence"] and called == []
+
+
+def test_both_design_writers_run_and_the_ledger_tells_them_apart(svc):
+    """The dual-producer case the ledger exists for: design_intelligence and
+    design_system both write `designSystem`; each must run, and a resume must
+    not skip the second because the first populated the section."""
+    svc.doc["pages"] = [
+        {"id": "PAGE-001", "name": "A", "route": "/a", "purpose": "x",
+         "origin": {"provider": "figma", "ref": "1:2", "container": "F"}},
+    ]
+    seen: list[str] = []
+
+    def executor(spec: TaskSpec) -> AgentResult:
+        seen.append(spec.node)
+        body = {"visualPersonality": f"from {spec.node}"}
+        if spec.node == "design_intelligence":
+            body["derivedFrom"] = "figma"
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(section="designSystem", natural_key="designSystem", body=body)],
+        )
+
+    plan = ["design_intelligence", "design_system"]
+    def first_pass(spec: TaskSpec) -> AgentResult:
+        if spec.node == "design_system":
+            raise RuntimeError("boom")
+        return executor(spec)
+
+    first = run(svc, first_pass, plan=plan, max_attempts=1)
+    assert first.completed == ["design_intelligence"] and first.failed == ["design_system"]
+    assert svc.doc["designSystem"]["visualPersonality"] == "from design_intelligence"
+
+    seen.clear()
+    second = run(svc, executor, plan=plan, resume=first.run_id)
+    assert seen == ["design_system"]          # the populated section did not hide it
+    assert second.ok
+    assert svc.doc["designSystem"]["visualPersonality"] == "from design_system"

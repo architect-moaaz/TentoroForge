@@ -22,10 +22,12 @@ import pytest
 
 GENERATE_PY = Path(__file__).resolve().parents[2] / "routers" / "generate.py"
 
-# Functions whose `_progress` use pattern must be safe.
+# Functions whose `_progress` use pattern must be safe. The design body took
+# over from `_run_figma_relay_pipeline`, which is now a thin wrapper that
+# builds a PlanSource and never touches `_progress` itself.
 PIPELINE_FUNCTIONS = {
     "_run_relay_pipeline",
-    "_run_figma_relay_pipeline",
+    "_run_design_relay_pipeline",
 }
 
 

@@ -32,15 +32,15 @@ class _RecordingStub:
 def stub_pipelines(monkeypatch):
     """Replace the legacy pipeline functions with recording stubs.
 
-    Returns (text_stub, figma_stub). Assert on `.calls[0]` to inspect
+    Returns (text_stub, design_stub). Assert on `.calls[0]` to inspect
     the kwargs the wrapper forwarded.
     """
     from routers import generate as gen_module
     text_stub = _RecordingStub("text")
-    figma_stub = _RecordingStub("figma")
+    design_stub = _RecordingStub("design")
     monkeypatch.setattr(gen_module, "_run_relay_pipeline", text_stub)
-    monkeypatch.setattr(gen_module, "_run_figma_relay_pipeline", figma_stub)
-    return text_stub, figma_stub
+    monkeypatch.setattr(gen_module, "_run_design_relay_pipeline", design_stub)
+    return text_stub, design_stub
 
 
 class TestDispatch:
@@ -60,8 +60,8 @@ class TestDispatch:
         assert events == [{"event": "log", "data": '{"text":"stub ran"}'}]
 
     @pytest.mark.asyncio
-    async def test_figma_source_routes_to_figma_pipeline(self, stub_pipelines):
-        text_stub, figma_stub = stub_pipelines
+    async def test_figma_source_routes_to_design_pipeline(self, stub_pipelines):
+        text_stub, design_stub = stub_pipelines
         events = []
         async for evt in run_pipeline(
             output_dir="/tmp/x",
@@ -71,7 +71,21 @@ class TestDispatch:
         ):
             events.append(evt)
         assert len(text_stub.calls) == 0
-        assert len(figma_stub.calls) == 1
+        assert len(design_stub.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_uxpilot_source_routes_to_the_same_design_pipeline(self, stub_pipelines):
+        text_stub, design_stub = stub_pipelines
+        async for _ in run_pipeline(
+            output_dir="/tmp/x",
+            plan={"a": 1},
+            description="build from ux pilot",
+            source=PlanSource.uxpilot(page_id="pg_1", credential_id="row", secret="ep_k"),
+        ):
+            pass
+        assert len(text_stub.calls) == 0
+        assert len(design_stub.calls) == 1
+        assert design_stub.calls[0]["source"].kind == "uxpilot"
 
 
 class TestArgForwarding:
@@ -98,25 +112,28 @@ class TestArgForwarding:
         assert call["figma_context"] is None
 
     @pytest.mark.asyncio
-    async def test_figma_forwards_url_and_token_from_source(self, stub_pipelines):
-        _, figma_stub = stub_pipelines
+    async def test_design_forwards_the_source_itself(self, stub_pipelines):
+        _, design_stub = stub_pipelines
+        src = PlanSource.figma(url="https://figma.com/file/xyz", token="figd-x")
         async for _ in run_pipeline(
             output_dir="/out",
             plan={"p": 1},
             description="d",
-            source=PlanSource.figma(url="https://figma.com/file/xyz", token="figd-x"),
+            source=src,
             project_id="proj-2",
         ):
             pass
-        call = figma_stub.calls[0]
-        assert call["figma_url"] == "https://figma.com/file/xyz"
-        assert call["figma_token"] == "figd-x"
+        call = design_stub.calls[0]
+        assert call["source"] is src
+        assert call["source"].figma_url == "https://figma.com/file/xyz"
+        assert call["source"].figma_token == "figd-x"
+        assert call["project_id"] == "proj-2"
 
     @pytest.mark.asyncio
     async def test_source_wins_over_loose_figma_kwargs(self, stub_pipelines):
         # If a legacy caller still passes figma_url/figma_token loose,
         # the source's own values take precedence — no accidental drift.
-        _, figma_stub = stub_pipelines
+        _, design_stub = stub_pipelines
         async for _ in run_pipeline(
             output_dir="/out",
             plan={},
@@ -126,9 +143,10 @@ class TestArgForwarding:
             figma_token="loose-should-lose-too",
         ):
             pass
-        call = figma_stub.calls[0]
-        assert call["figma_url"] == "AUTHORITATIVE"
-        assert call["figma_token"] == "AUTHORITATIVE_TOKEN"
+        call = design_stub.calls[0]
+        assert "figma_url" not in call
+        assert call["source"].figma_url == "AUTHORITATIVE"
+        assert call["source"].figma_token == "AUTHORITATIVE_TOKEN"
 
     @pytest.mark.asyncio
     async def test_absorbs_unknown_extras(self, stub_pipelines):

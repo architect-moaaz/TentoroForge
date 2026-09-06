@@ -122,7 +122,7 @@ _READS: dict[str, set[str]] = {
 
     # Design language: the product and what the UI already uses.
     "accessibility": {"requirements", "pages", "uiRegistry"},
-    "figma_intelligence": {"requirements", "pages"},
+    "design_intelligence": {"requirements", "pages"},
 
     # §30 verbatim — page design may compose pages and select patterns, and may
     # NOT touch business rules, database schema, security rules or role
@@ -160,7 +160,7 @@ def _cap(agent: str, writes: Iterable[str], tools: Iterable[str] = (), **kw) -> 
 #: The 18 agents of §27.
 #:
 #: Four of these have their tool grants spelled out in §101 (page_design,
-#: figma_intelligence, database/data_model, deployment) and the Page Design
+#: design_intelligence (as figma_intelligence), database/data_model, deployment) and the Page Design
 #: Agent has its full can/cannot list in §30 — those are transcribed. The rest
 #: are derived from each agent's name in §27 under §30's principle that an
 #: agent owns exactly one domain and requests changes outside it. They are a
@@ -283,12 +283,13 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
          "uiRegistry", "designSystem"},
         tools={"blueprint:read", "blueprint:write"},
     ),
-    # §31/§34 — the Figma Intelligence Agent contributes evidence, not design
-    # decisions; it may not author pages.
-    "figma_intelligence": _cap(
-        "figma_intelligence",
+    # §31/§34 — the Design Intelligence Agent (§101 names it Figma
+    # Intelligence; it reads every design provider the platform imports from)
+    # contributes evidence, not design decisions; it may not author pages.
+    "design_intelligence": _cap(
+        "design_intelligence",
         {"requirements", "designSystem", "uiRegistry"},
-        tools={"mcp:figma", "design:extract", "blueprint:evidence"},
+        tools={"mcp:figma", "mcp:uxpilot", "design:extract", "blueprint:evidence"},
     ),
 }
 

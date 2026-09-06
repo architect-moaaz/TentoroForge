@@ -39,6 +39,26 @@ import {
 // §11 · application — identity
 // ===========================================================================
 
+// ===========================================================================
+// §45–47 · design origin
+// ===========================================================================
+
+/**
+ * Where a page, component or design system was taken from. The PRD names Figma
+ * in §45–47; the platform imports designs from more than one tool, so the
+ * provenance is a provider plus that provider's own identifier. Decision 25 in
+ * BLUEPRINT.md Appendix C records the deviation.
+ */
+export const DesignProvider = z.enum(["figma", "uxpilot", "screenshot"]);
+
+export const DesignOrigin = z.object({
+  provider: DesignProvider,
+  /** Figma node id "220:144" · UX Pilot design id · attachment id. */
+  ref: z.string(),
+  /** Figma file key · UX Pilot page id. Absent for a screenshot. */
+  container: z.string().optional(),
+});
+
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
@@ -192,8 +212,8 @@ export const PageContract = z.object({
     })
     .default({ desktop: "primary", tablet: "supported", mobile: "adaptive" }),
 
-  /** §45 — provenance when the page came from a Figma frame. */
-  figmaFrame: z.string().optional(),
+  /** §45 — provenance when the page came from an imported design. */
+  origin: DesignOrigin.optional(),
 
   components: z.array(ComponentId).default([]),
   ...artifactBase,
@@ -239,8 +259,8 @@ export const ComponentDef = z.object({
   /** Library component this maps onto (§38 registry key). */
   registryKey: z.string().optional(),
   purpose: z.string().default(""),
-  /** §46 — Figma component this was derived from. */
-  figmaComponent: z.string().optional(),
+  /** §46 — imported design component this was derived from. */
+  origin: DesignOrigin.optional(),
   ...artifactBase,
 });
 
@@ -647,8 +667,8 @@ export const DesignSystem = z.object({
   responsiveRules: z.array(z.string()).default([]),
   accessibilityRules: z.array(z.string()).default([]),
   interactionConventions: z.array(z.string()).default([]),
-  /** §47 — set when the design system was extracted from a Figma file. */
-  derivedFromFigma: z.boolean().default(false),
+  /** §47 — set when the design system was extracted from an imported design. */
+  derivedFrom: z.enum(["none", "figma", "uxpilot", "screenshot"]).default("none"),
 });
 
 // ===========================================================================
@@ -691,7 +711,7 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma"]),
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),
@@ -828,6 +848,33 @@ export const ApplicationState = z.enum([
 ]);
 
 // ===========================================================================
+// §28 · run ledger
+// ===========================================================================
+
+/**
+ * One agent-node execution. The orchestrator marks a node done because a
+ * record says it ran, never because its sections look populated — two nodes
+ * that write the same section (design intelligence and the design-system
+ * agent both write designSystem) would otherwise mark each other complete on
+ * resume, and the second would silently never run.
+ */
+export const RunRecord = z.object({
+  /** Groups the records of one orchestrator run; resume names it. */
+  runId: z.string(),
+  /** DAG node key, e.g. "design_system". */
+  node: z.string(),
+  agent: z.string(),
+  /** Fan-out subject (a page id) or "" for a node that runs once. */
+  subject: z.string().default(""),
+  outcome: z.enum(["completed", "failed", "blocked"]),
+  /** Blueprint version the record was written at. */
+  version: z.number().int().min(1),
+  at: z.string().describe("ISO-8601 timestamp"),
+  taskId: z.string().optional(),
+  artifacts: z.array(AnyArtifactId).default([]),
+});
+
+// ===========================================================================
 // The Blueprint
 // ===========================================================================
 
@@ -877,9 +924,14 @@ export const Blueprint = z.object({
 
   codeMap: z.array(CodeMapEntry).default([]),
   changeHistory: z.array(ChangeRecord).default([]),
+  /** §28 — which nodes ran, so resume never infers completion from content. */
+  runs: z.array(RunRecord).default([]),
 });
 
 export type Blueprint = z.infer<typeof Blueprint>;
+export type DesignOrigin = z.infer<typeof DesignOrigin>;
+export type RunRecord = z.infer<typeof RunRecord>;
+export type DesignProvider = z.infer<typeof DesignProvider>;
 export type PageContract = z.infer<typeof PageContract>;
 export type Requirement = z.infer<typeof Requirement>;
 export type Decision = z.infer<typeof Decision>;

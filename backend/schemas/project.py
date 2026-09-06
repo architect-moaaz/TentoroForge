@@ -1,6 +1,7 @@
 """Pydantic schemas for project endpoints."""
 
 import uuid
+from typing import Literal
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -70,13 +71,38 @@ class ChatRequest(BaseModel):
     attachment_ids: list[str] = []
 
 
+class DesignImportRequest(BaseModel):
+    """An imported design as the source of the app's scope and look.
+
+    ``ref`` is the provider's own handle: a Figma design URL, or a UX Pilot
+    page id (or page URL). ``credential_id`` names the org's MCP-server row
+    holding the UX Pilot key; ``token`` is a Figma personal token, which has
+    no platform store yet and travels with the request as it always did.
+    """
+    provider: Literal["figma", "uxpilot"]
+    ref: str
+    credential_id: str | None = None
+    token: str | None = None
+
+
 class GenerateRequest(BaseModel):
     description: str
     plan: dict | None = None
+    # The design to build from, any provider. The two Figma fields below are
+    # the pre-design-source shape and still accepted; ``design`` wins when set.
+    design: DesignImportRequest | None = None
     figma_url: str | None = None
     figma_token: str | None = None
     # Screenshots / spec documents the user attached before hitting Build.
     attachment_ids: list[str] = []
+
+    def design_import(self) -> DesignImportRequest | None:
+        """The design request, whichever shape the client sent."""
+        if self.design is not None:
+            return self.design
+        if self.figma_url:
+            return DesignImportRequest(provider="figma", ref=self.figma_url, token=self.figma_token)
+        return None
 
 
 # ---------------------------------------------------------------------------

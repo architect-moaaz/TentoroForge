@@ -10,7 +10,7 @@ import {
   Wrench,
   Coins,
 } from "lucide-react";
-import { QUEST_PHASES, getDisplayPhases, FIGMA_UI_PHASE } from "@/lib/quest-phases";
+import { QUEST_PHASES, getDisplayPhases, DESIGN_UI_PHASE } from "@/lib/quest-phases";
 import type { QuestState } from "@/stores/chat";
 
 interface QuestTrackerProps {
@@ -23,14 +23,14 @@ interface QuestTrackerProps {
 }
 
 export function QuestTracker({ quest, streaming }: QuestTrackerProps) {
-  const displayPhases = getDisplayPhases(quest.isFigma);
+  const displayPhases = getDisplayPhases(quest.isDesign);
   const maxXp = displayPhases.reduce((sum, p) => sum + p.xp, 0);
   const xpPercent = maxXp > 0 ? Math.min((quest.totalXp / maxXp) * 100, 100) : 0;
 
   // Map original phase indices to display-phase status
   function getPhaseStatus(phase: typeof displayPhases[number]) {
-    if (phase.id === "figma-ui") {
-      // Figma phase is "active" if either components or pages is active
+    if (phase.id === "design-ui") {
+      // The design phase is "active" if either components or pages is active
       const compIdx = QUEST_PHASES.findIndex((p) => p.id === "components");
       const pagesIdx = QUEST_PHASES.findIndex((p) => p.id === "pages");
       const isCompleted =
@@ -48,7 +48,7 @@ export function QuestTracker({ quest, streaming }: QuestTrackerProps) {
   }
 
   function getPhaseXp(phase: typeof displayPhases[number]) {
-    if (phase.id === "figma-ui") return FIGMA_UI_PHASE.xp;
+    if (phase.id === "design-ui") return DESIGN_UI_PHASE.xp;
     return phase.xp;
   }
 

@@ -77,12 +77,13 @@ def test_all_eighteen_section_27_agents_are_registered():
         assert expected in AGENT_REGISTRY, expected
 
 
-def test_figma_intelligence_is_registered_from_section_101():
+def test_design_intelligence_is_registered_from_section_101():
     """§27's roster omits it, but §101 grants it tools by name — so it is a
     real agent the DAG can schedule, and it needs a declared boundary like any
     other. Registering it is deliberate, not an off-by-one."""
     extra = set(AGENT_REGISTRY) - set(SECTION_27_AGENTS)
-    # Beyond §27's eighteen: figma_intelligence (§101), two the rebuild added —
+    # Beyond §27's eighteen: design_intelligence (§101's Figma Intelligence,
+    # widened to every design provider), two the rebuild added —
     # a2ui_patterns (§34) and memory (§20/§23, a derivation service that owns
     # sections rather than an agent that is ever prompted) — and smith itself.
     #
@@ -90,10 +91,11 @@ def test_figma_intelligence_is_registered_from_section_101():
     # answer to. It is in the registry anyway so that its writes go through the
     # same check_capability as theirs. A coordinator exempt from the boundary
     # check is how §28's "uncontrolled swarm" gets in wearing a badge.
-    assert extra == {"figma_intelligence", "a2ui_patterns", "a2ui_pages",
+    assert extra == {"design_intelligence", "a2ui_patterns", "a2ui_pages",
                      "memory", "smith"}
-    cap = capability_for("figma_intelligence")
+    cap = capability_for("design_intelligence")
     assert "mcp:figma" in cap.tools
+    assert "mcp:uxpilot" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
     # author pages off its own bat.
     assert not cap.can_write("pages")

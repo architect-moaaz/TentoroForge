@@ -3727,6 +3727,23 @@ async def _run_relay_pipeline(
     )
 
 
+def _build_design_source(source, *, output_dir: str | None = None, project_id=None):
+    """The DesignSource adapter for a PlanSource, or None for text."""
+    try:
+        if source.is_figma:
+            from services.design_source.figma import FigmaSource
+            return FigmaSource(
+                source.design_ref, source.secret,
+                output_dir=output_dir, project_id=str(project_id) if project_id else None,
+            )
+        if source.is_uxpilot:
+            from services.design_source.uxpilot import UxPilotSource
+            return UxPilotSource.from_credentials(source.design_ref, source.secret or "")
+    except Exception as exc:  # noqa: BLE001 — the pipeline logs and continues without import
+        logger.warning("[design] adapter for %s could not be built: %s", source.kind, exc)
+    return None
+
+
 async def _run_figma_relay_pipeline(
     output_dir: str,
     plan: dict,
@@ -3736,15 +3753,46 @@ async def _run_figma_relay_pipeline(
     domain_context: dict | None = None,
     project_id: uuid.UUID | None = None,
 ) -> AsyncIterator[dict]:
-    """Run the relay pipeline for Figma projects.
+    """Figma-era entry: the design pipeline with a Figma PlanSource."""
+    from services.pipeline.source import PlanSource
+    async for evt in _run_design_relay_pipeline(
+        output_dir=output_dir,
+        plan=plan,
+        description=description,
+        source=PlanSource.figma(url=figma_url, token=figma_token),
+        domain_context=domain_context,
+        project_id=project_id,
+    ):
+        yield evt
 
-    Same as _run_relay_pipeline() for phases 1-3 and 6-9, but replaces
-    component_agent + page_agent (phases 4+5) with the figma_ui_agent
-    that generates pixel-perfect UI from the Figma reference.
 
+async def _run_design_relay_pipeline(
+    output_dir: str,
+    plan: dict,
+    description: str,
+    source,
+    domain_context: dict | None = None,
+    project_id: uuid.UUID | None = None,
+) -> AsyncIterator[dict]:
+    """Run the relay pipeline for a project built from an imported design.
+
+    Same as _run_relay_pipeline() for phases 1-3 and 6-9. Before them, the
+    design's pages are imported as PageV2 schemas through the provider's
+    :class:`services.design_source.DesignSource` (the shared
+    ``phase_design_import``); the Figma REST mapper and refiner run first
+    for a Figma source only, because they read Figma's node tree.
+
+    ``source`` is the :class:`PlanSource` (kind figma or uxpilot).
     `domain_context`: same semantics as _run_relay_pipeline. When supplied,
     skip the inline discovery call in Layer 1.
     """
+    # The Figma-era locals: every Figma-only block below reads them. They
+    # resolve to "" for any other provider, and those blocks are guarded on
+    # ``source.is_figma`` so an empty URL never reaches the Figma clients.
+    figma_url: str = source.figma_url or ""
+    figma_token: str = source.figma_token or ""
+    _design = _build_design_source(source, output_dir=output_dir, project_id=project_id)
+
     from agents.contract_agent import run_contract_agent
     from agents.schema_agent import run_schema_agent
     from agents.auth_agent import run_auth_agent
@@ -3834,20 +3882,17 @@ async def _run_figma_relay_pipeline(
     # pipeline. The Figma file supplies visual ground truth, but persona /
     # compliance / common pitfalls are still useful for the downstream
     # contract / api / business-logic agents.
-    # Load figma-context.json from disk (populated earlier by extract_figma_context
-    # during project creation). Present here means brief_from_figma will run —
-    # palette/typography/radius extracted verbatim from Figma, no LLM in the design
-    # decision chain. Absent means brief_author fallback.
+    # Load the design context from disk (written at import time by
+    # services.design_import / extract_figma_context). Present here means
+    # brief_from_figma will run — palette/typography/radius measured from the
+    # design, no LLM in the design decision chain. Absent means brief_author
+    # fallback. The aggregator is provider-agnostic; only its name is Figma's.
     def _load_figma_ctx() -> dict | None:
         try:
-            from pathlib import Path as _P
-            import json as _json
-            p = _P(output_dir) / "src" / "contracts" / "figma-context.json"
-            if p.exists():
-                return _json.loads(p.read_text())
+            from services.design_context import read_design_context
+            return read_design_context(output_dir)
         except Exception:  # noqa: BLE001
-            pass
-        return None
+            return None
 
     _figma_ctx_for_brief = _load_figma_ctx()
 
@@ -4006,333 +4051,42 @@ async def _run_figma_relay_pipeline(
     if _removed > 0:
         yield sse_event("log", {"text": f"[Cleanup] Removed {_removed} stale schema file(s) from src/schemas/"})
 
-    # Surface Figma-driven plan information so the user sees what scope was inferred.
-    if (plan or {}).get("_figma_driven"):
+    # Surface design-driven plan information so the user sees what scope was inferred.
+    if (plan or {}).get("_design_driven") or (plan or {}).get("_figma_driven"):
         _routes = [p.get("route") for p in (plan.get("pages") or [])]
+        _prov = ((plan.get("design") or {}).get("provider") or source.provider or "design")
         yield sse_event("log", {
-            "text": f"[Figma Plan] Driven by Figma — {len(_routes)} page(s): {_routes}"
+            "text": f"[Design Plan] Driven by {_prov} — {len(_routes)} page(s): {_routes}"
         })
 
     # Track which routes the deterministic mapper successfully emits. Used
     # later by run_schema_frontend_pipeline's skip_routes filter so the LLM
     # schema pipeline doesn't overwrite Figma-emitted pages.
     deterministic_pages: set[str] = set()
-    deterministic_failures: list[tuple[str, str]] = []
 
-    # ── DETERMINISTIC FIGMA MAPPER (runs FIRST — before any LLM phase) ──
-    # Why first: backend LLM agents (Contract, Schema, API, BusinessLogic) can
-    # wedge on claude_agent_sdk subprocess timeouts. If we run them first, a
-    # wedge means the Figma-driven frontend never gets emitted. Running this
-    # block at the start guarantees the user's Figma frames land on disk
-    # regardless of what happens downstream.
-    try:
-        from services.figma_client import fetch_figma_node_batched, fetch_figma_image_urls
-        from services.figma_to_schema import build_page_schema
-        from services.figma_style_extractor import extract_tokens
-        from services.figma_typography_extractor import extract_typography
-        from services.figma_node_walker import walk_and_flatten
-        from services.figma_name_classifier import classify
-        from services.figma_asset_downloader import download_figma_assets
+    # The Figma REST node-tree mapper, its SVG export and its theme-token
+    # merge live in services.design_source.figma now (the ``schema`` markup
+    # kind); the shared import phase below runs them for a Figma source
+    # whenever Dev Mode JSX is not available.
 
-        parsed = parse_figma_url(figma_url)
-        file_key = parsed["file_key"]
-        plan_pages = (plan or {}).get("pages") or []
-        pages_with_nodes = [p for p in plan_pages
-                            if isinstance(p, dict) and p.get("figma_node_id")]
-
-        if not pages_with_nodes:
-            yield sse_event("log", {
-                "text": "[FigmaDeterministic] No pages have figma_node_id — skipping mapper"
-            })
-        else:
-            yield sse_event("status", {
-                "message": f"Generating {len(pages_with_nodes)} page(s) from Figma..."
-            })
-
-            # Spec D Wave 5-C — populate the closed vocabulary the LLM
-            # classifiers need before running the walk. Idempotent + safe:
-            # empty lists are treated as "LLM path ineligible" by every
-            # wire site, so this is a no-op when the plan has no routes /
-            # workflows and the library registry can't be loaded.
-            try:
-                from services.figma_llm_ctx import (
-                    context_from_plan as _figma_llm_ctx_from_plan,
-                    set_figma_llm_context as _set_figma_llm_context,
-                )
-                _ctx = _figma_llm_ctx_from_plan(plan)
-                _set_figma_llm_context(**_ctx)
-                yield sse_event("log", {"text": (
-                    f"[FigmaLLM] context populated: "
-                    f"{len(_ctx['routes'])} route(s), "
-                    f"{len(_ctx['workflows'])} workflow(s), "
-                    f"{len(_ctx['component_registry'])} component(s), "
-                    f"{len(_ctx['nav_icon_set'])} nav icon(s)"
-                )})
-            except Exception as _ctx_exc:  # noqa: BLE001
-                logger.exception("[FigmaLLM] context wire failed")
-                yield sse_event("log", {"text": (
-                    f"[FigmaLLM] context wire failed — falling back to "
-                    f"keyword classifiers: {_ctx_exc}"
-                )})
-
-            # Fetch all nodes concurrently (capped at 8 via module-level semaphore)
-            node_ids = [p["figma_node_id"] for p in pages_with_nodes[:50]]
-            docs = await fetch_figma_node_batched(file_key, node_ids, figma_token)
-
-            # Aggregate tokens across all successfully-fetched docs so the
-            # brand palette reflects the whole file, not just one frame.
-            all_walked_nodes = []
-            for doc in docs.values():
-                if doc:
-                    all_walked_nodes.extend(walk_and_flatten(doc))
-
-            # ── SVG asset export ──────────────────────────────────────────────
-            # Every Figma node that classifies as Image or Icon (logos, icons,
-            # illustrations) gets exported as SVG via the REST API and cached
-            # locally so the schema can reference a real /api/asset/... URL
-            # instead of leaving Image / Icon nodes empty.
-            asset_paths: dict[str, str] = {}
-            try:
-                exportable_ids: list[str] = []
-                # Map fid → children count so we can refuse to export a
-                # FRAME that holds a whole UI tree as one big SVG.
-                children_count_by_fid: dict[str, int] = {}
-                for entry in all_walked_nodes:
-                    n = entry["node"]
-                    parent = entry.get("parent") or {}
-                    pid = parent.get("id")
-                    if pid:
-                        children_count_by_fid[pid] = children_count_by_fid.get(pid, 0) + 1
-
-                for entry in all_walked_nodes:
-                    n = entry["node"]
-                    fid = n.get("id")
-                    if not fid or fid in asset_paths:
-                        continue
-                    schema_type, _ = classify(n.get("name") or "", n.get("type") or "")
-                    figma_type = n.get("type")
-                    # Skip frames that look like UI screenshots rather than
-                    # image assets:
-                    #   - Image-classified FRAME with > 4 walked children
-                    #     (a real image asset has 0 children or a single
-                    #     vector layer; a screenshot frame holds an entire
-                    #     dashboard mockup),
-                    #   - OR bbox larger than ~600px in either axis
-                    #     (icons / logos stay under that; a 1200×800 SVG
-                    #     export of a dashboard is what we're avoiding).
-                    if schema_type == "Image" and figma_type == "FRAME":
-                        bbox = n.get("absoluteBoundingBox") or {}
-                        w = bbox.get("width") or 0
-                        h = bbox.get("height") or 0
-                        # Vector-only FRAMEs (logos with one path per glyph,
-                        # multi-piece icon compositions) often blow past
-                        # the 4-children cap — a "DITANS HEALTH" wordmark
-                        # has 12+ child VECTORs. Allow them through when
-                        # the bbox is small (≤ 600×200, the same footprint
-                        # _is_vector_only_frame() uses to gate the classifier).
-                        from services.figma_to_schema import _is_vector_only_frame
-                        if _is_vector_only_frame(n):
-                            # Vector composition — export as one SVG.
-                            pass
-                        elif children_count_by_fid.get(fid, 0) > 4 or w > 600 or h > 600:
-                            continue  # not a real image asset
-
-                    # Export Icon / Image / Logo classifications, plus any
-                    # raw VECTOR / instance node (Figma DesignKit icons are
-                    # COMPONENT / INSTANCE nodes wrapping vector layers).
-                    if schema_type in ("Icon", "Image") or figma_type in (
-                        "VECTOR", "BOOLEAN_OPERATION",
-                    ):
-                        exportable_ids.append(fid)
-                if exportable_ids:
-                    yield sse_event("log", {
-                        "text": f"[FigmaAssets] Exporting {len(exportable_ids)} SVG asset(s)..."
-                    })
-                    url_by_fid = await fetch_figma_image_urls(
-                        file_key, exportable_ids, figma_token, format="svg",
-                    )
-                    if url_by_fid:
-                        # Download all CDN URLs in one shot. The downloader
-                        # returns {url: local_public_path}. Map back to fid.
-                        url_to_path = await download_figma_assets(
-                            list(url_by_fid.values()),
-                            output_dir,
-                            project_id=Path(output_dir).name,
-                        )
-                        for fid, url in url_by_fid.items():
-                            local = url_to_path.get(url)
-                            if local:
-                                asset_paths[fid] = local
-                        yield sse_event("log", {
-                            "text": f"[FigmaAssets] ✓ Cached {len(asset_paths)} of {len(exportable_ids)} asset(s) to /api/asset/..."
-                        })
-                    else:
-                        yield sse_event("log", {
-                            "text": "[FigmaAssets] ⚠ Figma image-export returned no URLs"
-                        })
-            except Exception as e:
-                yield sse_event("log", {
-                    "text": f"[FigmaAssets] ⚠ SVG export failed: {e} — schemas will render without Figma icons/logos"
-                })
-
-            # Build schemas and write each page; collect outcomes for SSE log
-            for page in pages_with_nodes[:50]:
-                route = page.get("route", "?")
-                doc = docs.get(page["figma_node_id"]) or {}
-                if not doc:
-                    deterministic_failures.append((route, "fetch failed"))
-                    yield sse_event("log", {"text": f"[FigmaDeterministic] ⚠ {route}: fetch failed — LLM fallback"})
-                    continue
-                try:
-                    result = build_page_schema(doc, asset_paths=asset_paths)
-                    file_path = Path(output_dir) / page.get(
-                        "file",
-                        f"src/schemas/{route.strip('/').replace('/', '-') or 'home'}.json"
-                    )
-                    # Always write the schema — Box-fallback nodes render as
-                    # empty containers but the recognised structure (Form /
-                    # Input / Heading / Stack / Row / Card) is preserved.
-                    # Dropping an 80%-correct schema because 17 of 70 nodes are
-                    # unknown is too strict; downstream LLM fallback can't
-                    # rebuild what the deterministic mapper already produced.
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_path.write_text(json.dumps(result.page, indent=2))
-                    deterministic_pages.add(route)
-                    if result.complete:
-                        yield sse_event("log", {"text": f"[FigmaDeterministic] ✓ {route}"})
-                    else:
-                        incomplete = len(result.incomplete_nodes) if hasattr(result, "incomplete_nodes") else 0
-                        yield sse_event("log", {
-                            "text": f"[FigmaDeterministic] ✓ {route} (with {incomplete} Box-fallback node(s))"
-                        })
-                except Exception as e:
-                    deterministic_failures.append((route, str(e)))
-                    yield sse_event("log", {
-                        "text": f"[FigmaDeterministic] ⚠ {route}: {e} — LLM fallback"
-                    })
-
-            # Write merged tokens.custom.json (only if anything was extracted)
-            if all_walked_nodes:
-                merged_tokens = extract_tokens(all_walked_nodes)
-                merged_tokens["typography"] = extract_typography(all_walked_nodes)
-                tokens_dir = Path(output_dir) / "src" / "theme"
-                tokens_dir.mkdir(parents=True, exist_ok=True)
-                tokens_path = tokens_dir / "tokens.custom.json"
-                existing = {}
-                if tokens_path.exists():
-                    try:
-                        existing = json.loads(tokens_path.read_text())
-                    except (json.JSONDecodeError, OSError):
-                        existing = {}
-                # Shallow per-category merge so neighbouring categories survive
-                for cat, sub in merged_tokens.items():
-                    if isinstance(sub, dict) and isinstance(existing.get(cat), dict):
-                        existing[cat] = {**existing[cat], **sub}
-                    else:
-                        existing[cat] = sub
-                tokens_path.write_text(json.dumps(existing, indent=2))
-                yield sse_event("log", {
-                    "text": f"[FigmaDeterministic] tokens merged from {len(all_walked_nodes)} walked node(s)"
-                })
-
-            # ── Shell extraction (DISABLED — rolled back) ───────────────────
-            # The structural-diff shell extractor was hoisting too aggressively
-            # — it stripped login page content (auth routes weren't excluded
-            # by the synthesized nav-flow) and the renderer's PageOutlet
-            # composition isn't wired through for Figma-driven apps yet.
-            # Net effect was negative: blank login + sidebar-only screens.
-            # Re-enable behind a FIGMA_SHELL_EXTRACT env flag once both
-            # issues are fixed:
-            #   1. Exclude /login, /signin, /signup, /register from candidates
-            #   2. Wire PageOutlet composition into the Figma render path
-            # For now, every page keeps its own embedded chrome — duplicated
-            # but visually correct.
-            if os.environ.get("FIGMA_SHELL_EXTRACT") == "1":
-                try:
-                    from services.figma_shell_extractor import (
-                        extract_shell_by_structural_diff,
-                        extract_shell_from_pages,
-                    )
-                    nav_flow_path = Path(output_dir) / "src" / "schemas" / "nav-flow.json"
-                    nav_flow_data: dict = {}
-                    if nav_flow_path.exists():
-                        try:
-                            nav_flow_data = json.loads(nav_flow_path.read_text())
-                        except (json.JSONDecodeError, OSError):
-                            nav_flow_data = {}
-                    if not nav_flow_data:
-                        # Synthesize nav-flow but EXCLUDE auth routes so the
-                        # extractor doesn't strip the login page.
-                        auth_route_prefixes = ("/login", "/signin", "/signup", "/register")
-                        nav_flow_data = {
-                            "pages": [
-                                {
-                                    "route": p.get("route", "/"),
-                                    "shell": not any(
-                                        (p.get("route") or "").startswith(pre)
-                                        for pre in auth_route_prefixes
-                                    ),
-                                    "schemaFile": f"src/schemas/{(p.get('route','/').strip('/').replace('/', '-') or 'home')}.json",
-                                }
-                                for p in pages_with_nodes[:50]
-                            ],
-                            "auth_routes": [
-                                p.get("route") for p in pages_with_nodes[:50]
-                                if any(
-                                    (p.get("route") or "").startswith(pre)
-                                    for pre in auth_route_prefixes
-                                )
-                            ],
-                        }
-                    shell = extract_shell_by_structural_diff(
-                        Path(output_dir), nav_flow_data,
-                    )
-                    if shell is None:
-                        shell = extract_shell_from_pages(
-                            Path(output_dir), nav_flow_data,
-                        )
-                    if shell is not None:
-                        yield sse_event("log", {
-                            "text": "[FigmaDeterministic] ✓ Extracted shell.json (FIGMA_SHELL_EXTRACT=1)"
-                        })
-                except Exception as _shell_ex:
-                    yield sse_event("log", {
-                        "text": f"[FigmaDeterministic] shell extraction failed: {_shell_ex} — continuing"
-                    })
-
-    except Exception as _det_ex:
-        yield sse_event("log", {"text": f"[FigmaDeterministic] block failed: {_det_ex}"})
-    # ── END DETERMINISTIC FIGMA MAPPER ──
-
-    # ── FIGMA SCHEMA REFINER (on by default; disable with FIGMA_SCHEMA_REFINE=0) ──
-    # Body lifted to services.pipeline.phase_figma_pre.phase_figma_schema_refine
-    # in Phase 1e. The legacy wrapper preserves control flow by delegating to
-    # the phase function; deleting this thin wrapper is a follow-up when
-    # snapshot coverage is in place.
-    from services.pipeline.phase_figma_pre import phase_figma_schema_refine as _phase_figma_schema_refine
-    async for _evt in _phase_figma_schema_refine(
-        None,  # state — unused today; kept in the contract for future spine work
-        plan,
-        output_dir=output_dir,
-        deterministic_pages=deterministic_pages,
-        figma_url=figma_url,
-        figma_token=figma_token,
-        project_id=project_id,
-    ):
-        yield _evt
-
-    # ── FIGMA MCP BLOCK ──
-    # Body lifted to services.pipeline.phase_figma_pre.phase_figma_mcp
-    # in Phase 1e.
-    from services.pipeline.phase_figma_pre import phase_figma_mcp as _phase_figma_mcp
-    async for _evt in _phase_figma_mcp(
-        None, plan,
-        output_dir=output_dir,
-        figma_url=figma_url,
-        project_id=project_id,
-    ):
-        yield _evt
-    # ── END FIGMA MCP BLOCK ──
+    # ── DESIGN IMPORT (every provider) ──
+    # One page schema per design ref through the provider's DesignSource:
+    # Figma Dev Mode JSX or UX Pilot HTML, the same element mapping behind
+    # both. Replaces the Figma-only MCP block. Routes it writes join
+    # ``deterministic_pages`` so the schema authoring phase skips them.
+    if _design is not None:
+        from services.pipeline.phase_design_import import phase_design_import as _phase_design_import
+        async for _evt in _phase_design_import(
+            None, plan,
+            source=_design,
+            output_dir=output_dir,
+            project_id=project_id,
+            imported_routes=deterministic_pages,
+        ):
+            yield _evt
+    else:
+        yield sse_event("log", {"text": f"[DesignImport] no adapter for provider {source.provider!r} — skipping import"})
+    # ── END DESIGN IMPORT ──
 
     # ── BINDING PASS (plan-driven) ───────────────────────────────────────────
     # Body lifted to services.pipeline.phase_figma_pre.phase_figma_binding_pass
@@ -4923,7 +4677,7 @@ async def _run_figma_relay_pipeline(
             "duration_ms": total_duration,
         })
         return
-    elif IR_FRONTEND_ENABLED:
+    elif IR_FRONTEND_ENABLED and source.is_figma:
         # ── IR PATH: Figma → IR Agent → compile ──
         yield sse_event("status", {"message": "Converting Figma design to IR..."})
         yield sse_event("log", {"text": "[IR] Using Figma → IR path"})
@@ -4955,6 +4709,8 @@ async def _run_figma_relay_pipeline(
         if extracted_pages:
             registry = merge_section(registry, "pages", extracted_pages)
         save_registry(output_dir, registry)
+    elif not source.is_figma:
+        yield sse_event("log", {"text": f"[Pipeline] no legacy UI path for provider {source.provider!r} — schema mode only"})
     else:
         # ── LLM PATH: Original Figma UI agent ──
         yield sse_event("status", {"message": "Generating UI from Figma design..."})
@@ -5361,16 +5117,49 @@ async def generate_project(
     if req.figma_url:
         req.figma_url = req.figma_url.strip()
 
-    # Allow the Figma token to come from the server environment (FIGMA_TOKEN)
-    # when the request omits it. This selects the Figma pipeline without
-    # requiring the secret in the request body. An explicit request token wins.
+    # A `design` request for Figma is the same import as the two loose fields.
+    _figma_credential_id: str | None = None
+    if req.design is not None and req.design.provider == "figma":
+        req.figma_url = req.figma_url or req.design.ref.strip()
+        req.figma_token = req.figma_token or (req.design.token or "").strip()
+        _figma_credential_id = req.design.credential_id
+
+    # The Figma token comes from the org's Figma MCP-server row (Settings →
+    # MCP Servers), then FIGMA_TOKEN in the environment. A token pasted into
+    # the request is used for this call and never persisted. Selecting the
+    # Figma pipeline never requires the secret in the request body.
     if req.figma_url and not req.figma_token:
-        _env_figma_token = os.environ.get("FIGMA_TOKEN", "").strip()
-        if _env_figma_token:
-            req.figma_token = _env_figma_token
+        from services.design_import import figma_token_for as _figma_token_for
+        from services.design_source import DesignSourceError as _DesignSourceError
+        try:
+            req.figma_token, _figma_credential_id = await _figma_token_for(
+                {"credential_id": _figma_credential_id}, db=db, org_id=project.org_id,
+            )
+        except _DesignSourceError as _cred_exc:
+            raise HTTPException(status_code=400, detail=str(_cred_exc))
+        if not req.figma_token:
+            # Building the plan from the prompt alone would silently drop the
+            # design the user asked for; say what is missing instead.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "no Figma access token: register Figma under Settings → MCP Servers "
+                    "(https://mcp.figma.com/mcp with a personal access token) or paste a token"
+                ),
+            )
 
     is_figma = bool(req.figma_url and req.figma_token)
-    description = req.description or (f"Import from Figma: {req.figma_url}" if is_figma else "")
+    # A design from any other provider (UX Pilot today). Figma keeps its own
+    # branch below because its plan comes from the design analyzer over a
+    # screenshot + styles tree; the others build the plan from the adapter.
+    _design_req = req.design_import()
+    is_design_import = bool(_design_req and _design_req.provider != "figma")
+    _design_label = {"uxpilot": "UX Pilot"}.get(_design_req.provider, _design_req.provider) if _design_req else ""
+    description = req.description or (
+        f"Import from Figma: {req.figma_url}" if is_figma
+        else f"Import from {_design_label}: {_design_req.ref}" if is_design_import
+        else ""
+    )
 
     # When Figma is supplied but no explicit plan, build the plan directly from
     # the Figma file (one page per top-level frame). This bypasses the LLM
@@ -5391,8 +5180,8 @@ async def generate_project(
             )
             # req.plan remains None; pipeline below will plan as before.
 
-    # When no plan and no Figma, enter planning mode instead of generating
-    needs_planning = not is_figma and not req.plan
+    # When no plan and no design, enter planning mode instead of generating
+    needs_planning = not is_figma and not is_design_import and not req.plan
 
     # Update project status (planning keeps 'generating' so frontend routes subsequent messages to /chat)
     project.status = ProjectStatus.generating
@@ -5477,7 +5266,11 @@ async def generate_project(
             return
 
         yield sse_event("status", {
-            "message": "Fetching Figma design..." if is_figma else "Starting code generation...",
+            "message": (
+                "Fetching Figma design..." if is_figma
+                else f"Fetching {_design_label} design..." if is_design_import
+                else "Starting code generation..."
+            ),
             "project_id": str(project.id),
         })
 
@@ -5533,7 +5326,13 @@ async def generate_project(
                 metadata: dict = {
                     "intent": "DESIGN_ANALYSIS",
                     "figma_url": req.figma_url,
-                    "figma_token": req.figma_token,
+                    # The token is resolved again at approval time from the
+                    # credential row (or FIGMA_TOKEN); it is never persisted.
+                    "design": {
+                        "provider": "figma",
+                        "ref": req.figma_url,
+                        "credential_id": _figma_credential_id,
+                    },
                 }
                 if plan:
                     metadata["plan"] = plan
@@ -5555,6 +5354,73 @@ async def generate_project(
                     metadata=metadata,
                 )
 
+                yield sse_event("complete", {"project_id": str(project.id), "intent": "DESIGN_ANALYSIS"})
+                return
+
+            elif is_design_import:
+                # Design import from a provider adapter (UX Pilot): the
+                # adapter's scope is the plan, its tokens are the design
+                # context, and the plan goes to the user for approval the
+                # same way a Figma analysis does. The key is resolved from
+                # the org's MCP-server row for this request and never stored.
+                from services.design_import import (
+                    import_design_plan, page_texts, resolve_design,
+                )
+                from services.design_source import DesignSourceError
+                from database import async_session as _async_session
+
+                yield sse_event("intent", {"intent": "DESIGN_ANALYSIS",
+                                           "reasoning": f"Importing the {_design_label} design"})
+                try:
+                    async with _async_session() as _dsess:
+                        resolved = await resolve_design(
+                            provider=_design_req.provider,
+                            ref=_design_req.ref,
+                            db=_dsess,
+                            org_id=project.org_id,
+                            credential_id=_design_req.credential_id,
+                        )
+                    plan = await import_design_plan(resolved.source, project.output_dir, description)
+                except DesignSourceError as _dse:
+                    logger.warning("[design] import failed: %s", _dse)
+                    yield sse_event("error", {"message": f"{_design_label} import failed: {_dse}"})
+                    yield sse_event("complete", {"project_id": str(project.id), "intent": "DESIGN_ANALYSIS"})
+                    return
+
+                _routes = [p.get("route") for p in plan.get("pages") or []]
+                yield sse_event("status", {
+                    "message": f"Imported {len(_routes)} page(s) from {_design_label}. Wiring data and actions...",
+                })
+                # Binding intent from the pages' visible text — the same
+                # analysis the Figma plan gets from frame text. Best effort.
+                try:
+                    from services.figma_plan_binding import (
+                        enrich_plan_with_bindings_from_texts, make_anthropic_call_llm,
+                    )
+                    _texts = await page_texts(resolved.source, plan)
+                    plan = await enrich_plan_with_bindings_from_texts(
+                        plan, _texts, call_llm=make_anthropic_call_llm(),
+                    )
+                except Exception as _enr_ex:  # noqa: BLE001
+                    logger.warning("[design] binding enrichment skipped: %s", _enr_ex)
+
+                metadata: dict = {
+                    "intent": "DESIGN_ANALYSIS",
+                    "design": resolved.metadata,
+                    "original_prompt": description,
+                    "plan": plan,
+                }
+                async for _tev in _offer_design_templates(plan, project.output_dir):
+                    yield _tev
+                yield sse_event("plan_ready", {"plan": plan})
+                _bp_record_plan(project, plan)
+                _summary = (
+                    f"Imported {len(_routes)} page(s) from {_design_label}: "
+                    + ", ".join(str(r) for r in _routes)
+                )
+                await _persist_assistant_message(
+                    project.id, _summary, MessageType.plan, metadata=metadata,
+                )
                 yield sse_event("complete", {"project_id": str(project.id), "intent": "DESIGN_ANALYSIS"})
                 return
 
@@ -5625,7 +5491,11 @@ async def generate_project(
             _sync_workflows_from_plan(project.output_dir, req.plan)  # Re-sync in case plan changed
 
             # Git commit
-            commit_msg = f"Figma import: {req.figma_url[:60]}" if is_figma else f"Initial generation: {description[:80]}"
+            commit_msg = (
+                f"Figma import: {req.figma_url[:60]}" if is_figma
+                else f"{_design_label} import: {_design_req.ref[:60]}" if is_design_import
+                else f"Initial generation: {description[:80]}"
+            )
             commit_hash = await git_commit(
                 project.output_dir,
                 commit_msg,
@@ -6329,6 +6199,16 @@ async def chat_with_project(
                         (plan_metadata and plan_metadata.get("figma_url"))
                         or (Path(project.output_dir) / "reference.png").exists()
                     )
+                    # A design imported through a provider adapter (UX Pilot):
+                    # the plan metadata carries provider + ref + credential row.
+                    _design_meta = (plan_metadata or {}).get("design") if plan_metadata else None
+                    is_design_project = bool(
+                        isinstance(_design_meta, dict)
+                        and _design_meta.get("provider")
+                        and _design_meta.get("provider") != "figma"
+                    )
+                    if is_design_project:
+                        is_figma_project = False
 
                     yield sse_event("intent", {"intent": "GENERATE", "reasoning": "Plan approved — generating code"})
                     yield sse_event("status", {"message": "Generating application code..."})
@@ -6352,7 +6232,21 @@ async def chat_with_project(
                     # deterministic Figma mapper writes page schemas without the LLM
                     # schema agent). Non-Figma plans use the description pipeline.
                     figma_url = plan_metadata.get("figma_url", "").strip() if plan_metadata else ""
-                    figma_token = plan_metadata.get("figma_token", "").strip() if plan_metadata else ""
+                    figma_token = ""
+                    if is_figma_project and figma_url:
+                        from services.design_import import figma_token_for as _figma_token_for
+                        from database import async_session as _async_session
+                        async with _async_session() as _fsess:
+                            figma_token, _figma_row_id = await _figma_token_for(
+                                (plan_metadata or {}).get("design"),
+                                db=_fsess, org_id=project.org_id,
+                                legacy_token=(plan_metadata or {}).get("figma_token"),
+                            )
+                        if not figma_token:
+                            yield sse_event("log", {"text": (
+                                "[Figma] no Figma access: register Figma under Settings → MCP Servers "
+                                "— building from the plan without the design"
+                            )})
 
                     if is_figma_project and figma_url and figma_token:
                         # Ensure plan.pages came from the Figma file. The /chat
@@ -6399,8 +6293,8 @@ async def chat_with_project(
                                 # Fall through to the description path below
                                 is_figma_project = False
 
-                    if is_figma_project and figma_url and figma_token:
-                        # Fix 4 — branding lock. When Figma is the source, the
+                    if is_design_project or (is_figma_project and figma_url and figma_token):
+                        # Fix 4 — branding lock. When a design is the source, the
                         # user's project name is authoritative for `appName`:
                         # the planner/LLM would otherwise infer a name from the
                         # description ("Product Image Scraper App") or pick a
@@ -6416,11 +6310,25 @@ async def chat_with_project(
                             plan["appName"] = _proj_name
                             plan["name"] = _proj_name  # sibling used by some readers
                             logger.info("[figma] branding lock: appName=%r (from project.name)", _proj_name)
-                        logger.info("[chat] Figma project approval — Smith invokes figma generator")
+                        if is_design_project:
+                            from services.design_import import plan_source_from_metadata
+                            from database import async_session as _async_session
+                            async with _async_session() as _dsess:
+                                _design_source = await plan_source_from_metadata(
+                                    _design_meta, db=_dsess, org_id=project.org_id,
+                                )
+                            logger.info("[chat] %s project approval — Smith invokes design generator",
+                                        _design_meta.get("provider"))
+                        else:
+                            _design_source = PlanSource.figma(
+                                url=figma_url, token=figma_token,
+                                credential_id=((plan_metadata or {}).get("design") or {}).get("credential_id"),
+                            )
+                            logger.info("[chat] Figma project approval — Smith invokes figma generator")
                         from services.smith_agent_adapters import orchestrate_generation
                         async for evt in orchestrate_generation(
                             pipeline_fn=run_pipeline,
-                            source=PlanSource.figma(url=figma_url, token=figma_token),
+                            source=_design_source,
                             output_dir=project.output_dir,
                             plan=plan,
                             description=description,
@@ -6462,6 +6370,8 @@ async def chat_with_project(
                     commit_msg = (
                         f"Figma import: {plan_metadata.get('figma_url', '')[:60]}"
                         if is_figma_project
+                        else f"{_design_meta.get('provider')} import: {str(_design_meta.get('ref', ''))[:60]}"
+                        if is_design_project
                         else f"Initial generation: {description[:80]}"
                     )
                     commit_hash = await git_commit(project.output_dir, commit_msg,
@@ -6575,10 +6485,18 @@ async def chat_with_project(
                     yield sse_event("intent", {"intent": "DESIGN_ANALYSIS", "reasoning": "Adjusting design requirements"})
                     yield sse_event("status", {"message": "Re-analyzing design with your feedback..."})
 
-                    # Load previous metadata to get figma_url
+                    # Load previous metadata to get figma_url; the token is
+                    # resolved from the org's Figma row, never read back.
                     _, prev_metadata = await _load_pending_plan_with_metadata(project.id)
                     figma_url = prev_metadata.get("figma_url", "") if prev_metadata else ""
-                    figma_token = prev_metadata.get("figma_token", "") if prev_metadata else ""
+                    _prev_design = (prev_metadata or {}).get("design") or {}
+                    from services.design_import import figma_token_for as _figma_token_for
+                    from database import async_session as _async_session
+                    async with _async_session() as _fsess:
+                        figma_token, _figma_row_id = await _figma_token_for(
+                            _prev_design, db=_fsess, org_id=project.org_id,
+                            legacy_token=(prev_metadata or {}).get("figma_token"),
+                        )
 
                     # Detect Figma URL update in user message
                     import re as _re
@@ -6633,7 +6551,11 @@ async def chat_with_project(
                     metadata: dict = {
                         "intent": "DESIGN_ANALYSIS",
                         "figma_url": figma_url,
-                        "figma_token": figma_token,
+                        "design": {
+                            "provider": "figma",
+                            "ref": figma_url,
+                            "credential_id": _prev_design.get("credential_id") or _figma_row_id,
+                        },
                     }
                     if plan:
                         metadata["plan"] = plan

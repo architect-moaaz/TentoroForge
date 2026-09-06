@@ -7,6 +7,10 @@ caller's contract. Callers construct a :class:`PlanSource` and pass it
 to :func:`run_pipeline`; this function dispatches on ``source.kind`` and
 forwards to the correct legacy implementation.
 
+Design sources: every design kind (``figma``, ``uxpilot``) dispatches to
+the one design body, ``_run_design_relay_pipeline``; the provider
+difference lives in :mod:`services.design_source`, not here.
+
 **Scope of this file** (Phase 1e wrapper):
 
 - ✅ ONE entry point (`run_pipeline`).
@@ -82,7 +86,7 @@ async def run_pipeline(
     # importing that module at the top pulls in the FastAPI router
     # plus its full dependency graph. Defer to call time so this module
     # stays cheap to import (matters for the test suite).
-    from routers.generate import _run_relay_pipeline, _run_figma_relay_pipeline
+    from routers.generate import _run_relay_pipeline, _run_design_relay_pipeline
 
     if source.is_text:
         async for evt in _run_relay_pipeline(
@@ -96,16 +100,15 @@ async def run_pipeline(
             yield evt
         return
 
-    # Figma path — source.figma_url is guaranteed non-empty by
-    # PlanSource.__post_init__. If a legacy caller still passes
-    # figma_url/figma_token as loose kwargs (from before this
-    # wrapper existed), the source's own fields win.
-    async for evt in _run_figma_relay_pipeline(
+    # Design path (Figma, UX Pilot) — source.design_ref is guaranteed
+    # non-empty by PlanSource.__post_init__. If a legacy caller still passes
+    # figma_url/figma_token as loose kwargs (from before this wrapper
+    # existed), the source's own fields win: the body reads the source.
+    async for evt in _run_design_relay_pipeline(
         output_dir=output_dir,
         plan=plan,
         description=description,
-        figma_url=source.figma_url,
-        figma_token=source.figma_token,
+        source=source,
         project_id=project_id,
         domain_context=domain_context,
     ):

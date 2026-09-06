@@ -483,8 +483,29 @@
               "mobile": "adaptive"
             }
           },
-          "figmaFrame": {
-            "type": "string"
+          "origin": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "figma",
+                  "uxpilot",
+                  "screenshot"
+                ]
+              },
+              "ref": {
+                "type": "string"
+              },
+              "container": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider",
+              "ref"
+            ],
+            "additionalProperties": false
           },
           "components": {
             "type": "array",
@@ -599,8 +620,8 @@
             "type": "string",
             "default": ""
           },
-          "figmaComponent": {
-            "type": "string"
+          "origin": {
+            "$ref": "#/properties/pages/items/properties/origin"
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
@@ -1419,9 +1440,15 @@
           },
           "default": []
         },
-        "derivedFromFigma": {
-          "type": "boolean",
-          "default": false
+        "derivedFrom": {
+          "type": "string",
+          "enum": [
+            "none",
+            "figma",
+            "uxpilot",
+            "screenshot"
+          ],
+          "default": "none"
         }
       },
       "additionalProperties": false,
@@ -1620,6 +1647,7 @@
                     "conversation",
                     "document",
                     "figma",
+                    "uxpilot",
                     "screenshot",
                     "spreadsheet",
                     "existing_implementation",
@@ -1748,7 +1776,8 @@
               "user",
               "smith_recommendation",
               "domain_default",
-              "figma"
+              "figma",
+              "uxpilot"
             ]
           },
           "approvedBy": {
@@ -2083,6 +2112,63 @@
           "version",
           "at",
           "userRequest"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string",
+            "default": ""
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "blocked"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "at": {
+            "type": "string",
+            "description": "ISO-8601 timestamp"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/permissions/items/properties/subject"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "runId",
+          "node",
+          "agent",
+          "outcome",
+          "version",
+          "at"
         ],
         "additionalProperties": false
       },

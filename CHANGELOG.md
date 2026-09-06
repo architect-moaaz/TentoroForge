@@ -9,6 +9,17 @@ User-visible changes to the Tentoro Forge platform. Newest first.
 
 ---
 
+## 2026-09-06
+
+### Design to App — Figma and UX Pilot behind one contract
+- ✨ **Import a design from UX Pilot** — "New App → Import a design" now offers Figma or UX Pilot. A UX Pilot page id (or its URL) becomes one screen per design, the page's theme becomes the locked design brief, and each design's HTML is imported as a PageV2 schema. Reads spend no UX Pilot credits. The key comes from the org's MCP-server row (Settings → MCP Servers, `https://mcp.uxpilot.net/mcp`) and is never persisted with the plan.
+- ⚡ **One design pipeline, two adapters** — the Figma-only pipeline body is now the design body: a `DesignSource` (scope, tokens, markup, assets) sits behind `PlanSource` kinds `figma` and `uxpilot`, the per-page import phase is shared (`phase_design_import`), and only the Figma REST mapper and refiner stay Figma-specific. The design context file is `src/contracts/design-context.json` (the Figma-era name is still read).
+- ✨ **HTML front end for the PageV2 transformer** — `html_to_schema` maps semantic HTML (headings, forms, inputs, buttons, links) and plain-CSS layout (`display:flex`, `gap`, grid columns) onto the same element mapping Figma's JSX uses.
+- ⚡ **Figma token leaves the plan** — Figma is registered under Settings → MCP Servers like UX Pilot (`https://mcp.figma.com/mcp`, personal access token as bearer); the same token serves the REST client. The token is resolved from that row (or `FIGMA_TOKEN`) at every use and is no longer written into plan metadata. A pasted token still works for one import and is never stored.
+- ⚡ **The Blueprint records what ran** — a §28 run ledger (`runs`) on the Blueprint; the orchestrator writes every agent node's outcome and `run(resume=<run id>)` skips what completed. Completion is never inferred from a populated section, which is what had kept the intelligence agents out of the DAG. `domain_intelligence` now runs before product analysis and `design_intelligence` runs once per imported design before the design-system agent.
+- ⚡ **No Figma-only block left in the pipeline** — the REST node-tree mapper, its SVG export, the theme-token merge and the schema refiner are the Figma adapter's `schema` markup kind and two provider-neutral follow-ups of the shared import phase. `_run_design_relay_pipeline` runs the same steps for every provider.
+- 🎨 **Blueprint names a provider, not Figma** — pages and components carry `origin {provider, ref, container}`, `designSystem.derivedFrom` names the provider, and decision sources / evidence types gain `uxpilot` (PRD §45–47 deviation, Decision 25).
+
 ## 2026-07-29
 
 ### UAT bug sweep — B-021 series (Planters / Nursery Management)
