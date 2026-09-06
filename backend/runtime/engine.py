@@ -443,23 +443,35 @@ class WorkflowRuntimeEngine:
     # -----------------------------------------------------------------------
 
     def _load_definition(self, output_dir: str, workflow_id: str) -> dict | None:
-        wf_file = Path(output_dir) / "workflows" / f"{workflow_id}.json"
-        if not wf_file.exists():
-            return None
-        try:
-            return json.loads(wf_file.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
+        # Load from the SAME place the list/editor/apply resolve by
+        # (routers.workflows._workflows_path): the Blueprint projection writes
+        # generated workflows to app/src/lib/workflows/definitions/<id>.json.
+        # The engine previously only looked in the legacy <output_dir>/workflows
+        # dir, so every simulate/start of a generated workflow failed with
+        # "Workflow definition '<id>' not found". Prefer the projected dir; fall
+        # back to the legacy dir for old projects.
+        candidates = [
+            Path(output_dir) / "app" / "src" / "lib" / "workflows"
+                / "definitions" / f"{workflow_id}.json",
+            Path(output_dir) / "workflows" / f"{workflow_id}.json",
+        ]
+        for wf_file in candidates:
+            if wf_file.exists():
+                try:
+                    return json.loads(wf_file.read_text())
+                except (json.JSONDecodeError, OSError):
+                    return None
+        return None
 
     def _find_start_nodes(self, nodes: list[dict], edges: list[dict]) -> list[dict]:
         """Find nodes with no incoming edges or type 'start'/'start_event'."""
-        target_ids = {e["target"] for e in edges}
-        start_nodes = []
-        for node in nodes:
-            if node.get("type") in ("start", "start_event", "trigger"):
-                start_nodes.append(node)
-            elif node["id"] not in target_ids:
-                start_nodes.append(node)
+        target_ids = {e.get("target") for e in edges}
+        # A start node is an ENTRY point: it has no incoming edge. The trigger
+        # TYPE alone is not sufficient — a workflow can have several trigger-typed
+        # nodes chained (Start -> "form submitted" -> ...), and the old OR added
+        # every trigger-typed node even when it had an incoming edge, so the graph
+        # was entered twice and every downstream node executed (and logged) twice.
+        start_nodes = [n for n in nodes if n.get("id") not in target_ids]
         return start_nodes or nodes[:1]
 
     def _get_next_node_ids(self, node_id: str, edges: list[dict]) -> list[str]:

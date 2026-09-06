@@ -103,13 +103,25 @@ def workflow_list_item(data: dict, stem: str) -> WorkflowListItem:
     """
     definition = data.get("definition", {}) or {}
     steps = definition.get("steps", []) or []
+    nodes = definition.get("nodes", []) or []
     trigger = definition.get("trigger", {})
+    # step_count: prefer the planner's `steps` when present; otherwise count the
+    # operational nodes the editor stores (everything after the trigger).
+    # Generated workflows carry `nodes`/`edges`/`trigger` and NO `steps`, so the
+    # old `len(steps)` showed a wrong "0 steps" for every workflow in the list.
+    if steps:
+        step_count = len(steps)
+    else:
+        step_count = sum(
+            1 for n in nodes
+            if isinstance(n, dict) and (n.get("type") or "").lower() != "trigger"
+        )
     return WorkflowListItem(
         id=stem,
         name=data.get("name", stem),
         description=data.get("description"),
         trigger_type=trigger.get("type") if isinstance(trigger, dict) else None,
-        step_count=len(steps),
+        step_count=step_count,
     )
 
 

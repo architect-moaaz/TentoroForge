@@ -11784,6 +11784,28 @@ are shaped placeholders).
     so the granular Timeout (connect15/read300/write60/pool15, required for long
     streamed generations) is the type the client accepts. Fixed 2026-09-06 (branch `component-fixes`).
 
+### 32.7.1 Workflow editor — bugs found + fixed (2026-09-06, brutal QA, branch `component-fixes`)
+
+Live QA of the generated-app **Workflow editor** (the platform's visual workflow
+builder, `frontend/src/components/workflow/*` + backend `routers/workflows.py` +
+`runtime/engine.py`). Root-fixed so every future generated app benefits:
+
+- **W1 — list always showed "0 steps".** `routers/workflows.py::workflow_list_item`
+  computed `step_count=len(definition["steps"])`, but generated workflows store
+  their graph in `definition.nodes`/`edges` and leave `steps` empty. Fixed: count
+  the operational nodes (`nodes` minus triggers) when `steps` is absent. (Add a
+  Pet now 5, Book an Appointment 13, …)
+- **W2 — Simulator "Workflow definition '<id>' not found".** `runtime/engine.py::
+  _load_definition` only looked in the legacy `<output_dir>/workflows/<id>.json`,
+  but the Blueprint projection writes to
+  `<output_dir>/app/src/lib/workflows/definitions/<id>.json` (what the list/editor
+  resolve by via `_workflows_path`). Fixed: engine now prefers the projected dir,
+  falls back to legacy. Simulate runs end-to-end again.
+- **W3 — every node executed (and logged) twice.** `_find_start_nodes` added ANY
+  `trigger`-typed node as an entry point even when it had an incoming edge, so a
+  chained trigger (Start → "form submitted") entered the graph twice. Fixed: a
+  start node is one with **no incoming edge**.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
