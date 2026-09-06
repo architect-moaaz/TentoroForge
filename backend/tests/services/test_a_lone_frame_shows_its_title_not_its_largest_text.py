@@ -95,7 +95,7 @@ def test_a_lone_frames_rail_is_its_navigation():
         ["لوحة التحكم", "نظرة عامة"], ["الجلسات والأجندات", "إدارة الجلسات", "2"], ["اللجان والهيئات"]]
     assert all(c["icon"] == 20 for c in items)
     text = chrome.describe_drawn(drawn)
-    assert "icon 40px" in text and "filled block" in text and "- لوحة التحكم / نظرة عامة" in text
+    assert "icon 40px" in text and "filled block" in text and "- لوحة التحكم  [underneath: نظرة عامة" in text
     labels = chrome._labels(content, [])
     assert "لوحة التحكم" in labels and "الجلسات والأجندات" not in labels
     buttons = []

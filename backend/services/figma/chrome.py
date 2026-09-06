@@ -436,10 +436,23 @@ def describe_drawn(entries: Iterable[dict], depth: int = 0) -> str:
             marks.append(f"→ {e['navigate']}")
         if e.get("workflow"):
             marks.append(f"runs {e['workflow']}")
-        head = ("  " * depth) + "- " + " / ".join(e.get("labels") or [])
-        lines.append(head + (f"  [{', '.join(marks)}]" if marks else ""))
-        if e.get("children"):
-            lines.append(describe_drawn(e["children"], depth + 1))
+        # THE FIRST LINE IS THE ENTRY; THE REST IS WHAT IT SAYS UNDERNEATH.
+        # Rendered as "a / b / c" the caption of one entry read as the heading
+        # of the next; the architect took "file management" — the caption of
+        # the documents item — for a group over the footer.
+        labels = list(e.get("labels") or [])
+        head = ("  " * depth) + "- " + (labels[0] if labels else "")
+        nested = e.get("children") if depth == 0 else None
+        # An entry that holds a list is shown by that list, not by a flattened
+        # run of every line inside it; an entry with no list shows what is
+        # written underneath its first line. Two levels: a rail's lists and
+        # their members. Deeper structure — a badge inside an item — is the
+        # member's own "underneath".
+        if len(labels) > 1 and not nested:
+            marks.insert(0, "underneath: " + " · ".join(labels[1:]))
+        lines.append(head + (f"  [{'; '.join(marks)}]" if marks else ""))
+        if nested:
+            lines.append(describe_drawn(nested, depth + 1))
     return "\n".join(lines)
 
 

@@ -1571,9 +1571,10 @@ def build_prompt(
                           "the product (a logo beside a name); a filled block of "
                           "dates or states is status, not navigation; a short "
                           "unactioned label introducing a run of entries is a group "
-                          "heading; an entry drawn as icon + label (+ caption or "
-                          "badge) is a destination. Say nothing about entries you "
-                          "leave out; do not invent any.")
+                          "heading; an entry drawn as icon + label is a destination, and what "
+                          "is written underneath it — a caption, a badge count — belongs "
+                          "to that entry and is never a heading. Say nothing about "
+                          "entries you leave out; do not invent any.")
             return _describe_chrome(side)
 
         if drawn:
