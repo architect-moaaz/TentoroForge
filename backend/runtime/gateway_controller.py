@@ -2,11 +2,26 @@
 condition nodes, and AI-decide branching."""
 
 import logging
+import re
 from typing import Any
 
-from runtime.variable_resolver import VariableResolver
-
 logger = logging.getLogger(__name__)
+
+_BRACE_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
+
+
+def _debrace(expr: str) -> str:
+    """Turn `{{path.to.value}}` into the bare FEEL path `path.to.value`.
+
+    Conditions must be handed to the FEEL evaluator with their bindings as
+    identifiers, NOT as pre-substituted text. VariableResolver.resolve_string
+    inlines the resolved VALUE unquoted, so a string binding
+    `{{input.name}}` = "Rex" becomes `Rex != null` — FEEL then reads `Rex` as
+    an identifier, finds nothing, and the clause is false. De-bracing yields
+    `input.name != null`, which the evaluator resolves against the live
+    variables with the correct type ("Rex"), so equality/`!= null` work.
+    """
+    return _BRACE_RE.sub(lambda m: m.group(1), expr or "")
 
 
 class GatewayController:
@@ -27,9 +42,9 @@ class GatewayController:
         config = node.get("data", {}).get("config", {})
         expression = config.get("expression", "")
 
-        # Resolve variable templates in the expression
-        resolver = VariableResolver(variables)
-        resolved_expr = resolver.resolve_string(expression)
+        # De-brace to bare FEEL paths so bindings resolve with real types
+        # (see _debrace). NOT resolve_string, which inlined unquoted values.
+        resolved_expr = _debrace(expression)
 
         result = self._evaluate_condition(resolved_expr, variables)
         edge_type = "then" if result else "else"
@@ -254,7 +269,10 @@ class GatewayController:
         - Bare variable name: truthy check
         """
         try:
-            condition = condition.strip()
+            # De-brace here too so edge conditions (resolve_exclusive_gateway
+            # passes `edge.data.condition` straight in) resolve their {{bindings}}
+            # as FEEL paths. Idempotent when the caller already de-braced.
+            condition = _debrace(condition).strip()
             if not condition:
                 return False
 

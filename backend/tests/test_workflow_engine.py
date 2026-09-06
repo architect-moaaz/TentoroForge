@@ -130,8 +130,41 @@ class TestConditionEvaluation:
     def setup_method(self):
         self.gc = GatewayController()
 
+    # --- Compound generated conditions (regression for the {{input}}/{{session}}
+    #     namespace + JS-operator + today() cluster). These mirror the shapes the
+    #     generation pipeline actually emits; before the fix every one branched
+    #     wrong because {{input.*}} resolved to null, `==`/`&&`/`||` failed to
+    #     tokenize, and today() was undefined. ---
+    def test_compound_and_or_valid_input(self):
+        expr = ("{{input.name}} != null && {{input.species}} != null "
+                "&& ({{input.dateOfBirth}} == null || {{input.dateOfBirth}} <= today()) "
+                "&& ({{input.weightKg}} == null || {{input.weightKg}} > 0)")
+        node = {"id": "c", "data": {"config": {"expression": expr}}}
+        vars_ok = {"input": {"name": "Rex", "species": "dog", "weightKg": 12}}
+        vars_bad = {"input": {}}
+        edges = [
+            {"source": "c", "target": "ok", "data": {"edgeType": "then"}},
+            {"source": "c", "target": "bad", "data": {"edgeType": "else"}},
+        ]
+        assert self.gc.resolve_condition_node(node, edges, vars_ok) == ["ok"]
+        assert self.gc.resolve_condition_node(node, edges, vars_bad) == ["bad"]
+
+    def test_session_role_and_in_operator(self):
+        assert self.gc._evaluate_condition(
+            "{{session.user.role}} != 'VETERINARIAN'", {"session": {"user": {"role": "OWNER"}}})
+        assert not self.gc._evaluate_condition(
+            "{{session.user.role}} != 'VETERINARIAN'", {"session": {"user": {"role": "VETERINARIAN"}}})
+        assert self.gc._evaluate_condition(
+            "{{apptStatus}} in ['REQUESTED','CONFIRMED']", {"apptStatus": "CONFIRMED"})
+
+    def test_today_builtin(self):
+        assert self.gc._evaluate_condition("{{d}} >= today()", {"d": "2099-01-01"})
+        assert not self.gc._evaluate_condition("{{d}} >= today()", {"d": "2000-01-01"})
+
     def test_equality_string(self):
-        assert self.gc._evaluate_condition("status == approved", {"status": "approved"})
+        # Quoted RHS: a string literal, not a variable ref (matches how the
+        # generation pipeline emits `{{status}} == 'approved'`).
+        assert self.gc._evaluate_condition("status == 'approved'", {"status": "approved"})
 
     def test_inequality(self):
         assert self.gc._evaluate_condition("status != pending", {"status": "approved"})

@@ -74,6 +74,23 @@ class WorkflowRuntimeEngine:
         # Transition to running
         await self.state.transition_instance(instance, WorkflowInstanceStatus.running)
 
+        # Seed the canonical binding namespaces the generation pipeline emits.
+        # LLM-authored conditions/mappings reference {{input.X}} (the triggering
+        # payload) and {{session.user.id}} / {{session.user.role}} (the acting
+        # user) — see services/plan_validator.py, singleton_page_reconciler.py.
+        # The runtime historically seeded only `trigger`/`previous`, so every
+        # {{input.*}} / {{session.*}} resolved to null and conditions branched
+        # wrong. `input` mirrors the trigger payload; `session` defaults its
+        # user id to the initiator and can be overridden by passing a `session`
+        # key in the start variables (lets the simulator test different roles).
+        initial_inputs = dict(variables or {})
+        await self.state.set_variable(instance, "input", initial_inputs)
+        session_seed = initial_inputs.get("session") if isinstance(initial_inputs.get("session"), dict) else {}
+        session_user = {"id": str(initiated_by) if initiated_by else None, "role": None}
+        if isinstance(session_seed.get("user"), dict):
+            session_user.update(session_seed["user"])
+        await self.state.set_variable(instance, "session", {**session_seed, "user": session_user})
+
         # Find start node(s)
         start_nodes = self._find_start_nodes(nodes, edges)
         if not start_nodes:
@@ -130,6 +147,16 @@ class WorkflowRuntimeEngine:
             "node_id": task.node_id,
             "output": output_data,
         })
+        await self.state.set_variable(instance, "result", output_data)
+
+        # This node is no longer "active": drop it from current_node_ids. It was
+        # only ever appended (when the blocking task was created) and never
+        # removed, so every finished human-task node accumulated and stayed
+        # painted amber/active in the simulator — including the final one after
+        # the whole workflow completed.
+        if task.node_id:
+            remaining = [nid for nid in (instance.current_node_ids or []) if nid != task.node_id]
+            await self.state.update_current_nodes(instance, remaining)
 
         # Try to advance the workflow
         if output_dir:
@@ -196,6 +223,13 @@ class WorkflowRuntimeEngine:
         """Execute a set of nodes, handling gateways and task creation."""
         node_map = {n["id"]: n for n in nodes}
         completed_in_this_pass: set[str] = set()
+        # Nodes we've already handled this pass. A node reached by two paths
+        # (a `then`/`else` that reconverge, or two branches into a shared
+        # "notify"/end node — present in 10 of the 12 vet workflows) MUST NOT
+        # execute twice, and a loop-back edge must terminate rather than spin
+        # forever. The one handler that legitimately re-enters — a parallel
+        # join still waiting for a branch — discards itself below.
+        processed: set[str] = set()
         to_process = list(node_ids)
 
         while to_process:
@@ -204,6 +238,9 @@ class WorkflowRuntimeEngine:
             if not node:
                 logger.warning("Node %s not found in definition", current_id)
                 continue
+            if current_id in processed:
+                continue
+            processed.add(current_id)
 
             node_type = node.get("type", "action")
             node_data = node.get("data", {})
@@ -229,6 +266,9 @@ class WorkflowRuntimeEngine:
                         "node_id": current_id,
                         "output": variables.copy(),
                     })
+                    # `result` = the most recent node's output (the "fetched row"
+                    # the generation pipeline binds via {{result.X}}).
+                    await self.state.set_variable(instance, "result", variables.copy())
                     completed_in_this_pass.add(current_id)
                     await self.exec_logger.log_complete(log_entry, {"trigger_seeded": True})
                     next_ids = self._get_next_node_ids(current_id, edges)
@@ -271,6 +311,7 @@ class WorkflowRuntimeEngine:
                             "node_id": current_id,
                             "output": eval_result,
                         })
+                        await self.state.set_variable(instance, "result", eval_result)
 
                         # Log the result
                         logger.info(
@@ -317,6 +358,7 @@ class WorkflowRuntimeEngine:
                         "node_id": current_id,
                         "output": ai_output,
                     })
+                    await self.state.set_variable(instance, "result", ai_output)
 
                     # Route based on decision
                     next_ids = self.gateway.resolve_ai_decide_node(
@@ -336,6 +378,11 @@ class WorkflowRuntimeEngine:
                         if not self.gateway.check_join_condition(
                             current_id, edges, completed_in_this_pass
                         ):
+                            # Not all branches in yet — release the processed
+                            # mark so the join is re-evaluated when the remaining
+                            # branch re-queues it (otherwise the guard above would
+                            # skip it forever and the join would never fire).
+                            processed.discard(current_id)
                             await self.exec_logger.log_skip(
                                 instance.id, current_id, node_type, node_label,
                                 "Waiting for parallel paths to complete",
@@ -394,6 +441,7 @@ class WorkflowRuntimeEngine:
                             "node_id": current_id,
                             "output": task.output_data,
                         })
+                        await self.state.set_variable(instance, "result", task.output_data)
 
                     completed_in_this_pass.add(current_id)
                     await self.exec_logger.log_complete(log_entry, {
@@ -418,17 +466,20 @@ class WorkflowRuntimeEngine:
                 # Don't propagate — let other parallel paths continue
                 continue
 
-        # Check if workflow has reached all end nodes
+        # Completion: the pass drained with no pending tasks and nothing is
+        # blocking. Complete regardless of whether an explicit end/end_event
+        # node was hit — a fully-automated workflow (trigger → service action,
+        # no end node) used to satisfy every completion precondition except the
+        # end-node check and so stayed "running" forever, making the simulator
+        # poll indefinitely. We still require that at least one node ran and the
+        # instance isn't parked in `waiting` (a blocking task keeps a pending
+        # task, so this branch isn't even entered in that case).
         if not await self.state.list_pending_tasks_for_instance(instance.id):
-            if completed_in_this_pass:
-                # Check if any completed node is an end node
-                for nid in completed_in_this_pass:
-                    n = node_map.get(nid)
-                    if n and n.get("type") in ("end", "end_event"):
-                        await self.state.transition_instance(
-                            instance, WorkflowInstanceStatus.completed
-                        )
-                        return
+            if completed_in_this_pass and instance.status != WorkflowInstanceStatus.waiting:
+                await self.state.transition_instance(
+                    instance, WorkflowInstanceStatus.completed
+                )
+                return
 
     async def _check_completion(self, instance: WorkflowInstance) -> None:
         """Check if a workflow instance is complete (no pending tasks)."""
