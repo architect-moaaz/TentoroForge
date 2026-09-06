@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, LayoutTemplate, Figma, Key } from "lucide-react";
+import { Sparkles, LayoutTemplate, Figma, Key, PenTool } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,14 +24,21 @@ interface NewAppDialogProps {
 }
 
 type Mode = "describe" | "template" | "figma" | null;
+/** Where an imported design lives. Both connect through Smith as a
+ *  `designSources` entry; the credential is resolved by NAME from the
+ *  organisation's integrations and never leaves the server. */
+type DesignProvider = "figma" | "uxpilot";
 
 const FIGMA_URL_PATTERN = /figma\.com\/(file|design)\/[a-zA-Z0-9]+/;
+const UXPILOT_REF_PATTERN = /^(https?:\/\/[^\s]*uxpilot\.(ai|net)\/[^\s]+|[A-Za-z0-9_-]{4,64})$/;
 
 export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
   const [mode, setMode] = useState<Mode>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [provider, setProvider] = useState<DesignProvider>("figma");
   const [figmaUrl, setFigmaUrl] = useState("");
+  const [uxpilotRef, setUxpilotRef] = useState("");
   const [figmaScope, setFigmaScope] =
     useState<"evidence" | "specification">("evidence");
   const [figmaDescription, setFigmaDescription] = useState("");
@@ -53,7 +60,10 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     },
   });
 
-  // Create project then trigger Figma generation via the chat SSE stream
+  const providerLabel = provider === "uxpilot" ? "UX Pilot" : "Figma";
+  const designRef = provider === "uxpilot" ? uxpilotRef.trim() : figmaUrl.trim();
+
+  // Create project then hand the design to Smith through the panel.
   const createFigmaProject = useMutation({
     mutationFn: async (data: {
       name: string;
@@ -66,7 +76,7 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
       // if the user left it blank.
       const desc = data.figmaDescription.trim()
         ? data.figmaDescription.trim()
-        : `Figma import: ${data.figmaUrl}`;
+        : `${providerLabel} import: ${data.figmaUrl}`;
       const project = await api.post<Project>(`/api/orgs/${orgId}/projects`, {
         name: data.name,
         description: desc,
@@ -89,10 +99,15 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
       // `connect_figma`: the credential is resolved by NAME from the org's
       // integrations, `treatAs` is recorded, and the run that follows is the
       // ordinary Blueprint DAG.
+      // One key for either provider; SmithPanel words the opening message
+      // for the tool the design lives in. `figma_url` is kept for a tab
+      // that still holds the older key shape.
       sessionStorage.setItem(
-        `figma_connect_${project.id}`,
+        `design_connect_${project.id}`,
         JSON.stringify({
-          figma_url: figmaUrl,
+          provider,
+          ref: designRef,
+          figma_url: provider === "figma" ? figmaUrl : "",
           treat_as: figmaScope,
           // The brief travels with it so the panel can START the definition
           // rather than leaving it typed in the composer for someone to press
@@ -109,16 +124,25 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     createProject.mutate({ name: name.trim(), description: description.trim() || undefined });
   };
 
+  const designReady =
+    provider === "uxpilot"
+      ? UXPILOT_REF_PATTERN.test(uxpilotRef.trim())
+      : Boolean(figmaUrl);
+
   const handleFigmaCreate = () => {
     if (!name.trim()) return;
-    if (!FIGMA_URL_PATTERN.test(figmaUrl)) {
+    if (provider === "figma" && !FIGMA_URL_PATTERN.test(figmaUrl)) {
       setFigmaUrlError("Enter a valid Figma URL (e.g., https://www.figma.com/design/...)");
+      return;
+    }
+    if (provider === "uxpilot" && !UXPILOT_REF_PATTERN.test(uxpilotRef.trim())) {
+      setFigmaUrlError("Enter a UX Pilot page id, or the page's URL from UX Pilot");
       return;
     }
     setFigmaUrlError(null);
     createFigmaProject.mutate({
       name: name.trim(),
-      figmaUrl,
+      figmaUrl: designRef,
       figmaDescription,
     });
   };
@@ -127,7 +151,9 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     setMode(null);
     setName("");
     setDescription("");
+    setProvider("figma");
     setFigmaUrl("");
+    setUxpilotRef("");
     setFigmaDescription("");
     setFigmaUrlError(null);
   };
@@ -148,7 +174,7 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
             {mode === "describe"
               ? "Describe Your App"
               : mode === "figma"
-                ? "Import from Figma"
+                ? "Import a design"
                 : mode === "template"
                   ? "Choose a Template"
                   : "Create New App"}
@@ -173,11 +199,11 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
               onClick={() => setMode("figma")}
               className="flex items-center gap-3 rounded-lg border p-4 text-left transition-colors hover:bg-accent"
             >
-              <Figma className="h-8 w-8 text-[#F24E1E]" />
+              <PenTool className="h-8 w-8 text-[#F24E1E]" />
               <div>
-                <p className="font-medium">Import from Figma</p>
+                <p className="font-medium">Import a design</p>
                 <p className="text-sm text-muted-foreground">
-                  Convert a Figma design into a working app
+                  Build from a Figma file or a UX Pilot page
                 </p>
               </div>
             </button>
@@ -232,6 +258,29 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
         ) : mode === "figma" ? (
           <div className="space-y-4 py-4">
             <div>
+              <Label>Design source</Label>
+              <div className="mt-1 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Design source">
+                {([
+                  ["figma", "Figma", <Figma key="f" className="h-4 w-4 text-[#F24E1E]" />],
+                  ["uxpilot", "UX Pilot", <PenTool key="u" className="h-4 w-4 text-[#6C4CF1]" />],
+                ] as const).map(([value, label, icon]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={provider === value}
+                    onClick={() => { setProvider(value); setFigmaUrlError(null); }}
+                    className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                      provider === value ? "border-foreground bg-accent" : "hover:bg-accent"
+                    }`}
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
               <Label htmlFor="figma-name">App Name</Label>
               <Input
                 id="figma-name"
@@ -254,29 +303,54 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 className="mt-1"
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                1–3 sentences. Figma gives us the look; this tells us what the app does — used to pick the right integrations, entities, and workflows.
+                1–3 sentences. {providerLabel} gives us the look; this tells us what the app does — used to pick the right integrations, entities, and workflows.
               </p>
             </div>
-            <div>
-              <Label htmlFor="figma-url" className="flex items-center gap-1.5">
-                <Figma className="h-3.5 w-3.5" />
-                Figma URL
-              </Label>
-              <Input
-                id="figma-url"
-                type="url"
-                value={figmaUrl}
-                onChange={(e) => {
-                  setFigmaUrl(e.target.value);
-                  setFigmaUrlError(null);
-                }}
-                placeholder="https://www.figma.com/design/abc123/My-Design"
-                className="mt-1"
-              />
-              {figmaUrlError && (
-                <p className="mt-1 text-xs text-destructive">{figmaUrlError}</p>
-              )}
-            </div>
+            {provider === "uxpilot" ? (
+              <div>
+                <Label htmlFor="uxpilot-ref" className="flex items-center gap-1.5">
+                  <PenTool className="h-3.5 w-3.5" />
+                  UX Pilot page
+                </Label>
+                <Input
+                  id="uxpilot-ref"
+                  value={uxpilotRef}
+                  onChange={(e) => {
+                    setUxpilotRef(e.target.value);
+                    setFigmaUrlError(null);
+                  }}
+                  placeholder="Page id, or the page's URL from UX Pilot"
+                  className="mt-1"
+                />
+                {figmaUrlError && (
+                  <p className="mt-1 text-xs text-destructive">{figmaUrlError}</p>
+                )}
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Every design on the page becomes a screen. Reading a page spends no UX Pilot credits.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <Label htmlFor="figma-url" className="flex items-center gap-1.5">
+                  <Figma className="h-3.5 w-3.5" />
+                  Figma URL
+                </Label>
+                <Input
+                  id="figma-url"
+                  type="url"
+                  value={figmaUrl}
+                  onChange={(e) => {
+                    setFigmaUrl(e.target.value);
+                    setFigmaUrlError(null);
+                  }}
+                  placeholder="https://www.figma.com/design/abc123/My-Design"
+                  className="mt-1"
+                />
+                {figmaUrlError && (
+                  <p className="mt-1 text-xs text-destructive">{figmaUrlError}</p>
+                )}
+              </div>
+            )}
             {/* NO TOKEN FIELD. It asked for the PAT and put it in
                 localStorage — a credential at rest in the browser, which §42
                 forbids — and then dropped it, because the only component that
@@ -313,7 +387,7 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 ))}
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                The Figma token comes from your organisation&apos;s integrations.
+                The {providerLabel} credential comes from your organisation&apos;s integrations (Settings &rarr; Integrations).
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -322,7 +396,7 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
               </Button>
               <Button
                 onClick={handleFigmaCreate}
-                disabled={!name.trim() || !figmaUrl || isPending}
+                disabled={!name.trim() || !designReady || isPending}
               >
                 {createFigmaProject.isPending ? "Creating..." : "Import design"}
               </Button>

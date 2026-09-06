@@ -133,6 +133,11 @@ class DesignReference:
 
     target: FigmaTarget
     source_id: str = "FIGMA-001"
+    #: ``figma`` or ``uxpilot`` — the tool the design lives in. Every field on
+    #: this reference is shaped by Figma, which came first; a UX Pilot
+    #: extraction fills the same shape (a design is a screen, the page is the
+    #: file) so the store, the brief and the layout read one thing.
+    provider: str = "figma"
     screens: list[ScreenRef] = field(default_factory=list)
     components: list[ComponentRef] = field(default_factory=list)
     interactions: list[InteractionRef] = field(default_factory=list)
@@ -143,7 +148,7 @@ class DesignReference:
 
     def evidence_for(self, node_id: str, locator: str = "") -> dict[str, str]:
         """One ``requirements[].evidence[]`` entry, in the §14 shape."""
-        entry = {"type": "figma", "source": self.source_id, "node": node_id}
+        entry = {"type": self.provider or "figma", "source": self.source_id, "node": node_id}
         if locator:
             entry["locator"] = locator
         return entry

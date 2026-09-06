@@ -38,26 +38,31 @@ from services.figma.reference import (
 from services.figma.url import FigmaTarget
 
 STORE_DIR = ".forge/figma"
-_ID = re.compile(r"^FIGMA-(\d{3,})$")
+_ID = re.compile(r"^(FIGMA|UXPILOT)-(\d{3,})$")
+#: Id prefix per provider. UX Pilot sources share the store and the sequence
+#: rule; only the prefix says which tool a citation resolves into.
+PREFIX_BY_PROVIDER = {"figma": "FIGMA", "uxpilot": "UXPILOT"}
 
 
 def store_dir(output_dir: str | Path) -> Path:
     return Path(output_dir) / STORE_DIR
 
 
-def next_source_id(doc: dict) -> str:
-    """The next ``FIGMA-nnn``, from what the document already records.
+def next_source_id(doc: dict, provider: str = "figma") -> str:
+    """The next ``FIGMA-nnn`` (or ``UXPILOT-nnn``), from what the document
+    already records.
 
     Derived from the document rather than a counter file: the document is what
     survives a restore (§93), and a counter that disagreed with it would hand
-    out an id already in use.
+    out an id already in use. Each provider counts its own sequence.
     """
+    prefix = PREFIX_BY_PROVIDER.get(provider, "FIGMA")
     used = [
-        int(m.group(1))
+        int(m.group(2))
         for s in (doc.get("designSources") or [])
-        if (m := _ID.match(str(s.get("id") or "")))
+        if (m := _ID.match(str(s.get("id") or ""))) and m.group(1) == prefix
     ]
-    return f"FIGMA-{max(used, default=0) + 1:03d}"
+    return f"{prefix}-{max(used, default=0) + 1:03d}"
 
 
 def source_record(ref: DesignReference, *, name: str = "",
@@ -71,7 +76,7 @@ def source_record(ref: DesignReference, *, name: str = "",
     """
     return {
         "id": ref.source_id,
-        "type": "figma",
+        "type": ref.provider or "figma",
         "fileKey": ref.target.file_key,
         **({"nodeId": ref.target.node_id} if ref.target.node_id else {}),
         "url": ref.target.source_url,
@@ -162,6 +167,7 @@ def _from_dict(raw: dict[str, Any]) -> DesignReference:
     out = DesignReference(
         target=target,
         source_id=raw.get("source_id") or "FIGMA-001",
+        provider=str(raw.get("provider") or "figma"),
         tokens=tokens,
         gaps=list(raw.get("gaps") or []),
     )

@@ -56,6 +56,10 @@ class FigmaTarget:
     #: branch's own key — this is retained for provenance, not for fetching.
     parent_file_key: str | None = None
     source_url: str = ""
+    #: Which tool the identifiers belong to. ``figma`` (file key + node id) or
+    #: ``uxpilot`` (``file_key`` is the page id). Display only: the store and
+    #: the reference carry the same two identifiers for either.
+    kind: str = "figma"
 
     @property
     def is_whole_file(self) -> bool:
@@ -63,6 +67,8 @@ class FigmaTarget:
 
     def describe(self) -> str:
         """Human-readable, for clarification questions and run logs."""
+        if self.kind == "uxpilot":
+            return f"UX Pilot page {self.file_key}"
         where = f"node {self.node_id}" if self.node_id else "the whole file"
         branch = f" (branch of {self.parent_file_key})" if self.parent_file_key else ""
         return f"{self.file_key}{branch}, {where}"

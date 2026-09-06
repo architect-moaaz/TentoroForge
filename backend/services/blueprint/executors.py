@@ -1499,13 +1499,22 @@ def build_prompt(
         # would crowd out the labels that actually carry meaning.
         from services.figma.brief import brief_for
 
+        brief = brief_for(doc, subject, output_dir)
+        # THE TOOL THE DESIGN LIVES IN names the evidence type. A UX Pilot
+        # page fills the same brief; its citations must say so, or every
+        # requirement it evidences would claim a Figma frame that does not
+        # exist.
+        provider = str(brief.get("provider") or "figma")
+        tool_label = {"uxpilot": "UX Pilot", "figma": "Figma"}.get(provider, provider)
+        unit = "design" if provider == "uxpilot" else "frame"
+
         user = (
-            "A user connected this Figma design as the visual reference for "
+            f"A user connected this {tool_label} design as the visual reference for "
             "the application being built. Propose the requirements it is "
             "evidence for.\n\n"
-            "Every requirement must cite the frame it came from, in "
+            f"Every requirement must cite the {unit} it came from, in "
             "`evidence`, as "
-            '`{"type": "figma", "source": "<source>", "node": "<nodeId>"}`.\n\n'
+            f'`{{"type": "{provider}", "source": "<source>", "node": "<nodeId>"}}`.\n\n'
             "State only what the design shows. A screen proves that a "
             "capability is reachable; it does not tell you who may use it, "
             "what conditions govern it, what it writes, or what happens when "
@@ -1514,7 +1523,7 @@ def build_prompt(
             "listed gaps are questions the user will be asked, not holes for "
             "you to fill.\n\n"
             "```json\n"
-            + json.dumps(brief_for(doc, subject, output_dir), indent=2, sort_keys=True)
+            + json.dumps(brief, indent=2, sort_keys=True)
             + "\n```"
         )
         if feedback:
@@ -2162,7 +2171,10 @@ def make_executor(
             # entirely. Falling through is the whole contract of this seam.
             logger.warning("[figma] %s: %s", spec.subject, exc)
         if drawn is not None:
-            tell(reasoning, f"Building {page.get('route')} from its Figma frame.",
+            _provider = str(drawn.get("provider") or "figma")
+            _tool_label = {"uxpilot": "UX Pilot design", "figma": "Figma frame"}.get(
+                _provider, f"{_provider} design")
+            tell(reasoning, f"Building {page.get('route')} from its {_tool_label}.",
                  "step", spec.node)
             return AgentResult(
                 task_id=spec.task_id,
@@ -2172,7 +2184,7 @@ def make_executor(
                     natural_key=spec.subject,
                     body={"page": spec.subject,
                           "root": _as_template(drawn["root"]),
-                          "composedBy": "figma",
+                          "composedBy": _provider,
                           "dataSources": drawn["dataSources"],
                           # THE FRAME'S SIZE TRAVELS WITH THE TREE. `compose`
                           # returns it and `FigmaCanvas` scales by it, but
@@ -2182,7 +2194,7 @@ def make_executor(
                           # no recorded size, which composes flowed anyway.
                           **({"canvas": drawn["canvas"]} if drawn.get("canvas") else {}),
                           "rationale": (
-                              f"built from Figma frame "
+                              f"built from {_tool_label} "
                               f"{page.get('figmaFrame')} (§48)"),
                           "requirements": list(page.get("requirements") or [])},
                 )],

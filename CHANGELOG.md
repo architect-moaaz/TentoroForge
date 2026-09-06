@@ -9,6 +9,14 @@ User-visible changes to the Tentoro Forge platform. Newest first.
 
 ---
 
+## 2026-09-06
+
+### UX Pilot as a second design source
+- ✨ **Import a design from UX Pilot** — "New App → Import a design" offers Figma or UX Pilot. A UX Pilot page connects through Smith exactly as a Figma file does (`connect_uxpilot`, or a page named in the opening brief): every design on the page becomes a screen, the page's theme becomes the design system (§47), and the page's diagrams become flow evidence (§55). Reading a page spends no UX Pilot credits; the gateway only exposes the read tools.
+- ⚡ **One reference shape for both tools** — a UX Pilot extraction fills the same `DesignReference` a Figma file does, so the store, the intelligence brief, `figma_design_system` and the layout projection read one thing. `designSources[].type` is `figma | uxpilot`, ids are `UXPILOT-nnn`, evidence and `composedBy` name the provider.
+- 🎨 **A page drawn in UX Pilot is built from its HTML** — `html_to_schema` maps semantic tags and plain-CSS layout onto the element vocabulary the Figma JSX transformer reads; `figma_layout.compose` takes either.
+- ⚡ **The key is named, never pasted (§42)** — `UXPILOT_API_KEY` and `UXPILOT_MCP_URL` live under Settings → Integrations → UX Pilot beside Figma's, resolved by name at the moment of the call.
+
 ## 2026-07-29
 
 ### UAT bug sweep — B-021 series (Planters / Nursery Management)

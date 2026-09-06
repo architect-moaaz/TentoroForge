@@ -386,7 +386,9 @@ export const PageContract = z.object({
     })
     .default({ desktop: "primary", tablet: "supported", mobile: "adaptive" }),
 
-  /** §45 — provenance when the page came from a Figma frame. */
+  /** §45 — provenance when the page came from a connected design: a Figma
+   *  frame's node id, or a UX Pilot design id. Resolved against
+   *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
 
   components: z.array(ComponentId).default([]),
@@ -693,13 +695,14 @@ export const PageLayout = z.object({
    * An enum here is a vocabulary for what WAS written, not only for what can
    * be written now.
    */
-  // `figma` — built from the frame it was designed as, rather than composed
-  // from the catalog. A page carrying `figmaFrame` takes this route and
-  // every other page takes A2UI, so the two are genuinely different
-  // provenance and the distinction is worth keeping: a screen that came
-  // from a drawing and a screen a model invented are not the same claim.
+  // `figma` / `uxpilot` — built from the frame or design it was designed
+  // as, rather than composed from the catalog. A page carrying `figmaFrame`
+  // takes this route and every other page takes A2UI, so the two are
+  // genuinely different provenance and the distinction is worth keeping: a
+  // screen that came from a drawing and a screen a model invented are not
+  // the same claim.
   composedBy: z
-    .enum(["a2ui", "agent", "deterministic", "figma", ""])
+    .enum(["a2ui", "agent", "deterministic", "figma", "uxpilot", ""])
     .default(""),
   /**
    * The Figma frame's own size, for a layout composed from one. `FigmaCanvas`
@@ -1190,10 +1193,15 @@ export const DesignSourceFrame = z.object({
 });
 
 export const DesignSource = z.object({
-  /** `FIGMA-001`. Its own sequence — a design source is evidence, not a
-   *  Blueprint artifact, so it is deliberately outside ID_PREFIXES. */
-  id: z.string().regex(/^FIGMA-\d{3,}$/),
-  type: z.literal("figma").default("figma"),
+  /** `FIGMA-001` or `UXPILOT-001`. Its own sequence per provider — a design
+   *  source is evidence, not a Blueprint artifact, so it is deliberately
+   *  outside ID_PREFIXES. */
+  id: z.string().regex(/^(FIGMA|UXPILOT)-\d{3,}$/),
+  /** Which tool the design lives in. Every seam below is named for Figma,
+   *  which came first; a UX Pilot source fills the same fields with its own
+   *  identifiers (`fileKey` is the page id, a frame's `nodeId` is a design id). */
+  type: z.enum(["figma", "uxpilot"]).default("figma"),
+  /** Figma file key · UX Pilot page id. */
   fileKey: z.string(),
   /** Set when the user linked one frame rather than the whole file (§41). */
   nodeId: z.string().optional(),
@@ -1354,7 +1362,7 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma"]),
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),

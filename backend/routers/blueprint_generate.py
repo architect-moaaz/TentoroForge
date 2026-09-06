@@ -524,12 +524,19 @@ def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
     the user's to fix, and the definition stands either way.
     """
     from services.smith.figma_connect import FigmaConnectError, connect
+    from services.smith.uxpilot_connect import (
+        UxPilotConnectError, connect as connect_uxpilot,
+    )
 
     try:
-        out = connect(output_dir, figma_url=named["figma_url"],
-                      token_env=named["token_env"], treat_as=named["treat_as"])
+        if named.get("provider") == "uxpilot":
+            out = connect_uxpilot(output_dir, uxpilot_ref=named["uxpilot_ref"],
+                                  key_env=named["key_env"], treat_as=named["treat_as"])
+        else:
+            out = connect(output_dir, figma_url=named["figma_url"],
+                          token_env=named["token_env"], treat_as=named["treat_as"])
         emit("message", {"text": out["summary"]})
-    except FigmaConnectError as exc:
+    except (FigmaConnectError, UxPilotConnectError) as exc:
         emit("message", {"text": f"The design could not be attached: {exc}",
                          "status": "needs_user"})
     except Exception as exc:  # noqa: BLE001 — the definition stands
@@ -766,8 +773,10 @@ async def smith_chat(
                 # and is attached the moment the definition has made a
                 # Blueprint to attach it to, in this same turn.
                 from services.smith.figma_connect import find_in as _figma_in
+                from services.smith.uxpilot_connect import find_in as _uxpilot_in
 
-                named_design = _figma_in(_brief_from(req.history, req.message))
+                _the_brief = _brief_from(req.history, req.message)
+                named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
 
                 if not req.history:
                     from services.smith.clarify_brief import clarify_brief

@@ -56,6 +56,7 @@ def design_brief(ref: DesignReference) -> dict[str, Any]:
     screens = [s for s in ref.screens if s.looks_like_screen]
     return {
         "source": ref.source_id,
+        "provider": ref.provider or "figma",
         "file": ref.target.describe(),
         "counts": ref.summary(),
         "screens": [screen_entry(s) for s in screens],

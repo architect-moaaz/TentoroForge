@@ -1668,11 +1668,14 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^FIGMA-\\d{3,}$"
+            "pattern": "^(FIGMA|UXPILOT)-\\d{3,}$"
           },
           "type": {
             "type": "string",
-            "const": "figma",
+            "enum": [
+              "figma",
+              "uxpilot"
+            ],
             "default": "figma"
           },
           "fileKey": {
@@ -2166,6 +2169,7 @@
               "agent",
               "deterministic",
               "figma",
+              "uxpilot",
               ""
             ],
             "default": ""
@@ -2258,6 +2262,7 @@
                     "conversation",
                     "document",
                     "figma",
+                    "uxpilot",
                     "screenshot",
                     "spreadsheet",
                     "existing_implementation",
@@ -2386,7 +2391,8 @@
               "user",
               "smith_recommendation",
               "domain_default",
-              "figma"
+              "figma",
+              "uxpilot"
             ]
           },
           "approvedBy": {
