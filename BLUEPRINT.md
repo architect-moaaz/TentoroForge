@@ -11762,6 +11762,16 @@ are shaped placeholders).
     (`catalog` is data-only, no build). `registry`'s build additionally emits
     `dist/starter.json` + `dist/component-contracts.json` (the component catalog
     Smith and the a2ui binder read). Fixed 2026-08-26 (branch `component-fixes`).
+  - **Fresh-DB `create_all` must import EVERY model module, not just those in
+    `models/__init__.py`.** `create_all` only emits tables for classes registered
+    on `Base.metadata`, and `models/__init__.py` does not re-export every model —
+    `models/deployment.py` (`deployments`) and `models/smith_preference.py`
+    (`smith_preferences`) were missed, so those 2 tables never got created. Effect:
+    `GET /deployments/latest` 500s (`UndefinedTableError`) on every editor poll,
+    and — worse — a **build stage that writes to a missing table throws inside the
+    detached build task, which swallows the error, leaving the run hung at 0/22
+    with no log**. Bring-up must import all `models/*.py` before `create_all`
+    (imports all 42 model tables). Fixed 2026-09-06 (branch `component-fixes`).
 
 ### 32.8 What still holds
 
