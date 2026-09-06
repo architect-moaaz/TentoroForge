@@ -241,7 +241,7 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
             # with its leaves bound; the Table is what a region with no
             # readable rows becomes.
             from services.figma import rows as _rows
-            source, mapper = entry["_rows"]
+            source, mapper, locale = entry["_rows"]
             try:
                 found = _rows.row_blocks(node)
                 if found:
@@ -249,7 +249,7 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
                     leaves = [str((leaf.get("props") or {}).get("content") or "")
                               for leaf in _rows._leaves(drawn[0], [])]
                     mapping = mapper(leaves, entry["entity"])
-                    bound_list = _rows.bind_rows(container, drawn, mapping, source=source)
+                    bound_list = _rows.bind_rows(container, drawn, mapping, source=source, locale=locale)
                     if bound_list is not None:
                         return _swap(node, container, bound_list)
             except Exception as exc:  # noqa: BLE001 — a row that cannot be read leaves the Table
@@ -265,6 +265,7 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
 def realize(root: dict, classifications: list[dict], *,
             min_confidence: float = MIN_CONFIDENCE,
             row_mapper: Callable[[Sequence[str], str], Sequence[dict]] | None = None,
+            locale: str = "",
             ) -> tuple[dict, list[dict], list[dict]]:
     """Apply the confident, bindable classifications to ``root``.
 
@@ -310,7 +311,7 @@ def realize(root: dict, classifications: list[dict], *,
 
         wanted[entry["nodeId"]] = {**entry, "_node": component,
                                    "_bind": f"{{{{{name}.value}}}}" if entry["kind"] == "metric" else None,
-                                   "_rows": (name, row_mapper) if entry["kind"] == "table" and row_mapper else None}
+                                   "_rows": (name, row_mapper, locale) if entry["kind"] == "table" and row_mapper else None}
         sources.append(source)
         applied.append({"nodeId": entry["nodeId"], "kind": entry["kind"],
                         "entity": entry["entity"], "source": name,

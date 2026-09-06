@@ -258,7 +258,8 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                         [(c.get("nodeId"), c.get("kind"), c.get("entity") or "-",
                           round(float(c.get("confidence") or 0), 2)) for c in classified])
             schema["children"][0], live_sources, applied = _realize.realize(
-                schema["children"][0], classified, row_mapper=_map_row)
+                schema["children"][0], classified, row_mapper=_map_row,
+                locale=str((svc.doc.get("product") or {}).get("locale") or ""))
             logger.info("[figma] %s: realized %s | sources %s", page.get("id"),
                         [(a.get("nodeId"), a.get("kind"), a.get("source")) for a in applied],
                         [s.get("name") for s in live_sources])

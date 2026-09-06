@@ -212,8 +212,19 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
         // parent, so we never insert a dangling reference).
         val = prop === "id" ? mintToken(val) : (val in tokenMap ? tokenMap[val] : null);
       } else if (ISO.test(val)) {
-        const d = new Date(val);
-        if (!isNaN(d.getTime())) val = d;
+        // WHAT THE DRIVER WILL BIND, by drizzle's own dataType. `timestamp()`
+        // is dataType "date" and takes a Date; `date()` in string mode is
+        // dataType "string" and takes "YYYY-MM-DD" — handed a Date it threw
+        // from Buffer.byteLength and every member and bill failed to seed.
+        const target = (table as any)[prop];
+        const dt = String(target?.dataType ?? "").toLowerCase();
+        const ct = String(target?.columnType ?? "").toLowerCase();
+        if (dt === "date") {
+          const d = new Date(val);
+          if (!isNaN(d.getTime())) val = d;
+        } else if (dt === "string" && ct.includes("date") && !ct.includes("time")) {
+          val = String(val).slice(0, 10);
+        }
       }
     }
     out[prop] = val;
@@ -229,12 +240,24 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
 }
 
 async function seedDomain(adminId: string | null): Promise<void> {
+  // TWO PRODUCERS, ONE READER. The legacy pipeline wrote contracts/seed-plan.json;
+  // the Blueprint projection writes src/db/seed.json as { table: rows[] } and
+  // this read only the first, so every Blueprint-built app seeded nothing but
+  // the admin. The projection's file is read when the plan is absent, its
+  // tables seeded in rounds so a child whose parent has not been inserted yet
+  // is retried after the parent — the file's keys are alphabetical, not
+  // dependency-ordered.
   const planPath = path.join(process.cwd(), "contracts", "seed-plan.json");
-  if (!fs.existsSync(planPath)) return;
+  const seedPath = path.join(process.cwd(), "src", "db", "seed.json");
   let plan: any;
-  try {
-    plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
-  } catch {
+  if (fs.existsSync(planPath)) {
+    try { plan = JSON.parse(fs.readFileSync(planPath, "utf8")); } catch { return; }
+  } else if (fs.existsSync(seedPath)) {
+    try {
+      const bag = JSON.parse(fs.readFileSync(seedPath, "utf8")) as Record<string, unknown[]>;
+      plan = { tables: Object.keys(bag).map((name, i) => ({ name, order: i, seed_data: bag[name] })) };
+    } catch { return; }
+  } else {
     return;
   }
   const tables = (plan.tables || []).slice().sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
@@ -248,9 +271,9 @@ async function seedDomain(adminId: string | null): Promise<void> {
     ids["users"] = [adminId];
     ids["user"] = [adminId];
   }
-  for (const t of tables) {
+  const seedOne = async (t: any): Promise<number | null> => {
     const table = tableFor(t.name);
-    if (!table) continue;
+    if (!table) return null;
     try {
       const [{ c }] = await db.select({ c: sql<number>`count(*)::int` }).from(table);
       if (c > 0) {
@@ -263,7 +286,7 @@ async function seedDomain(adminId: string | null): Promise<void> {
           /* table has no simple id column — leave pool empty */
         }
         console.log(`ℹ️  ${t.name} already has ${c} rows — skipping insert`);
-        continue;
+        return null;
       }
     } catch {
       /* count failed (table may differ) — attempt insert anyway */
@@ -301,10 +324,30 @@ async function seedDomain(adminId: string | null): Promise<void> {
     // (bad FK, type mismatch, wrong table). Emit a greppable marker so the
     // seed-smoke gate catches it; stay non-fatal so boot still completes.
     if (rows.length > 0 && got.length === 0) {
-      console.error(`❌ SEED MISMATCH: ${t.name} planned ${rows.length} inserted 0`);
-      if (firstErr) console.error(`   ↳ first row error: ${firstErr}`);
+      // Reported by the caller once the rounds are over; a parent that
+      // simply has not been seeded yet is not a mismatch. The first error
+      // travels with the table so the final report can say WHY.
+      (t as any).__firstErr = firstErr;
+      return 0;
     }
     console.log(`✅ seeded ${got.length}/${rows.length} ${t.name}`);
+    return got.length;
+  };
+  let pending: any[] = tables;
+  for (let round = 0; round < 6 && pending.length > 0; round++) {
+    const next: any[] = [];
+    for (const t of pending) {
+      const n = await seedOne(t);
+      if (n === 0) next.push(t);
+    }
+    if (next.length === pending.length) {
+      for (const t of next) {
+        console.error(`❌ SEED MISMATCH: ${t.name} planned rows inserted 0`);
+        if ((t as any).__firstErr) console.error(`   ↳ first row error: ${(t as any).__firstErr}`);
+      }
+      break;
+    }
+    pending = next;
   }
 }
 
