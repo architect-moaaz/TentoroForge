@@ -11827,6 +11827,84 @@ builder, `frontend/src/components/workflow/*` + backend `routers/workflows.py` +
   `backend/templates/workflow-engine/domain/feel-lite`. Verified: conditions with
   `==` and `&&` now parse with no error in the editor.
 
+### 32.7.2 Workflow editor + runtime — round-2 deep QA (2026-09-06, branch `component-fixes`)
+
+A second, exhaustive pass over the **Workflow editor** and the **Simulate** path
+(which drives the *backend* runtime engine, `POST …/workflows/start` →
+`runtime/engine.py`). Every fix is at the platform root, so it lands for the
+simulator AND for every generated app's workflow runtime. All verified live in
+the vet-portal project and with unit tests.
+
+**Runtime / condition evaluation** (the simulator was branching wrong on real
+generated conditions — valid "Add a Pet" input still routed to the invalid
+path). Root cause was a four-part cluster, all fixed:
+- **W7a — `{{input.*}}` / `{{result.*}}` / `{{session.*}}` were never seeded.**
+  The generation pipeline binds conditions/mappings to `input` (the trigger
+  payload, 104×), `result` (the previous node's output / fetched row, 52×) and
+  `session.user.id` / `session.user.role` (26×) — see `services/plan_validator.py`,
+  `singleton_page_reconciler.py`, `preview_session.py`. The engine seeded only
+  `trigger`/`previous`, so all three resolved to null. **`runtime/engine.py`** now
+  seeds `input` and `session` at start (session.user.id ← initiator, overridable
+  via a `session` key in the start variables so the simulator can test roles) and
+  `result` alongside every `previous`.
+- **W7b — conditions substituted binding VALUES unquoted before FEEL.**
+  `gateway_controller.resolve_condition_node` used `VariableResolver.resolve_string`,
+  which inlined a string value as bare text (`{{input.name}}`="Rex" → `Rex != null`);
+  FEEL then read `Rex` as an unresolved identifier → null. Replaced with `_debrace`
+  (`{{path}}` → the bare FEEL path `path`), so the evaluator resolves each binding
+  against the live variables with its real type.
+- **W7c — the *runtime* FEEL (`backend/runtime/feel_lite`) still rejected `==`
+  and silently DROPPED `&&`/`||`.** W6 fixed the frontend + template copies but not
+  the runtime port: `==` tokenized as two `Eq` → ParseError; `&&`/`||` were skipped
+  as unknown chars, so `A && B` evaluated as just `A`. Fixed the runtime tokenizer
+  (`==`→`Eq("=")`, `&&`→`And`, `||`→`Or`).
+- **W7d — `today()` (and `minutesBetween`/`isEmail`) were undefined builtins.**
+  Registered in `runtime/feel_lite/evaluator.py`.
+  *Verified live:* valid input → happy path (Create pet profile → Pet added),
+  empty input → else (Pet not saved); 11/11 real vet conditions pass in the unit
+  harness; regression tests added in `tests/test_workflow_engine.py`.
+- **W8 — convergent nodes double-executed; cycles looped forever.** `_execute_nodes`
+  had no processed-guard (10 of 12 vet workflows have a convergent node). Added a
+  `processed` set (a parallel join releases itself while still waiting). *Verified
+  live:* convergent end node runs once, workflow completes.
+- **W9 — a fully-automated workflow with no explicit end node never completed**
+  (the simulator polled forever). Completion now fires when the queue drains with
+  no pending tasks and the instance isn't `waiting`, regardless of an end node.
+- **W10 — completed human-task nodes stayed painted "active"** (`current_node_ids`
+  was appended-to but never pruned). `complete_task` now removes the finished node.
+
+**Editor (frontend) — verified live + typecheck-clean:**
+- **W11 — node moves / deletes were never persisted** and never marked dirty:
+  `WorkflowPanel` rendered `<WorkflowCanvas>` without `onNodesChange`/`onEdgesChange`,
+  so React-Flow move/remove changes updated only the canvas's internal state and
+  Save (which serializes the parent arrays) reverted them, while the button read
+  "Saved". Wired both callbacks (dirty only on a structural change, so selection
+  doesn't flag dirty). *Verified live:* dragged node persisted to the backend
+  (`pet_added.position` = new coords); deleting a node removed it + its edges (no
+  dangling edges).
+- **W12 — Properties-panel edits didn't show on the canvas** until a remount
+  (`useNodesState` seeded from `initialNodes` once, never re-synced). Added a
+  data-sync effect that adopts label/config edits while preserving live
+  positions. Load-bearing alongside W11 (else a later move would sync stale data
+  back). *Verified live:* a label edit updated the canvas node as typed.
+- **W13 — "New Workflow" reported "Saved" and was silently discarded**
+  (`createWorkflow` never set `isDirty`). Now flags dirty + clears the simulator
+  view. *Verified live:* Save shows "Save*", opens on the editor canvas.
+- **W14 — simulator view leaked across workflows** (`showSimulator` reset in
+  `openWorkflow` but not `backToList`/`createWorkflow`).
+- **W15 — `KeyValueMapper` "variable" source toggle was dead** (source inferred
+  purely from the value; switching cleared it to "" which re-inferred as "literal").
+  Now tracks source in local state — fixes variable binding for every object input
+  (http body/headers, db `where`, emit payload, mcp args, trigger mapping).
+- **W16 — a malformed `decisionTable` crashed the whole Properties panel**
+  (`table.outputs.map` on an unguarded LLM-generated shape). Added `normalizeTable`.
+- **W17 — escalation "Escalate to" type wasn't persisted unless an entity was
+  re-picked.** The Select now persists `escalateAssignType` on change and clears
+  the mismatched target.
+- **W18 — `ProcessVariablesEditor` tracked the expanded row by array index**, so
+  deleting a row above the open one jumped the editor to the wrong variable; also
+  unique-per-row input ids.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
