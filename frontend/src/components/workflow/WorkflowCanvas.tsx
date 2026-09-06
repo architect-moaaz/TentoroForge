@@ -187,7 +187,7 @@ export function WorkflowCanvas({
 
       const newEdge: Edge = {
         ...params,
-        id: `edge_${params.source}_${params.target}`,
+        id: `edge_${params.source}_${params.sourceHandle ?? "out"}_${params.target}`,
         type: "conditional",
         data: { edgeType } as WorkflowEdgeData,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
@@ -206,6 +206,34 @@ export function WorkflowCanvas({
       });
     },
     [setEdges, nodes, onEdgeAdded],
+  );
+
+  // A user can drag from any handle to any handle — reject the connections that
+  // produce an invalid graph so the editor never persists a misconfiguration:
+  //   • self-loops (a node wired to itself)
+  //   • edges INTO a trigger (a trigger is the entry point; it takes no input)
+  //   • edges OUT of an `end`/terminal node (a terminal has no outgoing flow)
+  //   • duplicate edges from the same source handle to the same target
+  const isValidConnection = useCallback(
+    (conn: Connection | Edge): boolean => {
+      const source = (conn as Connection).source;
+      const target = (conn as Connection).target;
+      const sourceHandle = (conn as Connection).sourceHandle ?? null;
+      if (!source || !target || source === target) return false;
+      const src = nodes.find((n) => n.id === source);
+      const tgt = nodes.find((n) => n.id === target);
+      if (tgt?.type === "trigger") return false;
+      if (src?.type === "end") return false;
+      const dup = edges.some(
+        (e) =>
+          e.source === source &&
+          e.target === target &&
+          (e.sourceHandle ?? null) === sourceHandle,
+      );
+      if (dup) return false;
+      return true;
+    },
+    [nodes, edges],
   );
 
   const onNodeClick = useCallback(
@@ -315,6 +343,7 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={readOnly ? undefined : onConnect}
+        isValidConnection={readOnly ? undefined : isValidConnection}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         onDragOver={readOnly ? undefined : onDragOver}

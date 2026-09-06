@@ -11806,6 +11806,15 @@ builder, `frontend/src/components/workflow/*` + backend `routers/workflows.py` +
   chained trigger (Start → "form submitted") entered the graph twice. Fixed: a
   start node is one with **no incoming edge**.
 
+- **W4 — the canvas accepted invalid connections.** `WorkflowCanvas` had NO
+  `isValidConnection` guard: a user could wire a node to itself, connect INTO a
+  trigger, connect OUT of an `end` terminal, or duplicate an edge — all persisted
+  as broken graphs. Added an `isValidConnection` that rejects self-loops,
+  into-trigger, out-of-terminal, and duplicate (same source-handle→target) edges.
+- **W5 — edge id collision.** New-edge id was `edge_<source>_<target>`, ignoring
+  the source handle, so a condition node's then/else (or parallel) edges to the
+  same target shared one id. Now `edge_<source>_<handle>_<target>`.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
