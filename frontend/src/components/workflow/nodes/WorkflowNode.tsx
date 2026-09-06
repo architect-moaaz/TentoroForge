@@ -78,6 +78,37 @@ interface MetadataPill {
   value: string;
 }
 
+/**
+ * A subtitle/pill value must be a plain string — config is LLM-generated and a
+ * field the card reads (expression, duration, table, …) can arrive as an object
+ * or array. Rendering that as a React child throws "Objects are not valid as a
+ * React child" and, with no error boundary in the tree, blank-screens the whole
+ * editor. Coerce: strings pass through, other primitives stringify, objects fall
+ * back to `fb`.
+ */
+function asText(v: unknown, fb = ""): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return fb;
+}
+
+/**
+ * Read an action input by name. The v2 contract editor writes values into
+ * `config.inputMappings` (as `{name, source:"literal", value}`), NOT the flat
+ * legacy keys the card historically read — so a table/recipient set in the panel
+ * showed no pill. Prefer the literal mapping, fall back to the flat key.
+ */
+function readInput(config: WorkflowNodeData["config"] | undefined, name: string): string {
+  const mappings = (config as Record<string, unknown> | undefined)?.inputMappings;
+  if (Array.isArray(mappings)) {
+    const m = mappings.find(
+      (x) => x && typeof x === "object" && (x as { name?: string }).name === name,
+    ) as { source?: string; value?: unknown } | undefined;
+    if (m && m.source === "literal") return asText(m.value);
+  }
+  return asText((config as Record<string, unknown> | undefined)?.[name]);
+}
+
 function getMetadataPills(
   nodeType: WorkflowNodeType,
   config: WorkflowNodeData["config"],
@@ -92,30 +123,35 @@ function getMetadataPills(
       pills.push({ label: "Form", value: name || "Start Form" });
       break;
     }
-    case "action":
+    case "action": {
+      const table = readInput(config, "table");
       if (config.actionType === "db_query") {
-        if (config.model) pills.push({ label: "Update", value: config.model });
+        if (table) pills.push({ label: "Query", value: table });
       } else if (
         config.actionType === "db_insert" ||
         config.actionType === "db_update" ||
         config.actionType === "db_delete"
       ) {
-        if (config.table) pills.push({ label: "Table", value: config.table });
+        if (table) pills.push({ label: "Table", value: table });
       } else if (config.actionType === "set_variable") {
-        if (config.variableName) pills.push({ label: "Var", value: config.variableName });
+        const v = readInput(config, "variableName") || asText(config.variableName);
+        if (v) pills.push({ label: "Var", value: v });
       } else if (config.actionType === "send_email") {
-        if (config.to) pills.push({ label: "To", value: config.to });
-        if (config.subject) pills.push({ label: "Subj", value: config.subject });
+        const to = readInput(config, "to"), subject = readInput(config, "subject");
+        if (to) pills.push({ label: "To", value: to });
+        if (subject) pills.push({ label: "Subj", value: subject });
       } else if (config.actionType === "send_notification") {
-        pills.push({ label: "Type", value: config.actionType });
+        pills.push({ label: "Type", value: asText(config.actionType) });
       } else if (config.actionType === "http_call") {
-        if (config.method) pills.push({ label: "Method", value: config.method });
-        if (config.url) pills.push({ label: "URL", value: config.url });
+        const method = readInput(config, "method"), url = readInput(config, "url");
+        if (method) pills.push({ label: "Method", value: method });
+        if (url) pills.push({ label: "URL", value: url });
       }
       break;
+    }
     case "exclusive_gateway":
     case "parallel_gateway":
-      if (config.expression) pills.push({ label: "When", value: config.expression });
+      if (config.expression) pills.push({ label: "When", value: asText(config.expression, "condition") });
       break;
     case "assignment":
     case "approval":
@@ -134,7 +170,7 @@ function getMetadataPills(
       if (config.aiTone) pills.push({ label: "Tone", value: config.aiTone });
       break;
     case "wait":
-      if (config.duration) pills.push({ label: "Delay", value: config.duration });
+      if (config.duration) pills.push({ label: "Delay", value: asText(config.duration, "delay") });
       break;
     case "escalation":
       if (config.slaHours) pills.push({ label: "SLA", value: `${config.slaHours}h` });
@@ -155,21 +191,24 @@ function getSubtitle(
   switch (nodeType) {
     case "trigger":
       return config.description || config.type || "";
-    case "action":
-      if (config.actionType === "set_variable")
-        return config.variableName ? `= ${config.variableName}` : "Set Variable";
+    case "action": {
+      if (config.actionType === "set_variable") {
+        const v = readInput(config, "variableName") || asText(config.variableName);
+        return v ? `= ${v}` : "Set Variable";
+      }
       if (
         config.actionType === "db_insert" ||
         config.actionType === "db_update" ||
         config.actionType === "db_delete"
       )
-        return config.table || config.actionType;
-      return config.actionType || config.description || "";
+        return readInput(config, "table") || asText(config.actionType);
+      return asText(config.actionType) || asText(config.description);
+    }
     case "condition":
-      return config.expression || "Expression";
+      return asText(config.expression, "Expression");
     case "exclusive_gateway":
     case "parallel_gateway":
-      return config.expression || "Gateway";
+      return asText(config.expression, "Gateway");
     case "fork":
       return "Fork";
     case "join":
@@ -179,12 +218,15 @@ function getSubtitle(
     case "end_event":
       return "End";
     case "decision": {
-      const dt = config.decisionTable;
-      if (dt) return `${dt.hitPolicy} · ${dt.rules.length} rules`;
+      // config.decisionTable is LLM-generated and may be a truthy-but-malformed
+      // shape ({}, [], a string, or missing rules). Only read .rules when it is
+      // actually an array — otherwise .length throws and blank-screens the editor.
+      const dt = config.decisionTable as { hitPolicy?: unknown; rules?: unknown } | undefined;
+      if (dt && Array.isArray(dt.rules)) return `${asText(dt.hitPolicy, "F")} · ${dt.rules.length} rules`;
       return "Decision table";
     }
     case "wait":
-      return config.duration || "Delay";
+      return asText(config.duration, "Delay");
     case "assignment":
     case "approval":
       return config.assignType || "";

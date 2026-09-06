@@ -191,6 +191,17 @@ class Parser:
     def _parse_member_or_call(self) -> ASTNode:
         node = self._parse_primary()
 
+        # Multi-word FEEL builtins: `starts with` / `ends with` (the canonical
+        # spaced spelling the function catalogue advertises). The tokenizer emits
+        # two identifiers; join them so `starts with(x, "A")` parses to a
+        # FunctionCall("starts with", …) instead of the bare Identifier("starts")
+        # with the rest silently dropped → a wrong-branch at runtime.
+        if (isinstance(node, Identifier) and node.name in ("starts", "ends")
+                and self._current().type == TokenType.Identifier
+                and self._current().value == "with"):
+            self._advance()
+            node = Identifier(name=f"{node.name} with")
+
         while True:
             if self._current().type == TokenType.Dot:
                 self._advance()

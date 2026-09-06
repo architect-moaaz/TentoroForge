@@ -210,17 +210,27 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
         return false;
       }
 
-      // Numeric comparison (= / != already handled above via fuzzyEqual).
-      if (typeof left === "number" && typeof right === "number") {
+      // Numeric comparison — coerce numeric STRINGS too (a numeric/bigint column
+      // comes back from node-postgres as a string, and trigger fields are spread
+      // in uncoerced), so `age >= 18` with age="9" compares 9 >= 18, not the
+      // lexicographic "9" >= "18" (which is true and wrong). Matches fuzzyEqual
+      // (used by = / !=) and the Python engine. Empty string is NOT a number.
+      const asNum = (v: unknown): number =>
+        typeof v === "number" ? v
+        : (typeof v === "string" && v.trim() !== "") ? Number(v)
+        : NaN;
+      const ln = asNum(left);
+      const rn = asNum(right);
+      if (Number.isFinite(ln) && Number.isFinite(rn)) {
         switch (node.operator) {
-          case "<": return left < right;
-          case "<=": return left <= right;
-          case ">": return left > right;
-          case ">=": return left >= right;
+          case "<": return ln < rn;
+          case "<=": return ln <= rn;
+          case ">": return ln > rn;
+          case ">=": return ln >= rn;
         }
       }
 
-      // String comparison
+      // String comparison (non-numeric operands, e.g. ISO dates)
       const ls = String(left);
       const rs = String(right);
       switch (node.operator) {

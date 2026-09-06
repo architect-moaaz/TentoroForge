@@ -112,9 +112,13 @@ def workflow_list_item(data: dict, stem: str) -> WorkflowListItem:
     if steps:
         step_count = len(steps)
     else:
+        # Count real operational steps: exclude the trigger AND the terminal
+        # end node (projection always appends an `end`), so an N-step workflow
+        # lists as N, not N+1.
+        _skip = {"trigger", "end", "end_event"}
         step_count = sum(
             1 for n in nodes
-            if isinstance(n, dict) and (n.get("type") or "").lower() != "trigger"
+            if isinstance(n, dict) and (n.get("type") or "").lower() not in _skip
         )
     return WorkflowListItem(
         id=stem,

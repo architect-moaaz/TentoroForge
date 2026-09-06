@@ -65,12 +65,34 @@ describe("useWorkflowSim", () => {
     expect(useWorkflowSim.getState().error).toContain("boom");
   });
 
-  it("poll() failure sets phase failed with an error", async () => {
+  it("poll() tolerates transient failures, then fails after the limit", async () => {
     const api = makeApi({ getInstance: async () => { throw new Error("net down"); } });
     await useWorkflowSim.getState().start(api, "w", {});
+    // A single blip must NOT kill a healthy run — it stays running and retries.
+    await useWorkflowSim.getState().poll(api);
+    expect(useWorkflowSim.getState().phase).toBe("running");
+    await useWorkflowSim.getState().poll(api);
+    expect(useWorkflowSim.getState().phase).toBe("running");
+    // Only after the 3rd consecutive failure does it give up.
     await useWorkflowSim.getState().poll(api);
     expect(useWorkflowSim.getState().phase).toBe("failed");
     expect(useWorkflowSim.getState().error).toContain("net down");
+  });
+
+  it("poll() clears the error streak after a good poll", async () => {
+    let calls = 0;
+    const api = makeApi({
+      getInstance: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("blip");
+        return { id: "i", status: "running", variables: {}, tasks: [], error_message: null } as never;
+      },
+    });
+    await useWorkflowSim.getState().start(api, "w", {});
+    await useWorkflowSim.getState().poll(api); // fails (streak=1), stays running
+    expect(useWorkflowSim.getState().phase).toBe("running");
+    await useWorkflowSim.getState().poll(api); // succeeds → streak reset
+    expect(useWorkflowSim.getState().pollErrors).toBe(0);
   });
 
   it("settles to failed when the instance status is failed", async () => {

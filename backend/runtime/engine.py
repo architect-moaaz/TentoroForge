@@ -140,6 +140,15 @@ class WorkflowRuntimeEngine:
             remaining = [nid for nid in (instance.current_node_ids or []) if nid != task.node_id]
             await self.state.update_current_nodes(instance, remaining)
 
+        # The blocking task parked the instance in `waiting`; completing it means
+        # the run is moving again, so return it to `running` BEFORE advancing.
+        # Otherwise the downstream drain reaches the completion guard while the
+        # status is still the stale `waiting`, and the guard (which skips a
+        # waiting instance so a genuinely-paused run isn't force-completed) would
+        # leave a resumed human-task workflow stuck in `waiting` forever.
+        if instance.status == WorkflowInstanceStatus.waiting:
+            await self.state.transition_instance(instance, WorkflowInstanceStatus.running)
+
         # Try to advance the workflow
         if output_dir:
             definition = self._load_definition(output_dir, instance.workflow_id)
@@ -507,6 +516,12 @@ class WorkflowRuntimeEngine:
     def _get_org_id_from_instance(self, instance: WorkflowInstance) -> uuid.UUID:
         """Get org_id from the project relationship.
         Falls back to a zero UUID if not loaded."""
-        if hasattr(instance, "project") and instance.project:
+        # Only read `project` when it is ALREADY loaded. Touching an unloaded
+        # relationship here triggers a synchronous lazy-load in an async context
+        # (MissingGreenlet). In the request path the project is eager-loaded, so
+        # this returns the real org id; on any other path we fall back rather
+        # than crash — which is exactly what the docstring already promises.
+        from sqlalchemy import inspect as sa_inspect
+        if "project" not in sa_inspect(instance).unloaded and instance.project:
             return instance.project.org_id
         return uuid.UUID(int=0)

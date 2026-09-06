@@ -611,6 +611,12 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
             </div>
             {selectedNode ? (
               <NodePropertiesPanel
+                // Remount per selected node so panel sub-components that seed
+                // local useState from props at mount (EscalationProps assignType,
+                // CronBuilder mode, KeyValueMapper row source, OutputRow editing)
+                // reset to the new node instead of leaking the previous node's
+                // state when switching between two nodes of the same type.
+                key={selectedNode.id}
                 nodeData={selectedNode.data}
                 nodeId={selectedNode.id}
                 allNodes={nodes}

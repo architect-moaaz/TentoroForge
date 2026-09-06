@@ -22,6 +22,7 @@ interface SimState {
   activeTask: TaskDTO | null;
   variables: Record<string, unknown>;
   error: string | null;
+  pollErrors: number; // consecutive poll failures; a single blip must not fail the run
 
   reset(): void;
   start(api: SimApi, workflowId: string, variables: Record<string, unknown>): Promise<void>;
@@ -32,7 +33,11 @@ interface SimState {
   fastForwardTimer(api: SimApi): Promise<void>;
 }
 
-const INITIAL = {
+// A FACTORY, not a shared constant: `reset`/`start` used to spread one module
+// -level object, so every reset aliased the same logs/nodeStatuses/pendingReveal
+// /variables instances. Harmless while every path replaces them, but a single
+// future in-place mutation would corrupt all later resets. Fresh objects each time.
+const makeInitial = () => ({
   phase: "idle" as RunPhase,
   instanceId: null,
   instance: null,
@@ -42,7 +47,11 @@ const INITIAL = {
   activeTask: null,
   variables: {} as Record<string, unknown>,
   error: null,
-};
+  pollErrors: 0,
+});
+
+/** How many CONSECUTIVE poll failures before we declare the run failed. */
+const POLL_ERROR_LIMIT = 3;
 
 /** Once the reveal queue is empty, derive phase/activeTask from the latest instance snapshot. */
 function settle(get: () => SimState, set: (p: Partial<SimState>) => void) {
@@ -57,12 +66,12 @@ function settle(get: () => SimState, set: (p: Partial<SimState>) => void) {
 }
 
 export const useWorkflowSim = create<SimState>((set, get) => ({
-  ...INITIAL,
+  ...makeInitial(),
 
-  reset: () => set({ ...INITIAL }),
+  reset: () => set(makeInitial()),
 
   start: async (api, workflowId, variables) => {
-    set({ ...INITIAL, phase: "starting" });
+    set({ ...makeInitial(), phase: "starting" });
     try {
       const inst = await api.start(workflowId, variables);
       set({ phase: "running", instanceId: inst.id, variables: inst.variables ?? {} });
@@ -87,10 +96,18 @@ export const useWorkflowSim = create<SimState>((set, get) => ({
         logs,
         variables: instance.variables ?? {},
         pendingReveal: [...snap.pendingReveal, ...fresh],
+        pollErrors: 0, // a good poll clears the transient-failure streak
       });
       settle(get, set);
     } catch (e) {
-      set({ phase: "failed", error: e instanceof Error ? e.message : String(e) });
+      // A single dropped/slow poll (fired every ~800ms) must NOT kill a healthy
+      // run. Tolerate a few consecutive failures; only give up after the limit.
+      const n = get().pollErrors + 1;
+      if (n >= POLL_ERROR_LIMIT) {
+        set({ phase: "failed", pollErrors: n, error: e instanceof Error ? e.message : String(e) });
+      } else {
+        set({ pollErrors: n }); // keep the current phase; the next tick retries
+      }
     }
   },
 

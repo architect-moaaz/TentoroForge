@@ -557,3 +557,29 @@ class TestMatchValue:
         ast = parse(tokenize("null"))
         assert match_value(None, ast, {}) is True
         assert match_value(0, ast, {}) is False
+
+
+# =====================================================================
+# Round-2 QA regressions (simulator FEEL parity with the emitted engine)
+# =====================================================================
+
+class TestRound2Regressions:
+    def test_negative_numbers_in_list_do_not_crash(self):
+        # F3: `-` after `[`/`,` was tokenized as a wildcard, so `[-10, -5]`
+        # raised ParseError → the condition silently fell to the wrong branch.
+        assert evaluate_expression("temp in [-10, -5, 0]", {"temp": -5}) is True
+        assert evaluate_expression("temp in [-10, -5, 0]", {"temp": 3}) is False
+        assert evaluate_expression("x < -2", {"x": -5}) is True
+
+    def test_multiword_starts_ends_with(self):
+        # F2: the spaced spelling parsed to a bare identifier, dropping the call.
+        assert evaluate_expression('starts with(name, "App")', {"name": "Apple"}) is True
+        assert evaluate_expression('ends with(name, "le")', {"name": "Apple"}) is True
+        assert evaluate_expression('starts_with(name, "App")', {"name": "Apple"}) is True
+
+    def test_numeric_string_ordering(self):
+        # F1 (Python side stays correct): numeric strings compare numerically,
+        # not lexicographically ("9" >= "18" must be False).
+        assert evaluate_expression("age >= 18", {"age": "9"}) is False
+        assert evaluate_expression("age >= 18", {"age": "21"}) is True
+        assert evaluate_expression("x < y", {"x": "90", "y": "100"}) is True

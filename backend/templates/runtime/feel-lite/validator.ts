@@ -27,7 +27,11 @@ export interface ValidationResult {
 const KNOWN_FUNCTIONS = new Set([
   "sum", "count", "min", "max", "avg",
   "abs", "floor", "ceiling", "round",
-  "contains", "starts with", "ends with", "matches",
+  // Both spellings: the evaluator derives the underscore aliases and the
+  // condition compiler emits them, so the author-time check must accept them —
+  // otherwise a valid `starts_with(name,"A")` was falsely rejected as an
+  // "Unknown function". Matches the frontend validator's list.
+  "contains", "starts with", "ends with", "starts_with", "ends_with", "matches",
   "string", "number", "date", "now", "duration",
 ]);
 
