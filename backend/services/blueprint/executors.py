@@ -1554,17 +1554,34 @@ def build_prompt(
         # UnboundLocalError on every ux_architecture call — the one run that
         # was meant to prove the design's rail could become the shell.
         from services.figma.chrome import describe as _describe_chrome
+        from services.figma.chrome import describe_drawn as _describe_drawn
 
         drawn = [(src.get("id"), src.get("chrome"))
                  for src in doc.get("designSources") or [] if src.get("chrome")]
+
+        def _rail_text(chrome: dict) -> str:
+            side = chrome.get("sidebar") or {}
+            if side.get("drawn"):
+                # THE RAIL AS DRAWN, FOR THE ARCHITECT TO READ. Entry by entry
+                # with what each carries; which is the brand, which a status
+                # card, which a heading and which a destination is this
+                # agent's reading, not a threshold's.
+                return (_describe_drawn(side["drawn"])
+                        + "\n\nRead it: the brand is the entry at the top that names "
+                          "the product (a logo beside a name); a filled block of "
+                          "dates or states is status, not navigation; a short "
+                          "unactioned label introducing a run of entries is a group "
+                          "heading; an entry drawn as icon + label (+ caption or "
+                          "badge) is a destination. Say nothing about entries you "
+                          "leave out; do not invent any.")
+            return _describe_chrome(side)
+
         if drawn:
             user += (
                 "\n\nA CONNECTED DESIGN DRAWS THE NAVIGATION. Its sidebar is "
-                "identical on every screen, and this is what it says, in the "
+                "identical on every screen, and this is what it draws, in the "
                 "order the designer drew it:\n\n"
-                + "\n\n".join(
-                    f"[{sid}]\n" + _describe_chrome(chrome.get("sidebar") or {})
-                    for sid, chrome in drawn)
+                + "\n\n".join(f"[{sid}]\n" + _rail_text(chrome) for sid, chrome in drawn)
                 + "\n\nREPRODUCE IT. `navigation.style` is `sidebar`. "
                 "`navigation.tree` has one node per group heading, in that "
                 "order, with the group's destinations as its `children`, each "

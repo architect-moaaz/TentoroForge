@@ -273,64 +273,13 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
     """
     entries: list[tuple[str, dict]] = []   # (label, props) in document order
 
-    def _px(node: dict) -> float:
-        cls = str((node.get("props") or {}).get("className") or "")
-        m = re.search(r"\b(?:size|w|h)-\[(\d+(?:\.\d+)?)px\]", cls)
-        return float(m.group(1)) if m else 0.0
-
-    def _icon_size(node: dict, inherited: float = 0.0) -> float:
-        # A logo is often a sized box holding a `size-full` image (a flag
-        # emblem drawn as vectors); the box's size is the icon's size.
-        for child in node.get("children") or []:
-            if not isinstance(child, dict):
-                continue
-            if child.get("type") in ("Image", "Icon"):
-                return _px(child) or inherited
-            if child.get("type") not in ("Button", "Text", "Heading"):
-                found = _icon_size(child, _px(child) or inherited)
-                if found:
-                    return found
-        return 0.0
-
-    def _has_icon(node: dict) -> bool:
-        for child in node.get("children") or []:
-            if not isinstance(child, dict):
-                continue
-            if child.get("type") in ("Image", "Icon"):
-                return True
-            if child.get("type") not in ("Button", "Text", "Heading") and _has_icon(child):
-                return True
-        return False
-
     def walk(node: Any) -> None:
         if not isinstance(node, dict):
             return
         props = node.get("props") or {}
-        # AN ICON BESIDE A LABEL IS A DESTINATION. A rail item drawn as icon +
-        # label + caption (+ badge) is one item, not three labels: its first
-        # words are the destination and the rest describe it. Read as three,
-        # the caption of one item became the heading of the next.
-        labels = _labels(node, [])
-        cls = str(props.get("className") or "")
-        filled = any(t.startswith("bg-") and t not in ("bg-transparent", "bg-none") for t in cls.split())
-        # A FILLED BLOCK OF SEVERAL LABELS IS A STATUS CARD, NOT NAVIGATION —
-        # "session in progress / 2026/15 / Sunday 31 August" drawn in the rail.
-        # Read as labels, its last line became the heading of the items below.
-        if node.get("type") not in ("Button",) and filled and not _has_icon(node) and len(labels) >= 2:
-            return
-        if node.get("type") != "Button" and labels and len(labels) <= 3 and _has_icon(node):
-            # THE BRAND IS THE BIG ICON. A logo beside a name reads as icon +
-            # label like any destination; what sets it apart is size — a
-            # destination's glyph is 16-24px, a logo 32px and up — and place,
-            # before any destination has been read.
-            if not entries and _icon_size(node) >= 32:
-                entries.append((labels[0], {**props, "_brand": True}))
-                return
-            entries.append((labels[0], {**props, "_item": True}))
-            return
         text = props.get("label") or props.get("content") or props.get("text")
         if isinstance(text, str) and text.strip():
-            entries.append((text.strip(), {**props, "_item": node.get("type") == "Button"}))
+            entries.append((text.strip(), props))
         for child in node.get("children") or []:
             walk(child)
 
@@ -346,7 +295,7 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
     def _is_item(idx: int) -> bool:
         raw, props = entries[idx]
         return bool(_clean(raw)) and (
-            any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw)) or bool(props.get("_item")))
+            any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw)))
 
     heading_at = {i for i, (raw, props) in enumerate(entries)
                   if _clean(raw) and not _is_item(i)
@@ -360,11 +309,8 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
         label = _clean(raw)
         if not label:
             continue
-        if props.get("_brand"):
-            brand.append(label)
-            continue
         if _is_item(i):
-            action = {k: props[k] for k in _ACTIONS if props.get(k) and k != "_item"}
+            action = {k: props[k] for k in _ACTIONS if props.get(k)}
             if current is None:
                 current = {"label": "", "items": []}
                 groups.append(current)
@@ -377,13 +323,124 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
         # Any other unactioned label — a footer, a version string — is noise.
 
     groups = [g for g in groups if g["items"]]
-    # A LONE ITEM AHEAD OF THE REST IS THE BRAND: a logo beside a name reads
-    # as icon + label, exactly like a destination, but a destination comes
-    # in a run and the brand stands alone at the top.
-    if len(groups) >= 2 and not groups[0]["label"] and len(groups[0]["items"]) == 1:
-        brand.insert(0, groups[0]["items"][0]["label"])
-        groups = groups[1:]
     return {"brand": brand, "groups": groups}
+
+
+def _icon_px(node: dict, inherited: float = 0.0) -> float:
+    """The size of the first image in a subtree; a `size-full` image takes
+    the size of the box that holds it (a flag emblem drawn as vectors)."""
+    def px(n: dict) -> float:
+        cls = str((n.get("props") or {}).get("className") or "")
+        m = re.search(r"\b(?:size|w|h)-\[(\d+(?:\.\d+)?)px\]", cls)
+        return float(m.group(1)) if m else 0.0
+    for child in node.get("children") or []:
+        if not isinstance(child, dict):
+            continue
+        if child.get("type") in ("Image", "Icon"):
+            return px(child) or inherited
+        found = _icon_px(child, px(child) or inherited)
+        if found:
+            return found
+    return 0.0
+
+
+def _carries_text(node: Any) -> bool:
+    return isinstance(node, dict) and bool(_labels(node, []))
+
+
+def rail_as_drawn(chrome_nodes: Iterable[dict]) -> list[dict]:
+    """The rail entry by entry, in document order, as the designer drew it.
+
+    NO DECISIONS HERE. An entry is a structural unit — a child of any
+    container whose children each carry text (a list), or the container
+    itself when nothing under it forms a list — and it records what it
+    carries: its labels together, the size of its icon, whether it is filled,
+    and any action the transform bound. Which entry is the brand, which the
+    status card, which a heading and which a destination is the architect's
+    reading, made from this. The first version of this module decided those
+    with numbers — a brand's icon is 32px or more, a status card is a filled
+    block of two labels, an item has at most three — each tuned on one file,
+    which is how an exception list begins.
+    """
+    def entry(node: dict) -> dict:
+        props = node.get("props") or {}
+        cls = str(props.get("className") or "")
+        out: dict = {"labels": _labels(node, [])}
+        icon = _icon_px(node)
+        if icon:
+            out["icon"] = icon
+        if any(t.startswith("bg-") and t not in ("bg-transparent", "bg-none") for t in cls.split()):
+            out["filled"] = True
+        for k in _ACTIONS:
+            if props.get(k):
+                out[k] = props[k]
+        # An action bound on a descendant is the entry's action.
+        if not any(k in out for k in _ACTIONS):
+            def find(n):
+                if isinstance(n, dict):
+                    p = n.get("props") or {}
+                    for k in _ACTIONS:
+                        if p.get(k):
+                            return {k: p[k]}
+                    for c in n.get("children") or []:
+                        r = find(c)
+                        if r:
+                            return r
+                return None
+            bound = find(node)
+            if bound:
+                out.update(bound)
+        nested = lists_in(node)
+        # Only a list of BLOCKS nests — members that carry an icon, a fill or
+        # an action of their own. A list of plain text lines is the entry's
+        # own lines, already in `labels`.
+        if nested and any(e.get("icon") or e.get("filled") or any(k in e for k in _ACTIONS) for e in nested):
+            out["children"] = nested
+        return out
+
+    def _leaf(n: dict) -> bool:
+        return n.get("type") in ("Text", "Heading") and not n.get("children")
+
+    def lists_in(node: dict) -> list[dict]:
+        """Entries of the lists inside a node, in document order. A run of
+        leaf texts is not a list: those are one entry's own lines."""
+        kids = [c for c in node.get("children") or [] if isinstance(c, dict)]
+        texty = [c for c in kids if _carries_text(c)]
+        if len(texty) >= 2 and not all(_leaf(c) for c in texty):
+            return [entry(c) for c in texty]
+        out: list[dict] = []
+        for c in kids:
+            if not _leaf(c):
+                out.extend(lists_in(c))
+        return out
+
+    entries: list[dict] = []
+    for node in chrome_nodes:
+        if not isinstance(node, dict):
+            continue
+        found = lists_in(node)
+        entries.extend(found if found else ([entry(node)] if _carries_text(node) else []))
+    return entries
+
+
+def describe_drawn(entries: Iterable[dict], depth: int = 0) -> str:
+    """The rail as a person would read it, one line per entry."""
+    lines = []
+    for e in entries:
+        marks = []
+        if e.get("icon"):
+            marks.append(f"icon {int(e['icon'])}px")
+        if e.get("filled"):
+            marks.append("filled block")
+        if e.get("navigate"):
+            marks.append(f"→ {e['navigate']}")
+        if e.get("workflow"):
+            marks.append(f"runs {e['workflow']}")
+        head = ("  " * depth) + "- " + " / ".join(e.get("labels") or [])
+        lines.append(head + (f"  [{', '.join(marks)}]" if marks else ""))
+        if e.get("children"):
+            lines.append(describe_drawn(e["children"], depth + 1))
+    return "\n".join(lines)
 
 
 def describe(chrome: dict) -> str:

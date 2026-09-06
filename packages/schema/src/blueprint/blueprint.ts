@@ -1243,6 +1243,28 @@ export const DesignSource = z.object({
   chrome: z
     .object({
       sidebar: z.object({
+        /**
+         * The rail AS DRAWN, entry by entry in document order, for the
+         * architect to read: an entry is a block of the rail's lists — its
+         * labels together, the size of its icon if it has one, whether it is
+         * filled, and any action the transform bound. What is brand, status,
+         * heading or destination is the architect's decision, made from this;
+         * the sorted `brand`/`groups` below are the older, bound-only reading.
+         */
+        drawn: z
+          .array(
+            z.object({
+              labels: z.array(z.string()).default([]),
+              /** Icon size in px, when the entry carries an image. */
+              icon: z.number().nonnegative().optional(),
+              filled: z.boolean().default(false),
+              navigate: z.string().optional(),
+              workflow: z.string().optional(),
+              /** A nested list inside the entry, read the same way. */
+              children: z.array(z.any()).default([]),
+            }),
+          )
+          .default([]),
         brand: z.array(z.string()).default([]),
         groups: z
           .array(

@@ -82,10 +82,20 @@ def test_a_lone_frames_rail_is_its_navigation():
     fps = chrome.chrome_for([root])
     assert fps, "the lone rail is found"
     content, removed = chrome.split(root, fps)
-    nav = chrome.navigation_from(removed)
-    assert nav["brand"] == ["المجلس التشريعي"]
-    assert [i["label"] for g in nav["groups"] for i in g["items"]] == ["لوحة التحكم", "الجلسات والأجندات", "اللجان والهيئات"]
-    assert "الأحد 31 أغسطس 2026" not in [g["label"] for g in nav["groups"]]
+    # THE RAIL AS DRAWN, NOT AS SORTED. Which entry is the brand, the status
+    # card or a destination is the architect's reading; what is recorded is
+    # what each entry carries.
+    drawn = chrome.rail_as_drawn(removed)
+    heads = [e["labels"][0] for e in drawn]
+    assert heads == ["المجلس التشريعي", "جلسة منعقدة", "لوحة التحكم", "الجلسات والأجندات", "اللجان والهيئات"], heads
+    brand, session, *items = drawn
+    assert brand["icon"] == 40 and "filled" not in brand
+    assert session["filled"] is True and "icon" not in session
+    assert [c["labels"] for c in items] == [
+        ["لوحة التحكم", "نظرة عامة"], ["الجلسات والأجندات", "إدارة الجلسات", "2"], ["اللجان والهيئات"]]
+    assert all(c["icon"] == 20 for c in items)
+    text = chrome.describe_drawn(drawn)
+    assert "icon 40px" in text and "filled block" in text and "- لوحة التحكم / نظرة عامة" in text
     labels = chrome._labels(content, [])
     assert "لوحة التحكم" in labels and "الجلسات والأجندات" not in labels
     buttons = []

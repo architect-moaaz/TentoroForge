@@ -1741,6 +1741,41 @@
               "sidebar": {
                 "type": "object",
                 "properties": {
+                  "drawn": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "labels": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "default": []
+                        },
+                        "icon": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "filled": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "navigate": {
+                          "type": "string"
+                        },
+                        "workflow": {
+                          "type": "string"
+                        },
+                        "children": {
+                          "type": "array",
+                          "default": []
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "default": []
+                  },
                   "brand": {
                     "type": "array",
                     "items": {

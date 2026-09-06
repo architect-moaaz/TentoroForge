@@ -211,9 +211,10 @@ def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
     if not removed:
         return {}
     nav = _chrome.navigation_from(removed)
-    if not nav.get("groups"):
+    drawn = _chrome.rail_as_drawn(removed)
+    if not drawn and not nav.get("groups"):
         return {}
-    return {"sidebar": nav, "sharedBy": len(roots)}
+    return {"sidebar": {**nav, "drawn": drawn}, "sharedBy": len(roots)}
 
 
 def _frame_headings(ref: DesignReference) -> dict[str, str]:
