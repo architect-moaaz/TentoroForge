@@ -163,6 +163,45 @@ def _bindable(entry: dict) -> bool:
     return False
 
 
+# Western or Arabic-Indic digits; ASCII or Arabic decimal (U+066B) and
+# thousands (U+066C) separators; an optional percent sign of either script.
+_NUMBER_RE = re.compile(r"^\s*[\d\u0660-\u0669][\d\u0660-\u0669,.\u066b\u066c\s]*\s*[%\u066a]?\s*$")
+
+
+def _bind_number(node: dict, template: str) -> dict | None:
+    """The drawn tile with only its number replaced.
+
+    A metric tile is a fill, an icon, a label, a number and a caption; the
+    number is the one thing the data layer computes. Replacing the whole
+    tile with a Stat component threw away everything the designer drew
+    around it. The first text leaf that is only a number — Western or Arabic
+    digits, a separator, a percent sign — becomes the template; the rest of
+    the tile is returned as drawn. None when the tile draws no number.
+    """
+    found = False
+
+    def walk(n: Any) -> Any:
+        nonlocal found
+        if not isinstance(n, dict):
+            return n
+        out = dict(n)
+        props = dict(n.get("props") or {})
+        text = props.get("content")
+        if (not found and n.get("type") in ("Heading", "Text")
+                and isinstance(text, str) and _NUMBER_RE.match(text)):
+            found = True
+            props["content"] = template
+            out["props"] = props
+            return out
+        kids = n.get("children")
+        if isinstance(kids, list):
+            out["children"] = [walk(c) for c in kids]
+        return out
+
+    bound = walk(node)
+    return bound if found else None
+
+
 def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
     """Rebuild the tree, swapping any node whose Figma id was classified.
 
@@ -178,6 +217,10 @@ def _replace(node: Any, wanted: dict[str, dict], done: set[str]) -> Any:
     entry = wanted.get(node_id)
     if entry is not None and node_id not in done:
         done.add(node_id)
+        if entry.get("_bind"):
+            bound = _bind_number(node, entry["_bind"])
+            if bound is not None:
+                return bound
         return entry["_node"]
 
     children = node.get("children")
@@ -225,7 +268,8 @@ def realize(root: dict, classifications: list[dict], *,
         else:
             component, source = _table(entry, name), _list_source(entry, name)
 
-        wanted[entry["nodeId"]] = {**entry, "_node": component}
+        wanted[entry["nodeId"]] = {**entry, "_node": component,
+                                   "_bind": f"{{{{{name}.value}}}}" if entry["kind"] == "metric" else None}
         sources.append(source)
         applied.append({"nodeId": entry["nodeId"], "kind": entry["kind"],
                         "entity": entry["entity"], "source": name,
@@ -238,7 +282,7 @@ def realize(root: dict, classifications: list[dict], *,
     # A source whose region was never found would bind nothing. That happens
     # when a classified wrapper sat inside another that was replaced first —
     # correct, and its source has to go with it.
-    kept = {wanted[n]["_node"] is not None and n in done for n in wanted}
+    kept = {n in done for n in wanted}
     if not all(kept):
         live = {a["nodeId"] for a in applied if a["nodeId"] in done}
         sources = [s for s, a in zip(sources, applied) if a["nodeId"] in live]
