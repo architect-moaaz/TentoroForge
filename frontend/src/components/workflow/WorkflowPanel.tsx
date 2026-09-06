@@ -143,6 +143,13 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
     setNodes(newWf.definition.nodes);
     setEdges(newWf.definition.edges);
     setSelectedNodeId(null);
+    // A brand-new workflow has never been persisted, so it IS unsaved: enable
+    // Save and let back-navigation warn. Without this the button read "Saved"
+    // and the workflow was silently discarded on leave/reload. Also clear the
+    // simulator view so New Workflow always opens on the editor canvas, even if
+    // the previous workflow was left in Simulate mode.
+    setIsDirty(true);
+    setShowSimulator(false);
   }, [setCurrentWorkflow, setSelectedNodeId]);
 
   // Save current workflow
@@ -329,6 +336,7 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
     setCurrentWorkflow(null);
     setSelectedNodeId(null);
     setIsDirty(false);
+    setShowSimulator(false);
   }, [isDirty, setCurrentWorkflow, setSelectedNodeId]);
 
   // A13-4 (second half): a tab close or reload bypasses backToList entirely,
@@ -559,6 +567,45 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
                 initialEdges={edges}
                 onNodeAdded={(node) => { setNodes((prev) => [...prev, node]); setIsDirty(true); }}
                 onEdgeAdded={(edge) => { setEdges((prev) => [...prev, edge]); setIsDirty(true); }}
+                // Moves and deletions happen inside the canvas (React Flow
+                // applyNodeChanges/applyEdgeChanges). Without these callbacks the
+                // parent's `nodes`/`edges` — the arrays saveWorkflow serializes —
+                // never learned about them, so a dragged node reverted and a
+                // deleted node/edge reappeared on Save, while the button stayed
+                // "Saved". Sync the serialized shape and flag dirty on a
+                // structural change (id/position/count) — a pure selection change
+                // maps identically, so selecting a node no longer marks dirty.
+                onNodesChange={(rfNodes) => {
+                  const mapped = rfNodes.map((n) => ({
+                    id: n.id,
+                    type: n.type ?? "action",
+                    position: n.position,
+                    data: n.data,
+                  })) as WorkflowNodeSerialized[];
+                  const structural =
+                    mapped.length !== nodes.length ||
+                    mapped.some((m) => {
+                      const prev = nodes.find((x) => x.id === m.id);
+                      return !prev || prev.position?.x !== m.position?.x || prev.position?.y !== m.position?.y;
+                    });
+                  setNodes(mapped);
+                  if (structural) setIsDirty(true);
+                }}
+                onEdgesChange={(rfEdges) => {
+                  const mapped = rfEdges.map((e) => ({
+                    id: e.id,
+                    source: e.source,
+                    target: e.target,
+                    sourceHandle: e.sourceHandle ?? undefined,
+                    targetHandle: e.targetHandle ?? undefined,
+                    data: e.data,
+                  })) as WorkflowEdgeSerialized[];
+                  const structural =
+                    mapped.length !== edges.length ||
+                    mapped.some((m) => !edges.find((x) => x.id === m.id));
+                  setEdges(mapped);
+                  if (structural) setIsDirty(true);
+                }}
                 layoutVersion={layoutVersion}
               />
             </div>

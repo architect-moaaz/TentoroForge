@@ -47,7 +47,16 @@ export function ProcessVariablesEditor({ variables, onChange }: ProcessVariables
 
   const removeVariable = (idx: number) => {
     onChange(variables.filter((_, i) => i !== idx));
-    if (expandedIdx === idx) setExpandedIdx(null);
+    // expandedIdx tracks the open row by array index, so a removal shifts it.
+    // Previously only a removal of the expanded row itself was handled; deleting
+    // a row ABOVE it left expandedIdx pointing at a now-different variable (the
+    // editor jumped to the wrong row). Shift it to follow the same variable.
+    setExpandedIdx((cur) => {
+      if (cur === null) return null;
+      if (cur === idx) return null;   // the expanded row was removed → collapse
+      if (cur > idx) return cur - 1;  // a row above it was removed → shift up
+      return cur;                      // a row below it was removed → unchanged
+    });
   };
 
   return (
@@ -98,9 +107,9 @@ export function ProcessVariablesEditor({ variables, onChange }: ProcessVariables
               <div className="px-2 pb-2 space-y-2 border-t">
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <div>
-                    <Label className="text-[10px]" htmlFor="wf-name">Name</Label>
+                    <Label className="text-[10px]" htmlFor={`wf-var-name-${idx}`}>Name</Label>
                     <Input
-                      id="wf-name"
+                      id={`wf-var-name-${idx}`}
                       className="h-7 text-xs font-mono"
                       placeholder="variableName"
                       value={v.name}
@@ -125,9 +134,9 @@ export function ProcessVariablesEditor({ variables, onChange }: ProcessVariables
                   </div>
                 </div>
                 <div>
-                  <Label className="text-[10px]" htmlFor="wf-description">Description</Label>
+                  <Label className="text-[10px]" htmlFor={`wf-var-desc-${idx}`}>Description</Label>
                   <Input
-                    id="wf-description"
+                    id={`wf-var-desc-${idx}`}
                     className="h-7 text-xs"
                     placeholder="What this variable holds"
                     value={v.description || ""}

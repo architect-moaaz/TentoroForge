@@ -1109,7 +1109,22 @@ function EscalationProps({
       </div>
       <div>
         <Label className="text-xs">Escalate to</Label>
-        <Select value={assignType} onValueChange={(v) => setAssignType(v as AssignType)}>
+        <Select
+          value={assignType}
+          onValueChange={(v) => {
+            const next = v as AssignType;
+            setAssignType(next);
+            // Persist the type immediately and drop the now-mismatched target.
+            // Previously the type was saved ONLY when an entity was (re)picked,
+            // so changing Role→Person without re-selecting left escalateAssignType
+            // stale and escalateTo pointing at the wrong entity kind on reopen.
+            onUpdate({
+              escalateAssignType: next,
+              escalateTo: undefined,
+              escalateToName: undefined,
+            } as Partial<WorkflowNodeConfig>);
+          }}
+        >
           <SelectTrigger className="mt-1 h-8 text-xs">
             <SelectValue />
           </SelectTrigger>

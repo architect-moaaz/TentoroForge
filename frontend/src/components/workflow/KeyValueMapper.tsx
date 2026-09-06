@@ -17,6 +17,7 @@
  * Spec: docs/superpowers/specs/2026-07-22-workflow-node-contracts.md
  */
 
+import { useState } from "react";
 import { Plus, Trash2, Variable, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,7 +148,15 @@ function Row({
   onValueChange: (v: unknown) => void;
   onRemove: () => void;
 }) {
-  const source: RowSource = inferRowSource(v);
+  // The row's source used to be inferred purely from the value: a `{{…}}`
+  // string was "variable", anything else "literal". But switching TO variable
+  // cleared the value to "", which then inferred back to "literal" — so the
+  // variable dropdown never appeared and the toggle was a silent no-op. We
+  // keep an explicit source in local state; a concrete `{{binding}}` value
+  // still wins (it is authoritatively a variable), otherwise the chosen state
+  // decides, so an empty value can legitimately be in variable mode.
+  const [sourceState, setSourceState] = useState<RowSource>(() => inferRowSource(v));
+  const source: RowSource = inferRowSource(v) === "variable" ? "variable" : sourceState;
   // For variable source we store `{{path}}`; the Select value is just the path.
   const variablePath =
     source === "variable" && typeof v === "string"
@@ -157,7 +166,11 @@ function Row({
 
   const setSource = (s: RowSource) => {
     if (s === source) return;
-    onValueChange(s === "variable" ? "" : "");
+    setSourceState(s);
+    // Clear the value so the new control starts empty; a variable is set when
+    // the user picks one, a literal when they type. The local source state
+    // keeps the variable dropdown visible in the meantime.
+    onValueChange("");
   };
 
   const groups = new Map<string, WorkflowVariable[]>();

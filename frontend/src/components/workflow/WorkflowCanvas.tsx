@@ -147,6 +147,34 @@ export function WorkflowCanvas({
     }
   }, [layoutVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Adopt node DATA edits made in the Properties panel (label / config /
+  // nodeType) onto the live canvas nodes. useNodesState seeds from
+  // rfInitialNodes only ONCE, and no other effect re-synced it, so a panel
+  // edit updated the parent (and thus Save) but the node on the canvas kept
+  // its old label until a full remount. We merge by id, overlaying the parent
+  // data while preserving the LIVE position/selection/status the canvas owns —
+  // and return the same array reference when nothing changed so this never
+  // fights an in-progress drag (position-only parent updates are a no-op here).
+  useEffect(() => {
+    if (nodeStatuses) return; // simulator mode manages node data via the status effect
+    setNodes((cur) => {
+      const byId = new Map(initialNodes.map((n) => [n.id, n]));
+      let changed = false;
+      const next = cur.map((n) => {
+        const src = byId.get(n.id);
+        if (!src) return n;
+        const dataDiffers =
+          n.type !== src.type ||
+          n.data.label !== src.data.label ||
+          JSON.stringify(n.data.config) !== JSON.stringify(src.data.config);
+        if (!dataDiffers) return n;
+        changed = true;
+        return { ...n, type: src.type, data: { ...n.data, ...src.data, status: n.data.status } };
+      });
+      return changed ? next : cur;
+    });
+  }, [initialNodes, nodeStatuses, setNodes]);
+
   // C1: Sync simulator node statuses onto live nodes without disturbing positions.
   // Early-returns when nodeStatuses is undefined (editor mode) → zero effect on drag state.
   useEffect(() => {
