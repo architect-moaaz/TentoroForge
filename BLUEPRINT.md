@@ -11815,6 +11815,18 @@ builder, `frontend/src/components/workflow/*` + backend `routers/workflows.py` +
   the source handle, so a condition node's then/else (or parallel) edges to the
   same target shared one id. Now `edge_<source>_<handle>_<target>`.
 
+- **W6 — generated condition expressions were invalid FEEL (broken branching).**
+  Workflow condition nodes (and rules) are authored by the LLM with JS operators —
+  `{{a}} != null && {{b}} != null && {{c}} == null` — but FEEL-lite's grammar uses
+  the keywords `and`/`or` and single `=`, so the editor showed *"Unexpected token"*
+  and the runtime could not evaluate the branch. Fixed the FEEL-lite **tokenizer**
+  to accept `&&`→`and`, `||`→`or`, and `==`→`=` as aliases. Applied to ALL copies:
+  the canonical `frontend/src/lib/feel-lite/tokenizer.ts` (which `blueprint/
+  assembly.py` vendors into every generated app AND the editor validates with),
+  plus `backend/templates/runtime/feel-lite` and
+  `backend/templates/workflow-engine/domain/feel-lite`. Verified: conditions with
+  `==` and `&&` now parse with no error in the editor.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
