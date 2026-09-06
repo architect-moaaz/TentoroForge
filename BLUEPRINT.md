@@ -11772,6 +11772,17 @@ are shaped placeholders).
     detached build task, which swallows the error, leaving the run hung at 0/22
     with no log**. Bring-up must import all `models/*.py` before `create_all`
     (imports all 42 model tables). Fixed 2026-09-06 (branch `component-fixes`).
+  - **`anthropic` SDK ↔ httpx flavour.** `anthropic` 1.4.0+ vendors httpx as
+    `httpx2` and its client REJECTS a plain `httpx.Timeout` (raises *"use
+    httpx2.Timeout instead"*). `services/blueprint/executors.py::_anthropic()`
+    built its client with `httpx.Timeout(...)`, so **every model call on the
+    `requirements` node threw** — the node failed, all 21 downstream stages were
+    skipped, and the run reported "complete" with `$0.00` usage and 0/22 built
+    (the detached build task swallows the error; the real reason is in
+    `output/<slug>/.forge/runs/*.jsonl`). Fix: import the flavour the installed
+    SDK uses (`try: import httpx2 as httpx / except ImportError: import httpx`)
+    so the granular Timeout (connect15/read300/write60/pool15, required for long
+    streamed generations) is the type the client accepts. Fixed 2026-09-06 (branch `component-fixes`).
 
 ### 32.8 What still holds
 
