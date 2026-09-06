@@ -38,26 +38,31 @@ from services.figma.reference import (
 from services.figma.url import FigmaTarget
 
 STORE_DIR = ".forge/figma"
-_ID = re.compile(r"^FIGMA-(\d{3,})$")
+_ID = re.compile(r"^(FIGMA|UXPILOT)-(\d{3,})$")
+#: Id prefix per provider. UX Pilot sources share the store and the sequence
+#: rule; only the prefix says which tool a citation resolves into.
+PREFIX_BY_PROVIDER = {"figma": "FIGMA", "uxpilot": "UXPILOT"}
 
 
 def store_dir(output_dir: str | Path) -> Path:
     return Path(output_dir) / STORE_DIR
 
 
-def next_source_id(doc: dict) -> str:
-    """The next ``FIGMA-nnn``, from what the document already records.
+def next_source_id(doc: dict, provider: str = "figma") -> str:
+    """The next ``FIGMA-nnn`` (or ``UXPILOT-nnn``), from what the document
+    already records.
 
     Derived from the document rather than a counter file: the document is what
     survives a restore (§93), and a counter that disagreed with it would hand
-    out an id already in use.
+    out an id already in use. Each provider counts its own sequence.
     """
+    prefix = PREFIX_BY_PROVIDER.get(provider, "FIGMA")
     used = [
-        int(m.group(1))
+        int(m.group(2))
         for s in (doc.get("designSources") or [])
-        if (m := _ID.match(str(s.get("id") or "")))
+        if (m := _ID.match(str(s.get("id") or ""))) and m.group(1) == prefix
     ]
-    return f"FIGMA-{max(used, default=0) + 1:03d}"
+    return f"{prefix}-{max(used, default=0) + 1:03d}"
 
 
 def source_record(ref: DesignReference, *, name: str = "",
@@ -71,7 +76,7 @@ def source_record(ref: DesignReference, *, name: str = "",
     """
     return {
         "id": ref.source_id,
-        "type": "figma",
+        "type": ref.provider or "figma",
         "fileKey": ref.target.file_key,
         **({"nodeId": ref.target.node_id} if ref.target.node_id else {}),
         "url": ref.target.source_url,
@@ -122,6 +127,21 @@ def connect(svc: Any, ref: DesignReference, *, name: str = "",
     """
     save(ref, svc.output_dir)
     record = source_record(ref, name=name, treat_as=treat_as)
+    # WHAT THE SCREENS SHARE, RECORDED AS EVIDENCE (§48). The rail every
+    # frame carries says which groups and destinations the designer drew, and
+    # the agent that authors `navigation.tree` reads it from here. Best-effort:
+    # a design with one frame, or frames that share nothing, records none.
+    chrome = _chrome_evidence(ref)
+    if chrome:
+        record["chrome"] = chrome
+    # WHAT EACH FRAME SHOWS, so the planner can route it by its identity rather
+    # than its position. Read with the shared chrome removed, or every frame's
+    # first heading would be the brand.
+    shows = _frame_headings(ref)
+    for frame in record.get("frames") or []:
+        heading = shows.get(str(frame.get("nodeId") or ""))
+        if heading:
+            frame["shows"] = heading
     sources = svc.doc.setdefault("designSources", [])
     for index, existing in enumerate(sources):
         if existing.get("id") == record["id"]:
@@ -147,6 +167,7 @@ def _from_dict(raw: dict[str, Any]) -> DesignReference:
     out = DesignReference(
         target=target,
         source_id=raw.get("source_id") or "FIGMA-001",
+        provider=str(raw.get("provider") or "figma"),
         tokens=tokens,
         gaps=list(raw.get("gaps") or []),
     )
@@ -156,4 +177,123 @@ def _from_dict(raw: dict[str, Any]) -> DesignReference:
         for c in raw.get("components") or []
     ]
     out.interactions = [InteractionRef(**i) for i in raw.get("interactions") or []]
+    return out
+
+
+def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
+    """The rail the screens share, read as brand, groups and destinations."""
+    try:
+        from services.figma import chrome as _chrome
+        from services.jsx_to_schema import transform_jsx_to_schema
+    except Exception:  # noqa: BLE001
+        return {}
+    # Neutral context on purpose: a fingerprint is types and text, and a
+    # vocabulary left set by an earlier turn would turn every button here into
+    # a classifier call.
+    from services.figma_llm_ctx import (
+        get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
+    )
+    saved = (list(get_routes()), list(get_workflows()))
+    reset_figma_llm_context()
+    roots: list[dict] = []
+    try:
+        for screen in ref.screens:
+            code = str((screen.structure or {}).get("code") or "")
+            if not code:
+                continue
+            try:
+                w, h = float(screen.width or 0), float(screen.height or 0)
+                tree = transform_jsx_to_schema(
+                    code, {}, canvas=(w, h) if w > 0 and h > 0 else None)
+                roots.append(tree["children"][0])
+            except Exception:  # noqa: BLE001
+                continue
+    finally:
+        set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+    shared = _chrome.chrome_for(roots)
+    if not shared or not roots:
+        return {}
+    _content, removed = _chrome.split(roots[0], shared)
+    if not removed:
+        return {}
+    nav = _chrome.navigation_from(removed)
+    drawn = _chrome.rail_as_drawn(removed)
+    if not drawn and not nav.get("groups"):
+        return {}
+    return {"sidebar": {**nav, "drawn": drawn}, "sharedBy": len(roots)}
+
+
+def _frame_headings(ref: DesignReference) -> dict[str, str]:
+    """node id -> the first heading the frame shows once its chrome is gone."""
+    try:
+        from services.figma import chrome as _chrome
+        from services.figma_llm_ctx import (
+            get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
+        )
+        from services.jsx_to_schema import transform_jsx_to_schema
+    except Exception:  # noqa: BLE001
+        return {}
+    saved = (list(get_routes()), list(get_workflows()))
+    reset_figma_llm_context()
+    trees: dict[str, dict] = {}
+    try:
+        for screen in ref.screens:
+            code = str((screen.structure or {}).get("code") or "")
+            if not code:
+                continue
+            try:
+                w, h = float(screen.width or 0), float(screen.height or 0)
+                trees[screen.node_id] = transform_jsx_to_schema(
+                    code, {}, canvas=(w, h) if w > 0 and h > 0 else None)["children"][0]
+            except Exception:  # noqa: BLE001
+                continue
+    finally:
+        set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+    shared = _chrome.chrome_for(list(trees.values()))
+
+    def _words(text) -> bool:
+        return isinstance(text, str) and len(text.strip()) >= 3 and any(ch.isalpha() for ch in text)
+
+    def first_text(node, kinds):
+        if isinstance(node, dict):
+            props = node.get("props") or {}
+            text = props.get("content") if node.get("type") in kinds else None
+            if _words(text):
+                return text.strip()
+            for child in node.get("children") or []:
+                found = first_text(child, kinds)
+                if found:
+                    return found
+        return None
+
+    def _width(node) -> float:
+        cls = str((node.get("props") or {}).get("className") or "")
+        for pat in (r"flex-\[(\d+(?:\.\d+)?)_0_0\]", r"max-w-\[(\d+(?:\.\d+)?)px\]", r"\bw-\[(\d+(?:\.\d+)?)px\]"):
+            m = re.search(pat, cls)
+            if m:
+                return float(m.group(1))
+        return 0.0
+
+    def content_region(tree):
+        """The widest region of the frame's first row. A lone frame has no
+        shared chrome to remove, and its rail comes first in document order:
+        its brand is not what the screen shows."""
+        first = next((c for c in tree.get("children") or [] if isinstance(c, dict)), None)
+        kids = [c for c in (first or {}).get("children") or [] if isinstance(c, dict)]
+        if len(kids) >= 2 and any(_width(k) for k in kids):
+            return max(kids, key=_width)
+        return tree
+
+    # WHAT A FRAME SHOWS IS ITS TITLE, NOT ITS LARGEST TEXT. On a legislative
+    # dashboard the only text large enough to be a Heading was the KPI "132",
+    # and every real title was set small in Cairo — so the page was named
+    # "132" and routed to /132. A title has letters and comes first: the
+    # first lettered text of the content region in document order, whatever
+    # its size — the header's title precedes any section heading.
+    out: dict[str, str] = {}
+    for node_id, tree in trees.items():
+        content, _removed = _chrome.split(tree, shared) if shared else (content_region(tree), [])
+        heading = first_text(content, ("Heading", "Text"))
+        if heading:
+            out[node_id] = heading
     return out

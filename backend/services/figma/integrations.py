@@ -75,7 +75,7 @@ def _run(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-async def _fetch(org_id: Any) -> dict[str, str]:
+async def _fetch(org_id: Any, provider: str = PROVIDER) -> dict[str, str]:
     from sqlalchemy import select
 
     from database import async_session
@@ -87,7 +87,7 @@ async def _fetch(org_id: Any) -> dict[str, str]:
         rows = (await db.execute(
             select(PlatformIntegration).where(
                 PlatformIntegration.org_id == org_id,
-                PlatformIntegration.provider == PROVIDER,
+                PlatformIntegration.provider == provider,
             )
         )).scalars().all()
 
@@ -122,8 +122,9 @@ async def _org_for_output_dir(output_dir: str | Path) -> Any:
     return getattr(row, "org_id", None)
 
 
-def config_for(output_dir: str | Path) -> dict[str, str]:
-    """Figma settings for the org owning this project, environment as fallback.
+def config_for(output_dir: str | Path, provider: str = PROVIDER) -> dict[str, str]:
+    """Settings for ``provider`` (Figma by default) for the org owning this
+    project, environment as fallback.
 
     Never raises: a project with no database row, a database that is down, or
     an organisation that has configured nothing all mean "fall back", and a
@@ -133,7 +134,7 @@ def config_for(output_dir: str | Path) -> dict[str, str]:
     try:
         org_id = _run(_org_for_output_dir(output_dir))
         if org_id is not None:
-            values = _run(_fetch(org_id))
+            values = _run(_fetch(org_id, provider))
     except Exception as exc:  # noqa: BLE001 — the store is an optimisation here
         logger.info("[figma] integrations lookup unavailable (%s); using the "
                     "environment", type(exc).__name__)

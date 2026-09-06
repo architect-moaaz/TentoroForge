@@ -42,6 +42,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # missing-field message ("I just need treat as") would be a worse way to
     # ask than the sentence that explains the difference.
     "connect_figma": {"figma_url", "token_env"},
+    # The same contract for the second design tool: the page, and the NAME of
+    # the variable holding the API key — never the key.
+    "connect_uxpilot": {"uxpilot_ref", "key_env"},
     "rebuild": set(),
 }
 
@@ -64,6 +67,12 @@ VERB_HELP: dict[str, str] = {
         "Attach a Figma design as evidence for the application: \"use this "
         "Figma design <url>\". Needs the design URL and the NAME of the "
         "environment variable holding the Figma token — never the token. Smith then asks whether the design is the specification or a reference."
+    ),
+    "connect_uxpilot": (
+        "Attach a UX Pilot page as evidence for the application: \"use this "
+        "UX Pilot page <id or url>\". Needs the page and the NAME of the "
+        "environment variable holding the UX Pilot API key — never the key. "
+        "Smith then asks whether the design is the specification or a reference."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

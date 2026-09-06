@@ -313,7 +313,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   // ── Design Studio ─────────────────────────────────────────────────────
   { id: "accessibility", name: "Design System", spriteKey: "ui_styler", room: "design_studio", role: "Owns the design language", color: "#DB2777" },
   { id: "page_design", name: "Page Designer", spriteKey: "page_assembler", room: "design_studio", role: "Drafts page contracts", color: "#F59E0B" },
-  { id: "figma_intelligence", name: "Figma Intel", spriteKey: "figma_importer", room: "design_studio", role: "Reads evidence out of Figma", color: "#A21CAF" },
+  { id: "figma_intelligence", name: "Figma Intel", spriteKey: "figma_importer", room: "design_studio", role: "Reads evidence out of Figma and UX Pilot", color: "#A21CAF" },
 
   // ── Data ──────────────────────────────────────────────────────────────
   { id: "data_model", name: "Data Modeler", spriteKey: "schema_designer", room: "data", role: "Designs entities and the schema", color: "#059669" },

@@ -7,6 +7,7 @@ import { useMotion } from "../../style/useMotion";
 import { useDensity, useRadiusScale } from "../../theme/tokens-context";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 import { resolveIcon } from "../../icons";
+import { useUrlState } from "../../style/useUrlState";
 
 /**
  * Labeled text-style input. Supports controlled value via `value` + `onChange`.
@@ -57,6 +58,18 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
                        style, value, onChange, iconLeft, iconRight }: InputProps) {
   const id = useInputId(name);
   const required = validators?.required === true;
+  // THE PAGE'S SEARCH BOX. `type: "search"` writes `q` to the URL (debounced),
+  // which the page passes to its list source's `search`; the searchable
+  // columns manifest decides what it matches. A drawn "Search policies…"
+  // box becomes this, and the list it sits above is what it searches.
+  const isSearch = type === "search";
+  const [urlQ, setUrlQ] = useUrlState("q", "");
+  const [draft, setDraft] = React.useState<string>(urlQ);
+  React.useEffect(() => {
+    if (!isSearch) return;
+    const t = setTimeout(() => { if (draft !== urlQ) setUrlQ(draft); }, 300);
+    return () => clearTimeout(t);
+  }, [draft, isSearch, urlQ, setUrlQ]);
   const radiusScale = useRadiusScale();
   const density = useDensity();
   const LeftIconComp = iconLeft ? resolveIcon(iconLeft) : null;
@@ -103,15 +116,15 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
           <input
             id={id}
             className={inputCls}
-            name={name}
+            name={isSearch ? (name || "q") : name}
             type={type}
             placeholder={placeholder}
             required={required}
             pattern={validators?.pattern}
             minLength={typeof validators?.min === "number" ? validators.min : undefined}
             maxLength={typeof validators?.max === "number" ? validators.max : undefined}
-            value={value}
-            onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+            value={isSearch ? draft : value}
+            onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
           />
           {RightIconComp && (
             <RightIconComp
@@ -126,15 +139,15 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
         <input
           id={id}
           className={inputCls}
-          name={name}
+          name={isSearch ? (name || "q") : name}
           type={type}
           placeholder={placeholder}
           required={required}
           pattern={validators?.pattern}
           minLength={typeof validators?.min === "number" ? validators.min : undefined}
           maxLength={typeof validators?.max === "number" ? validators.max : undefined}
-          value={value}
-          onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+          value={isSearch ? draft : value}
+          onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
         />
       )}
     </div>

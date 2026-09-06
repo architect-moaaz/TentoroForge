@@ -69,3 +69,16 @@ def test_json_wrapped_in_prose_is_still_read():
         'Sure! ```json\n{"questions":[{"question":"Who uses it?","options":[]}]}'
         '\n``` hope that helps'))
     assert out[0]["question"] == "Who uses it?"
+
+
+def test_an_attached_design_settles_the_visual_questions():
+    seen = {}
+
+    def provider(prompt):
+        seen["prompt"] = prompt
+        return '{"questions": []}'
+
+    clarify_brief("Palestine Legislative Council Dashboard", provider=provider, design_attached=True)
+    assert "A DESIGN FILE IS ATTACHED" in seen["prompt"] and "do not propose palettes" in seen["prompt"]
+    clarify_brief("Palestine Legislative Council Dashboard", provider=provider)
+    assert "A DESIGN FILE IS ATTACHED" not in seen["prompt"]

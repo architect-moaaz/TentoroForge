@@ -112,8 +112,15 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     "composing instead", page.get("id"), node_id)
         return None
 
-    code = str((screen.structure or {}).get("code") or "")
-    if not code:
+    structure = screen.structure or {}
+    code = str(structure.get("code") or "")
+    # A UX PILOT DESIGN IS HTML, NOT JSX. Same seam, same tree out: the HTML
+    # front end maps semantic tags and plain-CSS layout onto the element
+    # vocabulary `jsx_to_schema` reads, so the page that comes back is the
+    # same kind of object a Figma frame produces.
+    html = str(structure.get("html") or "") if structure.get("source") == "uxpilot_html" else ""
+    provider = "uxpilot" if html else "figma"
+    if not code and not html:
         # An extraction that recorded the node tree rather than the code. §102
         # wants that visible as a thin reference, not as a broken page.
         logger.info("[figma] %s has no design_context code for %s — composing "
@@ -126,6 +133,22 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the root's `size-full` resolves against the viewport, and every child
     # positioned against a 3902px-wide drawing lands somewhere else — which is
     # how a thirty-card dashboard rendered three cards and blank space.
+    # THE CLOSED VOCABULARIES, WHICH NOTHING WAS SUPPLYING.
+    #
+    # `figma_llm_ctx` exists so a button's action can only ever name a route or
+    # workflow this application actually defines — "the LLM cannot invent a
+    # target that isn't in the supplied lists". Nothing called
+    # `set_figma_llm_context`, so the lists were always empty, the guarded
+    # classifier never ran, and every button fell through to keyword matching.
+    #
+    # That left a design with buttons unbuildable from either side: inventing a
+    # target failed as "targets workflow 'dashboard', which this application
+    # does not define", and inventing nothing failed as "Button 'Dashboard'
+    # declares no action — it would do nothing". A real 15-screen design lost
+    # every page to it. The lists are the way out, and the Blueprint has had
+    # them all along.
+    _set_action_vocabulary(svc.doc)
+
     try:
         cw = float(getattr(screen, "width", 0) or 0)
         ch = float(getattr(screen, "height", 0) or 0)
@@ -137,16 +160,66 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     page.get("id"))
 
     try:
-        schema, assets = _run(build_schema_from_jsx(
-            code,
-            str(app_root),
-            route=str(page.get("route") or "") or None,
-            title=str(page.get("name") or "") or None,
-            canvas=canvas,
-        ))
+        if html:
+            schema, assets = _run(_build_from_html(
+                html, list(structure.get("assets") or []), str(app_root),
+                title=str(page.get("name") or "") or None,
+            ))
+        else:
+            schema, assets = _run(build_schema_from_jsx(
+                code,
+                str(app_root),
+                route=str(page.get("route") or "") or None,
+                title=str(page.get("name") or "") or None,
+                canvas=canvas,
+            ))
     except Exception as exc:  # noqa: BLE001 — one frame, never the run
         logger.warning("[figma] %s: %s", page.get("id"), exc)
         return None
+
+    # THE DESIGN'S CHROME IS THE SHELL'S, NOT THIS PAGE'S.
+    #
+    # Every frame is drawn whole — rail, brand, page — and the rail is the
+    # same subtree on every frame. Composed whole, each page carried its own
+    # sidebar beside the scaffold's, and `/cases/new` (a modal route) put a
+    # third inside a dialog. `chrome.shared_chrome` finds what every screen
+    # shares; `split` takes it out and unwraps the frame's boxes so the shell
+    # wraps content that is only content. A design with one frame, or frames
+    # that share nothing, has no chrome and composes exactly as before.
+    try:
+        from services.figma import chrome as _chrome
+
+        shared = _shared_chrome_for(svc)
+        if shared:
+            schema["children"][0], removed = _chrome.split(schema["children"][0], shared)
+            if removed:
+                logger.info("[figma] %s: removed %d chrome subtree(s)",
+                            page.get("id"), len(removed))
+    except Exception as exc:  # noqa: BLE001 — never the page
+        logger.warning("[figma] chrome split failed for %s: %s", page.get("id"), exc)
+
+    # A CARD ON A LIST PAGE OPENS THE ITEM, NOT THE LIST IT IS ON. The
+    # classifier bound the card's title to the page's own route because it
+    # does not know which page the card sits on; this step does.
+    from services.figma import cards as _cards
+
+    routes = [str(p.get("route") or "") for p in (svc.doc.get("pages") or [])]
+    retargeted = _cards.bind_cards(schema["children"][0], str(page.get("route") or ""), routes)
+    # A DRAWN SEARCH BOX SEARCHES THE PAGE'S ENTITY. The frame has no data
+    # sources of its own; the box needs a list to search, and the page says
+    # which entity it is about. The list source is derived from that, not
+    # invented, so the completeness rule sees a search with something to
+    # search rather than refusing the drawn page.
+    extra_sources = _search_source_for(svc.doc, page, schema["children"][0], list(schema.get("dataSources") or []))
+    if not extra_sources and not any(isinstance(x, dict) and x.get("op") in (None, "list") for x in (schema.get("dataSources") or [])):
+        # NOTHING TO SEARCH: a page with no entity of its own (a policy
+        # manager drawn for an entity the model never defined). The box
+        # stays the text it was drawn as, without the affordance — the same
+        # answer an unbound button gets — rather than the page being refused.
+        _demote_search_boxes(schema["children"][0])
+    if retargeted:
+        logger.info("[figma] %s: %d card(s) retargeted from the page itself",
+                    page.get("id"), retargeted)
 
     # A PICTURE OF A CHART BECOMES A CHART, BEFORE PROVENANCE IS STRIPPED.
     #
@@ -156,12 +229,39 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the tree exactly as composed, which is the page that already renders.
     live_sources: list[dict] = []
     try:
-        classified = _classify_regions(svc, page, code, screen, app_root)
+        # The region and table passes read the frame's JSX layers; HTML has
+        # no layers to read, so a UX Pilot page keeps the tree as mapped.
+        classified = _classify_regions(svc, page, code, screen, app_root) if code else []
+        # A TABLE DRAWN AS TEXT is read from its layers rather than looked
+        # at: header, first rows, the card's title. Bound to an entity it
+        # becomes a live Table whose rows open the entity's detail page.
+        classified = list(classified or []) + (_classify_tables(svc, code) if code else [])
         if classified:
             from services.figma import realize as _realize
 
+            # The row mapper is the same model the classifier used, given the
+            # entity's fields; a row it cannot read leaves the region to the Table.
+            from services.blueprint.executors import AnthropicModel
+            from services.figma import rows as _rows
+            _entities = {e.get("name"): e for e in (svc.doc.get("data") or {}).get("entities") or []}
+            _ask = AnthropicModel(max_tokens=2000)
+
+            def _map_row(leaves, entity_name):
+                ent = _entities.get(entity_name)
+                return _rows.map_row(_ask, leaves, ent) if ent else []
+
+            # THE VERDICTS ARE SAID. A classification nobody can see is a
+            # design decision nobody can correct; on 2026-09-06 a page was
+            # refused for binding what no source declared and the run left
+            # no trace of what the classifier had called each region.
+            logger.info("[figma] %s: classifier verdicts %s", page.get("id"),
+                        [(c.get("nodeId"), c.get("kind"), c.get("entity") or "-",
+                          round(float(c.get("confidence") or 0), 2)) for c in classified])
             schema["children"][0], live_sources, applied = _realize.realize(
-                schema["children"][0], classified)
+                schema["children"][0], classified, row_mapper=_map_row)
+            logger.info("[figma] %s: realized %s | sources %s", page.get("id"),
+                        [(a.get("nodeId"), a.get("kind"), a.get("source")) for a in applied],
+                        [s.get("name") for s in live_sources])
             if applied:
                 logger.info("[figma] %s: %d region(s) now live", page.get("id"),
                             len(applied))
@@ -200,12 +300,134 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
 
     out = {
         "root": root,
-        "dataSources": list(schema.get("dataSources") or []) + live_sources,
+        "dataSources": list(schema.get("dataSources") or []) + live_sources + extra_sources,
         "assets": dict(assets or {}),
+        "provider": provider,
     }
     if schema.get("_figmaCanvas"):
         out["canvas"] = schema["_figmaCanvas"]
     return out
+
+
+async def _build_from_html(
+    html: str, asset_urls: list[str], app_root: str, *, title: str | None,
+) -> tuple[dict, dict[str, str]]:
+    """A UX Pilot design's HTML as a PageV2 tree, its images cached under
+    ``public/figma/`` like a frame's — the same downloader, the same paths."""
+    from services.figma_asset_downloader import download_figma_assets
+    from services.html_to_schema import transform_html_to_schema
+
+    assets = await download_figma_assets(list(asset_urls), app_root) if asset_urls else {}
+    schema = transform_html_to_schema(html, assets, title=title or "Design Import")
+    return schema, assets
+
+
+def _set_action_vocabulary(doc: dict) -> None:
+    """Give the action classifier this application's real routes and workflows.
+
+    Best-effort: a doc without pages or workflows leaves the vocabulary empty,
+    which is the behaviour every run had before this existed.
+    """
+    try:
+        from services.figma_llm_ctx import set_figma_llm_context
+    except Exception:  # noqa: BLE001
+        return
+
+    routes = [str(p.get("route") or "") for p in (doc.get("pages") or [])]
+    routes = [r for r in routes if r.startswith("/")]
+
+    # IDS ONLY, BECAUSE IDS ARE WHAT RESOLVE.
+    #
+    # This offered names as well as ids, reasoning that a model reading a
+    # button recognises "Refund Approval Decision" more readily than
+    # "FLOW-014". It does — and then binds to it, and the validator rejects the
+    # page: "targets workflow 'Refund Approval Decision', which this
+    # application does not define", because `functional_completeness` resolves
+    # a button's `workflow` against `workflows[].id` alone. Offering a spelling
+    # that cannot resolve manufactures the exact failure the closed vocabulary
+    # exists to prevent.
+    #
+    # The cost is real: an opaque id is harder to choose correctly, so fewer
+    # buttons bind to workflows. Routes carry their own meaning and do most of
+    # the binding, and a button that binds to nothing now becomes Text rather
+    # than an invalid control.
+    # THE ID IS THE ONLY LEGAL SPELLING; THE NAME IS WHAT A LABEL CAN MATCH.
+    # Offered as bare ids, "Approve" had nothing to match against FLOW-009
+    # and every drawn action fell to text — in one fifteen-screen build not a
+    # single button ran a workflow. Each entry now reads
+    # "FLOW-009 — Refund Approval Decision: <trigger>"; the classifier
+    # matches the label to the words and returns the id.
+    workflows: list[str] = []
+    seen: set[str] = set()
+    for flow in doc.get("workflows") or []:
+        value = str(flow.get("id") or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        name = str(flow.get("name") or "").strip()
+        trigger = str((flow.get("trigger") or {}).get("detail") or "").strip()
+        workflows.append(value + (f" — {name}" if name else "") + (f": {trigger[:120]}" if trigger else ""))
+
+    try:
+        set_figma_llm_context(routes=routes or None,
+                              workflows=workflows or None)
+    except Exception:  # noqa: BLE001 — an enrichment, never the page
+        logger.info("[figma] could not set the action vocabulary")
+
+
+def _demote_search_boxes(node: Any) -> int:
+    """Search inputs with nothing to search become the text they were drawn as."""
+    n = 0
+    if isinstance(node, dict):
+        props = node.get("props") or {}
+        if node.get("type") == "Input" and props.get("type") == "search":
+            node["type"] = "Text"
+            node["props"] = {k: v for k, v in props.items() if k in ("className", "style", "_figmaNodeId")}
+            node["props"]["content"] = str(props.get("placeholder") or "")
+            node["children"] = []
+            n += 1
+        for c in node.get("children") or []:
+            n += _demote_search_boxes(c)
+    return n
+
+
+def _search_source_for(doc: dict, page: dict, root: dict, existing: list[dict]) -> list[dict]:
+    """The list source a drawn search box needs, when the page has none."""
+    def has_search(n):
+        if isinstance(n, dict):
+            p = n.get("props") or {}
+            if n.get("type") == "Input" and p.get("type") == "search":
+                return True
+            return any(has_search(c) for c in n.get("children") or [])
+        return False
+    if not has_search(root) or any(isinstance(s, dict) and s.get("op") in (None, "list") for s in existing):
+        return []
+    primary = str((page.get("data") or {}).get("primaryEntity") or "")
+    ent = next((e for e in (doc.get("data") or {}).get("entities") or [] if e.get("id") == primary), None)
+    if not ent:
+        return []
+    name = str(ent.get("name") or "")
+    return [{"name": name[:1].lower() + name[1:] + "List", "op": "list", "entity": name, "limit": 50}]
+
+
+def _classify_tables(svc: Any, code: str) -> list[dict]:
+    """Drawn tables bound to entities, with the row link resolved."""
+    from services.figma import tables as _tables
+    try:
+        drawn = _tables.drawn_tables(code)
+        if not drawn:
+            return []
+        from services.blueprint.executors import AnthropicModel
+        entities = (svc.doc.get("data") or {}).get("entities") or []
+        found = _tables.classify_tables(AnthropicModel(max_tokens=4000), drawn, entities)
+        for entry in found:
+            route = _tables.detail_route_for_entity(svc.doc, entry["entity"])
+            if route:
+                entry["rowHref"] = _tables.row_link(route)
+        return found
+    except Exception as exc:  # noqa: BLE001 — an enrichment, never the page
+        logger.warning("[figma] drawn-table binding failed: %s", exc)
+        return []
 
 
 def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
@@ -227,7 +449,8 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
 
     width = float(getattr(screen, "width", 0) or 0)
     height = float(getattr(screen, "height", 0) or 0)
-    regions = candidates(code, width, height)
+    regions = candidates(code, width, height,
+                         boxes=(getattr(screen, "structure", None) or {}).get("boxes"))
     if not regions:
         return []
 
@@ -254,3 +477,61 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
 
     entities = (svc.doc.get("data") or {}).get("entities") or []
     return vision.classify(AnthropicModel(max_tokens=8000), shots, entities)
+
+
+#: Chrome per (project, designs) for the life of the process. The fan-out
+#: composes twelve pages at once and each call would otherwise transform every
+#: screen again; the rail does not change between pages of one run.
+_CHROME_CACHE: dict[tuple, set[str]] = {}
+
+
+def _shared_chrome_for(svc: Any) -> set[str]:
+    """The fingerprints every screen of this application's designs share.
+
+    NEVER THROUGH THE ACTION CLASSIFIER. `compose` sets the routes/workflows
+    vocabulary before it transforms a page, so that page's buttons bind. The
+    same vocabulary was still set when this transformed the OTHER fourteen
+    screens for their fingerprints — and with it set, every button on every
+    screen is a real classifier call. Fifteen screens, twenty-odd buttons each,
+    twelve subjects at once: a run sat nine minutes in `page_layouts` without
+    composing one page or rendering one crop. A fingerprint is types and text;
+    the context is cleared for the transform and restored after.
+    """
+    key = (str(svc.output_dir),
+           tuple(str(s.get("id") or "") for s in svc.doc.get("designSources") or []))
+    cached = _CHROME_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    from services.figma import chrome as _chrome
+    from services.figma import store
+    from services.figma_llm_ctx import (
+        get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
+    )
+    from services.jsx_to_schema import transform_jsx_to_schema
+
+    saved = (list(get_routes()), list(get_workflows()))
+    reset_figma_llm_context()
+    roots: list[dict] = []
+    try:
+        for source in svc.doc.get("designSources") or []:
+            try:
+                ref = store.load(str(source.get("id") or ""), svc.output_dir)
+            except Exception:  # noqa: BLE001
+                ref = None
+            for screen in (ref.screens if ref else []):
+                code = str((screen.structure or {}).get("code") or "")
+                if not code:
+                    continue
+                try:
+                    w, h = float(screen.width or 0), float(screen.height or 0)
+                    canvas = (w, h) if w > 0 and h > 0 else None
+                    roots.append(transform_jsx_to_schema(code, {}, canvas=canvas)["children"][0])
+                except Exception:  # noqa: BLE001 — one frame, never the set
+                    continue
+    finally:
+        set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+
+    shared = _chrome.chrome_for(roots)
+    _CHROME_CACHE[key] = shared
+    return shared

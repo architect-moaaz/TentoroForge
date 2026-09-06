@@ -448,6 +448,32 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- UX Pilot (design source) --------------------------------------- #
+    # The second design tool a project can be built from. Same shape as
+    # `__figma__`: the key is per-organisation and write-only, and the
+    # extraction resolves it by NAME at the moment of the call (§42).
+    # Reading a UX Pilot page spends no credits; the gateway only exposes
+    # the read tools.
+    "__uxpilot__": [
+        ConfigKey(
+            key="UXPILOT_API_KEY",
+            provider="uxpilot",
+            label="UX Pilot API key",
+            kind="password",
+            required=True,
+            help_url="https://github.com/uxpilot-ai/uxpilot-mcp#authentication",
+        ),
+        ConfigKey(
+            key="UXPILOT_MCP_URL",
+            provider="uxpilot",
+            label="UX Pilot MCP endpoint",
+            kind="url",
+            required=False,
+            default="https://mcp.uxpilot.net/mcp",
+            help_url="https://github.com/uxpilot-ai/uxpilot-mcp",
+        ),
+    ],
+
     # --- Mobile builds (MOBILE-B) ------------------------------------ #
     # Synthetic "action type": no workflow ever calls "mobile_build", but
     # the credentials it needs share the registry shape so they surface

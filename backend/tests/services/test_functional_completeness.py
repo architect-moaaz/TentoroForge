@@ -28,7 +28,13 @@ def test_a_control_with_no_action_is_a_defect():
 def test_a_control_that_acts_is_fine():
     for prop, value in (("workflow", "FLOW-001"), ("navigate", "/x"),
                         ("submit", True), ("opensDialog", "d")):
-        doc = _doc({"type": "Button", "props": {"label": "Go", prop: value}})
+        button = {"type": "Button", "props": {"label": "Go", prop: value}}
+        # A dialog target must exist on the page — five real buttons opened
+        # dialogs by id that no node carried, and did nothing.
+        node = ({"type": "Stack", "props": {}, "children": [
+                    button, {"id": "d", "type": "Dialog", "props": {"title": "Go"}, "children": []}]}
+                if prop == "opensDialog" else button)
+        doc = _doc(node)
         assert _rules(doc) == [], prop
 
 

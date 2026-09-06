@@ -80,10 +80,23 @@ def classify_button_action(label: str, data_name: str = "", className: str = "")
         rest = view_match.group(1).strip().lower()
         if rest in _NAV_LABELS:
             return {"navigate": _NAV_LABELS[rest]}
-        return {"workflow": f"view.{_slugify(rest)}"}
 
-    # Default: assume an action workflow keyed by the slugified label
-    return {"workflow": _slugify(label)}
+    # NO INFERENCE IS THE ANSWER WHEN NOTHING MATCHED.
+    #
+    # This ended `return {"workflow": _slugify(label)}` — every unmatched label
+    # became a workflow id named after itself. The ids it produced do not
+    # exist, and the Blueprint validator says so: "targets workflow
+    # 'dashboard', which this application does not define". On a real
+    # 15-screen design that rejected EVERY page — "Dashboard", "Front Desk",
+    # "New Case" each invented a workflow — and the build ended with no
+    # layouts at all, so frontend, testing and preview were skipped behind it.
+    #
+    # A button with no action still renders and can be wired later. A button
+    # pointing at a workflow that was never defined cannot be part of any
+    # valid page, so inventing one trades a small gap for a total failure.
+    # The docstring above already promised this: "Empty dict means 'no
+    # inference' — caller leaves the Button as-is."
+    return {}
 
 
 def infer_input_name(data_name: str, type_: str, placeholder: str = "") -> str | None:

@@ -17,6 +17,9 @@ module.exports = {
   // function bundle. Deployed to Vercel, /dashboard then hits ENOENT on
   // `/var/task/src/schemas/home.json` and every SSR route 500s. Include
   // them for every route (they're shared across the tree).
+  // A verification build (`verify_build`) sets NEXT_DIST_DIR so it compiles
+  // beside a running dev server instead of into its `.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingIncludes: {
     "/**/*": [
       "./src/schemas/**/*.json",

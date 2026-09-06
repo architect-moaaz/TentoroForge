@@ -326,7 +326,7 @@ export async function renderSchemaPage(
   // `figma_layout.compose`. Present only on a page built FROM a design, so
   // every other page renders exactly as before.
   const figmaCanvas = (page as any)?._figmaCanvas as
-    | { width: number; height: number }
+    | { width: number; height: number; fit?: "scale" | "fluid" }
     | undefined;
 
   const mainClass = figmaDerived
@@ -351,7 +351,7 @@ export async function renderSchemaPage(
             <LiveRefresh entities={liveEntities} />
           )}
           {figmaCanvas?.width ? (
-            <FigmaCanvas width={figmaCanvas.width} height={figmaCanvas.height}>
+            <FigmaCanvas width={figmaCanvas.width} height={figmaCanvas.height} fit={figmaCanvas.fit}>
               {rendered}
             </FigmaCanvas>
           ) : (

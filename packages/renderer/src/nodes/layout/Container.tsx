@@ -1,6 +1,7 @@
 import type { ReactNode, CSSProperties } from "react";
 import { resolveStyle } from "../../runtime/tokens";
 import { applyStyleSlot } from "../../runtime/style-slot";
+import { NavigateSurface } from "../../client/NavigateSurface";
 
 /**
  * Container — centers its content with a responsive max-width and
@@ -36,6 +37,27 @@ export function Container({ node, children }: { node: any; children: ReactNode[]
   const shellRole = node.props?.shellRole;
   const shellRoleAttr = (shellRole === "sidebar") ? "" : undefined;
   const backdropAttr = (shellRole === "backdrop") ? "" : undefined;
+  // A container that navigates is a drawn card the designer made clickable:
+  // same box, same classes, plus the affordance and the Navigator seam.
+  if (typeof node.props?.navigate === "string" && node.props.navigate) {
+    return (
+      <NavigateSurface
+        navigate={node.props.navigate}
+        data-node-id={node.id}
+        className={className}
+        style={{
+          ...resolveStyle(node.style),
+          ...slotProps.style,
+          ...callerStyle,
+        }}
+        data-motion={slotProps["data-motion"]}
+        data-shell-sidebar={shellRoleAttr}
+        data-sidebar-backdrop={backdropAttr}
+      >
+        {children}
+      </NavigateSurface>
+    );
+  }
   return (
     <div
       data-node-id={node.id}

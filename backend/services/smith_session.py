@@ -206,6 +206,71 @@ class SmithSession:
 
     # ---- Iteration flow (§5.2 / §7 / §11) -------------------------------
 
+    def _connect_uxpilot(self, understanding: dict) -> "TurnResult":
+        """Attach a UX Pilot page, having asked for the page and a variable NAME.
+
+        The twin of :meth:`_connect_figma`; the same §42 rule and the same
+        output, a `designSources` record for `figma_intelligence` to fan out
+        over.
+        """
+        from services.smith.uxpilot_connect import UxPilotConnectError, connect
+        from services.uxpilot.url import parse as _parse_ref
+
+        page_ref = (understanding.get("uxpilot_ref") or "").strip()
+        key_env = (understanding.get("key_env") or "").strip()
+
+        if not page_ref:
+            return TurnResult(
+                status="asked",
+                answer="Which UX Pilot page? Paste the page's URL or its id and "
+                       "I'll pull the designs and theme out of it.",
+            )
+        if not key_env:
+            return TurnResult(
+                status="asked",
+                answer=("Which environment variable holds your UX Pilot API key? "
+                        "I need the NAME — `UXPILOT_API_KEY`, for example — not "
+                        "the key itself. Anything you type here is written to "
+                        "the conversation log, so a credential must not go in "
+                        "it; add it under Settings → Integrations → UX Pilot "
+                        "and tell me what it is called."),
+            )
+        if _parse_ref(page_ref) is None:
+            return TurnResult(
+                status="needs_user",
+                answer=(f"That does not look like a UX Pilot page: {page_ref!r}. "
+                        f"I need the page id, or the page's URL from UX Pilot."),
+            )
+
+        from services.smith.understand_ask import _design_scope
+
+        treat_as = _design_scope(understanding.get("treat_as"))
+        if not treat_as:
+            return TurnResult(
+                status="asked",
+                answer=("Before I pull it in — is this design the "
+                        "SPECIFICATION or a REFERENCE?\n\n"
+                        "• Specification: I build exactly the screens on the page "
+                        "and nothing else.\n"
+                        "• Reference: the screens become requirements and the "
+                        "design language, and the application is built around "
+                        "them — usually more pages than designs.\n\n"
+                        "Say “specification” or “reference”."),
+            )
+
+        try:
+            out = connect(self.output_dir, uxpilot_ref=page_ref, key_env=key_env,
+                          treat_as=treat_as)
+        except UxPilotConnectError as exc:
+            return TurnResult(status="needs_user", answer=str(exc))
+        except Exception as exc:  # noqa: BLE001 — a turn reports, never crashes
+            logger.exception("uxpilot connect failed for %s", self.output_dir)
+            return TurnResult(
+                status="needs_user",
+                answer=f"I could not read that UX Pilot page: {type(exc).__name__}.",
+            )
+        return TurnResult(status="resolved", answer=out["summary"])
+
     def _connect_figma(self, understanding: dict) -> "TurnResult":
         """Attach a Figma design, having asked for a URL and a variable NAME.
 
@@ -431,14 +496,26 @@ class SmithSession:
 
         if verb == "connect_figma":
             return self._connect_figma(understanding)
+        if verb == "connect_uxpilot":
+            return self._connect_uxpilot(understanding)
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, user_message)
         if verb == "rebuild":
+            # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
+            # The build is driven by the client — `useBlueprintRun` posts the
+            # run request with `approved: true` — and this handler has no way
+            # to reach it. It used to answer "say rebuild again to confirm",
+            # and nothing consumed the confirmation: saying it again returned
+            # the same sentence forever.
             return TurnResult(
                 status="needs_user",
-                answer=("A rebuild regenerates the whole application from its "
-                        "definition. Say \u201crebuild\u201d again to confirm "
-                        "and I will start it."),
+                answer=("Building the whole application is started from the "
+                        "definition, not from chat: open the \u201cDefinition "
+                        "ready to review\u201d card above and press "
+                        "\u201cApprove and build\u201d. That runs the pages, "
+                        "the data and the workflows, which takes a few "
+                        "minutes.\n\nI can still change one screen from here "
+                        "\u2014 name the route and I will rebuild that."),
             )
 
         target_file = (understanding.get("target_file") or "").strip()

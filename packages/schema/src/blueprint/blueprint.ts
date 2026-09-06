@@ -386,7 +386,9 @@ export const PageContract = z.object({
     })
     .default({ desktop: "primary", tablet: "supported", mobile: "adaptive" }),
 
-  /** §45 — provenance when the page came from a Figma frame. */
+  /** §45 — provenance when the page came from a connected design: a Figma
+   *  frame's node id, or a UX Pilot design id. Resolved against
+   *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
 
   components: z.array(ComponentId).default([]),
@@ -693,14 +695,34 @@ export const PageLayout = z.object({
    * An enum here is a vocabulary for what WAS written, not only for what can
    * be written now.
    */
-  // `figma` — built from the frame it was designed as, rather than composed
-  // from the catalog. A page carrying `figmaFrame` takes this route and
-  // every other page takes A2UI, so the two are genuinely different
-  // provenance and the distinction is worth keeping: a screen that came
-  // from a drawing and a screen a model invented are not the same claim.
+  // `figma` / `uxpilot` — built from the frame or design it was designed
+  // as, rather than composed from the catalog. A page carrying `figmaFrame`
+  // takes this route and every other page takes A2UI, so the two are
+  // genuinely different provenance and the distinction is worth keeping: a
+  // screen that came from a drawing and a screen a model invented are not
+  // the same claim.
   composedBy: z
-    .enum(["a2ui", "agent", "deterministic", "figma", ""])
+    .enum(["a2ui", "agent", "deterministic", "figma", "uxpilot", ""])
     .default(""),
+  /**
+   * The Figma frame's own size, for a layout composed from one. `FigmaCanvas`
+   * scales the page by (available width / frame width) and reads it off the
+   * projected schema; the executor carries it here from the composer. Absent
+   * for every A2UI page and for a frame with no recorded size — and, until it
+   * was declared, present-but-forbidden: fifteen of fifteen layout rows were
+   * refused as "'canvas' was unexpected" on the first run that wrote it.
+   */
+  canvas: z
+    .object({
+      width: z.number().positive(),
+      height: z.number().positive(),
+      // How the frame meets a viewport narrower than itself. `fluid`: the
+      // page reflows — a drawn box is a maximum, not a size — which is what
+      // an auto-layout frame supports. `scale`: the frame is a positioned
+      // picture and shrinks as one. Absent means `scale`, the older behaviour.
+      fit: z.enum(["scale", "fluid"]).optional(),
+    })
+    .optional(),
   ...artifactBase,
 });
 
@@ -939,7 +961,48 @@ export const Workflow = z.object({
   steps: z.array(WorkflowStep).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */
   launchedFrom: z.array(PageId).default([]),
+  /**
+   * What the workflow needs to start. A control that runs it must supply
+   * every required input from what its page has in scope — the record a
+   * detail page shows, the fields a form collects — and the composer refuses
+   * a control that cannot. Undeclared, nothing could be checked: a button on
+   * a case page sent `{}` and the first step failed to find the case.
+   */
+  inputs: z.array(z.object({
+    name: z.string().min(1),
+    kind: z.enum(["record", "field"]),
+    /** For a record input: the entity whose record is needed. */
+    entity: EntityId.optional(),
+    /** For a field input: string, number, boolean, date, enum, text, … */
+    type: z.string().optional(),
+    required: z.boolean().default(true),
+    description: z.string().default(""),
+  })).default([]),
   ...artifactBase,
+});
+
+/**
+ * What a rule does when its condition holds. The same actions the rules
+ * panel authors and the runtime applies: a form effect (show or hide,
+ * require, lock, narrow the options of a field), a value (set, default,
+ * clear), a refusal (show_error), or a side effect.
+ */
+export const RuleAction = z.object({
+  type: z.enum([
+    "set_field", "set_default", "clear_field", "show_error",
+    "set_visibility", "set_required", "set_readonly", "set_options",
+    "recommendation", "trigger_workflow", "send_notification",
+  ]),
+  field: z.string().optional(),
+  valueMode: z.enum(["literal", "field", "formula"]).optional(),
+  value: z.string().optional(),
+  message: z.string().optional(),
+  visible: z.boolean().optional(),
+  required: z.boolean().optional(),
+  readonly: z.boolean().optional(),
+  /** set_options: the options the field offers while the condition holds. */
+  options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+  workflow: WorkflowId.optional(),
 });
 
 export const BusinessRule = z.object({
@@ -950,6 +1013,22 @@ export const BusinessRule = z.object({
   /** Machine-evaluable form. */
   expression: z.string().optional(),
   appliesTo: z.array(AnyArtifactId).default([]),
+  /**
+   * A rule with effects. `kind: "condition_action"` names the entity whose
+   * form it governs, a FEEL condition over that entity's fields, and what
+   * happens when it holds (and, optionally, when it does not). Projected
+   * into the runtime's rules directory beside the panel's own rules, so a
+   * rule the agent authored fires on the form exactly as one a person
+   * authored. A rule with only a statement is prose; it constrains people,
+   * not forms.
+   */
+  kind: z.enum(["statement", "condition_action"]).default("statement"),
+  entity: EntityId.optional(),
+  when: z.string().optional(),
+  then: z.array(RuleAction).default([]),
+  otherwise: z.array(RuleAction).default([]),
+  scope: z.enum(["entity", "form", "server"]).default("form"),
+  salience: z.number().int().default(0),
   ...artifactBase,
 });
 
@@ -1102,13 +1181,27 @@ export const DesignSourceFrame = z.object({
    *  than filtered, because the naming convention is the file author's, not
    *  ours, and a wrong guess silently deletes evidence (§49). */
   looksLikeScreen: z.boolean().default(true),
+  /**
+   * What the frame shows, read off its own heading with the shared chrome
+   * removed. Fifteen frames of one real file all carried the same name, so
+   * the planner routed them by position: the Ticket Queue became `/login`,
+   * Front Desk became `/cases`, Policy Manager `/users/new` — 14 of 15 wrong.
+   * A frame's heading is its identity; this is the evidence the planner
+   * routes by (§48, §49).
+   */
+  shows: z.string().optional(),
 });
 
 export const DesignSource = z.object({
-  /** `FIGMA-001`. Its own sequence — a design source is evidence, not a
-   *  Blueprint artifact, so it is deliberately outside ID_PREFIXES. */
-  id: z.string().regex(/^FIGMA-\d{3,}$/),
-  type: z.literal("figma").default("figma"),
+  /** `FIGMA-001` or `UXPILOT-001`. Its own sequence per provider — a design
+   *  source is evidence, not a Blueprint artifact, so it is deliberately
+   *  outside ID_PREFIXES. */
+  id: z.string().regex(/^(FIGMA|UXPILOT)-\d{3,}$/),
+  /** Which tool the design lives in. Every seam below is named for Figma,
+   *  which came first; a UX Pilot source fills the same fields with its own
+   *  identifiers (`fileKey` is the page id, a frame's `nodeId` is a design id). */
+  type: z.enum(["figma", "uxpilot"]).default("figma"),
+  /** Figma file key · UX Pilot page id. */
   fileKey: z.string(),
   /** Set when the user linked one frame rather than the whole file (§41). */
   nodeId: z.string().optional(),
@@ -1144,6 +1237,64 @@ export const DesignSource = z.object({
    *  instead of passing for a complete one. Each is a clarification owed to
    *  the user before the DAG builds against it (§48, §50). */
   gaps: z.array(z.string()).default([]),
+  /**
+   * What every screen of this design shares — its chrome — read as evidence
+   * (§48). The rail is the same subtree on every frame; `services/figma/chrome`
+   * finds it by that definition and records what it says here, in the order
+   * the designer drew it. `ux_architecture`, the one author of
+   * `navigation.tree`, reads this and reproduces it; before it existed every
+   * Figma application got the generic sidebar with the drawn one rendered
+   * inside each page.
+   *
+   * Absent for a design with one frame, or frames that share nothing.
+   */
+  chrome: z
+    .object({
+      sidebar: z.object({
+        /**
+         * The rail AS DRAWN, entry by entry in document order, for the
+         * architect to read: an entry is a block of the rail's lists — its
+         * labels together, the size of its icon if it has one, whether it is
+         * filled, and any action the transform bound. What is brand, status,
+         * heading or destination is the architect's decision, made from this;
+         * the sorted `brand`/`groups` below are the older, bound-only reading.
+         */
+        drawn: z
+          .array(
+            z.object({
+              labels: z.array(z.string()).default([]),
+              /** Icon size in px, when the entry carries an image. */
+              icon: z.number().nonnegative().optional(),
+              filled: z.boolean().default(false),
+              navigate: z.string().optional(),
+              workflow: z.string().optional(),
+              /** A nested list inside the entry, read the same way. */
+              children: z.array(z.any()).default([]),
+            }),
+          )
+          .default([]),
+        brand: z.array(z.string()).default([]),
+        groups: z
+          .array(
+            z.object({
+              label: z.string().default(""),
+              items: z
+                .array(
+                  z.object({
+                    label: z.string(),
+                    navigate: z.string().optional(),
+                    workflow: z.string().optional(),
+                  }),
+                )
+                .default([]),
+            }),
+          )
+          .default([]),
+      }),
+      /** How many screens the rail was found on. */
+      sharedBy: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 export const DesignSystem = z.object({
@@ -1161,6 +1312,14 @@ export const DesignSystem = z.object({
   interactionConventions: z.array(z.string()).default([]),
   /** §47 — set when the design system was extracted from a Figma file. */
   derivedFromFigma: z.boolean().default(false),
+  /**
+   * Why each frame-derived token was chosen: the number of times the frames
+   * use it. Present only when the file published no variables and the
+   * scheme was counted off the frames instead (§49 — an inference carries
+   * its evidence). `background: 74` beside `#f7f3eb` lets a reader see the
+   * ground was the ground and not a guess.
+   */
+  paletteEvidence: z.record(z.string(), z.number()).optional(),
 });
 
 // ===========================================================================
@@ -1203,7 +1362,7 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma"]),
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),

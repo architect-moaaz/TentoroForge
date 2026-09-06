@@ -521,6 +521,80 @@ def _write_route_registry(root: Path, written: list[str]) -> None:
 # navigation — the route graph the guards and breadcrumbs read
 # ---------------------------------------------------------------------------
 
+def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/schemas/shell.json`` from ``navigation.tree``.
+
+    THE SHELL READS ONE FILE, AND NOTHING WROTE IT. The scaffold's layout builds
+    its rail from `shell.json` — a `SideNav` node whose `props.groups` carry
+    grouped destinations — and only falls back to a flat menu from nav-flow's
+    page list when the file is absent. Every Blueprint application was absent
+    it, so every rail was the fallback: one flat list of page titles, whatever
+    `navigation.tree` said. When the tree began carrying a connected design's
+    own groups (Overview, Cases, Approvals…), they had nowhere to go.
+
+    Written only when the tree has grouped nodes: a flat tree is exactly what
+    the fallback already renders, and writing it again would be a second
+    representation of one fact. Destinations resolve `page` ids to routes
+    through the page list, so a rename cannot break the rail; a drawn
+    destination with no page is kept, route-less, so its absence is visible
+    in the rail rather than silent (§49).
+    """
+    nav = doc.get("navigation") or {}
+    tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
+    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
+    # had children, so a one-screen application had no shell file at all and
+    # the root page, which reads it, failed to compile.
+    if not tree:
+        return {"files": [], "groups": 0, "reason": "no navigation"}
+
+    routes = {str(p.get("id")): str(p.get("route") or "")
+              for p in (doc.get("pages") or []) if p.get("id")}
+
+    def item(node: dict) -> dict[str, Any]:
+        out: dict[str, Any] = {"label": str(node.get("label") or "")}
+        route = routes.get(str(node.get("page") or ""))
+        if route:
+            out["route"] = route
+        if node.get("icon"):
+            out["icon"] = str(node["icon"])
+        return out
+
+    groups: list[dict[str, Any]] = []
+    for node in tree:
+        kids = [k for k in (node.get("children") or []) if isinstance(k, dict)]
+        if kids:
+            group: dict[str, Any] = {"label": str(node.get("label") or "")}
+            if node.get("icon"):
+                group["icon"] = str(node["icon"])
+            group["items"] = [item(k) for k in kids]
+            groups.append(group)
+        else:
+            groups.append(item(node))
+
+    app_name = str((doc.get("application") or {}).get("name") or "App")
+    # WHERE THE APPLICATION OPENS. The scaffold's root page redirected to a
+    # hard-coded /home, which no application has: every signed-in user landed
+    # on a 404 and had to find the rail. The Blueprint's navigation names the
+    # initial route; failing that, the first destination in the rail.
+    initial = ((nav.get("initialRoute") or {}).get("default")
+               if isinstance(nav.get("initialRoute"), dict) else nav.get("initialRoute"))
+    if not initial or str(initial) in ("/", "/home"):
+        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route") or it.get("href")), None)
+        initial = (first.get("route") or first.get("href")) if first else None
+    shell = {
+        "type": "AppShell",
+        "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
+        "children": [{"type": "SideNav",
+                      "props": {"groups": groups, "appName": app_name, "mode": "dark"}}],
+    }
+    if initial:
+        shell["initialRoute"] = str(initial)
+    out = Path(app_root) / "src" / "schemas"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "shell.json").write_text(json.dumps(shell, indent=2), "utf-8")
+    return {"files": ["src/schemas/shell.json"], "groups": len(groups)}
+
+
 def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/contracts/nav-flow.json`` from navigation + pages.
 
@@ -730,13 +804,31 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     declared role. A design system that grows a new role now reaches the app
     without anyone editing a list here.
     """
+    # `html:root`, NOT `:root`, AND ON PURPOSE. The scaffold's globals.css
+    # imports this file first and says the design's tokens win because they are
+    # unlayered and its own defaults sit in `@layer base`. Under Tailwind v3
+    # that is false: `@layer base` is Tailwind's directive, not a CSS cascade
+    # layer, and the compiled sheet has no layers — both `:root` blocks are
+    # unlayered and source order decides, so the scaffold's later `:root` beat
+    # this file on every token it also declared. `--accent` was the visible one:
+    # a design's gold became the stock grey on the sign-in page. `html:root`
+    # is one point of specificity higher than `:root` and `.dark`, which is
+    # exactly enough, and it still reads as what it is: the root element.
+
     design = doc.get("designSystem") or {}
     colors = design.get("colors") or {}
     lines: list[str] = []
 
-    # These four are the names the scaffold wraps in hsl(); the rest are ours
-    # alone and keep their hex.
-    WRAPPED = {"background", "foreground", "primary", "secondary"}
+    # THE NAMES THE SCAFFOLD WRAPS IN hsl(). This said "these four… the rest
+    # keep their hex" — and the scaffold's sign-in page paints its brand panel
+    # with `hsl(var(--accent))`, so a hex accent became `hsl(#c9a84c)`: invalid,
+    # silently dropped, and the design's gold never reached the one page every
+    # user sees first. The wrapped set is shadcn's, which is what the scaffold
+    # is — the same names `_COLOR_TOKENS` below already lists.
+    WRAPPED = {"background", "foreground", "primary", "primaryForeground",
+               "secondary", "secondaryForeground", "accent", "accentForeground",
+               "muted", "mutedForeground", "destructive", "destructiveForeground",
+               "border", "input", "ring", "card", "cardForeground"}
     for role, value in sorted(colors.items()):
         if isinstance(value, str) and value:
             out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
@@ -767,6 +859,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     typography = design.get("typography") or {}
     for key, token in (("fontFamilyBase", "--font-family-base"),
                        ("fontFamilyNumeric", "--font-family-numeric"),
+                       # The names the scaffold's Tailwind config and its sign-in
+                       # page actually read: `fontFamily.heading` is
+                       # `var(--font-heading)` and nothing defined it, so a
+                       # design's serif headings (Fraunces on a real file)
+                       # fell through to system-ui on every page.
+                       ("fontFamilyHeading", "--font-heading"),
+                       ("fontFamilyBase", "--font-body"),
                        ("baseSize", "--font-size-base"),
                        ("lineHeightBase", "--line-height-base")):
         value = typography.get(key)
@@ -783,7 +882,24 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     header = ("/* Generated from the Living Blueprint (designSystem).\n"
               "   Edit the Blueprint, not this file. */\n")
-    body = (":root {\n" + "\n".join(lines) + "\n}\n") if lines else (
+    # THE FAMILIES THE DESIGN NAMES ARE LOADED, AND THE BODY IS SET IN ONE.
+    # `--font-body: Inter` was emitted and nothing read it: no rule set the
+    # body's family, and a face that is not installed on the viewer's machine
+    # is not there to be read anyway. Every family the design system names is
+    # requested from Google Fonts (Inter, Fraunces, JetBrains Mono all live
+    # there; a family that does not is simply not served and falls back), and
+    # the body is set in the base family with the system sans behind it.
+    families = [str(v).strip() for k, v in (typography or {}).items()
+                if k in ("fontFamilyBase", "fontFamilyHeading", "fontFamilyNumeric") and v]
+    fonts_import = ""
+    if families:
+        query = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700"
+                         for f in dict.fromkeys(families))
+        fonts_import = f'@import url("https://fonts.googleapis.com/css2?{query}&display=swap");\n'
+    body_rule = ""
+    if (typography or {}).get("fontFamilyBase"):
+        body_rule = "body {\n  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n"
+    body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
         "   defaults stand rather than inventing a palette here. */\n")
     (out / "tokens.css").write_text(header + body, "utf-8")
@@ -1776,3 +1892,46 @@ def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, A
         "utf-8",
     )
     return {"files": ["src/lib/append-only-entities.ts"], "entities": len(set(names))}
+
+
+# ---------------------------------------------------------------------------
+# business rules with effects → the runtime's rules directory
+# ---------------------------------------------------------------------------
+
+def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``rules/blueprint-rules.json`` — the Blueprint's condition-action
+    rules, in the row shape the runtime's ``loadRules`` reads.
+
+    Only rules the panel authored reached the runtime before; a rule the
+    agent wrote had a statement and no effect on any form. This projects
+    the ones that declare effects, beside the panel's, in the same shape
+    (rule_type, model_name, config.whenFeel/then/otherwise/scope/salience),
+    so the form-rules route serves them together. Always written, so an
+    empty file and a never-run projection stay distinguishable.
+    """
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
+    rows = []
+    for rule in doc.get("businessRules") or []:
+        if not isinstance(rule, dict) or rule.get("status") == "DEPRECATED":
+            continue
+        if rule.get("kind") != "condition_action" or not rule.get("entity"):
+            continue
+        ent = entities.get(str(rule["entity"])) or {}
+        model = ent.get("name") or str(rule["entity"])
+        rows.append({
+            "id": rule.get("id"), "name": rule.get("name") or rule.get("id"),
+            "rule_type": "condition_action", "model_name": model,
+            "field_name": None, "is_active": True, "source": "blueprint",
+            "config": {
+                "whenFeel": rule.get("when") or rule.get("expression") or "true",
+                "then": [{"id": f"{rule.get('id')}-then-{i}", **a} for i, a in enumerate(rule.get("then") or [])],
+                "otherwise": [{"id": f"{rule.get('id')}-else-{i}", **a} for i, a in enumerate(rule.get("otherwise") or [])],
+                "scope": rule.get("scope") or "form",
+                "salience": int(rule.get("salience") or 0),
+            },
+        })
+    out = Path(app_root) / "rules"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "blueprint-rules.json").write_text(json.dumps(rows, indent=2), "utf-8")
+    return {"files": ["rules/blueprint-rules.json"], "rules": len(rows)}
+

@@ -201,7 +201,13 @@ def test_the_fixture_blueprint_matches_the_contract():
          / "contracts" / "blueprint.schema.json").read_text())
     item = (contract["properties"]["security"]["properties"]
             ["ownershipRules"]["items"])
-    obj = next(o for o in item["oneOf"] if o["type"] == "object")
+    # `z.union` is emitted as `anyOf` by the schema emitter — the JSON contract
+    # is generated from the TypeScript source and that is the keyword it
+    # writes. This read `oneOf`, which existed only in a copy of the JSON that
+    # had drifted from its source; regenerating removed it and the test failed
+    # against the very file it is meant to check.
+    variants = item.get("oneOf") or item.get("anyOf") or []
+    obj = next(o for o in variants if o.get("type") == "object")
     allowed = set(obj["properties"])
     for rule in fixture["security"]["ownershipRules"]:
         if isinstance(rule, dict):

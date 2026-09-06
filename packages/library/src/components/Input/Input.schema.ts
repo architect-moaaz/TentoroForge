@@ -15,7 +15,7 @@ import { z } from "zod";
 export const InputProps = z.object({
   name:        z.string().default("field"),
   label:       z.string().optional(),
-  type:        z.enum(["text", "email", "password", "number", "url", "tel"]).default("text"),
+  type:        z.enum(["text", "email", "password", "number", "url", "tel", "search"]).default("text"),
   placeholder: z.string().optional(),
   bind:        z.string().optional(),
   validators:  z.object({

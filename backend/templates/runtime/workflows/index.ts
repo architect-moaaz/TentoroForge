@@ -16,6 +16,7 @@
  */
 
 import { promises as fs } from "fs";
+import crypto from "node:crypto";
 import path from "path";
 // The app's data layer — used by the default db_* action handlers so workflows
 // actually read/write the database. Every generated app emits these.
@@ -514,12 +515,15 @@ function _walkPath(root: unknown, path: string): unknown {
 
 // A config value is either a process-variable name, a special token, or a
 // literal. `{{var}}` templates interpolate from the workflow variables.
-function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknown {
+export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknown {
   if (typeof ref !== "string") return ref;
   // Canonical runtime sentinels — kept in sync with services/proof_auto_heal.py.
   // `$now` and `$today` are the forward names planner + auto-heal both use.
   // CURRENT_TIMESTAMP / NOW() are retained as backwards-compat aliases.
   if (ref === "$now" || ref === "CURRENT_TIMESTAMP" || ref === "NOW()") return new Date();
+  // A fresh identifier for a required column nothing supplies — a case's
+  // reference number before its row exists. The engine has no sequences.
+  if (ref === "$uuid") return crypto.randomUUID();
   if (ref === "$today") {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -748,7 +752,7 @@ const _LEGACY_OWNER_FK_RE =
 // Drop keys the table doesn't have or that are empty "" / undefined (so they don't
 // clobber DB defaults or crash type coercion, e.g. "" into a timestamp), and default
 // an ACTOR FK to the acting user when missing.
-function _finalizeInsert(
+export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -761,10 +765,17 @@ function _finalizeInsert(
     // best-effort. If we can't coerce, DROP the field so the column
     // default fires — much better than crashing the whole insert.
     const col = (table as any)[k];
-    const colType = col && (col.columnType || col.dataType);
-    const isTimestampCol = typeof colType === "string" &&
-      /timestamp|date|time/i.test(colType);
-    if (isTimestampCol && !(v instanceof Date) && v !== null) {
+    // WHAT THE DRIVER WILL BIND, by drizzle's own `dataType`, not by the
+    // column type's name. `timestamp()` is dataType "date" and its driver
+    // mapping takes a Date; `date()` in string mode is dataType "string"
+    // and passes its value straight to postgres.js, which has no serializer
+    // for a Date and throws from Buffer.byteLength. Matching /date/ on
+    // "PgDateString" turned a form's valid "2026-09-12" into a Date and the
+    // Create Case insert failed on its due date.
+    const dataType = col && col.dataType;
+    const isDateName = typeof (col && col.columnType) === "string" &&
+      /timestamp|date|time/i.test(col.columnType);
+    if (dataType === "date" && !(v instanceof Date) && v !== null) {
       const coerced = _coerceValue(v);
       if (coerced instanceof Date) {
         out[k] = coerced;
@@ -775,6 +786,11 @@ function _finalizeInsert(
           `[workflow] db_insert: dropping ${k} — not Date-coercible (type=${typeof v}, value=${JSON.stringify(v)?.slice(0,80)}). Column default will fire.`,
         );
       }
+      continue;
+    }
+    if (dataType === "string" && isDateName && v instanceof Date) {
+      // `$now` on a string-mode date column: the calendar date, as text.
+      out[k] = /time/i.test(col.columnType) ? v.toISOString() : v.toISOString().slice(0, 10);
       continue;
     }
     out[k] = v;
@@ -1017,6 +1033,12 @@ export function registerDefaultActions(): void {
         const nid = (config as any).__nodeId;
         if (nid) ctx.variables[nid] = row;
       }
+      // THE STEP'S OUTPUT IS THE ROW. The engine stores what a handler returns
+      // under the node id, so `{{insert_case.id}}` — the vocabulary the author
+      // is given — walks into this object; `inserted` stays for the older
+      // `{{insert_case.inserted.id}}`. Returning only `{ inserted: row }` left
+      // the case number's audit entry with a null case id.
+      if (row && typeof row === "object") return { ...(row as Record<string, unknown>), inserted: row };
       return { inserted: row ?? true };
     } catch (err) {
       console.error("[workflow] db_insert failed:", err);

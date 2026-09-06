@@ -82,15 +82,31 @@ def _default_provider(prompt: str) -> str:
     return complete(content=prompt, max_tokens=400)
 
 
+_DESIGN_ATTACHED = """
+
+A DESIGN FILE IS ATTACHED to this brief as its visual specification. Colour,
+typography, spacing and layout are settled by it: do not ask about any of
+them, and do not propose palettes."""
+
+
 def clarify_brief(
     brief: str,
     *,
     provider: Callable[[str], str] | None = None,
+    design_attached: bool = False,
 ) -> list[dict[str, Any]]:
-    """`[{question, options}]` — empty when the brief stands on its own."""
+    """`[{question, options}]` — empty when the brief stands on its own.
+
+    `design_attached` says a Figma file travels with the brief. The prompt
+    already tells the model not to ask about colour when a reference is
+    attached; a bare link in the prose did not read as one, and it asked which
+    palette fits a design that had already chosen its own.
+    """
     text = (brief or "").strip()
     if not text:
         return []
+    if design_attached:
+        text = text + _DESIGN_ATTACHED
 
     # BUILT BEFORE THE TRY. `str.format` on a prompt containing literal JSON
     # braces raises KeyError, and inside the guard below that is indis-

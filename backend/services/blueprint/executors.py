@@ -1022,11 +1022,51 @@ NODE_TASKS: dict[str, str] = {
         "then-branch, its second the else-branch); the workflow's `trigger` is "
         "the start, and an `end` step is the terminal. A manually-triggered "
         "workflow must name the page that launches it, and any step that mutates "
-        "an entity must name a real one."
+        "an entity must name a real one.\n\n"
+        "Conditions and gateway expressions are FEEL, read by the engine's "
+        "parser: `=` (never `==`), `and`, `or`, `not`, names without braces "
+        "(`caseType = \"Refund\" and refundAmount > 0`), membership as "
+        "`stage in [\"A\", \"B\"]` with square brackets, never parentheses. "
+        "Values in step "
+        "config are templates over what the engine holds: the trigger's "
+        "input fields by name (`{{title}}`, never `{{input.title}}`), a step's "
+        "output under its key (`{{insert_case.id}}`), a variable a "
+        "set_variable step set by its `variableName`; the current time and "
+        "actor are the whole-value sentinels `$now`, `$today`, `$user.id`. "
+        "There is no `now`, `currentUser`, `vars`, `steps` or `sequence` "
+        "root; a template naming one is refused. The expression functions the "
+        "engine has are sum, count, min, max, avg, abs, floor, ceiling, round, "
+        "contains, starts with, ends with, matches, string, number, date, now, "
+        "duration — nothing else (no concat, substring, uuid, upper, format); "
+        "a reference number nothing supplies is `$uuid`, a fresh identifier, "
+        "written in the insert itself. A db_insert supplies every field the "
+        "data model marks required — an input by name, `$now`, `$user.id`, "
+        "`$uuid`, or a literal starting state; one that omits a required "
+        "field is refused, and a later db_update cannot rescue it.\n\n"
+        "Declare `inputs`: what the workflow needs to start. A workflow that "
+        "acts on one record declares `{name, kind: \"record\", entity}`; one "
+        "that takes what a person types declares `{name, kind: \"field\", "
+        "type}` per field. The control that runs the workflow must supply every "
+        "required input from its page — the record a detail page shows, the "
+        "fields a form collects — and a control that cannot is refused, so an "
+        "input left undeclared is a button that fails when pressed."
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "
-        "domain expert would recognise, and name the artifacts each governs."
+        "domain expert would recognise, and name the artifacts each governs. "
+        "A rule's `when` is FEEL, read by the engine's parser: `=` (never "
+        "`==`), `and`, `or`, `not`, field names without braces (`status`, "
+        "never `record.status`), membership as `stage in [\"A\", \"B\"]` "
+        "with square brackets, never parentheses; `null` is a value "
+        "(`termEnd != null`). A condition the parser refuses is refused "
+        "here, with the parser's reason.\n\n"
+        "A rule that changes what a form does is `kind: \"condition_action\"`: "
+        "name the `entity` whose form it governs, a `when` condition in FEEL "
+        "over that entity's fields (`caseType = \"Refund\"`), and `then` "
+        "actions — set_visibility, set_required, set_readonly, set_options, "
+        "set_field, show_error — each naming a field the entity has. Such a "
+        "rule fires on the form as a person types; a rule with only a "
+        "statement constrains people, not forms."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
@@ -1321,6 +1361,26 @@ def build_prompt(
             "author a loading or skeleton state: data resolves on the server "
             "before the page renders, so nothing is ever in flight and a "
             "spinner would sit under a table that had already loaded.\n\n"
+            "A page that lists records may carry one search box: an `Input` "
+            "with `type: \"search\"` (its `name` is `q`); it searches the "
+            "page's list source, and needs one. A Select whose options come "
+            "from a related entity may depend on a sibling Select through "
+            "`optionsFrom.dependsOn`; the relationship between their entities "
+            "decides, and the dependency is wired for you from it.\n\n"
+            "A workflow with `field` inputs is run from a Form whose `fields` "
+            "collect them, with the Button as that Form's submit; a workflow "
+            "with a `record` input is run from that record's detail page, or "
+            "as a row action of a Table (or a control inside a Repeat) over "
+            "that entity. A field whose value the control itself decides — an "
+            "Approve button is the `decision` — is passed as a constant in the "
+            "action's `args` (`\"args\": {\"decision\": \"APPROVED\"}`) instead "
+            "of a Form. A Button elsewhere is refused.\n\n"
+            "A control that runs a workflow names it by id from `workflows` "
+            "below — `FLOW-007`, never its title, never a name you infer "
+            "from the page, never a template. If no listed workflow does what "
+            "the control needs, the control navigates instead or is left "
+            "out; there is no workflow this application runs that is not in "
+            "that list.\n\n"
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
             + json.dumps(brief, indent=2, sort_keys=True)
@@ -1447,13 +1507,22 @@ def build_prompt(
         # would crowd out the labels that actually carry meaning.
         from services.figma.brief import brief_for
 
+        brief = brief_for(doc, subject, output_dir)
+        # THE TOOL THE DESIGN LIVES IN names the evidence type. A UX Pilot
+        # page fills the same brief; its citations must say so, or every
+        # requirement it evidences would claim a Figma frame that does not
+        # exist.
+        provider = str(brief.get("provider") or "figma")
+        tool_label = {"uxpilot": "UX Pilot", "figma": "Figma"}.get(provider, provider)
+        unit = "design" if provider == "uxpilot" else "frame"
+
         user = (
-            "A user connected this Figma design as the visual reference for "
+            f"A user connected this {tool_label} design as the visual reference for "
             "the application being built. Propose the requirements it is "
             "evidence for.\n\n"
-            "Every requirement must cite the frame it came from, in "
+            f"Every requirement must cite the {unit} it came from, in "
             "`evidence`, as "
-            '`{"type": "figma", "source": "<source>", "node": "<nodeId>"}`.\n\n'
+            f'`{{"type": "{provider}", "source": "<source>", "node": "<nodeId>"}}`.\n\n'
             "State only what the design shows. A screen proves that a "
             "capability is reachable; it does not tell you who may use it, "
             "what conditions govern it, what it writes, or what happens when "
@@ -1462,7 +1531,7 @@ def build_prompt(
             "listed gaps are questions the user will be asked, not holes for "
             "you to fill.\n\n"
             "```json\n"
-            + json.dumps(brief_for(doc, subject, output_dir), indent=2, sort_keys=True)
+            + json.dumps(brief, indent=2, sort_keys=True)
             + "\n```"
         )
         if feedback:
@@ -1489,6 +1558,58 @@ def build_prompt(
     # usually follows and occasionally does not, and one `references: ""`
     # fails the whole contract. Told what was rejected, the author fixes its
     # own field; told nothing, it re-emits it.
+    if spec.agent == "solution_architecture":
+        # THE DESIGN DRAWS THE NAVIGATION. Its sidebar is the same subtree on
+        # every screen, and `store.connect` records what it says. This agent
+        # is the one author of `navigation.tree`, and it could not see a
+        # design at all — so every Figma application got the generic rail with
+        # the drawn one rendered inside each page. §48: the design decides what
+        # exists; this agent decides how it is reached — and reproduces it.
+        #
+        # PLACED AFTER THE GENERIC PROMPT IS BUILT. It first sat among the
+        # per-agent hooks above, where `user` does not exist yet, and raised
+        # UnboundLocalError on every ux_architecture call — the one run that
+        # was meant to prove the design's rail could become the shell.
+        from services.figma.chrome import describe as _describe_chrome
+        from services.figma.chrome import describe_drawn as _describe_drawn
+
+        drawn = [(src.get("id"), src.get("chrome"))
+                 for src in doc.get("designSources") or [] if src.get("chrome")]
+
+        def _rail_text(chrome: dict) -> str:
+            side = chrome.get("sidebar") or {}
+            if side.get("drawn"):
+                # THE RAIL AS DRAWN, FOR THE ARCHITECT TO READ. Entry by entry
+                # with what each carries; which is the brand, which a status
+                # card, which a heading and which a destination is this
+                # agent's reading, not a threshold's.
+                return (_describe_drawn(side["drawn"])
+                        + "\n\nRead it: the brand is the entry at the top that names "
+                          "the product (a logo beside a name); a filled block of "
+                          "dates or states is status, not navigation; a short "
+                          "unactioned label introducing a run of entries is a group "
+                          "heading; an entry drawn as icon + label is a destination, and what "
+                          "is written underneath it — a caption, a badge count — belongs "
+                          "to that entry and is never a heading. Say nothing about "
+                          "entries you leave out; do not invent any.")
+            return _describe_chrome(side)
+
+        if drawn:
+            user += (
+                "\n\nA CONNECTED DESIGN DRAWS THE NAVIGATION. Its sidebar is "
+                "identical on every screen, and this is what it draws, in the "
+                "order the designer drew it:\n\n"
+                + "\n\n".join(f"[{sid}]\n" + _rail_text(chrome) for sid, chrome in drawn)
+                + "\n\nREPRODUCE IT. `navigation.style` is `sidebar`. "
+                "`navigation.tree` has one node per group heading, in that "
+                "order, with the group's destinations as its `children`, each "
+                "bound to the page whose route it names — use the `pages` "
+                "above. Do not add destinations the design does not draw, and "
+                "do not drop the ones it does; a drawn destination with no "
+                "matching page is still a node, without a `page`, so its "
+                "absence is visible rather than silent."
+            )
+
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
@@ -2058,7 +2179,10 @@ def make_executor(
             # entirely. Falling through is the whole contract of this seam.
             logger.warning("[figma] %s: %s", spec.subject, exc)
         if drawn is not None:
-            tell(reasoning, f"Building {page.get('route')} from its Figma frame.",
+            _provider = str(drawn.get("provider") or "figma")
+            _tool_label = {"uxpilot": "UX Pilot design", "figma": "Figma frame"}.get(
+                _provider, f"{_provider} design")
+            tell(reasoning, f"Building {page.get('route')} from its {_tool_label}.",
                  "step", spec.node)
             return AgentResult(
                 task_id=spec.task_id,
@@ -2068,10 +2192,17 @@ def make_executor(
                     natural_key=spec.subject,
                     body={"page": spec.subject,
                           "root": _as_template(drawn["root"]),
-                          "composedBy": "figma",
+                          "composedBy": _provider,
                           "dataSources": drawn["dataSources"],
+                          # THE FRAME'S SIZE TRAVELS WITH THE TREE. `compose`
+                          # returns it and `FigmaCanvas` scales by it, but
+                          # nothing between them carried it: a projected app
+                          # had no `_figmaCanvas`, so a 3902px frame rendered
+                          # cropped instead of scaled. Absent for a frame with
+                          # no recorded size, which composes flowed anyway.
+                          **({"canvas": drawn["canvas"]} if drawn.get("canvas") else {}),
                           "rationale": (
-                              f"built from Figma frame "
+                              f"built from {_tool_label} "
                               f"{page.get('figmaFrame')} (§48)"),
                           "requirements": list(page.get("requirements") or [])},
                 )],

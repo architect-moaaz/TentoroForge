@@ -44,6 +44,17 @@ Return ONLY a JSON object with exactly these keys:
       "connect_figma" — they named a Figma design to build from or to use as
                         the visual reference. Any figma.com/design or
                         figma.com/file link is this verb.
+      "connect_uxpilot" — they named a UX Pilot page (a uxpilot.ai link, or
+                        "UX Pilot page <id>") to build from or to use as the
+                        visual reference.
+    "rebuild"       — build or regenerate the WHOLE application: "build",
+                      "build it", "start the build", "generate the app",
+                      "rebuild everything". No route, no single screen.
+                      THE DIFFERENCE FROM compose_route IS SCOPE, and it was
+                      missing from this list entirely — so a bare "Build"
+                      became a compose of "/" and answered "there is no page
+                      at '/' in this application", which is true, unhelpful,
+                      and reads as a broken app rather than a misread word.
       "" when you are asking or answering rather than changing.
 
 Then fill in ONLY the fields that verb needs. Leave the others "".
@@ -87,6 +98,14 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
           from this". Leave "" if they have not said, and ask which in
           "clarification_needed": the difference is a four-page app versus
           a fourteen-page one, and it is cheap to ask and expensive to undo.
+
+  connect_uxpilot needs:
+      "uxpilot_ref": the UX Pilot page id or URL exactly as they gave it.
+      "key_env": the NAME of the environment variable holding their UX Pilot
+          API key — "UXPILOT_API_KEY", not the key. The same rule as
+          "token_env": never repeat a pasted key (a value starting `ep_`);
+          leave this "" and ask for the NAME in "clarification_needed".
+      "treat_as": as for connect_figma.
 
 Do not explain. Do not wrap the JSON in prose or code fences.
 
@@ -195,6 +214,7 @@ def understand_ask(
                 "clarification_needed": "What would you like to change?",
                 "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "uxpilot_ref": "", "key_env": "",
                 "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
@@ -214,6 +234,7 @@ def understand_ask(
                 "again and I will try once more.",
                 "answer": "", "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "uxpilot_ref": "", "key_env": "",
                 "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
@@ -224,6 +245,7 @@ def understand_ask(
                 "what on it?",
                 "answer": "", "verb": "", "route": "", "widgets": [],
                 "figma_url": "", "token_env": "",
+                "uxpilot_ref": "", "key_env": "",
                 "treat_as": "",
                 "target_file": "", "element_label": "", "new_value": ""}
 
@@ -259,6 +281,9 @@ def understand_ask(
         # have it persisted here, so anything shaped like a Figma PAT is
         # dropped and the user is asked for the variable name instead.
         "token_env": _env_name_only(data.get("token_env")),
+        "uxpilot_ref": str(data.get("uxpilot_ref") or "").strip(),
+        # A NAME, never an `ep_` key — the same guard `token_env` has.
+        "key_env": _env_name_only(data.get("key_env")),
         "treat_as": _design_scope(data.get("treat_as")),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),

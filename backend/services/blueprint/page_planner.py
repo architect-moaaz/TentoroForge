@@ -1011,6 +1011,14 @@ def plan_page(doc: dict, page: dict, template: dict,
         )
     root = bind_workflows(prune_unsatisfiable(roots[0], catalog),
                           workflow_for_page(doc, page, entity))
+    # THE PAGE'S RECORD IS A PAGE-LEVEL FACT: on a detail page every control
+    # that runs a workflow needing this entity's record carries its id.
+    from services.blueprint.record_scope import carry_entity, carry_record
+    carry_record(doc, page, {"root": root, "dataSources": template.get("dataSources") or []})
+    carry_entity(doc, page, root)
+    # A CITY SELECT NARROWS TO ITS STATE because the data model says so.
+    from services.blueprint.dependent_options import wire_dependent_options
+    wire_dependent_options(doc, {"root": root, "dataSources": template.get("dataSources") or []})
     # The composer's binder already resolved this tree's fetches, in the pass
     # that rewrote its pointers. Prefer them; derive only for a layout that
     # carries none. See `data_sources` for what re-deriving costs.
@@ -1058,6 +1066,12 @@ def plan_page(doc: dict, page: dict, template: dict,
         },
         "dataSources": sources,
         "root": root,
+        # THE FRAME'S SIZE REACHES THE RENDERER. `FigmaCanvas` scales a page
+        # by (available width / frame width) and reads it from here; without
+        # it a 3902px frame renders cropped, not scaled. Present only on a
+        # layout composed from a Figma frame with a recorded size — every
+        # other page is exactly as it was.
+        **({"_figmaCanvas": template["canvas"]} if template.get("canvas") else {}),
     }
     errors = validate_props(schema, catalog)
     if errors:
@@ -1283,6 +1297,22 @@ def page_brief(doc: dict, page_id: str) -> dict:
         "widgets": [w for w in _live(doc.get("widgets"))
                     if w.get("page") == page_id],
         "designSystem": doc.get("designSystem") or {},
+        # THE WORKFLOWS A CONTROL MAY DISPATCH, BY ID. The author is asked to
+        # write `{label, workflow}` and was never told which workflows exist,
+        # so it wrote names it inferred from the page — `exportCaseActivity`,
+        # once a template `$item.value` — and the validator refused the page
+        # twice, then failed it. A vocabulary the author cannot see is not a
+        # constraint; it is a guessing game with a gate at the end.
+        "workflows": [
+            {"id": w.get("id"), "name": w.get("name"),
+             "trigger": (w.get("trigger") or {}).get("detail")
+                        or (w.get("trigger") or {}).get("kind"),
+             # What the control that runs it must supply: a record the page
+             # shows, or fields a form on the page collects.
+             "inputs": [{k: v for k, v in i.items() if k in ("name", "kind", "entity", "type", "required")}
+                        for i in (w.get("inputs") or [])]}
+            for w in _live(doc.get("workflows")) if w.get("id")
+        ],
     }
     if entity:
         brief["entity"] = entity
@@ -1399,15 +1429,27 @@ def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
     for frame in frames:
         node_id = frame["nodeId"]
         name = str(frame.get("name") or "").strip() or node_id
-        slots.append({
+        # WHAT THE FRAME SHOWS IS WHAT IT IS. Fifteen frames of one real file
+        # carried one name, so the planner routed them by position — the
+        # Ticket Queue became /login, Front Desk /cases, Policy Manager
+        # /users/new: 14 of 15 wrong. The heading read off the frame is its
+        # identity, and the slot says so ahead of the layer name.
+        shows = str(frame.get("shows") or "").strip()
+        identity = shows or name
+        slot = {
             "feature": node_id,
             "figmaFrame": node_id,
             "source": frame.get("source"),
-            "name": name,
+            "name": identity,
             "pages": [{"slot": "screen",
-                       "prompt": "The screen drawn as \u201c%s\u201d." % name}],
-            "prompt": why,
-        })
+                       "prompt": ("The screen whose heading reads \u201c%s\u201d." % shows
+                                  if shows else "The screen drawn as \u201c%s\u201d." % name)}],
+            "prompt": why + (" Its heading reads \u201c%s\u201d: that is what it "
+                             "is, so its route and name say that." % shows if shows else ""),
+        }
+        if shows:
+            slot["shows"] = shows
+        slots.append(slot)
     return slots
 
 
@@ -1491,7 +1533,10 @@ _DRAWN_PREAMBLE = (
     "`figmaFrame` it must be built from. They are not declinable and they are "
     "not candidates: every one of them is a page, and every one keeps the "
     "`figmaFrame` its slot carries \u2014 that is how a screen gets built from "
-    "the drawing rather than composed from components.\n\n"
+    "the drawing rather than composed from components. A drawn slot's `shows` "
+    "is the heading read off the frame: route it as that, never by its "
+    "position \u2014 fifteen frames with one layer name once got fourteen "
+    "wrong routes.\n\n"
     "A design usually covers only the interesting part of an application. The "
     "entity features that follow are the rest, built AROUND those screens. "
     "Where an entity feature would BE one of them, answer it with that "
@@ -1517,6 +1562,10 @@ def page_slot_prompt(doc: dict) -> str:
             "and they are the whole page set. One page per frame: no more, and "
             "none declined.\n\n"
             "For each frame decide only what it IS — its route and its pattern. "
+            "A slot's `shows` is the heading read off the frame itself: route "
+            "the frame as THAT, never by its position in the list — one real "
+            "file had fifteen frames with one layer name and got fourteen wrong "
+            "routes. "
             "Set `figmaFrame` to the frame's `nodeId`, which the slot already "
             "carries: it is how the screen gets built from the drawing rather "
             "than composed from components.\n\n"

@@ -76,9 +76,12 @@ function overlayFor(url: string): Overlay | null {
 /** Inject client-fetchable `source` URLs onto dataSources that only carry a
  *  server-side op, so the client Engine can populate the form / record. */
 function withClientSources(schema: any, ov: Overlay): any {
+  // A LIST SOURCE IS FETCHED BY ITS ENTITY, NOT ITS NAME. The full page
+  // resolves `cases2` (a second list of Case) server-side by entity; the
+  // overlay asked `/api/data/cases2` and got a 404.
   const sources = (schema?.dataSources ?? []).map((s: any) => {
     if (s.source) return s;
-    if (s.op === "list" || s.op === "options") return { ...s, source: `/api/data/${s.name}` };
+    if (s.op === "list" || s.op === "options") return { ...s, source: `/api/data/${encodeURIComponent(String(s.entity || s.name))}` };
     if ((s.op === "get" || s.op === "detail" || s.op === "one" || s.op === "find") && ov.id) {
       return { ...s, source: `/api/data/${ov.entity}/${encodeURIComponent(ov.id)}` };
     }

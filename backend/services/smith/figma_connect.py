@@ -39,6 +39,8 @@ nodes; this only puts the source in front of them.
 """
 from __future__ import annotations
 
+import re
+
 import asyncio
 from typing import Any
 
@@ -196,3 +198,33 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
 
     record = attach(svc, ref, treat_as=treat_as)
     return {"record": record, "summary": summarise(ref, record)}
+
+
+_FIGMA_URL_RE = re.compile(r"https?://(?:www\.)?figma\.com/(?:file|design|board)/[^\s<>\"')]+")
+_ENV_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9_]*TOKEN[A-Z0-9_]*)\b")
+
+
+def find_in(text: str) -> dict | None:
+    """The design a brief names, or None.
+
+    "Import from Figma" arrives as an opening message — the brief with the file
+    link in it — and the first turn on a new project always defines. Read as
+    prose, the link was lost: the definition ran, the clarifier asked which
+    palette, and the design was never fetched. Finding the link here lets the
+    router attach it the moment a Blueprint exists, in the same turn.
+
+    Returns ``{"figma_url", "token_env", "treat_as"}``. The token is named,
+    never held (§42): an environment variable NAME in the text wins, else
+    ``FIGMA_TOKEN``. ``treat_as`` is "specification" unless the text calls the
+    design a reference.
+    """
+    from services.figma.url import parse as _parse
+
+    m = _FIGMA_URL_RE.search(text or "")
+    if not m or _parse(m.group(0)) is None:
+        return None
+    env = _ENV_NAME_RE.search(text or "")
+    lower = (text or "").lower()
+    treat_as = "reference" if ("as a reference" in lower or "as reference" in lower) else "specification"
+    return {"figma_url": m.group(0), "token_env": env.group(1) if env else "FIGMA_TOKEN",
+            "treat_as": treat_as}

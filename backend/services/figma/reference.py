@@ -133,6 +133,11 @@ class DesignReference:
 
     target: FigmaTarget
     source_id: str = "FIGMA-001"
+    #: ``figma`` or ``uxpilot`` — the tool the design lives in. Every field on
+    #: this reference is shaped by Figma, which came first; a UX Pilot
+    #: extraction fills the same shape (a design is a screen, the page is the
+    #: file) so the store, the brief and the layout read one thing.
+    provider: str = "figma"
     screens: list[ScreenRef] = field(default_factory=list)
     components: list[ComponentRef] = field(default_factory=list)
     interactions: list[InteractionRef] = field(default_factory=list)
@@ -143,7 +148,7 @@ class DesignReference:
 
     def evidence_for(self, node_id: str, locator: str = "") -> dict[str, str]:
         """One ``requirements[].evidence[]`` entry, in the §14 shape."""
-        entry = {"type": "figma", "source": self.source_id, "node": node_id}
+        entry = {"type": self.provider or "figma", "source": self.source_id, "node": node_id}
         if locator:
             entry["locator"] = locator
         return entry
@@ -433,6 +438,12 @@ def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
     payload = payload_of(blocks)
     if isinstance(payload, str):
         payload = _nodes_from_markup(payload) or payload
+    else:
+        # A REST node tree types every frame FRAME, nested or not; the markup
+        # converter demotes frames below a canvas's children to groups, and
+        # the same rule applies here or a screen's inner frames read as
+        # screens of their own.
+        payload = _demote_nested_frames(payload)
     nodes = _walk_nodes(payload)
 
     screens: list[ScreenRef] = []
@@ -451,10 +462,69 @@ def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
             width=float(box.get("width") or node.get("width") or 0),
             height=float(box.get("height") or node.get("height") or 0),
             looks_like_screen=not bool(_NON_SCREEN.match(name)),
+            # THE SCREEN'S GEOMETRY, KEPT. The metadata carries every element's
+            # box, auto-layout or not; the design context code does not for
+            # auto-layout, and a dashboard whose cards took their size from
+            # the layout had no region to look at. Boxes are in the screen's
+            # own coordinates, which is how the crops and the transform read.
+            structure={"boxes": _boxes_under(node, box)},
         ))
         if len(screens) >= limit:
             break
     return [s for s in screens if s.node_id]
+
+
+def _demote_nested_frames(payload: Any) -> Any:
+    """Frames below a canvas's own children — or below a selected root frame
+    when no canvas is in the tree — become groups, as the markup path already
+    reads them. A document root is neither: its canvases decide."""
+    if not isinstance(payload, dict):
+        return payload
+
+    def has_canvas(node: Any) -> bool:
+        if not isinstance(node, dict):
+            return False
+        if str(node.get("type") or "").upper() == "CANVAS":
+            return True
+        return any(has_canvas(c) for c in node.get("children") or [])
+
+    def convert(node: dict, below_screen: bool, parent_is_canvas: bool, rootless: bool) -> dict:
+        out = dict(node)
+        kind = str(node.get("type") or "").upper()
+        is_screen_level = parent_is_canvas or (rootless and not below_screen)
+        if kind == "FRAME" and not is_screen_level:
+            out["type"] = "GROUP"
+        kids = node.get("children") or []
+        if kids:
+            child_below = below_screen or (kind == "FRAME" and is_screen_level) or kind == "GROUP"
+            out["children"] = [convert(c, child_below, kind == "CANVAS", rootless) if isinstance(c, dict) else c
+                               for c in kids]
+        return out
+
+    root = payload.get("document") if isinstance(payload.get("document"), dict) else payload
+    rootless = not has_canvas(root)
+    converted = convert(root, False, False, rootless)
+    return {**payload, "document": converted} if root is not payload else converted
+
+
+def _boxes_under(node: dict, origin: dict) -> list[dict]:
+    """Every descendant's box relative to the screen's own top-left."""
+    ox, oy = float(origin.get("x") or 0), float(origin.get("y") or 0)
+    out: list[dict] = []
+
+    def walk(n: dict) -> None:
+        for child in n.get("children") or []:
+            if not isinstance(child, dict):
+                continue
+            b = child.get("absoluteBoundingBox") or child.get("boundingBox") or {}
+            if child.get("id") and b.get("width") is not None and b.get("height") is not None:
+                out.append({"id": str(child["id"]), "name": str(child.get("name") or ""),
+                            "x": float(b.get("x") or 0) - ox, "y": float(b.get("y") or 0) - oy,
+                            "width": float(b["width"]), "height": float(b["height"])})
+            walk(child)
+
+    walk(node)
+    return out
 
 
 def _walk_nodes(payload: Any, canvas: str = "") -> list[tuple[str, dict]]:
@@ -551,14 +621,17 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
     index = ref.screens.index(screen)
 
     if isinstance(payload, str):
-        ref.screens[index] = _replace(screen, structure=_structure_from_code(payload))
+        ref.screens[index] = _replace(screen, structure={
+            **_structure_from_code(payload), "boxes": (screen.structure or {}).get("boxes") or []})
         return
 
     if not isinstance(payload, dict):
         ref.gaps.append(f"no usable structure for {screen.name}")
         return
 
-    ref.screens[index] = _replace(screen, structure=payload)
+    ref.screens[index] = _replace(
+        screen, structure={**(payload if isinstance(payload, dict) else {"raw": payload}),
+                           "boxes": (screen.structure or {}).get("boxes") or []})
 
     known = {c.node_id for c in ref.components}
     for _canvas, node in _walk_nodes(payload):

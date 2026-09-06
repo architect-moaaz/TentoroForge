@@ -114,6 +114,11 @@ const FormOutcomeAction = z
  */
 export const FormProps = z.object({
   workflow:      z.string().optional(),
+  // The entity whose form this is — the model the form-side rules are
+  // evaluated for. Derived at projection from the page; a form that says
+  // none falls back to the workflow's name, which for a generated app is an
+  // id like FLOW-002 and matches no rule.
+  entity:        z.string().optional(),
   fields:        z.array(Field).optional(),
   defaultValues: z.record(z.unknown()).optional(),
   submitLabel:   z.string().optional(),

@@ -97,8 +97,10 @@ Output JSON shape:
 STRICT rules:
   * If kind == "navigate", target MUST be one of the strings in \
 available_routes, verbatim. Never invent a route.
-  * If kind == "workflow", target MUST be one of the strings in \
-available_workflows, verbatim. Never invent a workflow name.
+  * If kind == "workflow", target MUST be the id of one entry in \
+available_workflows — the part before " — " — or the entry verbatim. The \
+name and trigger after it say what the workflow does; match the label to \
+them. Never invent a workflow.
   * If kind == "external", target MUST be a full URL (http:// or https://).
   * If nothing in the registry is a plausible match, or the label is \
 ambiguous, return {"kind":"none","target":null,"confidence":0.0}.
@@ -114,6 +116,23 @@ Confidence rubric:
 Do not narrate. Emit ONE JSON object. No code fences."""
 
 
+#: The shape `classify_figma_action_llm` parses back. Declared so the reply is
+#: machine-checked rather than hoped for — the parser's fallback for anything
+#: it cannot read is `kind="none"`, which is indistinguishable from a genuine
+#: "no action" and is exactly how the broken import stayed invisible.
+_REPLY_SCHEMA: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["kind"],
+    "properties": {
+        "kind": {"type": "string",
+                 "enum": ["navigate", "workflow", "external", "none"]},
+        "target": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+}
+
+
 def _default_query_fn(system_prompt: str, user_prompt: str) -> str:
     """Real LLM call — kept minimal so tests can stub cleanly.
 
@@ -121,9 +140,27 @@ def _default_query_fn(system_prompt: str, user_prompt: str) -> str:
     so we don't fork provider handling. Falls back to an empty string on
     any error; the caller treats that as "garbage → none".
     """
+    # THIS IMPORTED A FUNCTION THAT NO LONGER EXISTS.
+    #
+    # It was `from services.llm_edit import _default_llm_query`, removed when
+    # that module made every caller pass its own boundary. The ImportError
+    # landed in the `except` below and was logged, and the CALLER swallows a
+    # failure as "garbage → none" — so the registry-safe classifier had been
+    # silently dead, and every Figma button fell through to keyword matching.
+    #
+    # The cost was invisible until a design with real buttons arrived: keyword
+    # matching either invented a workflow the app does not define, or declared
+    # none, and the Blueprint validator refuses BOTH. A 15-screen design lost
+    # every page to a dangling import.
+    #
+    # Bound to the same client the rest of the pipeline uses, so timeouts,
+    # retries and the model choice are not forked here.
     try:
-        from services.llm_edit import _default_llm_query  # type: ignore
-        return _default_llm_query(system_prompt, user_prompt)  # type: ignore[misc]
+        from services.blueprint.executors import AnthropicModel
+
+        reply = AnthropicModel(max_tokens=1024)(
+            system=system_prompt, user=user_prompt, schema=_REPLY_SCHEMA)
+        return str(getattr(reply, "text", reply) or "")
     except Exception:
         logger.exception("classify_figma_action_llm: default LLM query failed")
         return ""
@@ -213,9 +250,16 @@ def _enforce_registry_safety(
         return binding
 
     if binding.kind == "workflow":
-        if not binding.target or binding.target not in workflows:
+        # An entry may read "FLOW-009 — Refund Approval Decision: …"; the
+        # model may answer with the entry or with the id. Either way the
+        # binding's target is the id — the only spelling a page may carry.
+        ids = {w.split(" — ")[0].strip(): w for w in workflows}
+        target = (binding.target or "").strip()
+        if target in workflows:
+            target = target.split(" — ")[0].strip()
+        if not target or target not in ids:
             return FigmaActionBinding(kind="none", target=None, confidence=0.0)
-        return binding
+        return FigmaActionBinding(kind="workflow", target=target, confidence=binding.confidence)
 
     if binding.kind == "external":
         t = (binding.target or "").strip()

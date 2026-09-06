@@ -4,6 +4,13 @@ const config: Config = {
   darkMode: ["class"],
   content: [
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
+    // THE PAGES ARE JSON, AND THE JIT ONLY COMPILES WHAT IT READS. Every
+    // className a page uses lives in src/schemas/**/*.json; without this glob
+    // 6,519 arbitrary classes on one real 15-page app reached the DOM with no
+    // CSS behind them. This copy of the config is the THIRD producer of the
+    // same globs (runtime_injector and app-foundation are the others) and was
+    // the one that lost the fix — kept in step by hand until there is one.
+    "./src/schemas/**/*.json",
     "./node_modules/@tentoroforge/library/**/*.{js,jsx,ts,tsx}",
     "./node_modules/@tentoroforge/renderer/**/*.{js,jsx,ts,tsx}",
     "./node_modules/@tentoroforge/engine/**/*.{js,jsx,ts,tsx}",

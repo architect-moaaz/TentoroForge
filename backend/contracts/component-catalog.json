@@ -3147,6 +3147,9 @@
               "full"
             ],
             "default": "lg"
+          },
+          "navigate": {
+            "type": "string"
           }
         },
         "additionalProperties": false,
@@ -5698,6 +5701,9 @@
           "workflow": {
             "type": "string"
           },
+          "entity": {
+            "type": "string"
+          },
           "fields": {
             "type": "array",
             "items": {
@@ -7693,7 +7699,8 @@
               "password",
               "number",
               "url",
-              "tel"
+              "tel",
+              "search"
             ],
             "default": "text"
           },
@@ -9375,6 +9382,24 @@
                 "type": "string",
                 "minLength": 1,
                 "default": "name"
+              },
+              "dependsOn": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "column": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "field",
+                  "column"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -12126,6 +12151,24 @@
                 "type": "string",
                 "minLength": 1,
                 "default": "name"
+              },
+              "dependsOn": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "column": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "field",
+                  "column"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [

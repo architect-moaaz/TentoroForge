@@ -95,7 +95,9 @@ def test_transport_failure_retries_then_raises(monkeypatch):
         raise FigmaGatewayError("unreachable", "connection reset")
 
     monkeypatch.setattr(FigmaGateway, "_invoke", boom)
-    gw = gateway(max_attempts=3)
+    # The REST fallback would answer `get_metadata` after the third failure;
+    # this test is about the MCP retries and must not leave the machine.
+    gw = gateway(max_attempts=3, rest_fallback=False)
     with pytest.raises(FigmaGatewayError) as exc:
         run(gw.call("get_metadata", file_key="AbcDef123456"))
     assert exc.value.kind == "unreachable"

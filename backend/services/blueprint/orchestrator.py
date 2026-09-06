@@ -44,7 +44,7 @@ from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
     InvalidPatternTemplate,
-    InvalidWorkflowStep,
+    InvalidWorkflowStep, InvalidBusinessRule,
     apply_agent_result,
     capability_for,
 )
@@ -666,9 +666,40 @@ def completed_nodes(
     for key, node in nodes.items():
         if node.kind != "agent" or not node.produces:
             continue
-        if all(_section(doc, path) for path in node.produces):
-            done.add(key)
+        if not all(_section(doc, path) for path in node.produces):
+            continue
+        # A FAN-OUT IS COMPLETE WHEN EVERY SUBJECT IS, NOT WHEN ANY IS.
+        #
+        # "The section has content" is the right test for a node that writes
+        # once. For a node that writes once PER SUBJECT it is wrong by exactly
+        # the failures: `page_layouts` ended a run with 4 of 15 pages composed
+        # and 11 failed, this read the 4 as "pageLayouts has content" and
+        # planned the next run without it — so `frontend` was built from a
+        # four-page application and the eleven failed pages were never
+        # retried. Resume-not-redo became resume-not-finish.
+        #
+        # Checked against the rows themselves rather than a count, because a
+        # deprecated page leaves a layout behind and a count would call that
+        # complete too.
+        subject_key = _SUBJECT_ROW_KEY.get(node.fanout)
+        if node.fanout and subject_key:
+            section, field = subject_key
+            present = {str(row.get(field) or "")
+                       for row in (doc.get(section) or []) if isinstance(row, dict)}
+            if any(subject not in present for subject in subjects_for(node, doc)):
+                continue
+        done.add(key)
     return done
+
+
+#: For a fan-out node, which produced section names the subject a row was
+#: written for, and under which field. Only fan-outs whose rows carry their
+#: subject can be judged per subject; one that does not (a design source's
+#: requirements carry `evidence`, not a source id) keeps the section-level
+#: rule above, which is the behaviour every run had before this existed.
+_SUBJECT_ROW_KEY: dict[str, tuple[str, str]] = {
+    "pages": ("pageLayouts", "page"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1213,7 +1244,10 @@ def _apply_round(
             application = apply_agent_result(
                 svc, outcome, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+            # The author's refusals are outcomes here too. InvalidBusinessRule
+            # escaped this path on 2026-09-06 and took a whole build down with
+            # no end event written.
             _rejected(subject, label, _reason(exc))
             continue
 
@@ -1314,7 +1348,7 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
             feedback = str(exc)
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed
@@ -1383,6 +1417,8 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     )
 
     apply_data_projection(svc, app_root)
+    from services.blueprint.projection import project_business_rules
+    project_business_rules(svc.doc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
@@ -1395,7 +1431,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
         project_public_resources,
-        project_nav_flow, project_root_route,
+        project_nav_flow, project_root_route, project_shell,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -1444,6 +1480,10 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
     project_nav_flow(svc.doc, app_root)
+    # The rail itself, from the same tree the route graph was read from:
+    # `shell.json` is what the scaffold's layout builds its sidebar from, and
+    # nothing wrote it, so every rail was the flat fallback.
+    project_shell(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
     # The data route needs the same list the matcher was built from.

@@ -161,7 +161,11 @@ async def build_schema_from_jsx(
         # The frame's own dimensions, so the renderer can scale the canvas to
         # whatever width it is given instead of cropping it.
         if canvas is not None:
-            schema["_figmaCanvas"] = {"width": canvas[0], "height": canvas[1]}
+            schema["_figmaCanvas"] = {"width": canvas[0], "height": canvas[1],
+                                      # `fluid` reflows, `scale` shrinks as a
+                                      # picture — decided by `frame_fit` from
+                                      # the frame's own top level.
+                                      "fit": schema.get("canvasFit") or "scale"}
 
     # ── Auto-binding pass ─────────────────────────────────────────────
     # Attach dataSources + Repeat wrappers + {{item.field}} bindings by

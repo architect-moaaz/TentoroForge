@@ -30,6 +30,9 @@ const nextConfig: NextConfig = {
   // Next.js's file-tracer would otherwise leave them out and the deployed
   // function hits ENOENT on `/var/task/src/schemas/…`. Include them for every
   // route (the schemas are shared across the tree).
+  // A verification build (`verify_build`) sets NEXT_DIST_DIR so it compiles
+  // beside a running dev server instead of into its `.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingIncludes: {
     "/**/*": [
       "./src/schemas/**/*.json",

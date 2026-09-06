@@ -107,16 +107,25 @@ def test_the_landing_route_skips_auth_pages():
     assert assembly._landing_route({"navigation": {"landing": "/home"}}) == "/home"
 
 
-def test_assembly_invalidates_the_build_cache(tmp_path):
-    """Re-assembling rewrites the sources Next compiled from, so leaving
-    `.next` in place means a fixed file keeps failing exactly as before."""
+def test_assembly_invalidates_the_build_cache_but_not_the_served_app(tmp_path):
+    """Re-assembling rewrites the sources Next compiled from, so the compiler
+    cache under `.next/cache` and the verification build's output go stale
+    and are cleared. The rest of `.next` is what a running dev server serves
+    from — removing it whole answered every request with "Internal Server
+    Error" (`routes-manifest.json` missing) after each rebuild."""
     app = tmp_path / "app"
     stale = app / ".next" / "cache"
     stale.mkdir(parents=True)
     (stale / "old.js").write_text("stale")
+    (app / ".next" / "routes-manifest.json").write_text("{}")
+    verify = app / assembly.VERIFY_DIST_DIR
+    verify.mkdir()
+    (verify / "old.js").write_text("stale")
 
     assembly.assemble({"application": {"name": "T"}}, app, project_short_id="t")
-    assert not (app / ".next").exists()
+    assert not stale.exists()
+    assert not verify.exists()
+    assert (app / ".next" / "routes-manifest.json").exists()
 
 
 def test_everything_a_projection_writes_is_protected_from_the_scaffold(tmp_path):

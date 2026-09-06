@@ -23,7 +23,7 @@
  * its state. Nothing streams a model's intermediate thinking into this pane.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * The engine's origin. The greeting fetch below was relative, so it resolved
@@ -533,20 +533,111 @@ export function SmithPanel({
     ]);
   }, [run.messages]);
 
+  // Split out so a turn can be sent by something other than the composer —
+  // the Figma import hands one in below, and it must go through exactly the
+  // same path a typed message does or it is a second way to talk to Smith.
+  // THE OPEN QUESTIONS: Smith's trailing messages that carry options, after
+  // the last thing the user said. Answered ones are remembered until the set
+  // is sent; a new user message closes the set.
+  const [questionAnswers, setQuestionAnswers] = useState<Record<number, string>>({});
+  const openQuestions = useMemo(() => {
+    const out: number[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user") break;
+      if (m.options && m.options.length > 0) out.unshift(i);
+    }
+    return out;
+  }, [messages]);
+  const firstUnanswered = openQuestions.findIndex((i) => !questionAnswers[i]);
+  const answerQuestion = (index: number, answer: string) => {
+    const next = { ...questionAnswers, [index]: answer };
+    setQuestionAnswers(next);
+    if (openQuestions.every((i) => next[i])) {
+      const reply = openQuestions
+        .map((i) => `${messages[i].text.trim()} ${next[i]}`)
+        .join("\n");
+      setQuestionAnswers({});
+      sendText(openQuestions.length === 1 ? next[openQuestions[0]] : reply);
+    }
+  };
+
+  const sendText = useCallback(
+    (text: string) => {
+      if (!text || !projectId) return;
+      // Taken BEFORE the new turn is appended: the history is what came before
+      // this message, and including the message in its own history would have
+      // Smith read the question as its own answer.
+      const prior = messages.map((m) => ({ role: m.role, text: m.text }));
+      setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
+      void start({ description: text, evidence, history: prior });
+    },
+    [projectId, messages, evidence, start],
+  );
+
   const send = () => {
     const text = draft.trim();
     if (!text || busy || !projectId) return;
     setDraft("");
-    // Taken BEFORE the new turn is appended: the history is what came before
-    // this message, and including the message in its own history would have
-    // Smith read the question as its own answer.
-    const prior = messages.map((m) => ({ role: m.role, text: m.text }));
-    setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-    void start({ description: text, evidence, history: prior });
+    sendText(text);
   };
 
+  // THE FIGMA IMPORT LANDS HERE.
+  //
+  // `NewAppDialog` writes `figma_connect_<projectId>` and navigates. The
+  // brief and the design go to Smith as ONE opening message: the router finds
+  // the link in the brief, asks its clarifying questions knowing a design is
+  // attached, runs the definition, and attaches the design in the same turn.
+  //
+  // A held trigger used to send the connect when "the run completed" — and a
+  // clarifying question completes a turn, so on 2026-09-05 the connect went
+  // out before the definition, Smith answered "let me define that first",
+  // and the design was never fetched. There is nothing to time any more.
+  useEffect(() => {
+    if (!projectId) return;
+    // `design_connect_` carries either provider; `figma_connect_` is the
+    // older key a tab may still hold.
+    const key = `design_connect_${projectId}`;
+    const legacyKey = `figma_connect_${projectId}`;
+    const raw = sessionStorage.getItem(key) ?? sessionStorage.getItem(legacyKey);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(legacyKey);
+    try {
+      const parsed = JSON.parse(raw);
+      const provider: string = parsed.provider === "uxpilot" ? "uxpilot" : "figma";
+      const ref: string = String(parsed.ref || parsed.figma_url || "").trim();
+      const scope = parsed.treat_as === "specification" ? "the specification" : "a reference";
+      // The credential is named, never pasted (§42): the message tells Smith
+      // which environment variable holds it, and the server resolves the
+      // value from the organisation's integrations at the moment of the call.
+      const connect = !ref
+        ? ""
+        : provider === "uxpilot"
+          ? `Connect this UX Pilot page as ${scope}: ${ref} — the API key ` +
+            `is in the environment variable UXPILOT_API_KEY.`
+          : `Connect this Figma design as ${scope}: ${ref} — the access token ` +
+            `is in the environment variable FIGMA_TOKEN.`;
+      const opening = [String(parsed.brief || "").trim(), connect]
+        .filter(Boolean).join("\n\n");
+      if (opening) sendText(opening);
+    } catch {
+      // A malformed trigger is not worth a broken panel.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const approve = () => {
-    const brief = [...messages].reverse().find((m) => m.role === "user");
+    // THE BRIEF MAY NOT BE IN MEMORY. After a reload — or after any later turn
+    // — the last user message can be a clarification answer or nothing at all,
+    // and this returned silently, so the button did nothing. The Blueprint's
+    // own description is the brief the definition was built from.
+    const spoken = [...messages].reverse().find((m) => m.role === "user");
+    const described = String(
+      ((blueprint as { application?: { description?: unknown } } | null | undefined)
+        ?.application?.description) ?? "",
+    ).trim();
+    const brief = spoken ?? (described ? { text: described } : null);
     if (!brief) return;
     setMessages((m) => [
       ...m,
@@ -555,6 +646,22 @@ export function SmithPanel({
     ]);
     void start({ description: brief.text, evidence, approved: true });
   };
+
+  // A definition exists and nothing has been built from it. Read off the
+  // Blueprint so it survives reloads and later turns, unlike `awaitingApproval`.
+  // "Not built" means FEWER LAYOUTS THAN PAGES, not zero layouts. A run that
+  // failed partway leaves some pages composed and the rest not — 4 of 15 on a
+  // real project — and demanding zero hid the gate on exactly the project
+  // that most needed a way to finish. A fresh definition has no pages yet, so
+  // the floor of one keeps it showing there too.
+  const bp = (blueprint ?? {}) as Record<string, unknown>;
+  const pageCount = (bp.pages as unknown[] | undefined)?.length ?? 0;
+  const layoutCount = (bp.pageLayouts as unknown[] | undefined)?.length ?? 0;
+  const definedNotBuilt =
+    !busy &&
+    Array.isArray(bp.requirements) &&
+    (bp.requirements as unknown[]).length > 0 &&
+    layoutCount < Math.max(pageCount, 1);
 
   // What the side panel is showing: the run you picked, or the live one.
   const sidePlan =
@@ -690,18 +797,43 @@ export function SmithPanel({
 
             {m.options && m.options.length > 0 && (
               // §16 — the architect asks rather than assumes. Answering is
-              // just another turn, so these send their own label.
-              <div className="mt-2 flex flex-wrap gap-1">
-                {m.options.map((opt) => (
-                  <button
-                    key={opt}
-                    onClick={() => setDraft(opt)}
-                    className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
+              // just another turn, so these SEND their own label.
+              //
+              // ONE QUESTION AT A TIME. Smith may ask three at once, each its
+              // own message. When every question showed its chips, the first
+              // chip clicked sent that answer alone, the turn ended, and the
+              // other two questions were never answered — the answer to the
+              // last one overrode the rest. Only the first unanswered question
+              // of the open set offers its chips; an answer is kept here and
+              // the next question opens; the last answer sends them all in
+              // one reply, which is what the clarifier expects.
+              (() => {
+                const idx = openQuestions.indexOf(i);
+                if (idx < 0) return null; // an old question, already answered
+                const answered = questionAnswers[i];
+                if (answered) {
+                  return (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      <span className="rounded border border-current/25 bg-current/10 px-2 py-0.5">{answered}</span>
+                    </p>
+                  );
+                }
+                if (idx !== firstUnanswered) return null; // its turn comes next
+                return (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {m.options.map((opt) => (
+                      <button
+                        key={opt}
+                        disabled={busy}
+                        onClick={() => answerQuestion(i, opt)}
+                        className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()
             )}
             </div>
             )}
@@ -827,6 +959,36 @@ export function SmithPanel({
             definition={blueprint}
           />
         </>
+      ) : definedNotBuilt ? (
+        // THE GATE OUTLIVES THE RUN THAT OPENED IT.
+        //
+        // `run.awaitingApproval` is in-memory: a reload, or any turn after the
+        // definition — connecting a Figma design, answering a question — left
+        // the panel with no plan and the approval control gone. The definition
+        // was finished and there was no way left to say yes to it, so nothing
+        // ever started and the stage list stayed empty. That is why the
+        // pipeline "cannot be seen": no run was ever begun from here.
+        //
+        // Derived from the Blueprint instead: a definition exists, nothing has
+        // been built from it, and no run is in flight.
+        <div className="mt-6 px-2">
+          {/* The same list the in-memory gate shows, read off the Blueprint
+              so that a reload or a later turn does not hide what will be
+              built behind a bare button. */}
+          <Definition doc={blueprint as Record<string, unknown> | null} />
+          <p className="mt-3 text-xs text-muted-foreground">
+            The definition is ready and nothing has been built from it yet.
+            Approving builds the application — the pages, the data and the
+            workflows — which takes a few minutes.
+          </p>
+          <button
+            onClick={approve}
+            disabled={busy}
+            className="mt-3 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
+          >
+            Approve and build
+          </button>
+        </div>
       ) : (
         <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
           What Smith does appears here — the plan it follows, the stages as
@@ -1181,6 +1343,19 @@ function Definition({ doc }: { doc?: Record<string, unknown> | null }) {
 
   const nameOf = (r: Record<string, unknown> | string) =>
     typeof r === "string" ? r : String(r.name ?? r.role ?? r.id ?? "");
+  const rows = (v: unknown): Record<string, unknown>[] =>
+    Array.isArray(v) ? (v as Record<string, unknown>[]).filter((x) => x && typeof x === "object") : [];
+  const caps = rows((doc?.product as Record<string, unknown> | undefined)?.capabilities);
+  const frames = rows(doc?.designSources).flatMap((src) => rows(src.frames));
+  const data = (doc?.data as Record<string, unknown> | undefined) ?? {};
+  const named = (v: unknown, key = "name") =>
+    rows(v).map((x) => String(x[key] ?? x.name ?? x.id ?? "")).filter(Boolean);
+  const sections: [string, string[]][] = [
+    ["Pages", named(doc?.pages, "route")],
+    ["Data model", named(data.entities)],
+    ["Workflows", named(doc?.workflows)],
+    ["Business rules", named(doc?.businessRules)],
+  ];
 
   return (
     <div className="mt-3 border-t pt-3">
@@ -1194,6 +1369,61 @@ function Definition({ doc }: { doc?: Record<string, unknown> | null }) {
         </p>
       )}
 
+      {/*
+        WHAT WILL BE BUILT, BY NAME. The gate showed the requirements and a
+        row of counts; the user asked where the pages, data model, workflows
+        and rules could be seen before approving. Before the build the
+        Blueprint holds the product's capabilities and the design's frames —
+        those are what the build will turn into pages — and after a build the
+        sections themselves are listed, so the same panel reads correctly at
+        both moments. The left rail's Data Model, Workflows, Rules and Pages
+        tabs open each section in full once it exists.
+      */}
+      {frames.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium">
+            Screens from the design ({frames.length})
+          </p>
+          <ul className="mt-1 space-y-1">
+            {frames.map((f, i) => (
+              <li key={String(f.nodeId ?? i)} className="flex gap-1.5 text-xs">
+                <span className="text-muted-foreground/50">·</span>
+                <span>{String(f.name ?? f.nodeId ?? "")}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {caps.length > 0 && (
+        <>
+          <p className="mt-3 text-xs font-medium">
+            What it will be able to do ({caps.length})
+          </p>
+          <ul className="mt-1 space-y-1">
+            {caps.map((c, i) => (
+              <li key={String(c.name ?? i)} className="flex gap-1.5 text-xs">
+                <span className="text-muted-foreground/50">·</span>
+                <span>
+                  <span className="font-medium">{String(c.name ?? "")}</span>
+                  {c.description ? <span className="text-muted-foreground"> — {String(c.description)}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {sections.map(([label, items]) =>
+        items.length === 0 ? null : (
+          <div key={label}>
+            <p className="mt-3 text-xs font-medium">
+              {label} ({items.length})
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              {items.join(" · ")}
+            </p>
+          </div>
+        ),
+      )}
       {reqs.length > 0 && (
         <>
           <p className="mt-3 text-xs font-medium">
