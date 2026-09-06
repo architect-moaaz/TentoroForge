@@ -143,7 +143,7 @@ def map_row(ask: Callable[..., str], leaves: Sequence[str], entity: dict) -> lis
 
 
 def bind_rows(region: dict, rows: list[dict], mapping: Sequence[dict], *,
-              source: str, as_name: str = "item") -> dict | None:
+              source: str, as_name: str = "item", locale: str = "") -> dict | None:
     """The region with its list rows replaced by one Repeat over ``source``,
     whose template is the first row with its mapped leaves bound. None when
     nothing was mapped: a Repeat of literals would show one drawn row per
@@ -160,6 +160,11 @@ def bind_rows(region: dict, rows: list[dict], mapping: Sequence[dict], *,
         expr = f"{as_name}.{m['field']}"
         if m.get("formatter"):
             expr += "|" + m["formatter"]
+            # A date is written in the application's language — the
+            # Blueprint's `product.locale` — not the viewer's or the server's,
+            # which differ and made React refuse to hydrate the page.
+            if locale and m["formatter"] in ("time", "date", "weekday"):
+                expr += ":" + locale
         props = dict(leaf.get("props") or {})
         props["content"] = "{{" + expr + "}}"
         leaf["props"] = props

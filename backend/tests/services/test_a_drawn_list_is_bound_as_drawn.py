@@ -107,3 +107,12 @@ def test_the_mapper_reads_a_reply_object_as_the_classifier_does():
     class Reply:
         text = json.dumps({"leaves": [{"index": 0, "field": "title", "formatter": ""}]})
     assert rows.map_row(lambda **k: Reply(), ["x"], SESSION) == [{"index": 0, "field": "title", "formatter": ""}]
+
+
+def test_dates_in_a_bound_row_are_written_in_the_applications_language():
+    root = {"type": "Stack", "children": [_region()]}
+    out, sources, applied = realize(root, [
+        {"nodeId": "1:282", "kind": "table", "entity": "Session", "columns": ["title"], "title": "x", "confidence": 0.9, "reason": ""}],
+        row_mapper=lambda leaves, entity: rows.map_row(_stub_ask, leaves, SESSION), locale="ar")
+    texts = [l["props"]["content"] for l in rows._leaves(out["children"][0]["children"][1]["children"][0]["children"][0], [])]
+    assert texts[:2] == ["{{item.startsAt|time:ar}}", "{{item.startsAt|weekday:ar}}"] and texts[2] == "{{item.title}}"

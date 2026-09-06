@@ -25,6 +25,12 @@ COPY frontend ./frontend
 # (typescript, next, etc. live in various workspaces here). --legacy-
 # peer-deps because React 19 is still catching up.
 RUN npm ci --include-workspace-root --legacy-peer-deps
+# THE WORKSPACE PACKAGES ARE BUILT HERE, NOT SHIPPED. Their `main` points
+# at `dist/`, which is gitignored: a tree taken from git builds nothing for
+# `@tentoroforge/schema`, `renderer`, `library` and `engine`, and Next fails
+# with "Module not found". The old deployment only built because its tree
+# was a working copy that carried the dists along.
+RUN npm run build:engine-stack && npm run build:editor-stack
 
 # Next.js inlines every NEXT_PUBLIC_* env var into the client bundle at
 # build time. Setting it in docker-compose's environment: block only

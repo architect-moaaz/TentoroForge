@@ -93,11 +93,16 @@ function applyFormatter(value: unknown, formatter: string, arg?: string): unknow
     case "weekday": {
       const t = value instanceof Date ? value.getTime() : Date.parse(String(value));
       if (Number.isNaN(t)) return String(value);
-      const locale = arg || undefined;
+      // THE SAME TEXT ON THE SERVER AND IN THE BROWSER. Left to the runtime,
+      // the server formatted in its locale and time zone and the browser in
+      // the viewer's, and React refused to hydrate the page. The locale is
+      // the formatter's argument (the application's, as the composer wrote
+      // it) with a fixed fallback, and the time zone is UTC on both sides.
+      const locale = arg || "en-GB";
       const opts: Intl.DateTimeFormatOptions =
-        formatter === "time" ? { hour: "2-digit", minute: "2-digit" }
-        : formatter === "weekday" ? { weekday: "long" }
-        : { day: "numeric", month: "long" };
+        formatter === "time" ? { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }
+        : formatter === "weekday" ? { weekday: "long", timeZone: "UTC" }
+        : { day: "numeric", month: "long", timeZone: "UTC" };
       try {
         return new Intl.DateTimeFormat(locale, opts).format(new Date(t));
       } catch {

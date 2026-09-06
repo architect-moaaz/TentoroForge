@@ -19,8 +19,8 @@
   ],
   "scripts": {
     "test": "npm test --workspace=packages/schema && npm test --workspace=packages/renderer && npm test --workspace=packages/library && npm test --workspace=packages/editor && npm test --workspace=packages/figma-parser",
-    "build:engine-stack": "npm run build --workspace=packages/schema && npm run build --workspace=packages/renderer && npm run build --workspace=packages/library && npm run build --workspace=packages/engine",
-    "build:editor-stack": "npm run build --workspace=packages/registry && npm run build --workspace=packages/patches && npm run build --workspace=packages/editor",
+    "build:engine-stack": "npm run build --workspace=packages/schema && npm run build --workspace=packages/patches && npm run build --workspace=packages/renderer && npm run build --workspace=packages/library && npm run build --workspace=packages/engine",
+    "build:editor-stack": "npm run build --workspace=packages/registry && npm run build --workspace=packages/editor",
     "build": "npm run build:engine-stack && npm run build:editor-stack"
   }
 }

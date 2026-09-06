@@ -1125,7 +1125,16 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # seed — enough rows that a preview shows something
 # ---------------------------------------------------------------------------
 
-def _seed_value(field: dict, entity_name: str, row: int) -> Any:
+def _seed_value(field: dict, entity_name: str, row: int,
+                tables_by_id: dict | None = None) -> Any:
+    # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
+    # it failed every child insert as an invalid uuid and the demo database
+    # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
+    # i-th parent row it inserted, so that is what is written.
+    if field.get("references") and tables_by_id is not None:
+        parent = tables_by_id.get(str(field.get("references")))
+        if parent:
+            return f"ref:{parent}[{(row - 1) % 3}]"
     from services.blueprint.page_planner import enum_values
 
     kind = str(field.get("type") or "text").lower()
@@ -1163,6 +1172,8 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
     """
     entities = [e for e in (doc.get("data") or {}).get("entities") or []
                 if e.get("status") != "DEPRECATED"]
+    tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
+                    for e in entities if e.get("id")}
 
     seed: dict[str, list[dict]] = {}
     for entity in entities:
@@ -1174,7 +1185,7 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):
                     continue
-                record[field.get("name")] = _seed_value(field, name, row)
+                record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
             out_rows.append(record)
         seed[table] = out_rows
 

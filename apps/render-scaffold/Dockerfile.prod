@@ -19,6 +19,12 @@ COPY apps ./apps
 COPY frontend ./frontend
 
 RUN npm ci --include-workspace-root --legacy-peer-deps
+# THE WORKSPACE PACKAGES ARE BUILT HERE, NOT SHIPPED. Their `main` points
+# at `dist/`, which is gitignored: a tree taken from git builds nothing for
+# `@tentoroforge/schema`, `renderer`, `library` and `engine`, and Next fails
+# with "Module not found". The old deployment only built because its tree
+# was a working copy that carried the dists along.
+RUN npm run build:engine-stack
 
 # NEXT_PUBLIC_* env vars are baked into the client bundle at build time.
 # The scaffold's SSR page reads NEXT_PUBLIC_API_URL to fetch the
