@@ -1,4 +1,4 @@
-import type { RenderTruthFinding } from "./renderTruth";
+import type { RenderTruthFinding } from "./renderTruth.js";
 /**
  * Mirror of the Python-side Interaction/Evidence/Fault types.
  *

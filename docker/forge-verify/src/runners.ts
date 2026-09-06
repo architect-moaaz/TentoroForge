@@ -11,7 +11,7 @@ import {
   classifyRenderTruth,
   emptyWidgetCounts,
   type WidgetCounts,
-} from "./renderTruth";
+} from "./renderTruth.js";
 import {
   ButtonInteraction,
   DetailInteraction,
