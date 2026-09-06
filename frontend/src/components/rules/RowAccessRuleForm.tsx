@@ -17,6 +17,21 @@ import { conditionToFeel } from "@/lib/condition-to-feel";
 import type { ConditionExpression, RuleConfig } from "@/types/rules";
 
 /**
+ * True while some row of the tree still has no field chosen.
+ *
+ * A half-built row compiles to `null = ""` — a comparison between two
+ * constants, which the data engine refuses because it names no column of the
+ * row. Refusing means returning NO rows, so saving a rule mid-edit would make
+ * the entity unreadable until someone noticed. The compiled string alone does
+ * not look wrong, which is exactly why this says so.
+ */
+function hasBlankField(expr: ConditionExpression | null | undefined): boolean {
+  if (!expr) return false;
+  if ("logic" in expr) return expr.conditions.some(hasBlankField);
+  return !expr.field?.trim();
+}
+
+/**
  * Authoring for a `row_access` rule — which ROWS a role may reach.
  *
  * The sibling Access Control form is a role x action grid: it decides whether
@@ -160,11 +175,19 @@ export function RowAccessRuleForm({
             Compiled to the query&apos;s WHERE clause
           </Label>
           <pre className="mt-1 overflow-x-auto text-[11px]">{config.whenFeel}</pre>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            Comparisons, <code>in</code>, ranges and and/or/not become SQL.
-            Anything else — a function call, arithmetic — cannot, and the rule
-            returns no rows rather than being skipped.
-          </p>
+          {hasBlankField(config.when) ? (
+            <p className="mt-1.5 text-[11px] text-destructive">
+              A condition has no field chosen yet, so this compares two
+              constants. Saved as it stands, the engine cannot turn it into SQL
+              and the entity returns no rows at all.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Comparisons, <code>in</code>, ranges and and/or/not become SQL.
+              Anything else — a function call, arithmetic — cannot, and the rule
+              returns no rows rather than being skipped.
+            </p>
+          )}
         </div>
       )}
     </div>
