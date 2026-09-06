@@ -346,7 +346,15 @@ class AnthropicModel:
     def _anthropic(self) -> Any:
         if self._client is None:
             import anthropic
-            import httpx
+            # anthropic 1.4.0+ vendors httpx as `httpx2` and its client rejects a
+            # plain `httpx.Timeout` ("use httpx2.Timeout instead"), which failed
+            # every model call on the `requirements` node (build stuck at 0/22).
+            # Import the flavour the installed SDK actually uses so the Timeout
+            # below is the right type; fall back to plain httpx for older SDKs.
+            try:
+                import httpx2 as httpx
+            except ImportError:
+                import httpx
 
             # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
             # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
