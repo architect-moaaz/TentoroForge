@@ -93,10 +93,7 @@ class TestConditionEvaluation:
         self.gc = GatewayController()
 
     def test_equality(self):
-        # String literals are quoted (FEEL semantics + how the generation
-        # pipeline emits them: `{{status}} == 'approved'`). A bare unquoted
-        # RHS is a variable reference, not a string.
-        assert self.gc._evaluate_condition("status == 'approved'", {"status": "approved"})
+        assert self.gc._evaluate_condition("status == approved", {"status": "approved"})
 
     def test_inequality(self):
         assert self.gc._evaluate_condition("status != pending", {"status": "approved"})

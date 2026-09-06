@@ -170,13 +170,6 @@ export function tokenize(input: string): Token[] {
       addToken(TokenType.Neq, "!=", start);
       continue;
     }
-
-    // Accept JS `==` as FEEL `=` (LLM-authored conditions emit `x == null`).
-    if (ch === "=" && pos + 1 < input.length && input[pos + 1] === "=") {
-      advance(); advance();
-      addToken(TokenType.Eq, "==", start);
-      continue;
-    }
     if (ch === "<" && pos + 1 < input.length && input[pos + 1] === "=") {
       advance(); advance();
       addToken(TokenType.Lte, "<=", start);
@@ -185,21 +178,6 @@ export function tokenize(input: string): Token[] {
     if (ch === ">" && pos + 1 < input.length && input[pos + 1] === "=") {
       advance(); advance();
       addToken(TokenType.Gte, ">=", start);
-      continue;
-    }
-
-    // JS-style logical operators as aliases for the FEEL `and`/`or` keywords.
-    // LLM-authored conditions (workflow branches, rules) commonly emit
-    // `{{a}} != null && {{b}} != null`; accept `&&`/`||` so they tokenize as
-    // And/Or and parse+evaluate instead of erroring with "Unexpected token".
-    if (ch === "&" && pos + 1 < input.length && input[pos + 1] === "&") {
-      advance(); advance();
-      addToken(TokenType.And, "&&", start);
-      continue;
-    }
-    if (ch === "|" && pos + 1 < input.length && input[pos + 1] === "|") {
-      advance(); advance();
-      addToken(TokenType.Or, "||", start);
       continue;
     }
 

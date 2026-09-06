@@ -11816,53 +11816,53 @@ builder, `frontend/src/components/workflow/*` + backend `routers/workflows.py` +
   same target shared one id. Now `edge_<source>_<handle>_<target>`.
 
 - **W6 — generated condition expressions were invalid FEEL (broken branching).**
-  Workflow condition nodes (and rules) are authored by the LLM with JS operators —
+  Workflow condition nodes were authored by the LLM with JS operators —
   `{{a}} != null && {{b}} != null && {{c}} == null` — but FEEL-lite's grammar uses
   the keywords `and`/`or` and single `=`, so the editor showed *"Unexpected token"*
-  and the runtime could not evaluate the branch. Fixed the FEEL-lite **tokenizer**
-  to accept `&&`→`and`, `||`→`or`, and `==`→`=` as aliases. Applied to ALL copies:
-  the canonical `frontend/src/lib/feel-lite/tokenizer.ts` (which `blueprint/
-  assembly.py` vendors into every generated app AND the editor validates with),
-  plus `backend/templates/runtime/feel-lite` and
-  `backend/templates/workflow-engine/domain/feel-lite`. Verified: conditions with
-  `==` and `&&` now parse with no error in the editor.
+  and the runtime could not evaluate the branch. My initial fix widened the FEEL-lite
+  tokenizer to ACCEPT `&&`/`||`/`==` as aliases. **REVERTED on merge with `smithv2`
+  (see §32.7.2): the senior took the opposite, cleaner path — keep the engine's
+  dialect strict FEEL and REFUSE JavaScript at authoring** (`services/blueprint/
+  feel_check.py` runs the engine's own tokenizer over every condition, and the LLM
+  prompt now emits `=`/`and`/`or`/bare-names/`$now`/`$user.id`). Widening the
+  tokenizer would have made that author-time check accept JS, so it was rolled back
+  in all six copies.
 
-### 32.7.2 Workflow editor + runtime — round-2 deep QA (2026-09-06, branch `component-fixes`)
+### 32.7.2 Workflow editor + runtime — round-2 deep QA (2026-09-06/07, branch `component-fixes`)
 
 A second, exhaustive pass over the **Workflow editor** and the **Simulate** path
 (which drives the *backend* runtime engine, `POST …/workflows/start` →
-`runtime/engine.py`). Every fix is at the platform root, so it lands for the
-simulator AND for every generated app's workflow runtime. All verified live in
+`runtime/engine.py`). The editor + engine-safety fixes below are verified live in
 the vet-portal project and with unit tests.
 
-**Runtime / condition evaluation** (the simulator was branching wrong on real
-generated conditions — valid "Add a Pet" input still routed to the invalid
-path). Root cause was a four-part cluster, all fixed:
-- **W7a — `{{input.*}}` / `{{result.*}}` / `{{session.*}}` were never seeded.**
-  The generation pipeline binds conditions/mappings to `input` (the trigger
-  payload, 104×), `result` (the previous node's output / fetched row, 52×) and
-  `session.user.id` / `session.user.role` (26×) — see `services/plan_validator.py`,
-  `singleton_page_reconciler.py`, `preview_session.py`. The engine seeded only
-  `trigger`/`previous`, so all three resolved to null. **`runtime/engine.py`** now
-  seeds `input` and `session` at start (session.user.id ← initiator, overridable
-  via a `session` key in the start variables so the simulator can test roles) and
-  `result` alongside every `previous`.
-- **W7b — conditions substituted binding VALUES unquoted before FEEL.**
-  `gateway_controller.resolve_condition_node` used `VariableResolver.resolve_string`,
-  which inlined a string value as bare text (`{{input.name}}`="Rex" → `Rex != null`);
-  FEEL then read `Rex` as an unresolved identifier → null. Replaced with `_debrace`
-  (`{{path}}` → the bare FEEL path `path`), so the evaluator resolves each binding
-  against the live variables with its real type.
-- **W7c — the *runtime* FEEL (`backend/runtime/feel_lite`) still rejected `==`
-  and silently DROPPED `&&`/`||`.** W6 fixed the frontend + template copies but not
-  the runtime port: `==` tokenized as two `Eq` → ParseError; `&&`/`||` were skipped
-  as unknown chars, so `A && B` evaluated as just `A`. Fixed the runtime tokenizer
-  (`==`→`Eq("=")`, `&&`→`And`, `||`→`Or`).
-- **W7d — `today()` (and `minutesBetween`/`isEmail`) were undefined builtins.**
-  Registered in `runtime/feel_lite/evaluator.py`.
-  *Verified live:* valid input → happy path (Create pet profile → Pet added),
-  empty input → else (Pet not saved); 11/11 real vet conditions pass in the unit
-  harness; regression tests added in `tests/test_workflow_engine.py`.
+**Runtime / condition evaluation — SUPERSEDED on merge with `smithv2`.** The
+simulator branched wrong on the vet app's generated conditions
+(`{{input.name}} != null && … == null`). My first pass treated this as a runtime
+tolerance problem (W7a–d: seed `{{input}}`/`{{result}}`/`{{session}}` namespaces,
+de-brace before FEEL, widen the tokenizer for `&&`/`||`/`==`, add `today()`).
+When `smithv2` was pulled in, the senior had fixed the SAME bug the opposite,
+cleaner way and it is now the contract:
+- **The engine's dialect stays strict FEEL** — `=` (never `==`), `and`/`or`/`not`,
+  bare names (`caseType = "Refund" and refundAmount > 0`, not `{{input.caseType}}`),
+  membership `x in ["A","B"]`, and the whole-value sentinels `$now`/`$today`/
+  `$uuid`/`$user.id` resolved by the value resolver (not FEEL functions).
+- **What the engine refuses is refused at the author, never at the pages**
+  (`services/blueprint/feel_check.py` bundles the runtime's own tokenizer and runs
+  it over every workflow/rule condition; `functional_completeness.py` refuses the
+  invented roots). The generation prompt (`executors.py` NODE_TASKS) now emits the
+  strict dialect.
+- **Reconciliation:** W7a–d and W6 were **reverted** — they would have made the
+  author-time check accept JavaScript, breaking `test_an_expression_is_read_by_the_
+  engine_before_it_runs.py`. All six feel-lite copies + `engine.py`'s namespace
+  seeding + `gateway_controller`'s de-brace are back to the strict merge-base.
+  *Verified:* the senior's 17 FEEL-validation tests pass; 7/7 real strict-FEEL
+  conditions (bare names, `=`/`and`/`or`/`not`/`in`) evaluate + route correctly in
+  the reconciled engine; the vet app's *legacy* JS-operator conditions now correctly
+  fall to the else branch (they are invalid under the contract and need regeneration).
+
+**Engine execution safety — KEPT (orthogonal to the FEEL dialect; the senior did
+not touch `runtime/engine.py`).** Verified live post-merge: each node runs once and
+the run completes.
 - **W8 — convergent nodes double-executed; cycles looped forever.** `_execute_nodes`
   had no processed-guard (10 of 12 vet workflows have a convergent node). Added a
   `processed` set (a parallel join releases itself while still waiting). *Verified

@@ -160,60 +160,6 @@ def _fn_now(args: list) -> datetime:
     return datetime.now()
 
 
-@_register("today")
-def _fn_today(args: list) -> date:
-    """Current date. Generated conditions use `x >= today()` / `x <= today()`
-    for date-window guards (e.g. availabilityDate >= today()). Returns a
-    `date`; comparisons against ISO date strings fall back to lexical order
-    in _eval_comparison, which is correct for ISO-8601."""
-    return date.today()
-
-
-def _coerce_dt(val: Any) -> datetime | None:
-    """Best-effort parse of a value into a datetime for time math.
-    Accepts datetime/date, full ISO strings, and bare `HH:MM` clock times."""
-    if isinstance(val, datetime):
-        return val
-    if isinstance(val, date):
-        return datetime(val.year, val.month, val.day)
-    if val is None:
-        return None
-    s = str(val).strip()
-    for parser in (
-        lambda x: datetime.fromisoformat(x),
-        lambda x: datetime.strptime(x, "%H:%M"),
-        lambda x: datetime.strptime(x, "%H:%M:%S"),
-    ):
-        try:
-            return parser(s)
-        except (ValueError, TypeError):
-            continue
-    return None
-
-
-@_register("minutesBetween")
-def _fn_minutes_between(args: list) -> float | None:
-    """Whole minutes between two instants/clock-times (b - a). Used by
-    availability-slot generation; returns None if either side is unparseable."""
-    if len(args) < 2:
-        return None
-    a, b = _coerce_dt(args[0]), _coerce_dt(args[1])
-    if a is None or b is None:
-        return None
-    return (b - a).total_seconds() / 60.0
-
-
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-@_register("isEmail")
-def _fn_is_email(args: list) -> bool:
-    """True when the single argument looks like an email address."""
-    if not args or args[0] is None:
-        return False
-    return bool(_EMAIL_RE.match(str(args[0]).strip()))
-
-
 @_register("duration")
 def _fn_duration(args: list) -> timedelta | None:
     if not args:

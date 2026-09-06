@@ -74,23 +74,6 @@ class WorkflowRuntimeEngine:
         # Transition to running
         await self.state.transition_instance(instance, WorkflowInstanceStatus.running)
 
-        # Seed the canonical binding namespaces the generation pipeline emits.
-        # LLM-authored conditions/mappings reference {{input.X}} (the triggering
-        # payload) and {{session.user.id}} / {{session.user.role}} (the acting
-        # user) — see services/plan_validator.py, singleton_page_reconciler.py.
-        # The runtime historically seeded only `trigger`/`previous`, so every
-        # {{input.*}} / {{session.*}} resolved to null and conditions branched
-        # wrong. `input` mirrors the trigger payload; `session` defaults its
-        # user id to the initiator and can be overridden by passing a `session`
-        # key in the start variables (lets the simulator test different roles).
-        initial_inputs = dict(variables or {})
-        await self.state.set_variable(instance, "input", initial_inputs)
-        session_seed = initial_inputs.get("session") if isinstance(initial_inputs.get("session"), dict) else {}
-        session_user = {"id": str(initiated_by) if initiated_by else None, "role": None}
-        if isinstance(session_seed.get("user"), dict):
-            session_user.update(session_seed["user"])
-        await self.state.set_variable(instance, "session", {**session_seed, "user": session_user})
-
         # Find start node(s)
         start_nodes = self._find_start_nodes(nodes, edges)
         if not start_nodes:
@@ -147,7 +130,6 @@ class WorkflowRuntimeEngine:
             "node_id": task.node_id,
             "output": output_data,
         })
-        await self.state.set_variable(instance, "result", output_data)
 
         # This node is no longer "active": drop it from current_node_ids. It was
         # only ever appended (when the blocking task was created) and never
@@ -266,9 +248,6 @@ class WorkflowRuntimeEngine:
                         "node_id": current_id,
                         "output": variables.copy(),
                     })
-                    # `result` = the most recent node's output (the "fetched row"
-                    # the generation pipeline binds via {{result.X}}).
-                    await self.state.set_variable(instance, "result", variables.copy())
                     completed_in_this_pass.add(current_id)
                     await self.exec_logger.log_complete(log_entry, {"trigger_seeded": True})
                     next_ids = self._get_next_node_ids(current_id, edges)
@@ -311,7 +290,6 @@ class WorkflowRuntimeEngine:
                             "node_id": current_id,
                             "output": eval_result,
                         })
-                        await self.state.set_variable(instance, "result", eval_result)
 
                         # Log the result
                         logger.info(
@@ -358,7 +336,6 @@ class WorkflowRuntimeEngine:
                         "node_id": current_id,
                         "output": ai_output,
                     })
-                    await self.state.set_variable(instance, "result", ai_output)
 
                     # Route based on decision
                     next_ids = self.gateway.resolve_ai_decide_node(
@@ -441,7 +418,6 @@ class WorkflowRuntimeEngine:
                             "node_id": current_id,
                             "output": task.output_data,
                         })
-                        await self.state.set_variable(instance, "result", task.output_data)
 
                     completed_in_this_pass.add(current_id)
                     await self.exec_logger.log_complete(log_entry, {

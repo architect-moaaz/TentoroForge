@@ -105,13 +105,8 @@ export function tokenize(input: string): Token[] {
 
     if (ch === "." && pos + 1 < input.length && input[pos + 1] === ".") { advance(); advance(); addToken(TokenType.DotDot, "..", start); continue; }
     if (ch === "!" && pos + 1 < input.length && input[pos + 1] === "=") { advance(); advance(); addToken(TokenType.Neq, "!=", start); continue; }
-    if (ch === "=" && pos + 1 < input.length && input[pos + 1] === "=") { advance(); advance(); addToken(TokenType.Eq, "==", start); continue; }
     if (ch === "<" && pos + 1 < input.length && input[pos + 1] === "=") { advance(); advance(); addToken(TokenType.Lte, "<=", start); continue; }
     if (ch === ">" && pos + 1 < input.length && input[pos + 1] === "=") { advance(); advance(); addToken(TokenType.Gte, ">=", start); continue; }
-    // JS-style logical operators as aliases for FEEL `and`/`or` (LLM-authored
-    // conditions commonly emit `{{a}} != null && {{b}} != null`).
-    if (ch === "&" && pos + 1 < input.length && input[pos + 1] === "&") { advance(); advance(); addToken(TokenType.And, "&&", start); continue; }
-    if (ch === "|" && pos + 1 < input.length && input[pos + 1] === "|") { advance(); advance(); addToken(TokenType.Or, "||", start); continue; }
 
     switch (ch) {
       case "+": advance(); addToken(TokenType.Plus, "+", start); continue;

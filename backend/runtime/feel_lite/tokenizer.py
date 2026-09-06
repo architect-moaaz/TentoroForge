@@ -106,25 +106,6 @@ def tokenize(input_str: str) -> List[Token]:
         # Two-character operators first
         if pos + 1 < length:
             two = input_str[pos : pos + 2]
-            # Accept the JS-style operators the generation pipeline emits
-            # (`==`, `&&`, `||`) as aliases for FEEL's `=`, `and`, `or`.
-            # LLM-authored conditions use both spellings interchangeably
-            # (see the vet-app definitions: `{{a}} == 'X' && {{b}} != null`).
-            # `==` MUST carry the value "=" so ComparisonExpr's operator
-            # (parser reads op_token.value) normalizes to the `=` branch in
-            # _eval_comparison; a raw "==" value would miss every equality.
-            if two == "==":
-                tokens.append(Token(TokenType.Eq, "=", pos))
-                pos += 2
-                continue
-            if two == "&&":
-                tokens.append(Token(TokenType.And, "&&", pos))
-                pos += 2
-                continue
-            if two == "||":
-                tokens.append(Token(TokenType.Or, "||", pos))
-                pos += 2
-                continue
             if two == "!=":
                 tokens.append(Token(TokenType.NotEq, "!=", pos))
                 pos += 2
