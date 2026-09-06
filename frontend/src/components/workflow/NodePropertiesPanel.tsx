@@ -112,7 +112,11 @@ export function NodePropertiesPanel({
   });
 
   const insertVariable = (variable: string) => {
-    // Insert into the last focused input (simplified: append to description)
+    // Copy the reference to the clipboard so it is usable on EVERY node — the
+    // picker previously only appended to `config.description`, a no-op (an
+    // invisible write) on condition/gateway/AI nodes that render no description
+    // field. Still append to description where that field is shown.
+    try { navigator.clipboard?.writeText(variable); } catch { /* clipboard unavailable */ }
     const current = config.description || "";
     updateConfig({ description: current + variable });
   };
@@ -791,7 +795,28 @@ function WaitProps({
     { key: "d", label: "days", ms: 86_400_000 },
   ] as const;
 
-  const rawMs = Number(config.duration ?? 0) || 0;
+  // Accept BOTH the raw-ms string this editor writes AND a human default from
+  // the catalog ("1 hour", "30 minutes") — Number("1 hour") is NaN, which used
+  // to show a blank amount for a freshly-dropped wait node.
+  const parseDurationMs = (v: unknown): number => {
+    if (typeof v === "number") return v;
+    const s = String(v ?? "").trim();
+    if (/^\d+$/.test(s)) return Number(s);
+    const m = s.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)/);
+    if (m) {
+      const n = Number(m[1]);
+      const u = m[2].toLowerCase();
+      const table: Record<string, number> = {
+        s: 1_000, sec: 1_000, secs: 1_000, second: 1_000, seconds: 1_000,
+        m: 60_000, min: 60_000, mins: 60_000, minute: 60_000, minutes: 60_000,
+        h: 3_600_000, hr: 3_600_000, hour: 3_600_000, hours: 3_600_000,
+        d: 86_400_000, day: 86_400_000, days: 86_400_000,
+      };
+      if (table[u]) return n * table[u];
+    }
+    return 0;
+  };
+  const rawMs = parseDurationMs(config.duration);
   const unit =
     UNITS.slice().reverse().find((u) => rawMs > 0 && rawMs % u.ms === 0) ??
     UNITS[1];

@@ -57,7 +57,17 @@ export function KeyValueMapper({
   const entries = Object.entries(value ?? {});
 
   const addRow = () => {
-    onChange({ ...(value ?? {}), "": "" });
+    const v = value ?? {};
+    // Keys are unique, so a second blank "" row would overwrite the first —
+    // clicking Add looked like a no-op. If a blank row already exists, give the
+    // new one a distinct placeholder key the user then renames.
+    let key = "";
+    if (Object.prototype.hasOwnProperty.call(v, "")) {
+      let i = 1;
+      while (Object.prototype.hasOwnProperty.call(v, `key${i}`)) i += 1;
+      key = `key${i}`;
+    }
+    onChange({ ...v, [key]: "" });
   };
 
   const updateKey = (oldKey: string, newKey: string) => {

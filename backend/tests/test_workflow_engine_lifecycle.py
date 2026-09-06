@@ -67,6 +67,9 @@ async def test_human_task_workflow_completes(test_db, tmp_path):
         pending = await engine.state.list_pending_tasks_for_instance(instance_id)
         assert len(pending) == 1
         task_id = pending[0].id
+        # The task carries a form hint so the UI can render the right form
+        # (the ORIGINAL node type, since every human node collapses to user_task).
+        assert (pending[0].input_data or {}).get("node_type") == "user_task"
 
     async with async_session() as db:
         # Load the project into the session (identity map) so instance.project
@@ -102,3 +105,49 @@ async def test_automated_workflow_with_end_completes(test_db, tmp_path):
             output_dir=str(tmp_path), variables={})
         refreshed = await engine.state.get_instance(instance.id)
         assert refreshed.status == WorkflowInstanceStatus.completed
+
+
+@pytest.mark.asyncio
+async def test_parallel_join_with_blocking_task_completes(test_db, tmp_path):
+    """A fork whose branches finish in DIFFERENT passes (one branch has a human
+    task) must still join and complete — the join bookkeeping is durable across
+    passes, and it must NOT fire early while the human branch is still pending."""
+    wf_id = "parallel-wf"
+    nodes = [
+        _node("trigger", "trigger"),
+        _node("fork", "parallel_gateway"),
+        _node("A", "action", {"actionType": "set_variable", "variableName": "a", "expression": "1"}),
+        _node("B", "user_task", label="Review"),
+        _node("join", "join"),
+        _node("end", "end"),
+    ]
+    edges = [
+        {"source": "trigger", "target": "fork"},
+        {"source": "fork", "target": "A"},
+        {"source": "fork", "target": "B"},
+        {"source": "A", "target": "join"},
+        {"source": "B", "target": "join"},
+        {"source": "join", "target": "end"},
+    ]
+    _write_def(tmp_path, wf_id, nodes, edges)
+
+    async with async_session() as db:
+        engine = WorkflowRuntimeEngine(db)
+        started = await engine.start_workflow(
+            project_id=uuid.uuid4(), org_id=uuid.uuid4(), workflow_id=wf_id,
+            output_dir=str(tmp_path), variables={})
+        instance_id = started.id
+        fresh = await engine.state.get_instance(instance_id)
+        # Branch A ran; branch B paused at the human task. The join has NOT fired.
+        assert fresh.status == WorkflowInstanceStatus.waiting
+        pending = await engine.state.list_pending_tasks_for_instance(instance_id)
+        assert len(pending) == 1
+        task_id = pending[0].id
+
+    async with async_session() as db:
+        engine = WorkflowRuntimeEngine(db)
+        await engine.complete_task(task_id, output_data={"approved": True}, output_dir=str(tmp_path))
+        refreshed = await engine.state.get_instance(instance_id)
+        # Both branches are now in — the join fires and the run completes.
+        assert refreshed.status == WorkflowInstanceStatus.completed, \
+            f"expected completed, got {refreshed.status}"

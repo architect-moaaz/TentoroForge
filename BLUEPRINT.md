@@ -11949,22 +11949,27 @@ below is fixed and tested; the honest known-limitations follow.
 healthy run (tolerate 3 consecutive, reset on any good poll); `INITIAL` is a factory
 so resets never alias shared arrays.
 
-**Known limitations (documented, not yet fixed — none reachable by the current
-generated apps):**
-- **Parallel join + a blocking task in one branch deadlocks** (and a plain
-  convergent node downstream of such a fork double-executes) because the join /
-  processed bookkeeping (`completed_in_this_pass`, `processed`) is per-`_execute_nodes`
-  pass, and a blocking task splits execution across passes. The proper fix is a
-  DURABLE completed-node set (derive from `NodeExecutionLog`). No generated workflow
-  uses `parallel_gateway`/`fork` today, so it is latent — but it must be fixed before
-  parallel branches with human tasks are generated.
-- **Human-task forms render as a raw JSON box:** the executor classifies every human
-  node to `TaskType.user_task` (no `approval` type) and writes no `expectedOutputs`,
-  so `TaskInputPanel` never shows the approve/reject or typed-field form. Needs a
-  backend↔frontend contract alignment (task_type/form hint), out of scope for this pass.
-- Minor editor UX: `wait` duration has two representations (catalog `"1 hour"` vs
-  raw-ms after edit); the bottom VariablePicker only inserts into `description`;
-  `KeyValueMapper` "Add" is a no-op when an unnamed row already exists.
+**Fixed — the two deeper items too (now with durable/contract fixes + tests):**
+- **Parallel join across passes + cross-pass convergent double-execution.** The
+  join / `processed` bookkeeping was per-`_execute_nodes` pass, so a fork whose
+  branches finished in different passes (one branch holding a human/timer task)
+  deadlocked, and a convergent plain node downstream double-ran. `_execute_nodes`
+  now seeds `processed` and the join check from a DURABLE completed-node set
+  (`_load_completed_node_ids`, from `NodeExecutionLog`, minus nodes with a still-open
+  task so a pending human branch never fires the join early). Verified by
+  `test_parallel_join_with_blocking_task_completes`.
+- **Human-task forms rendered as a raw JSON box.** Every human node collapses to
+  `TaskType.user_task`, so the executor now stamps the ORIGINAL `node_type` (and the
+  node's form-binding fields as `expectedOutputs`) into `input_data`; `task-form.ts`
+  reads `node_type === "approval"` for the approve/reject form and `expectedOutputs`
+  for typed fields, falling back to JSON only when nothing is declared. Tested both
+  sides.
+
+**Fixed — the minor editor UX too:** `WaitProps` now parses a human duration
+default (`"1 hour"`) so the amount is never blank, and the card humanizes raw-ms
+(`3600000` → `1h`); the VariablePicker copies the reference to the clipboard so it
+is usable on nodes with no description field; `KeyValueMapper` "Add" gives a new
+blank row a distinct placeholder key instead of silently overwriting the first.
 
 ### 32.8 What still holds
 

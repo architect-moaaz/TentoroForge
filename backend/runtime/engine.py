@@ -213,14 +213,23 @@ class WorkflowRuntimeEngine:
     ) -> None:
         """Execute a set of nodes, handling gateways and task creation."""
         node_map = {n["id"]: n for n in nodes}
+        # DURABLE set of nodes already completed on this instance, loaded from the
+        # execution log. A blocking task splits a run across multiple
+        # `_execute_nodes` passes, so a per-pass set alone cannot see what earlier
+        # passes did: a parallel join whose branches complete in different passes
+        # would deadlock, and a convergent plain node downstream of such a fork
+        # would double-execute. Seeding from the log makes both correct across
+        # passes. `completed_in_this_pass` still tracks THIS pass (for the join
+        # check to react to nodes completed within the same synchronous walk).
+        durable_completed: set[str] = await self._load_completed_node_ids(instance.id)
         completed_in_this_pass: set[str] = set()
-        # Nodes we've already handled this pass. A node reached by two paths
-        # (a `then`/`else` that reconverge, or two branches into a shared
-        # "notify"/end node — present in 10 of the 12 vet workflows) MUST NOT
-        # execute twice, and a loop-back edge must terminate rather than spin
-        # forever. The one handler that legitimately re-enters — a parallel
-        # join still waiting for a branch — discards itself below.
-        processed: set[str] = set()
+        # Nodes we've already handled. A node reached by two paths (a `then`/`else`
+        # that reconverge, or two branches into a shared "notify"/end node) MUST
+        # NOT execute twice, and a loop-back edge must terminate rather than spin
+        # forever. Seed it with the durable set so a node completed in an EARLIER
+        # pass is not re-run when a later branch reaches it. The one handler that
+        # legitimately re-enters — a parallel join still waiting — discards itself.
+        processed: set[str] = set(durable_completed)
         to_process = list(node_ids)
 
         while to_process:
@@ -360,9 +369,12 @@ class WorkflowRuntimeEngine:
                     # Check if this is a join (has multiple incoming edges)
                     incoming = [e for e in edges if e.get("target") == current_id]
                     if len(incoming) > 1:
-                        # Join node — check if all incoming paths are complete
+                        # Join node — all incoming paths complete? Check against
+                        # this pass UNION the durable set, so branches that
+                        # completed in earlier passes (e.g. before a blocking task
+                        # on a sibling branch) still count.
                         if not self.gateway.check_join_condition(
-                            current_id, edges, completed_in_this_pass
+                            current_id, edges, completed_in_this_pass | durable_completed
                         ):
                             # Not all branches in yet — release the processed
                             # mark so the join is re-evaluated when the remaining
@@ -512,6 +524,38 @@ class WorkflowRuntimeEngine:
 
     def _get_next_node_ids(self, node_id: str, edges: list[dict]) -> list[str]:
         return [e["target"] for e in edges if e.get("source") == node_id]
+
+    async def _load_completed_node_ids(self, instance_id: uuid.UUID) -> set[str]:
+        """Durable set of node ids that are ACTUALLY done on this instance. Lets
+        join/convergence bookkeeping survive the separate `_execute_nodes` passes
+        a blocking task creates (fork branches that finish in different passes, or
+        a convergent node reached late).
+
+        A blocking task node is logged `completed` at CREATION (it's the node's
+        execution log entry, marked done once the task is dispatched), so the log
+        alone would count a still-pending human task as finished and fire a join
+        early. Subtract any node that still has an open task instance."""
+        from sqlalchemy import select
+        from models.node_execution_log import NodeExecutionLog, NodeExecutionStatus
+        completed_rows = await self.db.execute(
+            select(NodeExecutionLog.node_id).where(
+                NodeExecutionLog.workflow_instance_id == instance_id,
+                NodeExecutionLog.status == NodeExecutionStatus.completed,
+            )
+        )
+        completed = {row[0] for row in completed_rows.all()}
+        open_rows = await self.db.execute(
+            select(TaskInstance.node_id).where(
+                TaskInstance.workflow_instance_id == instance_id,
+                TaskInstance.status.in_([
+                    TaskInstanceStatus.pending,
+                    TaskInstanceStatus.assigned,
+                    TaskInstanceStatus.active,
+                ]),
+            )
+        )
+        still_open = {row[0] for row in open_rows.all()}
+        return completed - still_open
 
     def _get_org_id_from_instance(self, instance: WorkflowInstance) -> uuid.UUID:
         """Get org_id from the project relationship.

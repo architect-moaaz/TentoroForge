@@ -93,6 +93,21 @@ function asText(v: unknown, fb = ""): string {
 }
 
 /**
+ * Wait duration is stored by the panel as a raw-ms string ("3600000") but the
+ * catalog default is human ("1 hour"). Show a compact human label either way,
+ * so the card never displays a bare millisecond count.
+ */
+function humanizeDuration(v: unknown): string {
+  const s = asText(v, "");
+  if (!/^\d+$/.test(s)) return s || "Delay"; // already human, or empty
+  const ms = Number(s);
+  for (const [unit, size] of [["d", 86_400_000], ["h", 3_600_000], ["min", 60_000], ["s", 1_000]] as const) {
+    if (ms % size === 0 && ms >= size) return `${ms / size}${unit}`;
+  }
+  return ms > 0 ? `${ms}ms` : "Delay";
+}
+
+/**
  * Read an action input by name. The v2 contract editor writes values into
  * `config.inputMappings` (as `{name, source:"literal", value}`), NOT the flat
  * legacy keys the card historically read — so a table/recipient set in the panel
@@ -170,7 +185,7 @@ function getMetadataPills(
       if (config.aiTone) pills.push({ label: "Tone", value: config.aiTone });
       break;
     case "wait":
-      if (config.duration) pills.push({ label: "Delay", value: asText(config.duration, "delay") });
+      if (config.duration) pills.push({ label: "Delay", value: humanizeDuration(config.duration) });
       break;
     case "escalation":
       if (config.slaHours) pills.push({ label: "SLA", value: `${config.slaHours}h` });
@@ -226,7 +241,7 @@ function getSubtitle(
       return "Decision table";
     }
     case "wait":
-      return asText(config.duration, "Delay");
+      return humanizeDuration(config.duration);
     case "assignment":
     case "approval":
       return config.assignType || "";

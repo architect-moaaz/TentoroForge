@@ -13,7 +13,11 @@ export type TaskFormSpec =
   | { kind: "json"; fields: TaskField[] };
 
 export function taskFormSpec(task: TaskDTO): TaskFormSpec {
-  if (task.task_type === "approval") {
+  // Every human node collapses to task_type "user_task" on the backend, so the
+  // original workflow node type travels in input_data.node_type. An approval
+  // node gets the approve/reject form regardless of task_type.
+  const nodeType = task.input_data?.node_type as string | undefined;
+  if (task.task_type === "approval" || nodeType === "approval") {
     return {
       kind: "approval",
       fields: [
