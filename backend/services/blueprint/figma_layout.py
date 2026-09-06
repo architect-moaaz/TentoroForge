@@ -428,7 +428,8 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
 
     width = float(getattr(screen, "width", 0) or 0)
     height = float(getattr(screen, "height", 0) or 0)
-    regions = candidates(code, width, height)
+    regions = candidates(code, width, height,
+                         boxes=(getattr(screen, "structure", None) or {}).get("boxes"))
     if not regions:
         return []
 

@@ -61,12 +61,17 @@ def test_a_destination_without_a_page_is_kept_route_less(tmp_path):
     assert {"label": "Guest Self-Service"} in cases
 
 
-def test_a_flat_tree_writes_nothing(tmp_path):
-    """The fallback already renders it; a second copy would drift."""
+def test_a_flat_tree_still_writes_the_shell(tmp_path):
+    """A flat rail is still a rail. This used to write nothing and leave the
+    layout's fallback to render it, and a one-screen application then had no
+    shell file at all — and the root page, which reads the initial route off
+    the shell, failed to compile."""
     doc = {"application": {"name": "X"}, "pages": PAGES,
            "navigation": {"tree": [{"label": "Home", "page": "PAGE-002"}]}}
     out = project_shell(doc, tmp_path)
-    assert out["files"] == [] and not (tmp_path / "src/schemas/shell.json").exists()
+    assert out["files"] == ["src/schemas/shell.json"]
+    shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+    assert shell["children"][0]["props"]["groups"][0]["label"] == "Home"
 
 
 def test_no_navigation_writes_nothing(tmp_path):

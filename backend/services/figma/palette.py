@@ -129,8 +129,9 @@ def _surfaces(code: str, size: tuple[float, float] | None = None) -> list[dict[s
         bg = _BG_ANY.search(cls)
         if bg:
             fill = _hex(bg.group(1)) if bg.group(1) else _NAMED["bg-" + bg.group(2)]
+        nid = re.search(r'data-node-id="([^"]+)"', attrs)
         el = {"tag": tag, "w": w, "h": h, "fill": fill, "depth": len(stack), "label": False,
-              "cls": cls}
+              "cls": cls, "node_id": nid.group(1) if nid else None}
         if fill:
             out.append(el)
         if not selfclose and tag not in ("img", "br", "input"):

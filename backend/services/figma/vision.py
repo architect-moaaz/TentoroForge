@@ -82,6 +82,9 @@ REPLY_SCHEMA: dict[str, Any] = {
                     "xField": {"type": "string"},
                     "valueField": {"type": "string"},
                     "columns": {"type": "array", "items": {"type": "string"}},
+                    # A metric is a number computed over its entity: how many
+                    # records (`count`), or a `sum`/`avg` of `valueField`.
+                    "fn": {"type": "string", "enum": ["count", "sum", "avg"]},
                 },
             },
         }
@@ -112,7 +115,10 @@ _SYSTEM = (
     "and `valueField` for a chart, `columns` for a table — every one of them a "
     "field name copied exactly from the entity you named. Judge by what the "
     "picture shows: a chart of monthly values wants a date-like field on x, a "
-    "table of companies wants the columns whose headers you can read.\n\n"
+    "table of companies wants the columns whose headers you can read. A "
+    "`metric` wants `fn`: `count` when the number is how many of the entity "
+    "there are (\"132 members\"), `sum` or `avg` with `valueField` when it "
+    "totals or averages a field.\n\n"
     "Leave `entity` empty when nothing fits. Binding a chart to the wrong "
     "entity produces a confident, wrong application; leaving it empty keeps "
     "the drawing, which is merely incomplete."

@@ -59,7 +59,12 @@ def _source_name(title: str, entity: str, node_id: str) -> str:
     """
     base = re.sub(r"[^a-zA-Z0-9]+", " ", title or "").strip()
     if not base:
-        base = f"{entity} {node_id}"
+        # THE FALLBACK IS SANITISED TOO. A title in Arabic strips to nothing,
+        # the entity + node id took over, and the node id's colon went into
+        # the name: `member1:205`. The renderer reads a colon in a template
+        # as the start of a format modifier, so `{{member1:205.value}}` was
+        # never resolved and the card showed its own template.
+        base = re.sub(r"[^a-zA-Z0-9]+", " ", f"{entity} {node_id}").strip()
     parts = base.split()
     head = parts[0].lower()
     return head + "".join(p.capitalize() for p in parts[1:])
@@ -118,6 +123,21 @@ def _series_source(entry: dict, name: str) -> dict:
             "groupBy": entry["xField"], "agg": agg}
 
 
+def _metric(entry: dict, source: str) -> dict:
+    """The drawn number as a live Stat: the card's title is its label, the
+    value is the aggregate the source computes."""
+    return {"type": "Stat", "props": {"label": entry.get("title") or _label_for(entry["entity"]),
+                                       "value": f"{{{{{source}.value}}}}"}}
+
+
+def _metric_source(entry: dict, name: str) -> dict:
+    fn = entry.get("fn") or "count"
+    metric: dict = {"fn": fn}
+    if fn != "count" and entry.get("valueField"):
+        metric["field"] = entry["valueField"]
+    return {"name": name, "op": "aggregate", "entity": entry["entity"], "metrics": {"value": metric}}
+
+
 def _list_source(entry: dict, name: str) -> dict:
     return {"name": name, "op": "list", "entity": entry["entity"], "limit": 25}
 
@@ -136,6 +156,10 @@ def _bindable(entry: dict) -> bool:
         return bool(entry.get("xField"))
     if entry["kind"] == "table":
         return bool(entry.get("columns"))
+    if entry["kind"] == "metric":
+        # A count needs only its entity; a sum or average needs the field.
+        fn = entry.get("fn") or "count"
+        return fn == "count" or bool(entry.get("valueField"))
     return False
 
 
@@ -196,6 +220,8 @@ def realize(root: dict, classifications: list[dict], *,
 
         if entry["kind"] in _CHART_KIND:
             component, source = _chart(entry, name), _series_source(entry, name)
+        elif entry["kind"] == "metric":
+            component, source = _metric(entry, name), _metric_source(entry, name)
         else:
             component, source = _table(entry, name), _list_source(entry, name)
 

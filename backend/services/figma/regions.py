@@ -85,8 +85,28 @@ def regions(code: str, frame_width: float, frame_height: float) -> list[Region]:
     return out
 
 
+def _without_wrappers(boxes: list[dict]) -> list[dict]:
+    def rect(b):
+        return (float(b.get("x") or 0), float(b.get("y") or 0), float(b.get("width") or 0), float(b.get("height") or 0))
+
+    def inside(inner, outer) -> bool:
+        ix, iy, iw, ih = rect(inner); ox, oy, ow, oh = rect(outer)
+        return ix >= ox - 0.5 and iy >= oy - 0.5 and ix + iw <= ox + ow + 0.5 and iy + ih <= oy + oh + 0.5 and (iw * ih) < (ow * oh)
+
+    wrappers: set[int] = set()
+    for i, a in enumerate(boxes):
+        contained = [b for j, b in enumerate(boxes) if j != i and inside(b, a)]
+        direct = [b for b in contained if not any(c is not b and inside(b, c) for c in contained)]
+        if len(direct) == 1:
+            _, _, w, h = rect(a); _, _, cw, ch = rect(direct[0])
+            if w * h > 0 and (cw * ch) / (w * h) >= 0.9:
+                wrappers.add(i)
+    return [b for i, b in enumerate(boxes) if i not in wrappers]
+
+
 def candidates(code: str, frame_width: float, frame_height: float, *,
-               min_side: float = 120.0, limit: int = 24) -> list[Region]:
+               min_side: float = 120.0, limit: int = 32,
+               boxes: list[dict] | None = None) -> list[Region]:
     """The regions worth looking at, and no more than ``limit`` of them.
 
     TWO FILTERS, BOTH ABOUT COST RATHER THAN CORRECTNESS. Looking at a region
@@ -106,5 +126,58 @@ def candidates(code: str, frame_width: float, frame_height: float, *,
     which one is "the" region, which is precisely the judgement it must not
     make.
     """
-    return [r for r in regions(code, frame_width, frame_height)
-            if r.width >= min_side and r.height >= min_side][:limit]
+    # A card is card-sized on its long side; its short side may be less — a
+    # KPI tile is 172 by 110 — so the floor on the short side is two thirds.
+    def _card_sized(w: float, h: float) -> bool:
+        return max(w, h) >= min_side and min(w, h) >= min_side * 2 / 3
+
+    found = [r for r in regions(code, frame_width, frame_height)
+             if _card_sized(r.width, r.height)]
+    # AN AUTO-LAYOUT EXPORT HAS NO INSETS. Dev Mode writes a percentage inset
+    # only for absolutely positioned layers; a frame built with auto-layout
+    # carries sizes instead — `w-[172px] h-[110px]`, or the parent's size for
+    # a `w-full` child — and on such a frame this returned nothing, so no card
+    # was ever looked at and every number on a dashboard stayed the drawn
+    # text. Its cards are its filled boxes with a node id and a size; where
+    # they sit is not known from the classes, which the crop does not need.
+    seen = {r.node_id for r in found}
+    # A WRAPPER IS ITS CHILD'S RECTANGLE TWICE. Auto-layout exports wrap a
+    # card in a margin container a few pixels larger; ranked by area, the
+    # twenty-four largest boxes on a dashboard were eleven cards and their
+    # wrappers, and the KPI tiles fell below the cap. A box whose one directly
+    # contained box covers nine tenths of it is the wrapper, not a region —
+    # no kind is judged here, only that two rectangles are one.
+    boxes = _without_wrappers(list(boxes or []))
+    # THE FILE'S OWN GEOMETRY, WHEN THE EXTRACTION KEPT IT. `get_metadata`
+    # answers with every element's box, auto-layout or not; a screen's
+    # `structure.boxes` is that list in the frame's own coordinates and is the
+    # honest source of where each card sits. Sizes read off classes are the
+    # fallback for a reference extracted before boxes were kept.
+    for box in boxes or []:
+        nid = str(box.get("id") or box.get("node_id") or "")
+        w, h = float(box.get("width") or 0), float(box.get("height") or 0)
+        if not nid or nid in seen or not _card_sized(w, h):
+            continue
+        if w >= frame_width and h >= frame_height:
+            continue
+        # A BOX AS TALL AS THE FRAME IS A COLUMN — the rail, the content
+        # column, the page's own scroll container — and a column is the
+        # page's structure, not a card on it.
+        if h >= 0.9 * frame_height:
+            continue
+        seen.add(nid)
+        found.append(Region(node_id=nid, x=float(box.get("x") or 0), y=float(box.get("y") or 0),
+                            width=w, height=h))
+    from services.figma.palette import _surfaces
+    for el in _surfaces(code, (frame_width, frame_height)):
+        nid = el.get("node_id")
+        w, h = el.get("w") or 0.0, el.get("h") or 0.0
+        if not nid or nid in seen or not _card_sized(w, h):
+            continue
+        # The frame itself and its full-size wrappers are the page, not a card.
+        if w >= frame_width and h >= frame_height:
+            continue
+        seen.add(nid)
+        found.append(Region(node_id=nid, x=0.0, y=0.0, width=w, height=h))
+    found.sort(key=lambda reg: reg.area, reverse=True)
+    return found[:limit]

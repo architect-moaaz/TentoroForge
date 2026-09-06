@@ -53,6 +53,11 @@ log = logging.getLogger(__name__)
 #: of a user. Overridable for local work; the default is what a real user hits.
 DEFAULT_ENDPOINT = os.environ.get("FIGMA_MCP_URL", "https://mcp.figma.com/mcp")
 
+#: Tools the REST API can answer when the Dev Mode server will not: the node
+#: tree with every element's box, and a rendered image of a node. The
+#: design-context code has no REST equivalent.
+REST_FALLBACK_TOOLS: frozenset[str] = frozenset({"get_metadata", "get_screenshot"})
+
 #: §98 "allowed operations" / §101 "each agent receives only required tools".
 #: Every entry is read-only and maps to something §44/§47/§53/§55 asks for.
 ALLOWED_TOOLS: frozenset[str] = frozenset({
@@ -122,6 +127,11 @@ class FigmaGateway:
     max_attempts: int = 3
     #: §98 rate limits. Minimum wall-clock gap between calls to Figma.
     min_interval_s: float = 0.2
+    #: Answer `get_metadata` and `get_screenshot` from the REST API when the
+    #: MCP attempts are spent on a timeout or an unreachable server; off for
+    #: a test that must not leave the machine.
+    rest_fallback: bool = True
+    _rest_preferred: bool = field(default=False, repr=False)
 
     calls: list[CallRecord] = field(default_factory=list)
     _last_call_at: float = field(default=0.0, repr=False)
@@ -181,6 +191,13 @@ class FigmaGateway:
         if node_id:
             args["nodeId"] = node_id
 
+        # ONCE THE REST API HAS ANSWERED, IT ANSWERS FIRST. Three timeouts per
+        # crop, at a minute each, would turn twenty regions into an hour.
+        if self.rest_fallback and self._rest_preferred and tool in REST_FALLBACK_TOOLS:
+            started = time.monotonic()
+            blocks = await self._via_rest(tool, file_key, node_id)
+            self._record(tool, file_key, node_id, started, ok=True)
+            return blocks
         last: FigmaGatewayError | None = None
         for attempt in range(1, self.max_attempts + 1):
             await self._respect_rate_limit()
@@ -192,6 +209,15 @@ class FigmaGateway:
                              error_kind=exc.kind)
                 if exc.kind in ("auth", "not_allowed", "config", "unavailable"):
                     raise
+                # THE REST API ANSWERS WHAT THE MCP WILL NOT. The Dev Mode
+                # server needs the desktop app with the file loaded; on
+                # 2026-09-06 it answered its handshake in milliseconds and let
+                # every metadata read run to the 60s timeout, three times. The
+                # node tree with every box, and a rendered PNG of any node,
+                # are what the REST API has always served for the same token.
+                # The design-context code is the one thing it cannot give,
+                # and that tool keeps its error.
+                # Tried once the MCP attempts are spent, below.
                 last = exc
                 if attempt < self.max_attempts:
                     # Linear backoff. Figma's limits are per-minute, so an
@@ -202,7 +228,63 @@ class FigmaGateway:
             return blocks
 
         assert last is not None
+        if (self.rest_fallback and tool in REST_FALLBACK_TOOLS
+                and last.kind in ("timeout", "unreachable")):
+            blocks = await self._via_rest(tool, file_key, node_id, after=last)
+            self._record(tool, file_key, node_id, started, ok=True)
+            return blocks
         raise last
+
+    async def _via_rest(self, tool: str, file_key: str, node_id: str | None, *,
+                        after: FigmaGatewayError | None = None) -> list[dict[str, Any]]:
+        try:
+            blocks = await self._rest_fallback(tool, file_key, node_id)
+        except FigmaGatewayError:
+            raise
+        except Exception as rest_exc:  # noqa: BLE001 — mapped, not swallowed
+            raise FigmaGatewayError(
+                "unreachable", f"{tool}: MCP {after.kind if after else '-'}; "
+                               f"REST {type(rest_exc).__name__}: {rest_exc}") from rest_exc
+        if not self._rest_preferred:
+            log.info("[figma] %s %s/%s answered by the REST API after MCP %s; "
+                     "REST preferred for the rest of this session",
+                     tool, file_key, node_id or "", after.kind if after else "-")
+        self._rest_preferred = True
+        return blocks
+
+    async def _rest_fallback(self, tool: str, file_key: str,
+                             node_id: str | None) -> list[dict[str, Any]]:
+        """The same two answers from `api.figma.com`, in the block shapes the
+        callers already read: a structured node tree for `get_metadata`, an
+        image block for `get_screenshot`."""
+        import base64
+
+        import httpx
+
+        from services.figma_client import fetch_figma_image_urls, fetch_figma_node
+
+        token = self.resolver.resolve(self.credential.ref)
+        if not token:
+            raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
+        if tool == "get_metadata":
+            document = await fetch_figma_node(file_key, node_id or "0:1", token)
+            if not document:
+                raise FigmaGatewayError("tool_error", f"REST returned no node {node_id!r}")
+            return [{"type": "structured", "data": document}]
+        if tool == "get_screenshot":
+            if not node_id:
+                raise FigmaGatewayError("config", "get_screenshot needs a node id")
+            urls = await fetch_figma_image_urls(file_key, [node_id], token, format="png", scale=1.0)
+            url = urls.get(node_id)
+            if not url:
+                raise FigmaGatewayError("tool_error", f"REST could not render {node_id!r}")
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    raise FigmaGatewayError("tool_error", f"crop download {r.status_code}")
+                return [{"type": "image", "mimeType": "image/png",
+                         "data": base64.b64encode(r.content).decode("ascii")}]
+        raise FigmaGatewayError("not_allowed", f"{tool!r} has no REST equivalent")
 
     async def _invoke(self, tool: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         try:
