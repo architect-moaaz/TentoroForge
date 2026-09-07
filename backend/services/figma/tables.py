@@ -107,6 +107,84 @@ def drawn_tables(code: str) -> list[DrawnTable]:
     return [t for t in out if t.node_id]
 
 
+def drawn_tables_from_tree(root: dict) -> list[DrawnTable]:
+    """Every table the COMPOSED SCHEMA TREE draws — the REST path's counterpart
+    of :func:`drawn_tables`.
+
+    The REST transformer emits a schema tree, not the MCP's JSX, so Figma's
+    ``data-name="Table"`` markers are gone. A table is found by structure
+    instead: a node whose children are three or more sibling rows of similar
+    shape, each holding at least ``MIN_COLUMNS`` text cells. The first row is the
+    header, the rest sample the data. The node id is ``props._figmaNodeId`` —
+    the same id ``realize`` matches and the box classifier names — so a bound
+    table swaps in exactly as the MCP path's does. Detection is permissive on
+    purpose: ``classify_tables`` binds only what maps to an entity, so a
+    non-table that reaches it is dropped rather than mis-rendered.
+    """
+    out: list[DrawnTable] = []
+    if not isinstance(root, dict):
+        return out
+
+    def _cell_texts(row: dict) -> list[str]:
+        return [_descendant_text_dict(c).strip()
+                for c in (row.get("children") or []) if isinstance(c, dict)]
+
+    def _col_count(node: dict) -> int:
+        return sum(1 for c in (node.get("children") or []) if isinstance(c, dict))
+
+    def _title_from(ancestors: list[dict]) -> str:
+        # The card's own title: the nearest Heading, or failing that the first
+        # titley Text, among the table's ancestors' children.
+        for a in reversed(ancestors):
+            for kind in ("Heading", "Text"):
+                for c in a.get("children") or []:
+                    if isinstance(c, dict) and c.get("type") == kind:
+                        t = _descendant_text_dict(c).strip()
+                        if t:
+                            return t
+        return ""
+
+    def walk(node: dict, ancestors: list[dict]) -> None:
+        kids = [c for c in (node.get("children") or []) if isinstance(c, dict)]
+        rows = [k for k in kids if _col_count(k) >= MIN_COLUMNS]
+        if len(rows) >= 3:
+            counts = [_col_count(r) for r in rows]
+            # Similar shape: at most two distinct column counts across the rows.
+            if len(set(counts)) <= 2:
+                headers = [t for t in _cell_texts(rows[0]) if t]
+                data = [[t for t in _cell_texts(r)] for r in rows[1:1 + SAMPLE_ROWS]]
+                node_id = str((node.get("props") or {}).get("_figmaNodeId") or "")
+                if node_id and len(headers) >= MIN_COLUMNS:
+                    has_action = any(_ARROW.search(c or "") for r in data for c in r)
+                    out.append(DrawnTable(
+                        node_id=node_id, title=_title_from(ancestors),
+                        headers=headers, rows=data, has_row_action=has_action))
+                    return  # a table is not searched for tables within itself
+        for k in kids:
+            walk(k, ancestors + [node])
+
+    walk(root, [])
+    return [t for t in out if t.node_id]
+
+
+def _descendant_text_dict(node: dict) -> str:
+    """The concatenated text a schema-tree node carries (content/label)."""
+    parts: list[str] = []
+
+    def go(n: Any) -> None:
+        if isinstance(n, dict):
+            props = n.get("props") or {}
+            for key in ("content", "label"):
+                v = props.get(key)
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+            for c in n.get("children") or []:
+                go(c)
+
+    go(node)
+    return " ".join(parts)
+
+
 def _texts_of(element: Any) -> list[str]:
     from services.jsx_to_schema import JSXElement
     out: list[str] = []

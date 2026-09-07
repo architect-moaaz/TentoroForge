@@ -146,6 +146,15 @@ def _build_node(entry: dict, asset_paths: dict[str, str] | None = None) -> dict:
     utility = node_to_utility_classes(node)
     if utility:
         props["className"] = " ".join(utility)
+    # THE FRAME'S OWN NODE ID, so the region and table passes can bind to this
+    # node. `realize` swaps a classified region by `props._figmaNodeId`, and the
+    # box/vision classifiers name regions by the raw Figma id (`1:831`). The
+    # schema `id` is a hash of it (`_id_for`, for idempotency), which does not
+    # match — so the raw id rides here. Additive; the older REST plan path that
+    # also calls this ignores it.
+    fid = node.get("id")
+    if fid:
+        props["_figmaNodeId"] = str(fid)
     # Wire any pre-exported asset URL onto Image / Icon nodes so they render
     # the design instead of a broken-image icon. Callers can pass None when
     # asset export hasn't run yet — the schema then carries no `src`, and the

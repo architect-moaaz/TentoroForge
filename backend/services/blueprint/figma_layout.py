@@ -243,13 +243,17 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the tree exactly as composed, which is the page that already renders.
     live_sources: list[dict] = []
     try:
-        # The region and table passes read the frame's JSX layers; HTML has
-        # no layers to read, so a UX Pilot page keeps the tree as mapped.
-        classified = _classify_regions(svc, page, code, screen, app_root) if code else []
-        # A TABLE DRAWN AS TEXT is read from its layers rather than looked
-        # at: header, first rows, the card's title. Bound to an entity it
-        # becomes a live Table whose rows open the entity's detail page.
-        classified = list(classified or []) + (_classify_tables(svc, code) if code else [])
+        # The region and table passes read the frame's structure. The MCP path
+        # gives it as JSX layers; the REST path gives a schema tree with the
+        # same geometry (`boxes`) and node text. Either is enough — a UX Pilot
+        # page (HTML, no layers) is the only one that keeps the tree as mapped.
+        can_classify = bool(code) or rest_doc is not None
+        classified = _classify_regions(svc, page, code, screen, app_root) if can_classify else []
+        # A TABLE DRAWN AS TEXT is read from its layers (MCP code) or from the
+        # composed tree (REST). Bound to an entity it becomes a live Table whose
+        # rows open the entity's detail page.
+        classified = list(classified or []) + (
+            _classify_tables(svc, code, schema["children"][0]) if can_classify else [])
         if classified:
             from services.figma import realize as _realize
 
@@ -479,11 +483,15 @@ def _search_source_for(doc: dict, page: dict, root: dict, existing: list[dict]) 
     return [{"name": name[:1].lower() + name[1:] + "List", "op": "list", "entity": name, "limit": 50}]
 
 
-def _classify_tables(svc: Any, code: str) -> list[dict]:
-    """Drawn tables bound to entities, with the row link resolved."""
+def _classify_tables(svc: Any, code: str, root: dict | None = None) -> list[dict]:
+    """Drawn tables bound to entities, with the row link resolved.
+
+    Reads the table from the MCP code layers when there is code, and from the
+    composed schema tree (the REST path) otherwise — `classify_tables` binds
+    the same ``DrawnTable`` shape either way."""
     from services.figma import tables as _tables
     try:
-        drawn = _tables.drawn_tables(code)
+        drawn = _tables.drawn_tables(code) if code else _tables.drawn_tables_from_tree(root or {})
         if not drawn:
             return []
         from services.blueprint.executors import AnthropicModel
