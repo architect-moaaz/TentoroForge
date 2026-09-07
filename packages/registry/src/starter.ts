@@ -538,6 +538,13 @@ export const moneyInputEntry: RegistryEntry = {
     label:            { type: "string",  default: "Amount", control: "text",    group: "content",  description: "Field label." },
     currency:         { type: "string",  default: "USD",    control: "text",    group: "content",  description: "3-letter ISO currency code (locked unless currencyEditable)." },
     currencyEditable: { type: "boolean", default: false,    control: "toggle",  group: "behavior", description: "Let the user pick the currency from a dropdown." },
+    // The list that dropdown offers, and it had no control at all — so turning
+    // CURRENCYEDITABLE on gave the user a picker they could not populate.
+    // NO default: `Money.tsx` falls back to DEFAULT_CURRENCIES (nine codes)
+    // whenever this is absent or empty, so any seed here would silently NARROW
+    // the picker on every dropped field — a seed read as a restriction rather
+    // than as "unset".
+    currencies:       { type: "array",                       control: "json",    group: "content",  description: "Currency codes the picker offers, e.g. [\"USD\",\"EUR\"]. Unset offers the built-in nine." },
     min:              { type: "number",  default: 0,        control: "number",  group: "behavior", description: "Minimum amount." },
     step:             { type: "number",  default: 0.01,     control: "number",  group: "behavior", description: "Amount increment (default 0.01 for cents)." },
     placeholder:      { type: "string",  default: "0.00",   control: "text",    group: "content",  description: "Empty-state amount placeholder." },
@@ -2891,7 +2898,13 @@ export const emptyStateRichEntry: RegistryEntry = {
       // and no illustration assets ship with the editor, so any seed would put a
       // broken <img> on every EmptyStateRich the palette drops. `icon` is the
       // zero-config path; this is for projects that bundle their own art.
-      default: null,
+      //
+      // Spelled by OMITTING `default`, not by `default: null`. The `null`
+      // convention belongs to the binding/action descriptors, where a reader
+      // (`normalizeSeed`) strips it; on a `json` object descriptor it was just a
+      // second spelling of absent, and `null` is a value the component schema
+      // rejects if it ever reaches one. `default?: unknown` — absence already
+      // says this, unambiguously and with nothing to strip.
       control: "json",
       group: "content",
       description: "Illustration: a URL string, or a bundled slot { slug, alt?, tone? } resolved to <basePath>/<slug>.svg.",
@@ -4031,6 +4044,11 @@ export const kanbanEntry: RegistryEntry = {
     // from data that is not there.
     data:      { type: "binding",                    control: "binding", group: "data",    description: "Bind an array of records to derive columns from data instead of `columns`." },
     groupBy:   { type: "string",                     control: "text",    group: "data",    description: "Record field whose distinct values become the columns (used with `data`)." },
+    // Also no default, and for the sharper reason: `columnOrder` is an explicit
+    // column ALLOW-LIST as well as an ordering, so any seed would hide every
+    // lane it did not name. Absent means "derive the lanes from the data", which
+    // is what a board without it should do.
+    columnOrder: { type: "array",                    control: "json",    group: "data",    description: "Explicit lane order / allow-list, e.g. [\"todo\",\"doing\",\"done\"] (used with `data`). Unset derives lanes from the data." },
     cardTitle: { type: "string",                     control: "text",    group: "data",    description: "Record field rendered as the card title (used with `data`)." },
     emptyText: { type: "string",                     control: "text",    group: "content", description: "Shown when the board has no cards." },
     bind: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to the columns array." },
@@ -4652,6 +4670,11 @@ export const cartPanelEntry: RegistryEntry = {
     emptyState:         { type: "string", default: "Your cart is empty.", control: "text", group: "content", description: "Text shown when the cart has no items." },
     currency:           { type: "string", default: "USD",         control: "text",   group: "content",  description: "ISO currency code used for formatting." },
     checkoutLabel:      { type: "string", default: "Place order", control: "text",   group: "content",  description: "Primary CTA label." },
+    // `paymentMethods` had no control, so the panel could not name the methods
+    // the checkout offers. NO default: `z.array(z.string()).optional()`, and a
+    // seeded list would advertise payment methods the app may not actually
+    // accept — a seed read as a claim rather than as "unset".
+    paymentMethods:     { type: "array",                          control: "json",   group: "content",  description: "Payment methods offered at checkout, e.g. [\"card\",\"invoice\"]." },
     onCheckoutNavigate: { type: "string", default: "/orders",     control: "text",   group: "behavior", description: "Route to visit after a successful checkout." },
   },
 };
@@ -4666,6 +4689,11 @@ export const cartPageEntry: RegistryEntry = {
     title:              { type: "string", default: "Your cart",   control: "text", group: "content",  description: "Page heading." },
     currency:           { type: "string", default: "USD",         control: "text", group: "content",  description: "ISO currency code used for formatting." },
     checkoutLabel:      { type: "string", default: "Place order", control: "text", group: "content",  description: "Primary CTA label." },
+    // `paymentMethods` had no control, so the panel could not name the methods
+    // the checkout offers. NO default: `z.array(z.string()).optional()`, and a
+    // seeded list would advertise payment methods the app may not actually
+    // accept — a seed read as a claim rather than as "unset".
+    paymentMethods:     { type: "array",                          control: "json", group: "content",  description: "Payment methods offered at checkout, e.g. [\"card\",\"invoice\"]." },
     onCheckoutNavigate: { type: "string", default: "/orders",     control: "text", group: "behavior", description: "Route to visit after a successful checkout." },
   },
 };

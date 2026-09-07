@@ -1,5 +1,18 @@
 # Resume state — editor audit & fix campaign
 
+> ## ⚠ FIRST THING: PUSH
+> This branch has local commits that are **NOT on the remote**. `git push`
+> requires GitHub MFA, which could not be authorised while the work was
+> running, so pushing was deliberately abandoned rather than left hanging.
+>
+> ```
+> git push origin smithv2-editor-fixes
+> ```
+>
+> Run that first, authorise the MFA prompt, and the work is safe. Until then it
+> exists only in this working copy. Check how far ahead you are with:
+> `git rev-list --count origin/smithv2-editor-fixes..HEAD`
+
 Written so a fresh session can continue without re-deriving anything. Last
 pushed commit: **`76213c8`** on branch **`smithv2-editor-fixes`**.
 

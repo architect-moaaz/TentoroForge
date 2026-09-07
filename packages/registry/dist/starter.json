@@ -125,6 +125,7 @@
       "label": {},
       "currency": {},
       "currencyEditable": {},
+      "currencies": {},
       "min": {},
       "step": {},
       "placeholder": {}
@@ -755,6 +756,7 @@
       "columns": {},
       "data": {},
       "groupBy": {},
+      "columnOrder": {},
       "cardTitle": {},
       "emptyText": {},
       "bind": {}
@@ -904,7 +906,8 @@
     "props": {
       "variant": {},
       "title": {},
-      "message": {}
+      "message": {},
+      "dismissible": {}
     }
   },
   "Redirect": {
@@ -994,6 +997,7 @@
       "emptyState": {},
       "currency": {},
       "checkoutLabel": {},
+      "paymentMethods": {},
       "onCheckoutNavigate": {}
     }
   },
@@ -1002,6 +1006,7 @@
       "title": {},
       "currency": {},
       "checkoutLabel": {},
+      "paymentMethods": {},
       "onCheckoutNavigate": {}
     }
   },
