@@ -98,3 +98,12 @@ backend/scripts/feel/validate.cjs
 # checkout. See .mcp.json.example for the shape.
 .mcp.json
 !.mcp.json.example
+
+# Agent scratch probes. Auditors write throwaway .mts/.mjs scripts to introspect
+# Zod shapes and replay defaultPropsFor; they are diagnostic, not source, and a
+# couple were swept into a commit before this rule existed.
+zz-*.mjs
+zz-*.mts
+qa-a-*.mts
+.qa-*.mts
+**/tests/qa-a-*.test.tsx
