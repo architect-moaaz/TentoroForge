@@ -61,7 +61,14 @@ def open_forms(doc: dict, page: dict, root: dict, sources: list[dict]) -> tuple[
             props = child.get("props") or {}
             if child.get("type") == "Button" and props.get("workflow") and not props.get("submit"):
                 wf = workflows.get(str(props["workflow"]))
-                if wf is not None:
+                # A WORKFLOW THAT ACTS ON A RECORD IS NOT AN ENTRY POINT. "Approve"
+                # runs a decision on an escalation; "Contact Guest" messages a
+                # refund case — each needs a record the row it sits in supplies,
+                # not a form. A form cannot name that record, so wrapping the
+                # button only moved the refusal into the dialog. These are the
+                # same category as a bare record action ("Mark Read"): left as
+                # drawn for the list binding to scope, never turned into a form.
+                if wf is not None and not _needs_record(wf):
                     needed = _fields_needed(wf, props, _form_fields_around(root, child))
                     if needed:
                         _rewrite(child, wf, needed)
@@ -108,6 +115,13 @@ def _fields_needed(wf: dict, props: dict, around: set[str] | None) -> list[dict]
         if name and name not in args and name not in have:
             out.append(inp)
     return out
+
+
+def _needs_record(wf: dict) -> bool:
+    """Does the workflow require an existing record to act on? Such a control
+    is scoped by the row or detail page it sits in, never by a new-record form."""
+    return any(inp.get("kind") == "record" and inp.get("required", True)
+               for inp in wf.get("inputs") or [])
 
 
 def _field(inp: dict, entity: dict | None, by_name: dict, added: list[dict],

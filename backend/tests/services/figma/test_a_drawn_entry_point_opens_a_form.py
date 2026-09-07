@@ -98,6 +98,26 @@ def test_a_control_needing_a_record_is_not_an_entry_point():
     assert root["children"][0]["children"][1]["props"]["workflow"] == "FLOW-012"
 
 
+def test_a_workflow_needing_both_fields_and_a_record_is_left_alone():
+    """"Approve" runs a decision that takes a note field AND the escalation it
+    decides on. The field must not lure the button into a form the record can
+    never reach."""
+    doc = {**DOC, "workflows": DOC["workflows"] + [{
+        "id": "FLOW-007", "name": "Review Escalated Decision",
+        "inputs": [
+            {"kind": "record", "name": "escalation", "entity": "ENTITY-007", "required": True},
+            {"kind": "field", "name": "note", "required": True, "type": "text"},
+        ],
+        "steps": [{"type": "action", "entity": "ENTITY-007"}],
+    }]}
+    root = _page({"type": "Button", "props": {"label": "Approve", "workflow": "FLOW-007"}})
+
+    root, added, opened = open_forms(doc, doc["pages"][0], root, [])
+
+    assert opened == 0 and added == []
+    assert root["children"][0]["children"][1]["props"]["workflow"] == "FLOW-007"
+
+
 def test_a_button_already_inside_a_form_that_collects_the_fields_is_kept():
     form = {"type": "Form", "props": {"workflow": "FLOW-011", "fields": [
         {"kind": "select", "name": "caseType", "label": "Case type", "options": []},
