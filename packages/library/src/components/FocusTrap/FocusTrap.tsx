@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { useRuntimeArmed } from "@tentoroforge/renderer";
 import type { FocusTrapPropsType } from "./FocusTrap.schema";
 
 export interface FocusTrapProps extends FocusTrapPropsType {
@@ -48,7 +49,7 @@ function _focusables(root: HTMLElement): HTMLElement[] {
 }
 
 export function FocusTrap({
-  active = true,
+  active: activeProp = true,
   autoFocus = true,
   restoreFocus = true,
   className,
@@ -56,6 +57,16 @@ export function FocusTrap({
 }: FocusTrapProps): React.ReactElement {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const previouslyFocused = React.useRef<HTMLElement | null>(null);
+  // A TRAP MUST NOT ARM AROUND THE PERSON BUILDING IT.
+  //
+  // On the editor canvas this took `document.activeElement` on mount — with no
+  // focusable descendant it stamped `tabindex="-1"` on its own root and focused
+  // that — and then `preventDefault()`ed every Tab, so the editor's Tab key was
+  // dead for as long as a FocusTrap sat on the page. `restoreFocus` made it
+  // worse in the other direction, yanking focus back to a palette item on every
+  // unmount. Turning `active` off is not the fix: that is the RUNTIME setting,
+  // so it would ship a trap that does not trap. See useRuntimeArmed.
+  const active = useRuntimeArmed(activeProp);
 
   // Initial focus + restore on unmount / deactivate.
   React.useEffect(() => {
@@ -127,6 +138,7 @@ export function FocusTrap({
     <div
       ref={rootRef}
       data-forge-focus-trap={active ? "active" : "inactive"}
+      data-forge-focus-trap-authored={activeProp ? "active" : "inactive"}
       onKeyDown={onKeyDown}
       className={className}
     >

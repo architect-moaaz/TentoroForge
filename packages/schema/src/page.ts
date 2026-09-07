@@ -346,20 +346,49 @@ const V2RepeatNode = z.object({
   props: z
     .object({
       source: z.string().min(1).optional(),
+      // `bind` was read by `nodes/data/Repeat.tsx` (it is one of the four source
+      // slots it checks) and undeclared here, so the registry's `bind` control
+      // wrote a prop that made `NodeV2` fail with "Unrecognized key(s): 'bind'".
+      // The control could only ever break the page it was offered on. Declared
+      // now, because the runtime honours it — the alternative was deleting a
+      // control for something the renderer genuinely supports.
+      bind: z.string().min(1).optional(),
       path: z.string().optional(),
       as: z.string().default("item"),
       keyPath: z.string().default("id"),
     })
     .strict()
     .optional(),
-  children: z.array(NodeV2Ref).min(1),
+  // "YOU HAVE NOT FILLED THIS IN YET" MUST NOT BE SPELLED THE SAME WAY AS
+  // "THIS PAGE IS CORRUPT".
+  //
+  // This was `.min(1)`, and a Repeat dropped from the palette always arrives
+  // with `children: []`. `NodeV2` tries the strict shapes first and falls back
+  // to `anyRegistered`, which deliberately REFUSES any type a strict shape
+  // already covers — so an unconfigured Repeat matched nothing, `PageV2` failed,
+  // and the scaffold logged `schema validation failed … rendering raw`, taking
+  // every OTHER node on the page out of validated rendering with it. Measured on
+  // a real saved page: one empty Repeat, whole page invalid.
+  //
+  // Exactly the relaxation `DropdownMenuNode.items` / `ContextMenuNode.items` /
+  // `MenubarNode.menus` already received, for the identical reason. A Repeat
+  // with no children renders nothing, which is the correct rendering of "not
+  // configured yet" — it is not malformed.
+  children: z.array(NodeV2Ref).default([]),
 });
 
 const V2ConditionalNode = z.object({
   ...V2Envelope,
   type: z.literal("Conditional"),
-  props: z.object({ when: Expression }).strict(),
-  children: z.array(NodeV2Ref).min(1),
+  // `when` was REQUIRED with no default, so a Conditional was invalid from the
+  // instant it landed and stayed invalid until the author typed an expression —
+  // which they could not do, because the Properties panel needs a selection and
+  // the node emitted no element to select. Optional now, and the runtime already
+  // distinguishes "no `when` authored" (render children) from "`when` present
+  // and falsy" (render `else`), so absence has a defined meaning here rather
+  // than being a hole.
+  props: z.object({ when: Expression.optional() }).strict().optional(),
+  children: z.array(NodeV2Ref).default([]),
   else: z.array(NodeV2Ref).optional(),
 });
 

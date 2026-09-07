@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NavigatorProvider } from "@tentoroforge/renderer";
 import { CommandPalette } from "../../src/components/CommandPalette/CommandPalette";
-import { DesignTimeProvider } from "../../src/util/designTime";
+import { DesignTimeProvider } from "@tentoroforge/renderer";
 
 const ITEMS = [
   { id: "go-dash", label: "Go to dashboard", group: "Pages", action: { type: "navigate", to: "/" } },

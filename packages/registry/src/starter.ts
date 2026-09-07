@@ -803,8 +803,20 @@ export const popoverEntry: RegistryEntry = {
   slots: { type: "leaf" },
   props: {
     trigger: { type: "string", default: "Open",    control: "text", group: "content", description: "Trigger button label." },
-    title:   { type: "string", default: "",         control: "text", group: "content", description: "Panel title." },
+    // `""` on a `.optional()` string that the component gates on `{title && ...}`
+    // is absence spelled longer -- every dropped Popover persisted `"title":""`,
+    // a key on disk that means precisely nothing.
+    title:   { type: "string",                      control: "text", group: "content", description: "Panel title." },
     content: { type: "string", default: "Content",  control: "text", group: "content", description: "Panel body text." },
+    // Declared by `PopoverProps` AND `PopoverNode.props`, passed straight to
+    // `RPopover.Content`, and reachable from nothing -- so "center" (the
+    // component's parameter default) was the only value any authored Popover
+    // could ever hold, and a popover hung off a control at the edge of a page
+    // could not be pulled back inside the layout. NO default: the component's
+    // own `align = "center"` already covers the unset case, and seeding it would
+    // freeze a placement choice onto every dropped node.
+    align:   { type: "enum", control: "select", group: "style", options: ["start", "center", "end"],
+               description: "Which edge of the trigger the panel lines up with. Unset centres it." },
   },
 };
 
@@ -815,8 +827,19 @@ export const tooltipEntry: RegistryEntry = {
   description: "Hover/focus hint anchored to an element.",
   slots: { type: "leaf" },
   props: {
-    label:   { type: "string", default: "Hover me",  control: "text", group: "content", description: "Trigger text." },
+    // WAS byte-identical to `hoverCardEntry.label`, so a Tooltip and a HoverCard
+    // dropped side by side were indistinguishable on the canvas until you
+    // hovered each one. A seed's job is to say which component this is.
+    label:   { type: "string", default: "Tooltip trigger", control: "text", group: "content", description: "Trigger text." },
     content: { type: "string", default: "Hint text", control: "text", group: "content", description: "Tooltip hint." },
+    // Declared by `TooltipProps` AND `TooltipNode.props`, passed straight to
+    // `RTooltip.Content`, and reachable from nothing -- so every authored
+    // Tooltip was pinned to "top" and one on a control at the top of a page
+    // always tried to open off-screen. NO default: the component's own
+    // `side = "top"` covers unset, and a seed would freeze that placement onto
+    // every drop.
+    side:    { type: "enum", control: "select", group: "style", options: ["top", "right", "bottom", "left"],
+               description: "Which side of the trigger the hint opens on. Unset opens above." },
   },
 };
 
@@ -849,8 +872,26 @@ export const hoverCardEntry: RegistryEntry = {
   slots: { type: "leaf" },
   props: {
     label:   { type: "string", default: "Hover me", control: "text", group: "content", description: "Trigger text." },
-    title:   { type: "string", default: "",         control: "text", group: "content", description: "Card title." },
+    // `""` on a `.optional()` string the component gates on `{title && ...}` --
+    // every dropped HoverCard persisted a key that means the same as omitting
+    // it. Same one removed from Popover and InspectorPanel.
+    title:   { type: "string",                      control: "text", group: "content", description: "Card title." },
     content: { type: "string", default: "Details",  control: "text", group: "content", description: "Card body." },
+    // Four props that did not exist in ANY layer until now — HoverCard was the
+    // only floating surface with no placement control (Tooltip has `side`,
+    // Popover has `align`) and no hover intent: it popped instantly on the
+    // slightest mouse-over, which is the one behaviour a rich preview card must
+    // not have. NONE carries a default: absent keeps the component's own
+    // conventional values, and seeding any of them would freeze a placement or a
+    // timing onto every dropped card.
+    side:       { type: "enum", control: "select", group: "style", options: ["top", "right", "bottom", "left"],
+                  description: "Which side of the trigger the card opens on." },
+    align:      { type: "enum", control: "select", group: "style", options: ["start", "center", "end"],
+                  description: "How the card lines up with the trigger." },
+    openDelay:  { type: "number", control: "number", group: "behavior",
+                  description: "Hover intent in ms before the card opens. Unset uses the conventional 700." },
+    closeDelay: { type: "number", control: "number", group: "behavior",
+                  description: "Grace period in ms before the card closes. Unset uses the conventional 300." },
   },
 };
 
@@ -898,6 +939,13 @@ export const drawerEntry: RegistryEntry = {
     title:   { type: "string", default: "Panel",   control: "text", group: "content",  description: "Drawer title." },
     side:    { type: "enum",   default: "right",    control: "select", group: "behavior", options: ["left", "right", "top", "bottom"], description: "Edge the drawer slides from." },
     content: { type: "string", default: "Content",  control: "text", group: "content",  description: "Drawer body text." },
+    // `DrawerProps` declares it, `DrawerNode.props` declares it, and
+    // `Drawer.tsx` renders it as `RDialog.Description` -- the accessible
+    // description Radix itself warns about when it is missing. The registry had
+    // no control, so EVERY authored Drawer shipped without one. NO default: an
+    // invented description is worse than none, and `.optional()` means absent.
+    description: { type: "string", control: "text", group: "content",
+                   description: "Accessible description announced with the drawer title. Radix warns when it is absent." },
   },
 };
 
@@ -1659,11 +1707,77 @@ export const tableEntry: RegistryEntry = {
       description: "Columns as [{ key, label, width?, align?, sortable?, format? }].",
     },
     caption: {
+      // `""` on a `.optional()` string the component gates on `{caption && ...}`.
       type: "string",
-      default: "",
       control: "text",
       group: "content",
       description: "Accessible table caption.",
+    },
+    // EVERY ROUTE TO A ROW WAS CLOSED, AND THE TABLE DID NOT EVEN SAY SO.
+    //
+    // The editor offered `columns` and `caption` and nothing else, so a dropped
+    // Table was a header over an empty `<tbody>` -- permanently. The empty state
+    // is not missing from the component: `Table.tsx` has a well-commented
+    // `<tr data-forge-empty="table">` with an illustration and an `emptyText`
+    // headline, gated behind `dataMode = !!records && !children` where
+    // `records = rows ?? data ?? null`. With NO way to set `rows` or `data`, and
+    // `slots: "leaf"` closing the children route too, `records` was always null,
+    // `dataMode` always false, and the empty state never rendered. The void was
+    // not even labelled.
+    //
+    // `rows` is the one prop a user drops a Table to fill. `Table.tsx` already
+    // reads a Mustache binding string, which is why this is `binding` rather
+    // than a JSON array: `rows="{{items}}"` is the shape the runtime resolves
+    // and the shape the project's own fixtures are named in. `null` is the
+    // registry's documented "no seed" marker for binding descriptors -- see
+    // `normalizeSeed`, which strips it at drop -- and a seeded literal array
+    // would be design-time data frozen into a shipped app.
+    rows: {
+      type: "binding", default: null, control: "binding", group: "data",
+      description: "The rows to render. A binding over one of the project's collections, e.g. {{items}}.",
+    },
+    // With `rows` reachable, `dataMode` turns on and these become the words in
+    // the box the user finally sees. No defaults: the component's own copy is
+    // better than a seed, and a seeded headline would override it everywhere.
+    emptyText: {
+      type: "string", control: "text", group: "content",
+      description: "Headline shown when there are no rows. Falls back to the component's own copy.",
+    },
+    emptyDescription: {
+      type: "string", control: "text", group: "content",
+      description: "Supporting sentence under the empty-state headline.",
+    },
+    title: {
+      type: "string", control: "text", group: "content",
+      description: "Heading rendered above the table.",
+    },
+    // The behaviour props a user reaches for next, in that order. All
+    // `.optional()` on `TableProps`, all unseeded: each one, seeded, changes how
+    // every dropped Table behaves rather than describing what it is.
+    searchable: {
+      type: "boolean", control: "toggle", group: "behavior",
+      description: "Show a global search box over the rows.",
+    },
+    pageSize: {
+      type: "number", control: "number", group: "behavior",
+      description: "Rows per page. Small sets render with no pager.",
+    },
+    striped: {
+      type: "boolean", control: "toggle", group: "style",
+      description: "Alternate row background.",
+    },
+    stickyHeader: {
+      type: "boolean", control: "toggle", group: "style",
+      description: "Keep the header row visible while the body scrolls.",
+    },
+    density: {
+      type: "enum", control: "select", group: "style",
+      options: ["compact", "comfortable", "spacious"],
+      description: "Row height preset. Unset follows the theme's density token.",
+    },
+    rowHref: {
+      type: "string", control: "text", group: "behavior",
+      description: "Make each row a link, e.g. /items/{id}. The braces are filled from that row, not from the page.",
     },
   },
 };
@@ -2150,9 +2264,11 @@ export const inspectorPanelEntry: RegistryEntry = {
       group: "behavior",
       description: "URL search param key used to track the active selection.",
     },
+    // `""` on a `.optional()` string is absence spelled longer, and this one is
+    // read as `{title || fallback}` — so the seed persisted a key to disk on
+    // every dropped panel that meant exactly nothing.
     title: {
       type: "string",
-      default: "",
       control: "text",
       group: "content",
       description: "Optional panel heading.",
@@ -2165,13 +2281,24 @@ export const inspectorPanelEntry: RegistryEntry = {
       group: "style",
       description: "Panel width preset (narrow=320px, default=480px, wide=640px).",
     },
+    // WAS `false`, and that one value was the whole bug.
+    //
+    // `InspectorPanel.tsx` renders `null` until `?<paramKey>=` is in the URL,
+    // which neither the canvas nor the preview ever sets. `defaultOpen` was
+    // BUILT for exactly that — its own docstring says so — and then shipped
+    // switched off, so every palette-dropped InspectorPanel started in the
+    // precise state the fix existed to eliminate: 0x0, no DOM, no hint, and it
+    // silently swallowed anything dropped into it (the child persisted to disk
+    // and was never drawn). This is a design-time affordance, and a runtime
+    // `?inspector=` still wins, per the component — so `true` is the honest
+    // "unset" here and `false` was the command.
     defaultOpen: {
       type: "boolean",
-      default: false,
+      default: true,
       control: "toggle",
       group: "state",
       description:
-        "Show the panel with no selection. Off, the panel renders nothing until the URL carries its param — which is why it is invisible on the canvas.",
+        "Show the panel with no selection. Off, the panel renders nothing until the URL carries its param — which makes it invisible on the canvas and unable to show what is inside it.",
     },
   },
 };
@@ -2245,6 +2372,32 @@ export const chartEntry: RegistryEntry = {
       group: "data",
       description: "Rows as [{ <xKey>: string|number, ... }], or a Mustache binding string ({{stats.series}}).",
     },
+    // SIX PROPS THE COMPONENT READS AND THE PANEL DID NOT OFFER.
+    //
+    // `ChartNode.props` declares all six and `Chart.tsx` spreads the whole props
+    // object into the per-type impls, so every one of them is implemented and
+    // was simply unreachable. `title` and `help` are the two a user looks for
+    // first -- "a dashboard chart with no way to give it a name" is the
+    // complaint that writes itself.
+    //
+    // NONE of them carries a default. Each is `.optional()` on the node schema
+    // and each one, seeded, would be a command rather than a placeholder: an
+    // `overlay` seed draws a second series nobody asked for, `viewToggles` puts
+    // a segmented control in the header, `encoding.leaderboard` changes the
+    // chart's layout outright, and `semanticColor` overrides every series colour
+    // on the page.
+    title: { type: "string", control: "text", group: "content",
+      description: "Chart heading, rendered in the chart's own header row." },
+    help:  { type: "string", control: "text", group: "content",
+      description: "Explanatory text behind the header's help affordance." },
+    overlay: { type: "object", control: "json", group: "data",
+      description: "A SECOND encoding on the same axes: { chartType: line|bar|area, data, series, curve? }. A bar chart with a smoothed line over it." },
+    encoding: { type: "object", control: "json", group: "style",
+      description: "Visual-grammar switches: { leaderboard?, stacked?, sorted?: asc|desc, topN?, valueLabels? }." },
+    viewToggles: { type: "array", control: "json", group: "behavior",
+      description: "Segmented buttons in the chart header. The first with default:true (else index 0) is active on mount." },
+    semanticColor: { type: "object", control: "json", group: "style",
+      description: "Colour series by a row field so the same value reads the same on every chart: { by: \"field\", field, map }." },
     xKey: {
       type: "string",
       default: "date",
@@ -4492,7 +4645,11 @@ export const repeatEntry: RegistryEntry = {
       description: "Binding path of the array (e.g. 'requests'). Alias: `bind`." },
     bind:   { type: "string", control: "text", group: "data",
       description: "Shorthand for source — binding path of the array." },
-    path:   { type: "string", default: "", control: "text", group: "data",
+    // `""` on a `z.string().optional()` the runtime gates on `if (!path)` --
+    // absent is the valid state, and the seed was only a longer spelling of it
+    // that made the prop look set in the panel. Same rule as the sweep that
+    // removed it from Popover.title, DataBoundary.fallback and Table.caption.
+    path:   { type: "string", control: "text", group: "data",
       description: "Optional dotted sub-path within the bound array." },
     as:     { type: "string", default: "item", control: "text", group: "data",
       description: "Loop variable name for the child scope." },
@@ -4524,8 +4681,20 @@ export const dataBoundaryEntry: RegistryEntry = {
   description: "Wraps children with loading/empty fallbacks driven by bound data.",
   slots: { type: "list" },
   props: {
-    fallback: { type: "string", default: "", control: "text", group: "data",
-      description: "Text shown while data is loading or empty." },
+    // The description WAS "Text shown while data is loading or empty." That is
+    // false: `DataBoundary.tsx` renders `fallback` in exactly one place -- the
+    // `catch` around child rendering -- so it appears only when a child throws
+    // synchronously. There is no loading state and no empty state in the
+    // component. A user who typed "Loading orders..." would never once see it.
+    // The `""` seed goes for the usual reason: `z.string().optional()` wants
+    // absent, and `""` is a value.
+    fallback: { type: "string", control: "text", group: "data",
+      description: "Text shown INSTEAD of the children when one of them throws while rendering. Not a loading or empty state." },
+    // Both declared by `V2DataBoundaryNode.props` and reachable from nothing.
+    bind:   { type: "binding", default: null, control: "binding", group: "data",
+      description: "Data path this boundary guards." },
+    source: { type: "string", control: "text", group: "data",
+      description: "Named collection this boundary guards." },
   },
 };
 
@@ -4992,7 +5161,12 @@ export const optimisticProviderEntry: RegistryEntry = {
     "Wraps a subtree that should see intended state immediately and roll back on server error. Layout-neutral (display:contents).",
   slots: { type: "list" },
   props: {
-    resource:        { type: "string",  default: "",    control: "text",   group: "behavior", description: "Optional resource key ('tasks', 'orders/42') for scoped cache invalidation." },
+    // NO default. The component reads `resource ?? "root"` -- a NULLISH check --
+    // so `""` is a value that BEATS the fallback and the emitted attribute
+    // became `data-forge-optimistic=""` instead of `"root"`. Same class as
+    // `Sparkline.color: ""` and `ActivityFeed.maxHeight: 0`: a seed the
+    // component reads as a command rather than as "unset".
+    resource:        { type: "string",                  control: "text",   group: "behavior", description: "Optional resource key ('tasks', 'orders/42') for scoped cache invalidation. Unset scopes to 'root'." },
     toastOnRollback: { type: "boolean", default: true,  control: "toggle", group: "behavior", description: "On rollback, publish an UndoManager toast explaining the revert." },
     timeoutMs:       { type: "number",  default: 15000, control: "number", group: "behavior", description: "Rollback if the server hasn't confirmed after this many ms (0 disables)." },
   },

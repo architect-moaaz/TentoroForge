@@ -85,7 +85,23 @@ export function Conditional({ node, ctx }: { node: any; ctx: DispatchContext }) 
   // falsy value" (an interpolated `{{document.errorMessage}}` with a
   // null column comes back as null / "" — that's a genuine false and
   // must hide the branch, not render it unconditionally).
-  const whenPresent = "when" in props || "condition" in props;
+  // `""` IS "UNSET", NOT "FALSE".
+  //
+  // Presence was tested with `"when" in props`, so a `when` the author typed and
+  // then CLEARED back to an empty string counted as present-and-falsy: the
+  // children vanished and the only way to get them back was to know that the
+  // empty box had to be a non-empty expression. That is the `Sparkline.color`
+  // rule one node over — a blank value read as a command rather than as "not
+  // configured". A blank condition is now the same as no condition, which is the
+  // branch below that renders the children.
+  //
+  // A genuinely false condition is still false: `false`, `"false"`, `0`, `"0"`,
+  // `null` and an interpolated binding that resolved to nothing all keep hiding
+  // the branch, which is the case the presence test was written to protect.
+  const blank = (v: unknown) => v === undefined || (typeof v === "string" && v.trim() === "");
+  const whenPresent =
+    ("when" in props && !blank(props.when)) ||
+    ("condition" in props && !blank(props.condition));
   const whenExpr = props.when ?? props.condition;
   if (!whenPresent) {
     const fallbackChildren = node.children;

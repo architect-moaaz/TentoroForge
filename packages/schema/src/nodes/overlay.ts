@@ -102,6 +102,14 @@ export const HoverCardNode = z.object({
     label:   z.string().min(1),
     title:   z.string().optional(),
     content: z.string().min(1),
+    // HoverCard was the only floating surface with no placement prop in any
+    // layer — Tooltip declares `side`, Popover declares `align`, and this one
+    // could only ever open below its trigger with a 0ms hover intent. All
+    // optional, so nothing already on disk changes.
+    side:       z.enum(["top", "right", "bottom", "left"]).optional(),
+    align:      z.enum(["start", "center", "end"]).optional(),
+    openDelay:  z.number().int().min(0).max(5000).optional(),
+    closeDelay: z.number().int().min(0).max(5000).optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

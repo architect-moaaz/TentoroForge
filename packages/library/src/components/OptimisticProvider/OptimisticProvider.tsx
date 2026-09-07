@@ -56,7 +56,14 @@ export function OptimisticProvider({
   children,
   base,
   className,
+  style,
 }: OptimisticProviderProps): React.ReactElement {
+  // `style` is declared on `OptimisticProviderProps` (which is `.strict()`, so
+  // it went out of its way to type it) and on the TS interface, and was
+  // destructured by neither — the one prop the schema is most explicit about was
+  // the one silently discarded. Merged over the `display: contents` the wrapper
+  // needs to stay layout-neutral, so an author who deliberately sets `display`
+  // still wins.
   const [pending, setPending] = React.useState<
     Array<{ id: string; patch: Record<string, unknown>; startedAt: number }>
   >([]);
@@ -128,7 +135,7 @@ export function OptimisticProvider({
     <OptimisticCtx.Provider value={value}>
       <div
         data-forge-optimistic={resource ?? "root"}
-        style={{ display: "contents" }}
+        style={{ display: "contents", ...(style as React.CSSProperties | undefined) }}
         className={className}
       >
         {children}

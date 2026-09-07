@@ -3,6 +3,7 @@ import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import type { CartPanelPropsType } from "./CartPanel.schema";
 import { resolveStyle } from "../../style/resolveStyle";
+import { useDesignTime, useNavigator } from "@tentoroforge/renderer";
 import { useMotion } from "../../style/useMotion";
 
 export interface CartPanelProps extends CartPanelPropsType {
@@ -39,6 +40,20 @@ export function CartPanel({
   style,
 }: CartPanelProps) {
   const methods = paymentMethods && paymentMethods.length ? paymentMethods : DEFAULT_METHODS;
+  // HALF THIS PANEL'S CONFIGURATION SURFACE HAD NO PREVIEW.
+  //
+  // The checkout footer is inside the non-empty branch, and the editor cannot
+  // produce a non-empty cart -- there is no `/api/cart` behind the canvas. So
+  // `checkoutLabel`, `paymentMethods` and `onCheckoutNavigate` were three
+  // controls whose effect the author could never once see: rename the button to
+  // "Buy now" and nothing anywhere changes. The empty state itself is correct
+  // and stays; what was missing is the footer next to it.
+  //
+  // The button is already `disabled` on an empty cart, so showing the footer
+  // costs nothing and invents no content -- the labels and the payment list are
+  // the author's own values, rendered where they will appear.
+  const designTime = useDesignTime();
+  const nav = useNavigator();
   const [body, setBody] = React.useState<CartBody | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [method, setMethod] = React.useState<string>(methods[0]);
@@ -106,8 +121,12 @@ export function CartPanel({
         return;
       }
       window.dispatchEvent(new CustomEvent("forge-cart-changed"));
-      if (typeof window !== "undefined" && onCheckoutNavigate) {
-        window.location.href = onCheckoutNavigate;
+      if (onCheckoutNavigate) {
+        // WAS `window.location.href = onCheckoutNavigate`, which resolves an
+        // app-absolute route against the ORIGIN root -- the same line the
+        // base-path fix removed from six other components, missed here. Every
+        // schema-driven navigation goes through this seam.
+        nav.push(onCheckoutNavigate);
       }
     } catch (err) {
       setError(String(err));
@@ -119,6 +138,8 @@ export function CartPanel({
   if (body == null) {
     return <div className={className} data-cart-panel="loading">Loading…</div>;
   }
+
+  const showFooter = body.items.length > 0 || designTime;
 
   return (
     <div
@@ -132,9 +153,11 @@ export function CartPanel({
         <span className="text-xs text-muted-foreground">{body.count} item{body.count === 1 ? "" : "s"}</span>
       </div>
 
-      {body.items.length === 0 ? (
+      {body.items.length === 0 && (
         <p className="py-8 text-center text-sm text-muted-foreground">{emptyState}</p>
-      ) : (
+      )}
+
+      {body.items.length > 0 && (
         <>
           <table className="w-full text-sm">
             <thead>
@@ -172,8 +195,11 @@ export function CartPanel({
               })}
             </tbody>
           </table>
+        </>
+      )}
 
-          <div className="mt-5 grid grid-cols-1 gap-4 border-t border-border pt-4 sm:grid-cols-2 sm:items-end">
+      {showFooter && (
+        <div className="mt-5 grid grid-cols-1 gap-4 border-t border-border pt-4 sm:grid-cols-2 sm:items-end">
             <label className="text-xs text-muted-foreground">
               Payment method
               <select
@@ -200,8 +226,7 @@ export function CartPanel({
               </button>
               {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
             </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

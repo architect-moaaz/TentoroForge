@@ -4,6 +4,7 @@ import { Stack, Row, Grid, GridCell, Container, Spacer } from "../nodes/layout";
 import { Box, Text, Image } from "../nodes/primitive";
 import { Repeat, Conditional, DataBoundary } from "../nodes/data";
 import { Slot } from "../nodes/slot/Slot";
+import { StructuralNodeShell } from "./StructuralNodeShell";
 import { PageOutlet } from "../nodes/shell/PageOutlet";
 import { LibraryDispatcher } from "../nodes/library/LibraryDispatcher";
 import { NodeErrorBoundary } from "../nodes/library/NodeErrorBoundary";
@@ -250,12 +251,34 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // Conditional branches, DataBoundary wraps in try/catch). Pre-computing children
   // here would bypass their error-handling and scoping logic.
   switch (node.type) {
+    // THE FOUR THAT EMITTED NO ADDRESSABLE ELEMENT.
+    //
+    // These are dispatched ahead of the generic path below, which is where
+    // `data-node-id` is stamped — so they returned a bare fragment (or, for
+    // Slot, `null`) and the editor had nothing to select, measure, drop into or
+    // bind. The shell restores the handle every other node type already has.
+    // It is layout-neutral (`display: contents`) outside an authoring surface,
+    // so no shipped page changes, and it knows nothing about these four types
+    // beyond `node.type` — a fifth structural node is covered by being wrapped.
+    // See StructuralNodeShell.tsx.
     case "Repeat":
-      return <Repeat node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Repeat node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     case "Conditional":
-      return <Conditional node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Conditional node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     case "DataBoundary":
-      return <DataBoundary node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <DataBoundary node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     default:
       // P1-O13: dev-mode misuse warning. `bind` is only honored by iterator
       // nodes above; a `bind` on Grid/Stack/Card silently renders 0 items and
@@ -329,7 +352,11 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
       return <Image node={sizedNode} />;
     }
     case "Slot":
-      return <Slot node={node} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Slot node={node} />
+        </StructuralNodeShell>
+      );
     case "PageOutlet":
       // Shell composition: render the page content injected via PageOutletContext.
       // Works as a "use client" component because PageOutletContext.useContext

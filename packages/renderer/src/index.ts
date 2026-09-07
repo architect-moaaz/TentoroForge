@@ -113,3 +113,14 @@ export {
   usePresence,
 } from "./runtime/presence-client";
 export type { PresenceUser } from "./runtime/presence-client";
+
+// Design time — the one signal that says "this tree is being authored, not
+// run". Consumed by the dispatcher's structural-node shell and by the library
+// components whose only data source is a runtime the editor does not run.
+export {
+  DesignTimeProvider,
+  DesignTimePlaceholder,
+  useDesignTime,
+  useIdleRender,
+  useRuntimeArmed,
+} from "./client/DesignTime";

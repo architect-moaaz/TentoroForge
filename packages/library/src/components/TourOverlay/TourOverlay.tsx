@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import { resolveStyle } from "../../style/resolveStyle";
-import { useIdleRender } from "../../util/designTime";
+import { useIdleRender, useRuntimeArmed } from "@tentoroforge/renderer";
 import type { TourStepType } from "./TourOverlay.schema";
 
 type Props = {
@@ -39,15 +39,26 @@ export function TourOverlay({
   const [rect, setRect] = React.useState<DOMRect | null>(null);
   const styleProps = resolveStyle(style);
 
+  // A TOUR DOES NOT RUN WHILE IT IS BEING WRITTEN.
+  //
+  // `autoStart` armed on the canvas, and the step overlay's Escape handler is
+  // `window`-scoped — so an Escape pressed anywhere in the editor, for anything
+  // at all, ended the tour AND wrote `"done"` to localStorage under the
+  // component's own `storageKey`. From that moment it never rendered again on
+  // that machine: a 0x0 node with no way, from any editor control, to clear the
+  // flag. The dismissal was permanent, global, and triggered by a key the author
+  // presses for unrelated reasons.
+  const autoStartArmed = useRuntimeArmed(autoStart);
+
   React.useEffect(() => {
-    if (!autoStart || typeof window === "undefined") return;
+    if (!autoStartArmed || typeof window === "undefined") return;
     let dismissed = false;
     try {
       dismissed = window.localStorage.getItem(storageKey) === "done";
     } catch { /* private-mode / blocked storage */ }
     if (!dismissed && cleanSteps.length > 0) setActive(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autoStartArmed]);
 
   React.useEffect(() => {
     if (!active) return;

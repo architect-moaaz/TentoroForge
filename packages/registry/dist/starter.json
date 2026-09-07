@@ -284,7 +284,17 @@
   "Table": {
     "props": {
       "columns": {},
-      "caption": {}
+      "caption": {},
+      "rows": {},
+      "emptyText": {},
+      "emptyDescription": {},
+      "title": {},
+      "searchable": {},
+      "pageSize": {},
+      "striped": {},
+      "stickyHeader": {},
+      "density": {},
+      "rowHref": {}
     }
   },
   "Badge": {
@@ -381,6 +391,12 @@
     "props": {
       "chartType": {},
       "data": {},
+      "title": {},
+      "help": {},
+      "overlay": {},
+      "encoding": {},
+      "viewToggles": {},
+      "semanticColor": {},
       "xKey": {},
       "series": {},
       "height": {},
@@ -882,7 +898,9 @@
   },
   "DataBoundary": {
     "props": {
-      "fallback": {}
+      "fallback": {},
+      "bind": {},
+      "source": {}
     }
   },
   "Slot": {
@@ -942,13 +960,15 @@
     "props": {
       "trigger": {},
       "title": {},
-      "content": {}
+      "content": {},
+      "align": {}
     }
   },
   "Tooltip": {
     "props": {
       "label": {},
-      "content": {}
+      "content": {},
+      "side": {}
     }
   },
   "Drawer": {
@@ -956,7 +976,8 @@
       "trigger": {},
       "title": {},
       "side": {},
-      "content": {}
+      "content": {},
+      "description": {}
     }
   },
   "ContextMenu": {
@@ -969,7 +990,11 @@
     "props": {
       "label": {},
       "title": {},
-      "content": {}
+      "content": {},
+      "side": {},
+      "align": {},
+      "openDelay": {},
+      "closeDelay": {}
     }
   },
   "Menubar": {

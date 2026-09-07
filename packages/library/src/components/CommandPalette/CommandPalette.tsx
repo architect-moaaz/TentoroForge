@@ -5,7 +5,7 @@ import { Command } from "cmdk";
 import { z } from "zod";
 import type { CommandPaletteNode } from "@tentoroforge/schema";
 import { WorkflowDispatcherContext, useNavigator } from "@tentoroforge/renderer";
-import { useDesignTime } from "../../util/designTime";
+import { useDesignTime } from "@tentoroforge/renderer";
 
 type Props = z.infer<typeof CommandPaletteNode>["props"];
 

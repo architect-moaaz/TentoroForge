@@ -37,6 +37,14 @@ import * as React from "react";
  * exact previous behaviour** (renders nothing). The editor canvas is the only
  * caller that wraps its tree in `DesignTimeProvider`, so the placeholder exists
  * only where a human is looking at a node they cannot otherwise see.
+ *
+ * WHY IT LIVES IN @tentoroforge/renderer
+ * -------------------------------------
+ * Same reason as NavigatorContext and DialogStateContext: the library imports
+ * the renderer, and the renderer's own dispatcher needs this signal too (the
+ * structural nodes — Repeat / Conditional / DataBoundary / Slot — emit no
+ * addressable element at all, which is the same defect one layer down). Putting
+ * it here is what lets both packages read one context instead of two.
  */
 const DesignTimeContext = React.createContext<boolean>(false);
 
@@ -138,4 +146,40 @@ export function useIdleRender(
       minWidth={minWidth}
     />
   );
+}
+
+/**
+ * "Should this runtime behaviour arm?"
+ *
+ * The other half of the design-time story, and the one that produced four
+ * separate audit findings before anyone named it. A component that moves focus,
+ * takes the keyboard, or mounts a viewport-wide modal is doing exactly its job
+ * in a running app and is a bug in an authoring canvas:
+ *
+ *   FocusTrap    — took `document.activeElement` on mount and then called
+ *                  `preventDefault()` on Tab, so the editor's Tab key was dead
+ *                  while a trap sat on the page.
+ *   AutoFocus    — moved the caret into the artefact being edited on every page
+ *                  load, and re-fired on every keystroke in its own `selector`
+ *                  box, so typing a selector was a per-keystroke focus fight.
+ *   TourOverlay  — a window-scoped Escape listener, so pressing Escape anywhere
+ *                  in the editor permanently dismissed the component and wrote
+ *                  `done` to localStorage.
+ *   CommandPalette — a document-scoped Ctrl+K.
+ *
+ * Turning the component's own runtime flag off is NOT the fix: `enabled: false`
+ * on an AutoFocus stops the editor stealing focus by also stopping the shipped
+ * app from focusing anything. The behaviour has to be off *here* and on *there*,
+ * which is one condition, spelled once:
+ *
+ *   const armed = useRuntimeArmed(active);
+ *
+ * `flag` defaults to true so a component with no runtime flag of its own can
+ * call it bare.
+ */
+export function useRuntimeArmed(flag: boolean = true): boolean {
+  // The context read comes FIRST and unconditionally: `flag && !useDesignTime()`
+  // short-circuits, which would make the hook count depend on `flag`.
+  const designTime = useDesignTime();
+  return flag && !designTime;
 }

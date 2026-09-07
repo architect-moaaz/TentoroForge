@@ -3,7 +3,7 @@ import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import type { UndoManagerPropsType } from "./UndoManager.schema";
 import { resolveStyle } from "../../style/resolveStyle";
-import { useIdleRender } from "../../util/designTime";
+import { useIdleRender } from "@tentoroforge/renderer";
 
 /**
  * Runtime shape the mutation queue publishes.

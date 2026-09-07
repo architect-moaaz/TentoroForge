@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { DesignTimeProvider } from "../../src/util/designTime";
+import { DesignTimeProvider } from "@tentoroforge/renderer";
 import { PresenceIndicator } from "../../src/components/PresenceIndicator/PresenceIndicator";
 import { UndoManager } from "../../src/components/UndoManager/UndoManager";
 import { TourOverlay } from "../../src/components/TourOverlay/TourOverlay";

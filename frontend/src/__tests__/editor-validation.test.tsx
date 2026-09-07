@@ -228,14 +228,23 @@ describe("drop → render — every component renders selectably", () => {
     // Every component's registry default props must satisfy the renderer's Zod
     // schema (no "⚠ invalid props" placeholder on a fresh drop).
     expect(invalidProps).toEqual([]);
-    // The ONLY components that don't paint on an empty canvas are the data/logic
-    // control-flow builtins — they correctly render nothing until bound to data.
-    // Anything else blank is a real regression.
-    const CONFIG_DRIVEN = new Set(["Repeat", "Conditional", "DataBoundary", "Slot"]);
-    const unexpectedBlank = notRendered.filter((n) => !CONFIG_DRIVEN.has(n));
-    expect(unexpectedBlank).toEqual([]);
-    // 133 total − 4 config-driven = 129 must be directly selectable on drop.
-    expect(selectable.length).toBeGreaterThanOrEqual(129);
+    // THE EXCUSE THAT USED TO LIVE HERE.
+    //
+    // This block carved out `Repeat`, `Conditional`, `DataBoundary` and `Slot`
+    // as "config-driven builtins — they correctly render nothing until bound to
+    // data". An audit measured that claim and it did not hold: those four were
+    // dispatched AHEAD of the `data-node-id` tagging, so a palette drop
+    // committed to disk, autosaved, survived reload and emitted no element at
+    // all. With no element there is no selection; with no selection there is no
+    // Properties panel; with no Properties panel there is no way to bind them —
+    // so the "until bound to data" state was not reachable from the editor, and
+    // three of the four could not be given a child either, because drop
+    // resolution walks `closest("[data-node-id]")`.
+    //
+    // The carve-out is gone rather than narrowed: EVERY palette component must
+    // be selectable on drop. See renderer/src/runtime/StructuralNodeShell.tsx.
+    expect(notRendered).toEqual([]);
+    expect(selectable.length).toBe(inserted.length);
   }, 30_000);
 });
 
