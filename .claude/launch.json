@@ -111,6 +111,19 @@
       ],
       "cwd": "output/fnm4etij/app",
       "port": 6517
+    },
+    {
+      "name": "criterion",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "6518"
+      ],
+      "cwd": "output/xa2qt5vw/app",
+      "port": 6518
     }
   ]
 }
