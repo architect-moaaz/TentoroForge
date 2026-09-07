@@ -76,9 +76,19 @@ def fingerprint(node: dict) -> str:
     Type plus the ordered text it carries. Class names are excluded on
     purpose: two exports of the same rail differ in a `w-[239.5px]` here and
     there, and the words on it are what make it the same rail.
+
+    THE WORDS, NOT HOW THEY ARE GROUPED. The shared chrome is fingerprinted
+    from screens transformed without the action classifier, and each page is
+    transformed with it; the classifier folds a rail item's icon, label and
+    badge into one Button labelled "◉Notifications3" where the plain transform
+    had three texts. Same words, different list, different hash — so the rail
+    stayed on every page, its "+New Case" bound to a workflow no page could
+    supply, and fifteen layouts were refused. The text is hashed as one run
+    with the spaces removed, which both transforms produce alike.
     """
+    words = "".join(_labels(node, [])).replace(" ", "")
     return hashlib.sha1(
-        json.dumps([node.get("type"), _labels(node, [])]).encode("utf-8")
+        json.dumps([node.get("type"), words]).encode("utf-8")
     ).hexdigest()[:12]
 
 
