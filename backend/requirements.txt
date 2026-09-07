@@ -24,9 +24,8 @@ python-multipart>=0.0.9
 # Agents
 # claude-agent-sdk removed (LG-4) — agent loop runs on langgraph/langchain-anthropic
 
-# MCP client (platform-side tools/list + test-connection for
-# Agent Builder mcp tool nodes). Pinned <3.0 as a conservative guard
-# against future breaking releases; verified working with 2.x.
+# MCP client (platform-side tools/list + test-connection for Agent
+# Builder mcp tool nodes) and the a2ui composer's stdio client.
 # Held to the 1.x line: the a2ui MCP server the composer spawns
 # (services/a2ui_authority.py) registers `list_resources`/`read_resource`
 # on the low-level `Server`, and mcp 2.x removed those decorators — the
