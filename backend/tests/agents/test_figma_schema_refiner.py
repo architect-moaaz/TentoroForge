@@ -257,7 +257,7 @@ def test_real_deterministic_fixture_content_round_trips(monkeypatch):
     """Using the real Gate Control deterministic schema as input, a faithful
     echo (same content, responsive wrapper) passes the guards."""
     fixture = Path(__file__).resolve().parents[1] / "fixtures" / "gate_control_deterministic.json"
-    src = json.loads(fixture.read_text())
+    src = json.loads(fixture.read_text(encoding="utf-8"))
     # Build a 'responsive' output by wrapping the real children and adding markers.
     out = {
         "schemaVersion": src.get("schemaVersion", "2.0"),

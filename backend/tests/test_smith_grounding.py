@@ -16,7 +16,7 @@ from services.smith_grounding import extract_grounding_hints
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _make_ats(tmp_path: Path) -> None:

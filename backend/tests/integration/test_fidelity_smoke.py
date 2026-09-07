@@ -41,7 +41,7 @@ _FIXTURE_BY_PAGE: dict[str, Path] = {
 # ---------------------------------------------------------------------------
 
 def _load_fixture(page_type: str) -> dict:
-    return json.loads(_FIXTURE_BY_PAGE[page_type].read_text())
+    return json.loads(_FIXTURE_BY_PAGE[page_type].read_text(encoding="utf-8"))
 
 
 def _walk_nodes(node: dict):
@@ -168,14 +168,14 @@ def _run_pipeline(tmp_path: Path, *, monkeypatch, captured_prompts: list[str]) -
     # --- Step A: compile_to_file ---
     from services.design_compiler import compile_to_file
 
-    design_spec = json.loads(_DESIGN_SPEC_PATH.read_text())
+    design_spec = json.loads(_DESIGN_SPEC_PATH.read_text(encoding="utf-8"))
     tokens_out_path = tmp_path / "src" / "theme" / "tokens.custom.json"
     compile_to_file(design_spec, str(tokens_out_path))
 
     # --- Step B: write design-spec to expected location (schema_prompt reads it) ---
     design_spec_out = tmp_path / "src" / "contracts" / "design-spec.json"
     design_spec_out.parent.mkdir(parents=True, exist_ok=True)
-    design_spec_out.write_text(json.dumps(design_spec))
+    design_spec_out.write_text(json.dumps(design_spec), encoding="utf-8")
 
     # --- Step C: run schema agent ---
     plan = {
@@ -221,7 +221,7 @@ class TestFidelitySmokeHappyPath:
         # Load all three emitted schemas once
         schemas_dir = tmp_path / "src" / "schemas" / "accounts"
         self.schemas: dict[str, dict] = {
-            pt: json.loads((schemas_dir / f"{pt}.json").read_text())
+            pt: json.loads((schemas_dir / f"{pt}.json").read_text(encoding="utf-8"))
             for pt in ("list", "detail", "form")
         }
 
@@ -235,7 +235,7 @@ class TestFidelitySmokeHappyPath:
 
     def test_tokens_custom_json_has_required_top_level_keys(self):
         tokens_path = self.tmp_path / "src" / "theme" / "tokens.custom.json"
-        tokens = json.loads(tokens_path.read_text())
+        tokens = json.loads(tokens_path.read_text(encoding="utf-8"))
         for key in ("color", "spacing", "radius", "shadow"):
             assert key in tokens and tokens[key], (
                 f"tokens.custom.json must have non-empty '{key}' key"
@@ -243,7 +243,7 @@ class TestFidelitySmokeHappyPath:
 
     def test_tokens_color_has_ramp(self):
         tokens_path = self.tmp_path / "src" / "theme" / "tokens.custom.json"
-        tokens = json.loads(tokens_path.read_text())
+        tokens = json.loads(tokens_path.read_text(encoding="utf-8"))
         primary = tokens["color"].get("primary", {})
         assert len(primary) >= 5, (
             "Primary color ramp must have at least 5 stops (design_compiler generates 11)"
@@ -262,7 +262,7 @@ class TestFidelitySmokeHappyPath:
     def test_schema_registry_ts_emitted(self):
         registry = self.tmp_path / "src" / "schemas" / "registry.ts"
         assert registry.exists(), "registry.ts must be regenerated after agent run"
-        content = registry.read_text()
+        content = registry.read_text(encoding="utf-8")
         assert "accounts/list" in content
         assert "accounts/detail" in content
         assert "accounts/form" in content
@@ -400,7 +400,7 @@ class TestFidelityFlagOff:
 
         schemas_dir = tmp_path / "src" / "schemas" / "accounts"
         self.schemas: dict[str, dict] = {
-            pt: json.loads((schemas_dir / f"{pt}.json").read_text())
+            pt: json.loads((schemas_dir / f"{pt}.json").read_text(encoding="utf-8"))
             for pt in ("list", "detail", "form")
         }
 

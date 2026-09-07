@@ -10,7 +10,7 @@ export interface TransferProps extends TransferPropsType {
   onChange?: (selected: string[]) => void;
 }
 
-export function Transfer({ options = [], selected, titles = ["Available", "Selected"], style, onChange }: TransferProps) {
+export function Transfer({ name, options = [], selected, titles = ["Available", "Selected"], style, onChange }: TransferProps) {
   const [sel, setSel] = React.useState<string[]>(selected ?? []);
   const [focus, setFocus] = React.useState<string | null>(null);
   const inSel = (v: string) => sel.includes(v);
@@ -39,6 +39,10 @@ export function Transfer({ options = [], selected, titles = ["Available", "Selec
         <button type="button" aria-label="move left" onClick={() => move(false)} className="rounded border border-border px-2 py-1 text-sm hover:bg-muted">‹</button>
       </div>
       <Panel title={titles[1] ?? "Selected"} items={options.filter((o) => inSel(o.value))} testid="transfer-selected" />
+      {/* The two panels are <li>s — nothing named, so FormData saw nothing.
+          Serialise the selection as JSON under `name` (same convention as
+          KeyValueInput, which is what makes a jsonb value submittable). */}
+      {name && <input type="hidden" name={name} value={JSON.stringify(sel)} readOnly />}
     </div>
   );
 }

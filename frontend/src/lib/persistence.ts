@@ -20,13 +20,29 @@ async function saveFile(projectId: string, relPath: string, content: string): Pr
   // Write via the short-id project-file endpoint — symmetric with the editor's
   // read path (GET /api/_debug/project-file/{short_id}/{path}). projectId here
   // is the project SHORT id (what VisualEditorWorkspace passes).
-  const r = await fetch(`${API}/api/_debug/project-file/${projectId}/${relPath}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
+  const send = () =>
+    fetch(`${API}/api/_debug/project-file/${projectId}/${relPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+  let r = await send();
+  // RETRY ONCE ON 429, DO NOT REPORT IT AS LOST WORK.
+  //
+  // The persister debounces at 500ms — 120 writes a minute at a steady edit
+  // rate — which was the server's ENTIRE old allowance, so the editor throttled
+  // itself and the user saw "COULDN'T SAVE … HTTP 429" with their changes still
+  // unsaved. The ceiling has been raised (backend/config.py), but a burst can
+  // still clip it, and a rate limit is a "come back in a moment", not a failure:
+  // honour the server's own Retry-After and try again before telling anyone.
+  if (r.status === 429) {
+    const after = Number(r.headers.get("Retry-After"));
+    const waitMs = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 5000) : 1000;
+    await new Promise((res) => setTimeout(res, waitMs));
+    r = await send();
+  }
   // THROW on non-2xx. Previously this only console.warn'd and resolved, so a
-  // failed write (401/403/429/5xx) still let runSave reach markClean() →
+  // failed write (401/403/5xx) still let runSave reach markClean() →
   // isDirty=false + a green "Saved" while the edit was actually lost. Throwing
   // keeps isDirty=true and lets callers surface the failure.
   if (!r.ok) throw new Error(`Save failed: ${relPath} → HTTP ${r.status}`);

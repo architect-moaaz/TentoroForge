@@ -786,7 +786,7 @@ async def get_field_access_matrix(
     if project.output_dir:
         model_path = Path(project.output_dir) / "app-model.json"
         if model_path.exists():
-            app_model = json_module.loads(model_path.read_text())
+            app_model = json_module.loads(model_path.read_text(encoding="utf-8"))
             for table in app_model.get("database", {}).get("tables", []):
                 if table.get("name") == model_name:
                     fields = [col["name"] for col in table.get("columns", [])]

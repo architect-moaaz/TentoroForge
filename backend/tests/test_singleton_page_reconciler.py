@@ -36,7 +36,7 @@ def _seed_app(tmp_path: Path, *, has_profile_button: bool = True,
                 "createdAt":  {"type": "timestamp"},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     if has_profile_button:
@@ -47,7 +47,7 @@ def _seed_app(tmp_path: Path, *, has_profile_button: bool = True,
             "root": {"type": "Stack", "children": [
                 {"type": "Button", "props": {"label": "Edit", "navigate": "/profile/edit"}},
             ]},
-        }))
+        }), encoding="utf-8")
     # Bootstrap a minimal registry.ts so we can verify the append.
     (sdir / "registry.ts").write_text(
         'import { loadSchema } from "./load";\n\n'
@@ -58,7 +58,7 @@ def _seed_app(tmp_path: Path, *, has_profile_button: bool = True,
     for slug, doc in (extra_schemas or {}).items():
         p = sdir / (slug + ".json")
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(doc))
+        p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_reconciler_synthesizes_profile_edit(tmp_path):
@@ -69,7 +69,7 @@ def test_reconciler_synthesizes_profile_edit(tmp_path):
     result = reconcile_singleton_pages(str(tmp_path))
     assert "/profile/edit" in result["created"]
 
-    doc = json.loads((tmp_path / "src" / "schemas" / "profile" / "edit.json").read_text())
+    doc = json.loads((tmp_path / "src" / "schemas" / "profile" / "edit.json").read_text(encoding="utf-8"))
     assert doc["route"] == "/profile/edit"
     # Session-bound to the current user's User row.
     ds = doc["dataSources"][0]
@@ -88,7 +88,7 @@ def test_reconciler_synthesizes_profile_edit(tmp_path):
     assert "password" not in input_names        # never leak
     assert "createdAt" not in input_names       # lifecycle filtered
 
-    reg_ts = (tmp_path / "src" / "schemas" / "registry.ts").read_text()
+    reg_ts = (tmp_path / "src" / "schemas" / "registry.ts").read_text(encoding="utf-8")
     assert '"/profile/edit"' in reg_ts
     assert 'import("./profile/edit.json")' in reg_ts
 
@@ -104,7 +104,7 @@ def test_reconciler_leaves_existing_schema_untouched(tmp_path):
     result = reconcile_singleton_pages(str(tmp_path))
     assert "/profile/edit" not in result["created"]
     # Original content preserved verbatim.
-    doc = json.loads((tmp_path / "src" / "schemas" / "profile" / "edit.json").read_text())
+    doc = json.loads((tmp_path / "src" / "schemas" / "profile" / "edit.json").read_text(encoding="utf-8"))
     assert doc["root"]["props"]["content"] == "LLM's own edit page"
 
 
@@ -118,7 +118,7 @@ def test_reconciler_ignores_non_singleton_routes(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Edit", "navigate": "/candidates/abc/edit"}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     result = reconcile_singleton_pages(str(tmp_path))
     assert result["created"] == []
@@ -133,7 +133,7 @@ def test_reconciler_only_activates_for_known_singleton_nouns(tmp_path):
     (sdir / "home.json").write_text(json.dumps({
         "route": "/home",
         "root": {"type": "Button", "props": {"navigate": "/foo/edit"}},
-    }))
+    }), encoding="utf-8")
 
     result = reconcile_singleton_pages(str(tmp_path))
     assert result["created"] == []
@@ -155,7 +155,7 @@ def test_reconciler_synthesizes_profile_view_if_missing(tmp_path):
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {"User": {"fields": {"id": {"type": "uuid", "primaryKey": True},
                                           "email": {"type": "varchar"}}}},
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     (sdir / "registry.ts").write_text(
@@ -165,7 +165,7 @@ def test_reconciler_synthesizes_profile_view_if_missing(tmp_path):
     (sdir / "dashboard.json").write_text(json.dumps({
         "route": "/dashboard",
         "root": {"type": "Button", "props": {"navigate": "/profile/edit"}},
-    }))
+    }), encoding="utf-8")
 
     result = reconcile_singleton_pages(str(tmp_path))
     assert "/profile/edit" in result["created"]

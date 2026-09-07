@@ -11,7 +11,7 @@ from services.detail_page_analyzer import analyze_detail_pages, to_dict
 def _write_schema(tmp_path: Path, rel: str, doc: dict) -> None:
     p = tmp_path / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_inbound_relation_gap_detected(tmp_path):

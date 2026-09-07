@@ -68,7 +68,7 @@ def _load_dedup_aliases(root: Path) -> dict[str, str]:
     """loser route → winner route from the dedup pass's report."""
     try:
         rep = json.loads(
-            (root / "contracts" / "route-dedup.json").read_text())
+            (root / "contracts" / "route-dedup.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
     return {

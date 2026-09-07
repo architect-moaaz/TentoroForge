@@ -57,7 +57,7 @@ def montage(monkeypatch):
 class TestItWritesTheFileTheAuthorsRead:
     def test_the_reference_lands_where_load_composition_block_looks(self, tmp_path, montage):
         _run(ensure_composition_reference({}, str(tmp_path), "proj-1"))
-        assert json.loads(_written(tmp_path).read_text())["screens"]["collection"]["shape"] == "table"
+        assert json.loads(_written(tmp_path).read_text(encoding="utf-8"))["screens"]["collection"]["shape"] == "table"
 
     def test_the_authors_now_get_a_real_block(self, tmp_path, montage):
         """The end-to-end point: producer writes, reader reads."""

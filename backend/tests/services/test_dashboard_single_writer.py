@@ -74,7 +74,7 @@ def _app(tmp_path: Path, page: dict | None = MAQUETTE and AUTHORED_PAGE) -> Path
 
 
 def _page(root: Path) -> dict:
-    return json.loads((root / "src" / "schemas" / "home.json").read_text())
+    return json.loads((root / "src" / "schemas" / "home.json").read_text(encoding="utf-8"))
 
 
 def _types(doc: dict) -> set[str]:

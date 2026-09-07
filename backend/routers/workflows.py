@@ -152,7 +152,7 @@ async def list_workflows(
     items = []
     for f in sorted(wf_dir.glob("*.json")):
         try:
-            items.append(workflow_list_item(json.loads(f.read_text()), f.stem))
+            items.append(workflow_list_item(json.loads(f.read_text(encoding="utf-8")), f.stem))
         except (json.JSONDecodeError, KeyError):
             continue
     return items
@@ -174,7 +174,7 @@ async def get_workflow(
     if not wf_file.exists():
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    return canonical_workflow(json.loads(wf_file.read_text()), workflow_id)
+    return canonical_workflow(json.loads(wf_file.read_text(encoding="utf-8")), workflow_id)
 
 
 @router.post("/api/projects/{project_id}/workflows", status_code=201)
@@ -259,7 +259,7 @@ async def save_workflow(
     merged: dict = {}
     if wf_file.exists():
         try:
-            existing = json.loads(wf_file.read_text())
+            existing = json.loads(wf_file.read_text(encoding="utf-8"))
             if isinstance(existing, dict):
                 merged.update(existing)
         except (OSError, ValueError) as e:
@@ -269,7 +269,7 @@ async def save_workflow(
             )
     merged.update(payload)
 
-    wf_file.write_text(json.dumps(merged, indent=2))
+    wf_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
 
     # A15-4 — both interactive write paths now record history identically.
     #
@@ -426,7 +426,7 @@ async def patch_workflow_node(
     if not wf_file.exists():
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    data = json.loads(wf_file.read_text())
+    data = json.loads(wf_file.read_text(encoding="utf-8"))
     definition = data.get("definition") or {}
     node = merge_node_config(definition, node_id, req.config, req.label)
     if node is None:
@@ -434,7 +434,7 @@ async def patch_workflow_node(
 
     node_data = node.get("data") or {}
 
-    wf_file.write_text(json.dumps(data, indent=2))
+    wf_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
     try:
         git_commit(project.output_dir, f"edit(workflow): patch node {node_id} in {workflow_id}",
                    actor="editor",   # S24-9
@@ -482,7 +482,7 @@ async def apply_workflow(
     if not wf_file.exists():
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    wf_data = json.loads(wf_file.read_text())
+    wf_data = json.loads(wf_file.read_text(encoding="utf-8"))
 
     async def event_stream():
         yield sse_event("status", {"message": f"Applying workflow: {wf_data.get('name', workflow_id)}..."})
@@ -515,20 +515,20 @@ async def apply_workflow(
             yield sse_event("status", {"message": "Adding workflow schema exports..."})
             schema_file = output_dir / "src" / "db" / "schema.ts"
             if schema_file.exists():
-                schema_content = schema_file.read_text()
+                schema_content = schema_file.read_text(encoding="utf-8")
                 wf_export_line = "export { wfInstances, wfTaskInstances, wfExecutionLogs, wfInstancesRelations, wfTaskInstancesRelations, wfExecutionLogsRelations } from '@/lib/workflow-engine/infrastructure/schema';"
                 if "wfInstances" not in schema_content:
-                    schema_file.write_text(schema_content.rstrip() + "\n\n" + wf_export_line + "\n")
+                    schema_file.write_text(schema_content.rstrip() + "\n\n" + wf_export_line + "\n", encoding="utf-8")
 
             # 5. Add @anthropic-ai/sdk as optional dependency in package.json
             yield sse_event("status", {"message": "Updating dependencies..."})
             pkg_file = output_dir / "package.json"
             if pkg_file.exists():
-                pkg_data = json.loads(pkg_file.read_text())
+                pkg_data = json.loads(pkg_file.read_text(encoding="utf-8"))
                 deps = pkg_data.setdefault("dependencies", {})
                 if "@anthropic-ai/sdk" not in deps:
                     deps["@anthropic-ai/sdk"] = "^0.39.0"
-                    pkg_file.write_text(json.dumps(pkg_data, indent=2) + "\n")
+                    pkg_file.write_text(json.dumps(pkg_data, indent=2) + "\n", encoding="utf-8")
                     # Install the new dependency
                     subprocess.run(
                         ["npm", "install"],

@@ -97,9 +97,9 @@ def test_gate_flags_genuine_dropped_page(tmp_path):
 
     # Hand-edit app-model.json to REMOVE the declared /orders page (simulate drop).
     app_model = tmp_path / "src" / "contracts" / "app-model.json"
-    data = json.loads(app_model.read_text())
+    data = json.loads(app_model.read_text(encoding="utf-8"))
     data["pages"] = [p for p in data["pages"] if p.get("route") != "/orders"]
-    app_model.write_text(json.dumps(data, indent=2))
+    app_model.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     gate = check_contract_completeness(str(tmp_path), plan)
     assert not gate["passed"], "gate should fail on a genuine dropped page"

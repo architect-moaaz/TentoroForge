@@ -128,7 +128,7 @@ async def fidelity_stats(since: str | None = None):
         if since_dt and datetime.fromtimestamp(log_path.stat().st_mtime).astimezone() < since_dt.astimezone():
             continue
         try:
-            log = json.loads(log_path.read_text())
+            log = json.loads(log_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         if not log:
@@ -172,7 +172,7 @@ async def get_fidelity_log(short_id: str):
     if not log_path.exists():
         return {}
     try:
-        return json.loads(log_path.read_text())
+        return json.loads(log_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise HTTPException(500, "fidelity log is corrupted")
 

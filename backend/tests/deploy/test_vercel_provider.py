@@ -61,9 +61,9 @@ async def sample_project_id(db_session):
 
 
 def _mk_app_tree(tmp_path: Path) -> Path:
-    (tmp_path / "package.json").write_text('{"name":"acme"}')
+    (tmp_path / "package.json").write_text('{"name":"acme"}', encoding="utf-8")
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "page.tsx").write_text("export default () => null;")
+    (tmp_path / "src" / "page.tsx").write_text("export default () => null;", encoding="utf-8")
     return tmp_path
 
 

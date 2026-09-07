@@ -132,7 +132,7 @@ class TestLoadBlocks:
         assert load_blocks(tmp_path, "p1", []) == []
 
     def test_traversal_id_cannot_read_outside_the_project(self, tmp_path):
-        (tmp_path / "secret.txt").write_text("classified")
+        (tmp_path / "secret.txt").write_text("classified", encoding="utf-8")
         assert load_blocks(tmp_path, "p1", ["../secret.txt"]) == []
 
     def test_attachment_count_is_capped(self, tmp_path):
@@ -149,7 +149,7 @@ class TestLoadBlocks:
 
     def test_read_attachment_refuses_traversal_without_leaking(self, tmp_path):
         """404 territory — must not distinguish 'blocked' from 'absent'."""
-        (tmp_path / "secret.txt").write_text("classified")
+        (tmp_path / "secret.txt").write_text("classified", encoding="utf-8")
         assert read_attachment(tmp_path, "p1", "../secret.txt") is None
         assert read_attachment(tmp_path, "p1", "nope") is None
 

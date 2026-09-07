@@ -320,7 +320,7 @@ async def regenerate_from_figma(project_id: str) -> dict[str, Any]:
     from services.figma_to_ir import convert_figma_styles_to_ahtml
     from services.ahtml_storage import save_pages
 
-    styles_data = json.loads(styles_path.read_text())
+    styles_data = json.loads(styles_path.read_text(encoding="utf-8"))
 
     # Parse frames
     frames: list[tuple[str, dict]] = []
@@ -390,7 +390,7 @@ async def design_from_ir(project_id: str) -> dict[str, Any]:
             from services.figma_to_ir import convert_figma_styles_to_ahtml
             from services.ahtml_storage import save_pages
 
-            styles_data = json.loads(styles_path.read_text())
+            styles_data = json.loads(styles_path.read_text(encoding="utf-8"))
 
             # Parse frames
             frames: list[tuple[str, dict]] = []

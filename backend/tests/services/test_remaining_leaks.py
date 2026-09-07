@@ -15,9 +15,9 @@ def _mk_schemas(tmp_path: Path, files: dict[str, dict],
     for rel, doc in files.items():
         p = sdir / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(doc))
+        p.write_text(json.dumps(doc), encoding="utf-8")
     if registry is not None:
-        (sdir / "registry.ts").write_text(registry)
+        (sdir / "registry.ts").write_text(registry, encoding="utf-8")
     return root
 
 
@@ -66,7 +66,7 @@ def test_scorecard_anatomy_prefers_actionable_count(tmp_path):
     (root / "contracts" / "page-anatomy.json").write_text(json.dumps({
         "summary": {"injected": 6, "reported": 3, "reported_actionable": 1},
         "findings": [],
-    }))
+    }), encoding="utf-8")
     card = build_scorecard(root)
     assert card["breakdown"]["anatomy"]["unfilled_slots"] == 1
     assert card["breakdown"]["anatomy"]["penalty"] == 3
@@ -77,7 +77,7 @@ def test_scorecard_anatomy_falls_back_to_reported(tmp_path):
     root = tmp_path / "app"
     (root / "contracts").mkdir(parents=True)
     (root / "contracts" / "page-anatomy.json").write_text(json.dumps({
-        "summary": {"injected": 2, "reported": 2}}))
+        "summary": {"injected": 2, "reported": 2}}), encoding="utf-8")
     card = build_scorecard(root)
     assert card["breakdown"]["anatomy"]["unfilled_slots"] == 2
 
@@ -120,13 +120,13 @@ def test_materializer_falls_back_to_landing_page(tmp_path):
         "pages": [{"name": "HomePage", "route": "/", "type": "dashboard"}],
         "workflows": [{"name": "AdjustCreditsWorkflow", "trigger": "manual",
                        "steps": []}],
-    }))
+    }), encoding="utf-8")
     (root / "workflows" / "AdjustCreditsWorkflow.json").write_text(json.dumps(
         {"id": "AdjustCreditsWorkflow", "name": "AdjustCreditsWorkflow",
-         "definition": {"nodes": []}}))
+         "definition": {"nodes": []}}), encoding="utf-8")
     (root / "src" / "schemas" / "index.json").write_text(json.dumps(
         {"id": "home", "route": "/",
-         "root": {"type": "Stack", "children": []}}))
+         "root": {"type": "Stack", "children": []}}), encoding="utf-8")
     rep = materialize_workflow_launchers(root)
     assert len(rep["injected"]) == 1, rep
     assert rep["injected"][0]["route"] == "/"

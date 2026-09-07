@@ -70,7 +70,7 @@ def test_planted_aws_key_is_critical_and_redacted(tmp_path: Path):
     assert _FAKE_AWS_KEY not in json.dumps(report)
     assert _FAKE_AWS_KEY[:6] in hits[0]["detail"]  # redacted prefix survives
     # And the on-disk artifact is equally clean.
-    on_disk = (root / "security-report.json").read_text()
+    on_disk = (root / "security-report.json").read_text(encoding="utf-8")
     assert _FAKE_AWS_KEY not in on_disk
 
 
@@ -312,7 +312,7 @@ def test_report_written_to_output_dir(tmp_path: Path):
     root = tmp_path / "app"
     _write(root, "src/lib/config.ts", "export const x = 1;\n")
     report = run_security_gate(str(root))
-    on_disk = json.loads((root / "security-report.json").read_text())
+    on_disk = json.loads((root / "security-report.json").read_text(encoding="utf-8"))
     assert on_disk["passed"] == report["passed"]
     assert set(on_disk) >= {"generated_at", "passed", "errors",
                             "warnings", "skipped"}

@@ -4,6 +4,7 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { InputPropsType } from "./Input.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { useFieldValue } from "../../util/useFieldValue";
 import { useDensity, useRadiusScale } from "../../theme/tokens-context";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 import { resolveIcon } from "../../icons";
@@ -55,8 +56,14 @@ const INPUT_STATIC =
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Input({ name, label, type, placeholder, validators, bind: _bind,
-                       style, value, onChange, iconLeft, iconRight }: InputProps) {
+                       style, value, defaultValue, onChange, iconLeft, iconRight }: InputProps) {
   const id = useInputId(name);
+  // Same conditional-controlled shape as DatePicker/TimePicker. Harmless while
+  // uncontrolled, frozen the moment a `value` arrives without a handler — which
+  // is exactly what a schema node supplies.
+  const [current, commit] = useFieldValue<string>(
+    value, onChange, defaultValue as string | undefined, "",
+  );
   const required = validators?.required === true;
   // Both vocabularies apply as string length; the explicit HTML-standard
   // `minLength`/`maxLength` win over the historic `min`/`max`.
@@ -129,8 +136,8 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
             pattern={validators?.pattern}
             minLength={minLen}
             maxLength={maxLen}
-            value={isSearch ? draft : value}
-            onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
+            value={isSearch ? draft : current}
+            onChange={isSearch ? (e) => setDraft(e.target.value) : (e) => commit(e.target.value)}
           />
           {RightIconComp && (
             <RightIconComp
@@ -152,8 +159,8 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
           pattern={validators?.pattern}
           minLength={minLen}
           maxLength={maxLen}
-          value={isSearch ? draft : value}
-          onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
+          value={isSearch ? draft : current}
+          onChange={isSearch ? (e) => setDraft(e.target.value) : (e) => commit(e.target.value)}
         />
       )}
     </div>

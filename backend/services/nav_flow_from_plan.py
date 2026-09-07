@@ -483,7 +483,7 @@ def write_nav_flow(output_dir: str | "Path", nav_flow: dict) -> None:
     from pathlib import Path
     p = Path(output_dir) / "src" / "contracts"
     p.mkdir(parents=True, exist_ok=True)
-    (p / "nav-flow.json").write_text(json.dumps(nav_flow, indent=2))
+    (p / "nav-flow.json").write_text(json.dumps(nav_flow, indent=2), encoding="utf-8")
 
 
 # ────────────────────────────────────────────────────────────────────────

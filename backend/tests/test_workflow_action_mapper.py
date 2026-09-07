@@ -44,7 +44,7 @@ STATUS_WF = {
 def _write_wf(tmp_path, obj, fname):
     wdir = tmp_path / "workflows"
     wdir.mkdir(exist_ok=True)
-    (wdir / fname).write_text(json.dumps(obj))
+    (wdir / fname).write_text(json.dumps(obj), encoding="utf-8")
 
 
 def test_index_finds_status_workflow_and_its_call_shape(tmp_path):

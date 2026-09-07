@@ -123,7 +123,7 @@ def _ensure_component(dash: Path, result: dict) -> None:
     if not mob.exists():
         src = _TEMPLATE_DASHBOARD / "MobileNav.tsx"
         if src.exists():
-            mob.write_text(src.read_text(), encoding="utf-8")
+            mob.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
             result["mobilenav_copied"] = True
 
 

@@ -46,7 +46,7 @@ def test_upsert_nav_flow_idempotent(demo_project):
     nav_path = demo_project / "src" / "contracts" / "nav-flow.json"
     assert nav_path.exists()
 
-    nav = json.loads(nav_path.read_text())
+    nav = json.loads(nav_path.read_text(encoding="utf-8"))
     assert nav["version"] == "1.0"
     page_ids = {p["id"] for p in nav["pages"]}
     assert "login" in page_ids
@@ -55,7 +55,7 @@ def test_upsert_nav_flow_idempotent(demo_project):
 
     # Idempotency: re-registering login does not duplicate it
     _upsert_nav_flow(out, "/login", "Login", "src/schemas/login.json")
-    nav2 = json.loads(nav_path.read_text())
+    nav2 = json.loads(nav_path.read_text(encoding="utf-8"))
     assert len(nav2["pages"]) == 2, "second call should not add a duplicate"
 
 
@@ -63,7 +63,7 @@ def test_build_schema_from_jsx_sets_id_and_emits_navflow(demo_project):
     """build_schema_from_jsx with route= patches schema id/title and writes nav-flow."""
     from services.figma_mcp_pipeline import build_schema_from_jsx
 
-    jsx = FIXTURE_LOGIN.read_text()
+    jsx = FIXTURE_LOGIN.read_text(encoding="utf-8")
     out = str(demo_project)
 
     schema, _ = asyncio.run(
@@ -82,7 +82,7 @@ def test_build_schema_from_jsx_sets_id_and_emits_navflow(demo_project):
 
     nav_path = demo_project / "src" / "contracts" / "nav-flow.json"
     assert nav_path.exists()
-    nav = json.loads(nav_path.read_text())
+    nav = json.loads(nav_path.read_text(encoding="utf-8"))
     assert any(p["id"] == "login" for p in nav["pages"])
 
 
@@ -95,7 +95,7 @@ def test_commitbiz_demo_two_page_project(demo_project):
     # Page 1: Login
     login_schema, _ = asyncio.run(
         build_schema_from_jsx(
-            FIXTURE_LOGIN.read_text(),
+            FIXTURE_LOGIN.read_text(encoding="utf-8"),
             out,
             project_id="commitbiz-demo",
             route="/login",
@@ -104,12 +104,12 @@ def test_commitbiz_demo_two_page_project(demo_project):
         )
     )
     login_path = demo_project / "src" / "schemas" / "login.json"
-    login_path.write_text(json.dumps(login_schema, indent=2))
+    login_path.write_text(json.dumps(login_schema, indent=2), encoding="utf-8")
 
     # Page 2: Intent Intelligence
     intel_schema, _ = asyncio.run(
         build_schema_from_jsx(
-            FIXTURE_INTEL.read_text(),
+            FIXTURE_INTEL.read_text(encoding="utf-8"),
             out,
             project_id="commitbiz-demo",
             route="/intent-intelligence",
@@ -118,11 +118,11 @@ def test_commitbiz_demo_two_page_project(demo_project):
         )
     )
     intel_path = demo_project / "src" / "schemas" / "intent-intelligence.json"
-    intel_path.write_text(json.dumps(intel_schema, indent=2))
+    intel_path.write_text(json.dumps(intel_schema, indent=2), encoding="utf-8")
 
     # Verify nav-flow.json
     nav_path = demo_project / "src" / "contracts" / "nav-flow.json"
-    nav = json.loads(nav_path.read_text())
+    nav = json.loads(nav_path.read_text(encoding="utf-8"))
 
     assert nav["version"] == "1.0"
     assert len(nav["pages"]) == 2

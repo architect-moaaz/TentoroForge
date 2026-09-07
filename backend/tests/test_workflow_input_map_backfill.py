@@ -18,7 +18,7 @@ from services.workflow_input_map_backfill import (
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc, indent=2))
+    p.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
 
 def _drives_workflow(values: dict) -> dict:
@@ -86,7 +86,7 @@ def test_backfills_every_unmapped_field(tmp_path):
     assert "createdrive" in summary["workflows_touched"]
 
     wf = json.loads(
-        (tmp_path / "workflows/createdrive.json").read_text()
+        (tmp_path / "workflows/createdrive.json").read_text(encoding="utf-8")
     )
     insert = next(n for n in wf["definition"]["nodes"]
                   if n["id"] == "insert_drive")
@@ -108,7 +108,7 @@ def test_updates_action_contract_after_backfill(tmp_path):
     backfill_workflow_input_maps(tmp_path)
 
     ac = json.loads(
-        (tmp_path / "contracts/action-contract.json").read_text()
+        (tmp_path / "contracts/action-contract.json").read_text(encoding="utf-8")
     )
     action = ac["actions"][0]
     assert action["unmapped_fields"] == []
@@ -147,7 +147,7 @@ def test_already_present_key_is_not_overwritten(tmp_path):
 
     backfill_workflow_input_maps(tmp_path)
     wf = json.loads(
-        (tmp_path / "workflows/createdrive.json").read_text()
+        (tmp_path / "workflows/createdrive.json").read_text(encoding="utf-8")
     )
     insert = next(n for n in wf["definition"]["nodes"]
                   if n["id"] == "insert_drive")
@@ -175,7 +175,7 @@ def test_prefers_db_insert_over_db_update(tmp_path):
     })
     backfill_workflow_input_maps(tmp_path)
     wf = json.loads(
-        (tmp_path / "workflows/createdrive.json").read_text()
+        (tmp_path / "workflows/createdrive.json").read_text(encoding="utf-8")
     )
     insert = next(n for n in wf["definition"]["nodes"] if n["id"] == "i")
     update = next(n for n in wf["definition"]["nodes"] if n["id"] == "u")
@@ -198,7 +198,7 @@ def test_falls_back_to_db_update_when_no_insert(tmp_path):
     })
     backfill_workflow_input_maps(tmp_path)
     wf = json.loads(
-        (tmp_path / "workflows/createdrive.json").read_text()
+        (tmp_path / "workflows/createdrive.json").read_text(encoding="utf-8")
     )
     u = next(n for n in wf["definition"]["nodes"] if n["id"] == "u")
     assert u["data"]["config"]["values"] == {"title": "{{title}}"}

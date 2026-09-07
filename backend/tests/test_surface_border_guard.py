@@ -17,7 +17,7 @@ def _subset(result: dict, expected: dict) -> dict:
 def _write(tmp_path, name, schema):
     d = tmp_path / "src" / "schemas"
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(json.dumps(schema))
+    (d / name).write_text(json.dumps(schema), encoding="utf-8")
 
 
 def test_strips_radius_and_border_from_surface_containers(tmp_path):
@@ -35,7 +35,7 @@ def test_strips_radius_and_border_from_surface_containers(tmp_path):
     assert res["stripped"] == 3  # Card.radius + Card.border + Table.radius
     assert res["nodes"] == 2 and res["files"] == 1
 
-    schema = json.loads((tmp_path / "src" / "schemas" / "page.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8"))
     card = schema["root"]["children"][1]
     table = schema["root"]["children"][2]
     # radius + border gone…
@@ -54,7 +54,7 @@ def test_leaves_leaf_and_interactive_components_alone(tmp_path):
     })
     res = harmonize_surface_borders(str(tmp_path))
     assert res["stripped"] == 0
-    schema = json.loads((tmp_path / "src" / "schemas" / "page.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8"))
     assert schema["root"]["children"][0]["style"]["radius"] == "tokens.radius.full"
 
 

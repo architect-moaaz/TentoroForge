@@ -123,12 +123,12 @@ def test_db_insert_healed_too():
 def test_heal_workflow_mutations_writes_file(tmp_path):
     wf_dir = tmp_path / "workflows"
     wf_dir.mkdir()
-    (wf_dir / "pickup.json").write_text(json.dumps(_wf([_node("Set Picked Up", _pickup_config())])))
+    (wf_dir / "pickup.json").write_text(json.dumps(_wf([_node("Set Picked Up", _pickup_config())])), encoding="utf-8")
     report = heal_workflow_mutations(tmp_path)
     assert report["workflows_scanned"] == 1
     assert report["values_healed"] == 2
     assert report["unresolved"] == 0
-    reloaded = json.loads((wf_dir / "pickup.json").read_text())
+    reloaded = json.loads((wf_dir / "pickup.json").read_text(encoding="utf-8"))
     vals = reloaded["definition"]["nodes"][1]["data"]["config"]["values"]
     assert vals == {"status": "Picked Up", "pickedUpAt": NOW_LITERAL}
 

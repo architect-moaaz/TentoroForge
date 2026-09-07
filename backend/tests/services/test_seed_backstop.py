@@ -71,21 +71,21 @@ def test_render_seed_has_admin_insert():
 def test_ensure_seed_writes_when_missing(tmp_path):
     db = tmp_path / "src" / "db"
     db.mkdir(parents=True)
-    (db / "schema.ts").write_text(SCHEMA)
+    (db / "schema.ts").write_text(SCHEMA, encoding="utf-8")
     written = ensure_seed_file(tmp_path)
     assert written is not None
-    content = (db / "seed.ts").read_text()
+    content = (db / "seed.ts").read_text(encoding="utf-8")
     assert 'username: "admin"' in content
 
 
 def test_ensure_seed_does_not_overwrite_real_seed(tmp_path):
     db = tmp_path / "src" / "db"
     db.mkdir(parents=True)
-    (db / "schema.ts").write_text(SCHEMA)
+    (db / "schema.ts").write_text(SCHEMA, encoding="utf-8")
     real = "// a real, substantial LLM-generated seed file\n" + ("x" * 300)
-    (db / "seed.ts").write_text(real)
+    (db / "seed.ts").write_text(real, encoding="utf-8")
     assert ensure_seed_file(tmp_path) is None
-    assert (db / "seed.ts").read_text() == real
+    assert (db / "seed.ts").read_text(encoding="utf-8") == real
 
 
 def test_ensure_seed_noop_without_schema(tmp_path):

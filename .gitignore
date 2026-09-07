@@ -92,3 +92,9 @@ backend/data/build-usage.jsonl
 
 # built on demand from backend/scripts/feel/entry.ts
 backend/scripts/feel/validate.cjs
+
+# Local MCP server wiring. Absolute interpreter and repo paths that are true
+# only on the machine that wrote them, so committing it breaks every other
+# checkout. See .mcp.json.example for the shape.
+.mcp.json
+!.mcp.json.example

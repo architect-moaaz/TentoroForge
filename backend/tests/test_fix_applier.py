@@ -75,7 +75,7 @@ def spy_post_generate(monkeypatch):
 
 
 def _node_values(app_dir: Path, node_id: str) -> dict:
-    data = json.loads((app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text())
+    data = json.loads((app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text(encoding="utf-8"))
     for n in data["definition"]["nodes"]:
         if n.get("id") == node_id:
             return n["data"]["config"]["values"]
@@ -160,7 +160,7 @@ def test_workflow_node_config_unfixed_reports_unresolved(app_dir):
 
 def test_missing_node_does_not_corrupt_artifact(app_dir):
     """An unknown nodeId is a safe no-op — applied False, artifact untouched."""
-    original = (app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text()
+    original = (app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text(encoding="utf-8")
     diagnosis = {
         "symptom": "x",
         "feature": "x",
@@ -175,7 +175,7 @@ def test_missing_node_does_not_corrupt_artifact(app_dir):
     result = fix_applier.apply_fix(str(app_dir), diagnosis, git=False)
 
     assert result["applied"] is False
-    assert (app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text() == original
+    assert (app_dir / "workflows" / "assessmentschedulingworkflow.json").read_text(encoding="utf-8") == original
 
 
 # --------------------------------------------------------------------------- #
@@ -313,7 +313,7 @@ def test_page_schema_patch_applies(tmp_path, spy_post_generate):
         },
     }
     schema_path = pages / "candidates.json"
-    schema_path.write_text(json.dumps(schema, indent=2))
+    schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
     diagnosis = {
         "symptom": "title wrong",
@@ -333,7 +333,7 @@ def test_page_schema_patch_applies(tmp_path, spy_post_generate):
 
     assert result["applied"] is True
     assert result["seam"] == "page_schema_patch"
-    patched = json.loads(schema_path.read_text())
+    patched = json.loads(schema_path.read_text(encoding="utf-8"))
     assert patched["root"]["props"]["title"] == "All Candidates"
     assert result["verify"]["resolved"] is True
     assert spy_post_generate == [str(out)]

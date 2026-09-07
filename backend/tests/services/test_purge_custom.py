@@ -53,7 +53,7 @@ class TestPurgeCustom:
         # something to work with.
         target = tmp_path / "src" / "schemas" / "report.json"
         assert target.is_file()
-        doc = json.loads(target.read_text())
+        doc = json.loads(target.read_text(encoding="utf-8"))
         assert doc.get("id") == "report"
 
     def test_flag_on_known_page_types_still_run(

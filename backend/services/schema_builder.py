@@ -428,7 +428,7 @@ def _emit_ownership_rules_manifest(root: Path) -> str:
     lib_dir = root / "src" / "lib"
     lib_dir.mkdir(parents=True, exist_ok=True)
     (lib_dir / "ownership-rules.ts").write_text(
-        render_ownership_rules_module({}), "utf-8")
+        render_ownership_rules_module({}), encoding="utf-8")
     return "src/lib/ownership-rules.ts"
 
 
@@ -480,7 +480,7 @@ def _emit_append_only_manifest(root: Path, models: list[dict], reg_entities: dic
     lines_out.append("    || APPEND_ONLY_ENTITIES.has(String(entity).toLowerCase());")
     lines_out.append("}")
     lines_out.append("")
-    (lib_dir / "append-only-entities.ts").write_text("\n".join(lines_out))
+    (lib_dir / "append-only-entities.ts").write_text("\n".join(lines_out), encoding="utf-8")
     return "src/lib/append-only-entities.ts"
 
 
@@ -607,7 +607,7 @@ def _emit_sensitive_columns_manifest(root: Path, models: list[dict], reg_entitie
     lines_out.append("}")
     lines_out.append("")
 
-    (lib_dir / "sensitive-columns.ts").write_text("\n".join(lines_out))
+    (lib_dir / "sensitive-columns.ts").write_text("\n".join(lines_out), encoding="utf-8")
     return "src/lib/sensitive-columns.ts"
 
 
@@ -705,7 +705,7 @@ def _emit_searchable_columns_manifest(root: Path, models: list[dict], reg_entiti
     lines_out.append("}")
     lines_out.append("")
 
-    (lib_dir / "searchable-columns.ts").write_text("\n".join(lines_out))
+    (lib_dir / "searchable-columns.ts").write_text("\n".join(lines_out), encoding="utf-8")
     return "src/lib/searchable-columns.ts"
 
 
@@ -797,7 +797,7 @@ def _emit_merged_users(schema_dir, reserved_models, reg_entities, id_to_name,
     lines.extend(domain_lines)
     lines.append("});")
     lines.append("")
-    (schema_dir / "user.ts").write_text("\n".join(lines))
+    (schema_dir / "user.ts").write_text("\n".join(lines), encoding="utf-8")
     generated.append("src/db/schema/user.ts")
 
 
@@ -1257,7 +1257,7 @@ def _emit_entity(schema_dir, types_dir, name, model, fk_map, one_rels, coll_rels
         lines.append("}));")
 
     lines.append("")
-    (schema_dir / f"{slug}.ts").write_text("\n".join(lines))
+    (schema_dir / f"{slug}.ts").write_text("\n".join(lines), encoding="utf-8")
     generated.append(f"src/db/schema/{slug}.ts")
 
     # Types file.
@@ -1268,15 +1268,15 @@ def _emit_entity(schema_dir, types_dir, name, model, fk_map, one_rels, coll_rels
         f"export type New{name} = typeof {table}.$inferInsert;",
         "",
     ]
-    (types_dir / f"{slug}.ts").write_text("\n".join(tlines))
+    (types_dir / f"{slug}.ts").write_text("\n".join(tlines), encoding="utf-8")
     generated.append(f"src/types/{slug}.ts")
 
 
 def _emit_schema_barrel(schema_dir, models, reg_entities):
     lines = [f'export * from "./{_reg_slug(reg_entities, m["name"])}";' for m in models]
-    (schema_dir / "index.ts").write_text("\n".join(lines) + "\n")
+    (schema_dir / "index.ts").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _emit_types_barrel(types_dir, models, reg_entities):
     lines = [f'export * from "./{_reg_slug(reg_entities, m["name"])}";' for m in models]
-    (types_dir / "index.ts").write_text("\n".join(lines) + "\n")
+    (types_dir / "index.ts").write_text("\n".join(lines) + "\n", encoding="utf-8")

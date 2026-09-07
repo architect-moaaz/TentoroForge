@@ -29,7 +29,7 @@ def _mk_app(tmp_path: Path, *, plan: dict, schemas: dict[str, dict],
 
 
 def _plan_on_disk(root: Path) -> dict:
-    return json.loads((root / "src/contracts/plan.json").read_text())
+    return json.loads((root / "src/contracts/plan.json").read_text(encoding="utf-8"))
 
 
 def _form_page(density: str | None = None) -> dict:

@@ -40,32 +40,54 @@ export function ThemeToggle({
   style,
 }: Props): React.ReactElement {
   const [theme, setTheme] = React.useState<Theme>("light");
+  const rootRef = React.useRef<HTMLButtonElement | null>(null);
   const motion = useMotion(style?.motion);
   const styleProps = resolveStyle(style);
 
+  /**
+   * Where this toggle is allowed to write.
+   *
+   * In the editor the designed page is rendered inside [data-canvas-root], and
+   * this component was reaching straight past it: merely DROPPING a ThemeToggle
+   * stamped `data-theme` on the *editor's* <html>, and clicking it persisted a
+   * preference to the editor's own origin that outlived the session. Scoped to
+   * the canvas root, the toggle themes the page being designed and nothing
+   * else. In a generated app there is no canvas root, so the target is
+   * documentElement and localStorage persistence is unchanged.
+   */
+  const scopeOf = React.useCallback(
+    () => rootRef.current?.closest<HTMLElement>("[data-canvas-root]") ?? null,
+    [],
+  );
+
   React.useEffect(() => {
-    const initial = readInitial(storageKey);
+    const scoped = scopeOf();
+    const initial = scoped ? "light" : readInitial(storageKey);
     setTheme(initial);
-    document.documentElement.dataset.theme = initial;
-  }, [storageKey]);
+    (scoped ?? document.documentElement).dataset.theme = initial;
+  }, [storageKey, scopeOf]);
 
   const flip = React.useCallback(() => {
+    const scoped = scopeOf();
     setTheme((prev) => {
       const next: Theme = prev === "light" ? "dark" : "light";
-      document.documentElement.dataset.theme = next;
-      try {
-        window.localStorage.setItem(storageKey, next);
-      } catch {
-        // localStorage unavailable (private mode, quota) — persist skip is fine.
+      (scoped ?? document.documentElement).dataset.theme = next;
+      if (!scoped) {
+        try {
+          window.localStorage.setItem(storageKey, next);
+        } catch {
+          // localStorage unavailable (private mode, quota) — persist skip is fine.
+        }
       }
       return next;
     });
-  }, [storageKey]);
+  }, [storageKey, scopeOf]);
 
   const label = theme === "light" ? darkLabel : lightLabel;
 
   return (
     <button
+      ref={rootRef}
       type="button"
       onClick={flip}
       aria-label={label}

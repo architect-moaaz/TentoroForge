@@ -4,6 +4,8 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { CalendarPropsType } from "./Calendar.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { RADIUS_SURFACE_CLASS } from "../../style/radius";
+import { useElevation, useRadiusScale } from "../../theme/tokens-context";
 
 /**
  * Calendar with two modes:
@@ -68,6 +70,30 @@ function fmtValue(v: unknown): string {
   return String(v);
 }
 
+/**
+ * Token-elevation → shadow, copied from Card so a Calendar sitting next to a
+ * Card on the same page reads as the same kind of surface. Before this the
+ * Calendar was the only large surface in the library painting a bare 1px border
+ * and no shadow at all, which is a large part of why it "looks terrible" beside
+ * its neighbours.
+ */
+const TOKEN_ELEVATION_CLASSES: Record<"flat" | "bordered" | "layered" | "floating", string> = {
+  flat:     "shadow-none",
+  bordered: "border-2 shadow-none",
+  layered:  "shadow-sm",
+  floating: "shadow-lg",
+};
+
+/**
+ * Month-cell height. Responsive rather than the old flat `min-h-[84px]`: seven
+ * 84px columns inside a 375px device frame gave a 53px-wide cell whose event
+ * chips could not show a single word.
+ */
+const DAY_CELL_MIN_H = "min-h-[64px] sm:min-h-[92px]";
+/** See the month-grid comment — removes the doubled outer seams. */
+const GRID_EDGE_TRIM =
+  "[&>*:nth-child(7n)]:border-e-0 [&>*:nth-last-child(-n+7)]:border-b-0";
+
 const colorCache = new Map<string, string>();
 function colorForCategory(cat: string): string {
   if (!cat) return EVENT_PALETTE[0];
@@ -108,7 +134,9 @@ const coversDay = (ev: CalEvent, y: number, m: number, d: number) => {
 };
 
 export function Calendar(props: CalendarProps) {
-  const { name: _name, value, className, style, onChange, emptyText } = props;
+  const { name, value, className, style, onChange, emptyText } = props;
+  const radiusScale = useRadiusScale();
+  const elevation = useElevation();
   const eventMode = Array.isArray(props.events);
   const events = React.useMemo(() => (eventMode ? buildEvents(props) : []), // eslint-disable-line react-hooks/exhaustive-deps
     [props.events, props.dateField, props.endDateField, props.titleField, props.colorField, props.eventHref]);
@@ -122,7 +150,16 @@ export function Calendar(props: CalendarProps) {
   const [displayed, setDisplayed] = React.useState({ year: initial.year, month: initial.month });
   const [selected, setSelected] = React.useState<Ymd | null>(eventMode ? tYmd : parsed);
   const [active, setActive] = React.useState<{ ev: CalEvent; x: number; y: number } | null>(null);
-  React.useEffect(() => { if (parsed) setDisplayed({ year: parsed.year, month: parsed.month }); }, [value]); // eslint-disable-line
+  React.useEffect(() => {
+    if (!parsed) return;
+    setDisplayed({ year: parsed.year, month: parsed.month });
+    // Re-seed the selection too, but ONLY in picker mode: that mode now paints
+    // its highlight from `selected`, so a controlled `value` write has to move
+    // it or the parent would be ignored. Event mode deliberately keeps its
+    // selection on TODAY regardless of `value` — `value` only chooses the month
+    // to open on there, and the day-agenda strip underneath is "today's events".
+    if (!eventMode) setSelected(parsed);
+  }, [value]); // eslint-disable-line
   React.useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setActive(null);
@@ -148,6 +185,18 @@ export function Calendar(props: CalendarProps) {
       return { year: y, month: nm };
     });
   }
+  /**
+   * "Today" — jump the displayed month to the current one AND select today.
+   *
+   * The reported failure ("what does this today do, it is not doing anything")
+   * was real and total in picker mode, which is what a Calendar dropped from the
+   * palette is: the grid already opens on the current month, so re-setting
+   * `displayed` is a no-op, and the picker grid painted its selected ring from
+   * the `value` PROP rather than from `selected` state — so the one thing this
+   * function does change was not rendered anywhere. Fixed at the render site
+   * (picker mode now reads `selected`), which also makes plain day clicks
+   * highlight in an app that has no controlled parent writing `value` back.
+   */
   function goToday() { setDisplayed({ year: tYmd.year, month: tYmd.month }); setSelected(tYmd); }
   function clickDay(day: number) {
     const ymd = { year, month, day };
@@ -162,6 +211,12 @@ export function Calendar(props: CalendarProps) {
 
   const blanks = Array.from({ length: firstWeekday });
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  // Pad the last week out to seven. Without this the month grid simply STOPPED
+  // mid-row — a month ending on a Tuesday left five cell-widths of nothing below
+  // a ragged, un-bordered edge, inside a container that still drew its own
+  // border around the gap. That torn bottom edge is the single most visible part
+  // of "this calendar looks terrible".
+  const trailing = Array.from({ length: (7 - ((firstWeekday + daysInMonth) % 7)) % 7 });
   const agenda = selected ? events.filter((ev) => coversDay(ev, selected.year, selected.month, selected.day)) : [];
 
   // Days for the week view (week containing `selected`, else the display month's first week).
@@ -200,11 +255,38 @@ export function Calendar(props: CalendarProps) {
   return (
     <div
       data-calendar="" data-mode={eventMode ? "events" : "picker"} data-view={view}
-      className={`rounded-lg border border-border bg-card text-card-foreground${className ? ` ${className}` : ""}`}
+      // `overflow-hidden` is load-bearing, not cosmetic: the day cells paint
+      // their own backgrounds and hairlines right into all four corners, so
+      // without a clip the rounded border was visibly squared off at the bottom
+      // and the leading blank cells' grey block sat over the top-left curve.
+      // Card carries the same class for the same reason.
+      className={[
+        "overflow-hidden border border-border bg-card text-card-foreground",
+        RADIUS_SURFACE_CLASS[radiusScale],
+        TOKEN_ELEVATION_CLASSES[elevation],
+        className ?? "",
+      ].filter(Boolean).join(" ")}
       style={resolveStyle(style)} {...useMotion(style?.motion)}
     >
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+      {/* `name` used to be destructured and thrown away, and the component
+          renders no <input> of its own, so FormData never saw the picked date.
+          Same hidden-input pattern as Switch.tsx. */}
+      {name && (
+        <input
+          type="hidden"
+          name={name}
+          value={
+            selected
+              ? `${selected.year}-${String(selected.month + 1).padStart(2, "0")}-${String(selected.day).padStart(2, "0")}`
+              : ""
+          }
+          readOnly
+        />
+      )}
+      {/* Header — px-4 py-3 is the Card/Table header rhythm; the old px-3 py-2.5
+        * made the one piece of chrome the user reads first look cramped next to
+        * every other surface on the page. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <span className="text-sm font-semibold text-foreground">{headerLabel}</span>
         <div className="flex items-center gap-2">
           {eventMode && (
@@ -225,24 +307,30 @@ export function Calendar(props: CalendarProps) {
 
       {/* Weekday header (month/week grids) */}
       {(view === "month" || view === "week" || !eventMode) && (
-        <div className="grid grid-cols-7 border-b border-border">
+        <div className="grid grid-cols-7 border-b border-border bg-muted/30">
           {WEEKDAY_LABELS.map((wd) => (
-            <span key={wd} className="py-1.5 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{wd}</span>
+            <span key={wd} className="py-2 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">{wd}</span>
           ))}
         </div>
       )}
 
       {eventMode && view === "month" && (
-        <div className="grid grid-cols-7">
-          {blanks.map((_, i) => <div key={`b-${i}`} className="min-h-[84px] border-b border-e border-border bg-muted/20" />)}
+        // Strip the hairline off the last column and the last row. Every cell
+        // used to carry `border-b border-e` unconditionally, so the right-hand
+        // column doubled up against the container's own border and the bottom
+        // row doubled up against the day-agenda's `border-t` — two 2px seams
+        // framing the grid. `nth-last-child(-n+7)` is only correct because the
+        // month is now always padded to whole weeks (see `trailing`).
+        <div className={`grid grid-cols-7 ${GRID_EDGE_TRIM}`}>
+          {blanks.map((_, i) => <div key={`b-${i}`} className={`${DAY_CELL_MIN_H} border-b border-e border-border bg-muted/30`} />)}
           {days.map((day) => {
             const isToday = sameYmd(tYmd, year, month, day);
             const isSel = sameYmd(selected, year, month, day);
             const dayEvents = events.filter((ev) => coversDay(ev, year, month, day));
             return (
               <button key={day} type="button" onClick={() => clickDay(day)} data-testid={`cal-day-${day}`}
-                className={`min-h-[84px] border-b border-e border-border p-1 text-start align-top transition-colors hover:bg-muted/40 ${isSel ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""}`}>
-                <span className={`mb-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : "text-foreground"}`}>{day}</span>
+                className={`${DAY_CELL_MIN_H} border-b border-e border-border p-1.5 text-start align-top transition-colors hover:bg-muted/40 ${isSel ? "bg-primary/5 ring-1 ring-inset ring-primary/40" : ""}`}>
+                <span className={`mb-1 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : "text-foreground"}`}>{day}</span>
                 <div className="space-y-0.5">
                   {dayEvents.slice(0, 3).map((ev, k) => chip(ev, `${ev.id}-${k}`))}
                   {dayEvents.length > 3 && <span className="block px-1 text-[10px] text-muted-foreground">+{dayEvents.length - 3} more</span>}
@@ -250,11 +338,12 @@ export function Calendar(props: CalendarProps) {
               </button>
             );
           })}
+          {trailing.map((_, i) => <div key={`t-${i}`} className={`${DAY_CELL_MIN_H} border-b border-e border-border bg-muted/30`} />)}
         </div>
       )}
 
       {eventMode && view === "week" && (
-        <div className="grid grid-cols-7">
+        <div className={`grid grid-cols-7 ${GRID_EDGE_TRIM}`}>
           {weekDays.map((d, i) => {
             const y = d.getFullYear(), m = d.getMonth(), dd = d.getDate();
             const isToday = sameYmd(tYmd, y, m, dd);
@@ -294,14 +383,22 @@ export function Calendar(props: CalendarProps) {
 
       {/* Picker grid (legacy) */}
       {!eventMode && (
-        <div className="grid grid-cols-7 gap-0.5 p-2">
+        <div className="grid grid-cols-7 gap-1 p-3">
           {blanks.map((_, i) => <span key={`b-${i}`} />)}
           {days.map((day) => {
-            const isSel = sameYmd(parsed, year, month, day);
+            // `selected`, not `parsed`. The old code painted the highlight from
+            // the `value` PROP, so in the uncontrolled case that a dropped
+            // Calendar (and most generated apps) actually is, neither clicking a
+            // day nor pressing Today moved anything — the reported "what does
+            // this today do, it is not doing anything". `selected` is seeded
+            // from `value` and re-seeded whenever `value` changes, so a truly
+            // controlled parent behaves exactly as before.
+            const isSel = sameYmd(selected, year, month, day);
             const isToday = sameYmd(tYmd, year, month, day);
             return (
-              <button key={day} type="button" onClick={() => clickDay(day)}
-                className={`mx-auto h-8 w-8 rounded-full text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSel ? "bg-primary font-semibold text-primary-foreground" : isToday ? "font-semibold text-primary ring-1 ring-primary/40" : "text-foreground hover:bg-muted"}`}>
+              <button key={day} type="button" onClick={() => clickDay(day)} data-testid={`cal-day-${day}`}
+                aria-pressed={isSel}
+                className={`mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSel ? "bg-primary font-semibold text-primary-foreground" : isToday ? "font-semibold text-primary ring-1 ring-inset ring-primary/40 hover:bg-muted" : "text-foreground hover:bg-muted"}`}>
                 {day}
               </button>
             );

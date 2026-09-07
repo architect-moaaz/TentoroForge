@@ -19,7 +19,7 @@ from services.journey_verifier.extractor import (
 def _make_app(tmp_path: Path, plan: dict) -> Path:
     app = tmp_path / "app"
     app.mkdir()
-    (app / "plan.json").write_text(json.dumps(plan))
+    (app / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return app
 
 

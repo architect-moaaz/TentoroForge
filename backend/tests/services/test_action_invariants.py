@@ -21,7 +21,7 @@ def _write_plan(tmp_path: Path, plan: dict) -> Path:
     d = tmp_path / "src" / "contracts"
     d.mkdir(parents=True, exist_ok=True)
     p = d / "plan.json"
-    p.write_text(json.dumps(plan))
+    p.write_text(json.dumps(plan), encoding="utf-8")
     return p
 
 
@@ -29,7 +29,7 @@ def _write_schema(tmp_path: Path, name: str, schema: dict) -> Path:
     d = tmp_path / "src" / "schemas"
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{name}.json"
-    p.write_text(json.dumps(schema, indent=2))
+    p.write_text(json.dumps(schema, indent=2), encoding="utf-8")
     return p
 
 
@@ -139,7 +139,7 @@ class TestEnsureDeclaredActionsPresent:
         assert len(result.inserted) == 1
         assert result.inserted[0].label == "Approve"
         # File actually updated with the new button.
-        after = json.loads(schema_path.read_text())
+        after = json.loads(schema_path.read_text(encoding="utf-8"))
         assert _schema_has_action(after, {
             "kind": "workflow", "target": "ApproveRequest",
         }) is True

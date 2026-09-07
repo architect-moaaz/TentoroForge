@@ -46,6 +46,6 @@ async def test_two_page_plan_emits_exactly_two_files(tmp_path):
     assert found == ["notes.json", "notes/new.json"], f"unexpected files: {found}"
 
     # registry.ts is keyed by route
-    registry = (tmp_path / "src" / "schemas" / "registry.ts").read_text()
+    registry = (tmp_path / "src" / "schemas" / "registry.ts").read_text(encoding="utf-8")
     assert '"/notes": () => import("./notes.json")' in registry
     assert '"/notes/new": () => import("./notes/new.json")' in registry

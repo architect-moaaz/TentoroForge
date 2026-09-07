@@ -3,8 +3,8 @@ tokens) + app name, not a generic white card — and redirect to '/' (a real rou
 not '/dashboard' (a route group, not a URL)."""
 from pathlib import Path
 
-_LOGIN = Path("templates/app-foundation/src/app/login/page.tsx").read_text()
-_SIGNUP = Path("templates/app-foundation/src/app/signup/page.tsx").read_text()
+_LOGIN = Path("templates/app-foundation/src/app/login/page.tsx").read_text(encoding="utf-8")
+_SIGNUP = Path("templates/app-foundation/src/app/signup/page.tsx").read_text(encoding="utf-8")
 
 
 def test_login_uses_theme_tokens_and_app_name():
@@ -34,7 +34,7 @@ def test_login_uses_the_real_hook_contract():
     the <form> lost its onSubmit, and submitting did a NATIVE GET — the URL
     became "/login?" and sign-in silently did nothing.
     """
-    hook = Path("templates/app-foundation/src/hooks/useLogin.ts").read_text()
+    hook = Path("templates/app-foundation/src/hooks/useLogin.ts").read_text(encoding="utf-8")
     # Whatever the hook returns is the contract; the page must match it.
     import re
     returned = set(re.findall(r"\breturn \{([^}]*)\}", hook)[-1].replace(" ", "").split(","))

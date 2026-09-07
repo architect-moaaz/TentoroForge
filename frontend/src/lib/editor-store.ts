@@ -27,6 +27,19 @@ interface State {
   /** Full multi-selection set. selectedNodeId === selectedNodeIds[0] ?? null */
   selectedNodeIds: string[];
   currentPageId: string | null;
+  /**
+   * The open project's SHORT id (`output/<short_id>/` on disk) — the same value
+   * `attachPersister` is given.
+   *
+   * Held in the store rather than threaded as a prop because the properties
+   * panel is mounted from three places (PropertiesPanel, RightPanel,
+   * PropsTokensSidebar) and none of them is handed a project id today; the
+   * image control needs one to know where to upload. Not derivable from the
+   * route: `/editor/[projectId]` carries the short id but
+   * `/org/[orgId]/projects/[projectId]` carries the DB UUID and passes
+   * `project.short_id` down instead.
+   */
+  projectId: string | null;
   lastError: string | null;
   /** Persistent save-failure message (distinct from the transient, auto-clearing
    * `lastError` used for rejected edits). Stays until the next successful save. */
@@ -48,6 +61,7 @@ interface State {
   /** Clear the selection. */
   clearSelection: () => void;
   setCurrentPage: (pageId: string | null) => void;
+  setProjectId: (id: string | null) => void;
   dispatch: (action: EditorAction) => void;
   /** Apply several actions as ONE undoable transaction. All-or-nothing: if any
    * action throws or the result fails validation, nothing is committed. */
@@ -84,6 +98,7 @@ export const useEditorStore = create<State>((set, get) => ({
   selectedNodeId: null,
   selectedNodeIds: [],
   currentPageId: null,
+  projectId: null,
   lastError: null,
   saveError: null,
   isDirty: false,
@@ -125,6 +140,7 @@ export const useEditorStore = create<State>((set, get) => ({
   clearSelection: () => set({ selectedNodeIds: [], selectedNodeId: null }),
 
   setCurrentPage: (id) => set({ currentPageId: id, selectedNodeId: null, selectedNodeIds: [] }),
+  setProjectId: (id) => set({ projectId: id }),
   clearError: () => set({ lastError: null }),
 
   dispatch: (action) => {

@@ -74,9 +74,9 @@ def test_is_executable_workflow():
 def test_find_nonexecutable(tmp_path):
     wf = tmp_path / "workflows"; wf.mkdir()
     (wf / "CreateCustomer.json").write_text(json.dumps(
-        _wf([_action("db_insert", {"table": "customers", "values": {"name": "name"}})])))
+        _wf([_action("db_insert", {"table": "customers", "values": {"name": "name"}})])), encoding="utf-8")
     (wf / "WarrantyClaim.json").write_text(json.dumps(
-        _wf([_action("send_notification", {"description": "notify"})])))
+        _wf([_action("send_notification", {"description": "notify"})])), encoding="utf-8")
     bad = find_nonexecutable(tmp_path)
     assert [n for n, _ in bad] == ["WarrantyClaim.json"]  # only the prose one
 
@@ -85,7 +85,7 @@ def test_find_nonexecutable(tmp_path):
 async def test_ensure_regenerates_with_injected_fn(tmp_path):
     wf = tmp_path / "workflows"; wf.mkdir()
     (wf / "WarrantyClaim.json").write_text(json.dumps(
-        _wf([_action("send_notification", {"description": "notify the office manager"})])))
+        _wf([_action("send_notification", {"description": "notify the office manager"})])), encoding="utf-8")
 
     async def fake_regen(workflow, plan, domain_context):
         # produce an executable version
@@ -93,7 +93,7 @@ async def test_ensure_regenerates_with_injected_fn(tmp_path):
 
     report = await ensure_workflow_executability(tmp_path, {}, {}, regenerate=fake_regen)
     assert report["repaired"] == ["WarrantyClaim.json"]
-    rebuilt = json.loads((wf / "WarrantyClaim.json").read_text())
+    rebuilt = json.loads((wf / "WarrantyClaim.json").read_text(encoding="utf-8"))
     assert is_executable_workflow(rebuilt)
     assert rebuilt["name"] == "W"  # identity preserved
 
@@ -102,21 +102,21 @@ async def test_ensure_regenerates_with_injected_fn(tmp_path):
 async def test_ensure_keeps_original_when_regen_still_bad(tmp_path):
     wf = tmp_path / "workflows"; wf.mkdir()
     orig = _wf([_action("send_notification", {"description": "notify"})])
-    (wf / "Bad.json").write_text(json.dumps(orig))
+    (wf / "Bad.json").write_text(json.dumps(orig), encoding="utf-8")
 
     async def bad_regen(workflow, plan, domain_context):
         return _wf([_action("custom", {"description": "still prose"})])  # not executable
 
     report = await ensure_workflow_executability(tmp_path, {}, {}, regenerate=bad_regen)
     assert report["still_nonexecutable"] == ["Bad.json"]
-    assert json.loads((wf / "Bad.json").read_text()) == orig  # untouched
+    assert json.loads((wf / "Bad.json").read_text(encoding="utf-8")) == orig  # untouched
 
 
 @pytest.mark.asyncio
 async def test_ensure_noop_when_all_executable(tmp_path):
     wf = tmp_path / "workflows"; wf.mkdir()
     (wf / "CreateCustomer.json").write_text(json.dumps(
-        _wf([_action("db_insert", {"table": "customers", "values": {"name": "name"}})])))
+        _wf([_action("db_insert", {"table": "customers", "values": {"name": "name"}})])), encoding="utf-8")
 
     async def should_not_run(*a):
         raise AssertionError("regenerate should not be called")

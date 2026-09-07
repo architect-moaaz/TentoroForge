@@ -153,7 +153,7 @@ def ensure_api_routes(output_dir: str | Path) -> list[str]:
     for sf in sorted(schema_dir.glob("*.ts")):
         if sf.name == "index.ts":
             continue
-        info = parse_schema_file(sf.read_text())
+        info = parse_schema_file(sf.read_text(encoding="utf-8"))
         if not info:
             continue
         exp, id_num = info["export"], info["id_numeric"]
@@ -168,6 +168,6 @@ def ensure_api_routes(output_dir: str | Path) -> list[str]:
             if path.exists():
                 continue  # keep the LLM's version — may have custom logic
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(_render(tmpl, exp, id_num))
+            path.write_text(_render(tmpl, exp, id_num), encoding="utf-8")
             written.append(str(path))
     return written

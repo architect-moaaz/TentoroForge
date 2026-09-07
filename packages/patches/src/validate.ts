@@ -1,4 +1,5 @@
 import type { Artifacts, SchemaNode } from "./types";
+import { isLegacyBinding } from "./binding";
 
 const HEX_RE = /#[0-9A-Fa-f]{3,8}\b/;
 const PX_RE = /\b\d+\s*px\b/;
@@ -132,6 +133,51 @@ export function validateNavConsistency(a: Artifacts): string[] {
 }
 
 /**
+ * Reject the editor's dead `{ $binding: "expr" }` prop format.
+ *
+ * This is a REGRESSION GUARD, not a user-facing check — by the time anything
+ * reaches a commit the value should already be a `"{{expr}}"` string (written by
+ * `bindProp`, or converted from legacy data by `migrateBindingsDeep` at load).
+ * It earns its place because of how the original bug behaved: the object passed
+ * every gate silently (interpolation only transforms strings, validateProps
+ * cannot coerce it, and nothing here inspected prop VALUES at all), so the first
+ * feedback anyone got was a rendered "⚠ render error" — and by then autosave
+ * had already written it to disk and into the generated app.
+ *
+ * Prop values are otherwise unvalidated at commit on purpose, so this stays
+ * narrow: one shape, named explicitly, with the fix in the message.
+ */
+export function validateNoLegacyBindings(a: Artifacts): string[] {
+  const errs: string[] = [];
+  const scan = (v: unknown, pid: string, nodeId: string, path: string) => {
+    if (isLegacyBinding(v)) {
+      errs.push(
+        `${pid}/${nodeId}: prop '${path}' uses the removed {$binding} format — ` +
+        `use the "{{${String(v.$binding ?? "")}}}" string instead`,
+      );
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach((item, i) => scan(item, pid, nodeId, `${path}[${i}]`));
+    } else if (v && typeof v === "object") {
+      for (const [k, sub] of Object.entries(v as Record<string, unknown>)) {
+        scan(sub, pid, nodeId, `${path}.${k}`);
+      }
+    }
+  };
+  for (const [pid, page] of Object.entries(a.pageSchemas ?? {})) {
+    if (!page.root) continue;
+    for (const node of walk(page.root)) {
+      if (!node.props) continue;
+      for (const [name, value] of Object.entries(node.props)) {
+        scan(value, pid, node.id ?? "(no id)", name);
+      }
+    }
+  }
+  return errs;
+}
+
+/**
  * Subset that's safe to run at the editor commit boundary. Skips
  * prop-level closure (too noisy for live editing) and token closure
  * (cosmetic, not breaking). Use validateAll for the LLM peer-patcher's
@@ -140,6 +186,7 @@ export function validateNavConsistency(a: Artifacts): string[] {
 export function validateForCommit(a: Artifacts, registry?: RegistryLike): string[] {
   return [
     ...validateIdUniqueness(a),
+    ...validateNoLegacyBindings(a),
     ...(registry ? validateRegistryTypes(a, registry) : []),
   ];
 }

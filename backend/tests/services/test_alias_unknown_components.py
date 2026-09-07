@@ -57,7 +57,7 @@ def test_aliases_datetime_picker_to_date_picker(tmp_path: Path) -> None:
     })
     res = run(str(out))
     assert res == {"aliased": 1, "files": 1}
-    after = json.loads(schema_path.read_text())
+    after = json.loads(schema_path.read_text(encoding="utf-8"))
     assert after["root"]["children"][0]["children"][0]["type"] == "DatePicker"
 
 
@@ -69,7 +69,7 @@ def test_unknown_without_alias_untouched(tmp_path: Path) -> None:
     })
     res = run(str(out))
     assert res == {"aliased": 0, "files": 0}
-    after = json.loads(schema_path.read_text())
+    after = json.loads(schema_path.read_text(encoding="utf-8"))
     assert after["root"]["type"] == "MysteryComponent"
 
 
@@ -81,7 +81,7 @@ def test_known_type_passes_through(tmp_path: Path) -> None:
     })
     res = run(str(out))
     assert res["aliased"] == 0
-    after = json.loads(schema_path.read_text())
+    after = json.loads(schema_path.read_text(encoding="utf-8"))
     assert after["root"]["type"] == "Input"
 
 
@@ -96,7 +96,7 @@ def test_alias_target_not_registered_skipped(tmp_path: Path) -> None:
     })
     res = run(str(out))
     assert res == {"aliased": 0, "files": 0}
-    after = json.loads(schema_path.read_text())
+    after = json.loads(schema_path.read_text(encoding="utf-8"))
     assert after["root"]["type"] == "DateTimePicker"
 
 

@@ -32,6 +32,10 @@ export function RichTextEditor({
   onChange,
 }: RichTextEditorProps) {
   const editorRef = React.useRef<HTMLDivElement>(null);
+  // Mirror of the contentEditable's HTML. A contentEditable region is invisible
+  // to FormData by construction, so the value has to be kept in React state and
+  // shipped through a hidden input — otherwise `name` submitted nothing.
+  const [html, setHtml] = React.useState<string>(value ?? "");
 
   // Set initial HTML on mount without causing caret jumps on re-renders
   React.useEffect(() => {
@@ -45,12 +49,15 @@ export function RichTextEditor({
   function handleToolbarClick(cmd: string) {
     document.execCommand(cmd);
     if (editorRef.current) {
+      setHtml(editorRef.current.innerHTML);
       onChange?.(editorRef.current.innerHTML);
     }
   }
 
   function handleInput(e: React.FormEvent<HTMLDivElement>) {
-    onChange?.((e.target as HTMLDivElement).innerHTML);
+    const next = (e.target as HTMLDivElement).innerHTML;
+    setHtml(next);
+    onChange?.(next);
   }
 
   return (
@@ -91,6 +98,8 @@ export function RichTextEditor({
         data-placeholder={placeholder}
         className="min-h-[6rem] p-2 border border-t-0 border-border rounded-b-md bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
+      {/* Carry the HTML into the enclosing form's FormData under `name`. */}
+      {name && <input type="hidden" name={name} value={html} readOnly />}
     </div>
   );
 }

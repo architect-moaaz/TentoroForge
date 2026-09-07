@@ -29,6 +29,9 @@ export function SegmentedControl({ name, label, options = [], value, style, onCh
           );
         })}
       </div>
+      {/* Segments are <button type="button">, invisible to FormData. Carry the
+          selection into the enclosing form under `name`, as Switch.tsx does. */}
+      {name && <input type="hidden" name={name} value={current ?? ""} readOnly />}
     </div>
   );
 }

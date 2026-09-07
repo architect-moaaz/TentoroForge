@@ -181,11 +181,21 @@ export default async function Page({
   let pagePath = rawSlug;
   let raw = await loadSchema(projectRoot!, pagePath);
 
-  // Step 2: dynamic-route placeholder. /notes/abc-123 → notes/[id]
+  // Step 2: dynamic-route placeholder, RIGHT-TO-LEFT over every segment.
+  //
+  // This used to substitute only the LAST segment, so `/notes/abc-123` →
+  // `notes/[id]` resolved but `/items/42/edit` never did: its dynamic segment
+  // is in the MIDDLE, and the schema on disk is `items/[id]/edit.json`. That
+  // is not an edge case — `/<entity>/[id]/edit` is the edit page of every
+  // generated CRUD app, so the preview 404'd on all of them while the list and
+  // create pages worked. Segment 0 is the entity root and is never a
+  // placeholder.
   if (!raw && slug.length >= 2) {
-    const dynPath = [...slug.slice(0, -1), "[id]"].join("/");
-    raw = await loadSchema(projectRoot!, dynPath);
-    if (raw) pagePath = dynPath;
+    for (let i = slug.length - 1; i >= 1 && !raw; i -= 1) {
+      const dynPath = slug.map((seg, j) => (j === i ? "[id]" : seg)).join("/");
+      raw = await loadSchema(projectRoot!, dynPath);
+      if (raw) pagePath = dynPath;
+    }
   }
 
   // Step 3: legacy fallback: <entity>/<page-type>.json patterns

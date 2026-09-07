@@ -103,7 +103,7 @@ async def parse_page_sections(
 def _regex_parse_sections(filepath: str) -> list[dict]:
     """Simple regex-based section extraction as fallback."""
     try:
-        content = Path(filepath).read_text()
+        content = Path(filepath).read_text(encoding="utf-8")
     except Exception:
         return []
 

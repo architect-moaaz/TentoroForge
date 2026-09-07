@@ -17,7 +17,7 @@ def _mk(root: Path, path: str, content: bytes | str = b"") -> Path:
     full = root / path
     full.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(content, str):
-        full.write_text(content)
+        full.write_text(content, encoding="utf-8")
     else:
         full.write_bytes(content)
     return full

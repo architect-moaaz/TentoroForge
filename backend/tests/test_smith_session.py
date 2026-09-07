@@ -44,7 +44,7 @@ def _init_repo(tmp_path: Path) -> Path:
                            "config", "user.email", "t@t.t"])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "config", "user.name", "T"])
-    (tmp_path / "seed.txt").write_text("seed")
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "seed.txt"])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "commit", "-qm", "seed"])
@@ -224,7 +224,7 @@ def test_iteration_refuses_resolved_when_diff_does_not_mention_target(tmp_path):
     _init_repo(tmp_path)
     schema_dir = tmp_path / "src" / "schemas" / "candidates"
     schema_dir.mkdir(parents=True)
-    (schema_dir / "new.json").write_text('{"root":{"children":[]}}')
+    (schema_dir / "new.json").write_text('{"root":{"children":[]}}', encoding="utf-8")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "."])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "commit", "-qm", "baseline"])
@@ -237,7 +237,7 @@ def test_iteration_refuses_resolved_when_diff_does_not_mention_target(tmp_path):
     def _move(understanding, output_dir):
         """Smith edits an UNRELATED file — the wrong-file scenario."""
         p = Path(output_dir) / "some_other.txt"
-        p.write_text("unrelated change")
+        p.write_text("unrelated change", encoding="utf-8")
         return IterationMove(
             move_name="edit_file(some_other.txt)",
             touched_paths=["some_other.txt"],
@@ -353,7 +353,7 @@ def test_iteration_ask_user_when_understand_returns_low_confidence(tmp_path):
 
 def test_change_log_entry_records_ask_move_diff_and_verification(tmp_path):
     _init_repo(tmp_path)
-    (tmp_path / "a.json").write_text('{"before": true}')
+    (tmp_path / "a.json").write_text('{"before": true}', encoding="utf-8")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "."])
     subprocess.check_call(["git", "-C", str(tmp_path), "commit", "-qm", "b"])
     bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
@@ -362,7 +362,7 @@ def test_change_log_entry_records_ask_move_diff_and_verification(tmp_path):
     bp.save()
 
     def _move(u, output_dir):
-        (Path(output_dir) / "a.json").write_text('{"before":false, "label":"MARK"}')
+        (Path(output_dir) / "a.json").write_text('{"before":false, "label":"MARK"}', encoding="utf-8")
         return IterationMove(move_name="edit_file(a.json)", touched_paths=["a.json"])
 
     session = SmithSession(

@@ -129,24 +129,19 @@ function _humanizeContent(content: unknown): string {
 export function Badge({ content, variant, style }: Props) {
   const radiusScale = useRadiusScale();
   const density = useDensity();
-  // Resolve variant:
-  //   1. If the content matches a known status/priority keyword, content
-  //      inference always wins. LLM-generated schemas frequently emit
-  //      `variant: "warning"` (or similar single-tone defaults) for every
-  //      priority chip, which collapses high/critical/low/medium into the
-  //      same colour. Inference fixes that without requiring the LLM to
-  //      reason about colour mapping per row.
-  //   2. Otherwise, an explicit non-neutral caller variant wins.
-  //   3. Bare/neutral defaults fall back to inference (returns "neutral"
-  //      when content isn't recognised, so unstyled custom labels still
-  //      render as muted pills).
-  const inferred = _inferVariant(content);
+  // Resolve variant — EXPLICIT ALWAYS WINS, which is what the comment on
+  // SEMANTIC_VARIANT_HINTS has always promised and what the code did not do.
+  // Inference was checked first, so setting VARIANT to `danger` on a badge
+  // reading "Active" produced a green pill: the control did nothing and said
+  // nothing, and a designer could not override their own component.
+  //   1. An explicit non-neutral caller variant wins outright.
+  //   2. Otherwise infer from the content — LLM-generated schemas rarely carry
+  //      a variant, and without inference every "high"/"low"/"completed" pill
+  //      renders in the same muted grey.
+  //   3. Inference returns "neutral" when the content isn't recognised, so
+  //      unstyled custom labels still render as muted pills.
   const resolvedVariant: Variant =
-    inferred !== "neutral"
-      ? inferred
-      : variant && variant !== "neutral"
-        ? variant
-        : "neutral";
+    variant && variant !== "neutral" ? variant : _inferVariant(content);
 
   const className = [
     BASE_STATIC,

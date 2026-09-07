@@ -9,7 +9,7 @@ _RUNTIME_ROOT = Path(__file__).resolve().parents[3] / "backend" / "templates" / 
 
 
 def test_workflow_types_includes_parallel_approvers():
-    types = (_RUNTIME_ROOT / "workflows" / "types.ts").read_text()
+    types = (_RUNTIME_ROOT / "workflows" / "types.ts").read_text(encoding="utf-8")
     assert "ParallelApproverGroup" in types
     assert "RoutingCondition" in types
     assert "DelegationRule" in types
@@ -18,7 +18,7 @@ def test_workflow_types_includes_parallel_approvers():
 
 
 def test_workflow_engine_has_parallel_resolution():
-    engine = (_RUNTIME_ROOT / "workflows" / "engine.ts").read_text()
+    engine = (_RUNTIME_ROOT / "workflows" / "engine.ts").read_text(encoding="utf-8")
     assert "resolveApprovers" in engine
     assert "canAdvanceStage" in engine
     assert "evalCondition" in engine
@@ -27,7 +27,7 @@ def test_workflow_engine_has_parallel_resolution():
 def test_audit_log_module_exists():
     audit = _RUNTIME_ROOT / "workflows" / "audit-log.ts"
     assert audit.exists()
-    text = audit.read_text()
+    text = audit.read_text(encoding="utf-8")
     assert "appendAuditEntry" in text
     assert "getAuditTrailForRecord" in text
 
@@ -35,7 +35,7 @@ def test_audit_log_module_exists():
 def test_escalation_module_exists():
     escalation = _RUNTIME_ROOT / "workflows" / "escalation.ts"
     assert escalation.exists()
-    text = escalation.read_text()
+    text = escalation.read_text(encoding="utf-8")
     assert "processEscalations" in text
 
 

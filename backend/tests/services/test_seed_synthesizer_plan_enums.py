@@ -32,10 +32,10 @@ def _seed_app(root: Path) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "db" / "schema").mkdir(parents=True)
     (root / "contracts").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN))
-    (root / "src" / "db" / "schema" / "tasks.ts").write_text(SCHEMA_TS)
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
+    (root / "src" / "db" / "schema" / "tasks.ts").write_text(SCHEMA_TS, encoding="utf-8")
     (root / "contracts" / "seed-plan.json").write_text(json.dumps({
-        "tables": [{"name": "tasks", "row_count": 6}]}))
+        "tables": [{"name": "tasks", "row_count": 6}]}), encoding="utf-8")
 
 
 def test_plan_enum_map_keys_by_entity_and_table(tmp_path):
@@ -49,7 +49,7 @@ def test_varchar_status_seeded_with_plan_enums(tmp_path):
     _seed_app(tmp_path)
     res = synthesize_seed_rows(str(tmp_path))
     assert res["rows_total"] == 6
-    plan = json.loads((tmp_path / "contracts" / "seed-plan.json").read_text())
+    plan = json.loads((tmp_path / "contracts" / "seed-plan.json").read_text(encoding="utf-8"))
     rows = plan["tables"][0]["seed_data"]
     statuses = {r["status"] for r in rows}
     assert statuses <= {"todo", "in_progress", "done"}

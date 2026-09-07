@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { StyleProps } from "@tentoroforge/schema";
+import { isColorTokenRef, isScaleTokenRef } from "./style-slot";
 
 export type Theme = Record<string, Record<string, string> | string>;
 
@@ -66,6 +67,11 @@ export function compileTokens(theme: Theme): Record<string, string> {
   return out;
 }
 
+// Which discriminator each key needs. Colour keys treat a bare word as a CSS
+// colour name; scale keys treat a bare word as a token ("md", "lg"). See
+// isColorTokenRef / isScaleTokenRef for why the two rules differ.
+const COLOR_KEYS = new Set(["color", "background", "borderColor"]);
+
 const STYLE_KEY_TO_CSS: Record<string, string> = {
   color: "color",
   background: "backgroundColor",
@@ -88,6 +94,21 @@ const STYLE_KEY_TO_CSS: Record<string, string> = {
   gap: "gap",
 };
 
+/**
+ * Compile a node's style props to CSS.
+ *
+ * This used to wrap EVERY string unconditionally, which meant a raw value on
+ * any mapped key became an invalid custom property. Live proof: node
+ * `container-2hmhdg` in project gh0mlpbp has `background: "#945151"` and
+ * rendered as
+ *   style="…;background-color:var(--token-#945151);background:#945151"
+ * — the hex only painted because applyStyleSlot's `background` SHORTHAND is
+ * spread after this and happens to reset `background-color`. `color` and
+ * `borderColor` have no such shorthand coming after them, so a raw colour on
+ * those was broken outright with nothing to mask it, and every
+ * `"width": "788px"` / `"lineHeight": "1.5"` in the same schemas was silently
+ * dropped too. Discriminating here removes the reliance on spread order.
+ */
 export function resolveStyle(style?: StyleProps): CSSProperties {
   const out: Record<string, string> = {};
   if (!style) return out;
@@ -95,7 +116,8 @@ export function resolveStyle(style?: StyleProps): CSSProperties {
     if (typeof v !== "string") continue;
     const cssKey = STYLE_KEY_TO_CSS[k];
     if (!cssKey) continue;
-    out[cssKey] = `var(${tokenToCssVar(v)})`;
+    const isToken = COLOR_KEYS.has(k) ? isColorTokenRef(v) : isScaleTokenRef(v);
+    out[cssKey] = isToken ? `var(${tokenToCssVar(v)})` : v;
   }
   return out as CSSProperties;
 }

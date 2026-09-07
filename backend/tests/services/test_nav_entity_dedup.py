@@ -109,7 +109,7 @@ class TestTheNavFlowBackstop:
     def _write(self, tmp_path, pages):
         import json
         p = tmp_path / "nav-flow.json"
-        p.write_text(json.dumps({"pages": pages}))
+        p.write_text(json.dumps({"pages": pages}), encoding="utf-8")
         return p
 
     def test_a_duplicate_leaves_the_menu_but_keeps_its_route(self, tmp_path):
@@ -119,7 +119,7 @@ class TestTheNavFlowBackstop:
             {"title": "employees", "route": "/employees", "shell": True},
         ])
         rep = reconcile_nav_flow(str(p))
-        pages = json.loads(p.read_text())["pages"]
+        pages = json.loads(p.read_text(encoding="utf-8"))["pages"]
         dup = [x for x in pages if x["route"] == "/employees"][0]
         assert dup["shell"] is False          # gone from the sidebar
         assert dup["route"] == "/employees"   # still reachable
@@ -131,7 +131,7 @@ class TestTheNavFlowBackstop:
             {"title": "hr_admins", "route": "/hr-admins", "shell": True},
         ])
         reconcile_nav_flow(str(p))
-        page = json.loads(p.read_text())["pages"][0]
+        page = json.loads(p.read_text(encoding="utf-8"))["pages"][0]
         assert page["shell"] is True
         assert page["title"] == "HR Admins"
 

@@ -54,15 +54,15 @@ def _app(tmp_path: Path) -> Path:
     root = tmp_path / "app"
     (root / "src" / "schemas").mkdir(parents=True)
     (root / "src" / "contracts").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
     (root / "src" / "contracts" / "dashboard-maquette.json").write_text(
-        json.dumps(MAQUETTE))
-    (root / "src" / "schemas" / "home.json").write_text(json.dumps(THIN_PAGE))
+        json.dumps(MAQUETTE), encoding="utf-8")
+    (root / "src" / "schemas" / "home.json").write_text(json.dumps(THIN_PAGE), encoding="utf-8")
     return root
 
 
 def _page(root: Path) -> dict:
-    return json.loads((root / "src" / "schemas" / "home.json").read_text())
+    return json.loads((root / "src" / "schemas" / "home.json").read_text(encoding="utf-8"))
 
 
 def _surface(components, data):
@@ -129,7 +129,7 @@ def test_the_invented_sample_data_never_reaches_disk(tmp_path):
     look finished, be false, and pass every structural gate in the pipeline."""
     root = _app(tmp_path)
     compose_dashboard_via_a2ui(str(root), surface_provider=GOOD)
-    blob = (root / "src" / "schemas" / "home.json").read_text()
+    blob = (root / "src" / "schemas" / "home.json").read_text(encoding="utf-8")
     assert "Invented Bill 42" not in blob and '"12"' not in blob
 
 
@@ -176,7 +176,7 @@ def test_a_failing_composer_never_fails_the_build(tmp_path):
 
 def test_no_entities_means_every_binding_would_be_a_guess(tmp_path):
     root = _app(tmp_path)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"entities": {}}))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"entities": {}}), encoding="utf-8")
     res = compose_dashboard_via_a2ui(str(root), surface_provider=GOOD)
     assert res["applied"] is False and "no entities" in res["reason"]
 
@@ -198,7 +198,7 @@ def test_the_registry_adapter_reads_the_plan_not_a_second_source():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         (root / "src" / "contracts").mkdir(parents=True)
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
         reg = registry_for_binder(root)
 
     bill = reg["entities"]["Bill"]
@@ -298,7 +298,7 @@ def test_an_app_with_no_montage_is_unaffected(tmp_path):
 
 def test_an_unreadable_reference_never_breaks_the_requirement(tmp_path):
     root = _app(tmp_path)
-    (root / "src" / "contracts" / "composition-reference.json").write_text("{{{")
+    (root / "src" / "contracts" / "composition-reference.json").write_text("{{{", encoding="utf-8")
     req = build_requirement(root)
     assert "Decide what belongs on it" in req and "HOUSE LAYOUT" not in req
 
@@ -334,7 +334,7 @@ def test_a_collection_route_is_judged_by_the_collection_floor(tmp_path):
     res = compose_page_via_a2ui(str(root), "/bills", "list",
                                 surface_provider=COLLECTION_SURFACE)
     assert res["applied"] is True, res["reason"]
-    doc = json.loads((root / "src" / "schemas" / "bills.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "bills.json").read_text(encoding="utf-8"))
     types = {n["type"] for n in [doc["root"], *doc["root"]["children"]]}
     assert "Table" in types
 
@@ -342,12 +342,12 @@ def test_a_collection_route_is_judged_by_the_collection_floor(tmp_path):
 def test_a_thin_collection_is_declined_by_its_own_floor(tmp_path):
     root = _app(tmp_path)
     _page_file(root, "bills", "/bills", "Heading")
-    before = (root / "src" / "schemas" / "bills.json").read_text()
+    before = (root / "src" / "schemas" / "bills.json").read_text(encoding="utf-8")
     res = compose_page_via_a2ui(str(root), "/bills", "list",
                                 surface_provider=THIN)
     assert res["applied"] is False
     assert "collection_no_list_surface" in res["findings"]
-    assert (root / "src" / "schemas" / "bills.json").read_text() == before
+    assert (root / "src" / "schemas" / "bills.json").read_text(encoding="utf-8") == before
 
 
 def test_the_route_finds_its_schema_file_by_route_not_filename(tmp_path):

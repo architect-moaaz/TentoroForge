@@ -230,6 +230,7 @@ Also generate:
 {design_section}{figma_section}
 Generate a skeleton for EACH page listed above. Use PlaceholderSlot nodes for all data-bound content.
 {f"Page type: {page_type}" if page_type else ""}
+"""
 
     system = FIGMA_LAYOUT_SYSTEM_PROMPT if is_figma else PAGE_LAYOUT_SYSTEM_PROMPT
 

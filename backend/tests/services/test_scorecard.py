@@ -44,7 +44,7 @@ def test_all_absent_scores_clean(tmp_path):
 
 def test_unreadable_report_flagged_not_fatal(tmp_path):
     root = _app(tmp_path)
-    (root / "contracts" / "proof_report.json").write_text("{not json")
+    (root / "contracts" / "proof_report.json").write_text("{not json", encoding="utf-8")
     card = build_scorecard(root)
     assert card["inputs"]["proof_report"] == "unreadable"
     assert card["functional_score"] == 100
@@ -199,7 +199,7 @@ def test_write_scorecard_persists(tmp_path):
          {"error_count": 1, "warning_count": 0,
           "findings": [{"severity": "error", "code": "x"}]})
     card = write_scorecard(root)
-    on_disk = json.loads((root / SCORECARD_REL).read_text())
+    on_disk = json.loads((root / SCORECARD_REL).read_text(encoding="utf-8"))
     assert on_disk["functional_score"] == card["functional_score"] == 92
     assert "generated_at" in on_disk
 

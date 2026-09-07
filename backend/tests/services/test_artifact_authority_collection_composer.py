@@ -98,7 +98,7 @@ class TestFlagOnBootstrap:
                      _sessions_entity())
         apply_maquettes_to_collections(str(tmp_path))
         # No exception; file exists.
-        out = json.loads((tmp_path / "src" / "schemas" / "sessions.json").read_text())
+        out = json.loads((tmp_path / "src" / "schemas" / "sessions.json").read_text(encoding="utf-8"))
         # The composer marker is stamped so guards go into assert-only mode.
         assert out.get("meta", {}).get("collection_maquette_composed") is True
 
@@ -189,5 +189,5 @@ class TestFlagOnRecipeFallback:
         _write_maquettes(tmp_path, [])
         result = apply_maquettes_to_collections(str(tmp_path))
         # Tail-fill should not overwrite the marked file.
-        after = json.loads((tmp_path / "src" / "schemas" / "sessions.json").read_text())
+        after = json.loads((tmp_path / "src" / "schemas" / "sessions.json").read_text(encoding="utf-8"))
         assert after.get("meta", {}).get("collection_maquette_composed") is True

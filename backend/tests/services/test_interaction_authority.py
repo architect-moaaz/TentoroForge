@@ -58,7 +58,7 @@ def test_strips_unknown_workflow_bulk_action(tmp_path, monkeypatch):
     report = ia.validate_output_dir(tmp_path)
     assert report.enabled is True
     assert report.tables_seen == 1
-    written = json.loads(page_fp.read_text())
+    written = json.loads(page_fp.read_text(encoding="utf-8"))
     bulk = written["content"][0]["props"]["bulkActions"]
     assert len(bulk) == 1
     assert bulk[0]["workflow"] == "ArchiveOrders"
@@ -78,7 +78,7 @@ def test_kanban_movable_between_lanes_unknown_column_stripped(tmp_path, monkeypa
         }],
     })
     ia.validate_output_dir(tmp_path)
-    written = json.loads(page_fp.read_text())
+    written = json.loads(page_fp.read_text(encoding="utf-8"))
     assert "moveBetweenLanes" not in written["content"][0]["props"]
 
 
@@ -94,7 +94,7 @@ def test_kanban_movable_between_lanes_valid_kept(tmp_path, monkeypatch):
         }],
     })
     ia.validate_output_dir(tmp_path)
-    written = json.loads(page_fp.read_text())
+    written = json.loads(page_fp.read_text(encoding="utf-8"))
     assert written["content"][0]["props"]["moveBetweenLanes"]["sourceField"] == "status"
 
 
@@ -106,5 +106,5 @@ def test_persist_report_writes_contract(tmp_path, monkeypatch):
     ia.persist_report(report, tmp_path)
     out = tmp_path / "contracts" / "interaction_authority.json"
     assert out.exists()
-    data = json.loads(out.read_text())
+    data = json.loads(out.read_text(encoding="utf-8"))
     assert data["enabled"] is True

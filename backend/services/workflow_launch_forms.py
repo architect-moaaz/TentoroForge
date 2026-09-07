@@ -137,7 +137,7 @@ def _load_workflows(output_dir: Path) -> dict:
         return out
     for fn in sorted(wf_dir.glob("*.json")):
         try:
-            wf = json.loads(fn.read_text())
+            wf = json.loads(fn.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 — a bad file must not break the pass
             continue
         if not isinstance(wf, dict):
@@ -389,7 +389,7 @@ def ensure_workflow_launch_forms(output_dir: str, registry: dict) -> list[str]:
     launcher_edges: list[tuple[str, str, str]] = []
     for existing in schemas_root.rglob("*.json"):
         try:
-            data = json.loads(existing.read_text())
+            data = json.loads(existing.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         r = data.get("route")
@@ -403,7 +403,7 @@ def ensure_workflow_launch_forms(output_dir: str, registry: dict) -> list[str]:
 
     for schema_file in sorted(schemas_root.rglob("*.json")):
         try:
-            schema = json.loads(schema_file.read_text())
+            schema = json.loads(schema_file.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         launchers = _collect_launchers(schema)
@@ -504,7 +504,7 @@ def ensure_workflow_launch_forms(output_dir: str, registry: dict) -> list[str]:
                 seg=seg, verb=verb, field_nodes=field_nodes, entities=entities)
             page_file = schemas_root / f"{slug_path}.json"
             page_file.parent.mkdir(parents=True, exist_ok=True)
-            page_file.write_text(json.dumps(page, indent=2))
+            page_file.write_text(json.dumps(page, indent=2), encoding="utf-8")
             route_owner[route] = wf_key
             created.append(route)
 
@@ -523,7 +523,7 @@ def ensure_workflow_launch_forms(output_dir: str, registry: dict) -> list[str]:
             launcher_edges.append((route, src_route, btn_label or _launch_verb(wf_name, _norm(wf_slug_raw) or "run").title()))
 
         if modified:
-            schema_file.write_text(json.dumps(schema, indent=2))
+            schema_file.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
     if created:
         # Guarded: this import pulls in the whole schema pipeline, and it runs
@@ -583,7 +583,7 @@ def _reconcile_existing_launch_form_edges(
     known_routes: set[str] = set()
     if nav_path.exists():
         try:
-            nav = json.loads(nav_path.read_text())
+            nav = json.loads(nav_path.read_text(encoding="utf-8"))
             for p in (nav.get("pages") or []):
                 if isinstance(p, dict) and p.get("route"):
                     known_routes.add(str(p["route"]))
@@ -594,7 +594,7 @@ def _reconcile_existing_launch_form_edges(
     extras: list[tuple[str, str, str]] = []
     for schema_file in sorted(schemas_root.rglob("*.json")):
         try:
-            schema = json.loads(schema_file.read_text())
+            schema = json.loads(schema_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         src_route = schema.get("route") if isinstance(schema.get("route"), str) else None
@@ -637,7 +637,7 @@ def _register_launch_forms_in_nav_flow(out_dir: Path, edges: list[tuple[str, str
     if not nav_path.exists():
         return  # no schemas at all — nothing to register against
     try:
-        nav = json.loads(nav_path.read_text())
+        nav = json.loads(nav_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
     pages = nav.setdefault("pages", [])
@@ -694,7 +694,7 @@ def _register_launch_forms_in_nav_flow(out_dir: Path, edges: list[tuple[str, str
         })
         edge_keys.add(key)
 
-    nav_path.write_text(json.dumps(nav, indent=2))
+    nav_path.write_text(json.dumps(nav, indent=2), encoding="utf-8")
 
 
 def _find(node, typ, acc):

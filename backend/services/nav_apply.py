@@ -36,7 +36,7 @@ def apply_editor_nav(output_dir: str, nav_data: dict) -> dict[str, Any]:
     if not nav_path.exists():
         return {"transitions": 0, "applied": 0}
     try:
-        nav = json.loads(nav_path.read_text())
+        nav = json.loads(nav_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"transitions": 0, "applied": 0}
 
@@ -70,7 +70,7 @@ def apply_editor_nav(output_dir: str, nav_data: dict) -> dict[str, Any]:
         })
 
     nav["transitions"] = transitions
-    nav_path.write_text(json.dumps(nav, indent=2))
+    nav_path.write_text(json.dumps(nav, indent=2), encoding="utf-8")
     return {"transitions": len(transitions), "applied": apply_transitions(output_dir).get("applied", 0)}
 
 
@@ -96,7 +96,7 @@ def apply_transitions(output_dir: str) -> dict[str, Any]:
     if not nav_path.exists():
         return {"applied": 0}
     try:
-        nav = json.loads(nav_path.read_text())
+        nav = json.loads(nav_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"applied": 0}
 
@@ -121,7 +121,7 @@ def apply_transitions(output_dir: str) -> dict[str, Any]:
         if not sp.exists():
             continue
         try:
-            schema = json.loads(sp.read_text())
+            schema = json.loads(sp.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
 
@@ -153,7 +153,7 @@ def apply_transitions(output_dir: str) -> dict[str, Any]:
                 applied += 1
 
         if changed:
-            sp.write_text(json.dumps(schema, indent=2))
+            sp.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
     if applied:
         logger.info("nav_apply: rewrote %d navigate prop(s) from transitions in %s", applied, output_dir)

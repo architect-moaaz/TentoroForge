@@ -74,13 +74,35 @@ const PROP_REMAP: Record<string, RemapFn> = {
   Select: unifyValidators,
   Tabs: (p) => {
     // LLM emits Tabs as `{ defaultValue, variant }` — completely different
-    // from the v2 contract `{ tabs: [{id,label}], value }`. Without enough
-    // info to synthesise a real tabs array, fall back to a single placeholder
-    // tab so the canvas renders rather than showing an "invalid props"
-    // marker. The user can then rebuild Tabs in the editor.
+    // from the v2 contract `{ tabs: [{id,label}], value }`, and a palette drop
+    // materialises the registry default `tabs: null` (its only control,
+    // actionPicker, cannot author an array at all).
+    //
+    // This used to return `{ tabs: [{id:"tab1",label:"Tab"}], value:"tab1" }`
+    // — a whole new props object. That did two kinds of damage: the single
+    // hard-coded def capped the render at ONE panel (Tabs indexed panels by
+    // tabs[i]), and rebuilding the object threw away the `value` the user had
+    // typed in the Properties panel, so a node saying `value: "tab-1"`
+    // rendered a strip whose only button was `data-tab-id="tab1"`
+    // (docs/editor-audit/containment.md, probe T5).
+    //
+    // Tabs now derives one tab per CHILD, so the right repair here is to leave
+    // an empty array and keep every other prop: `tabs: []` says "nothing
+    // declared", and the panel count decides the strip.
     if (Array.isArray((p as any).tabs)) return p;
-    const v = typeof p.defaultValue === "string" ? p.defaultValue : "tab1";
-    return { tabs: [{ id: v, label: "Tab" }], value: v };
+    const out = { ...p };
+    out.tabs = [];
+    if (typeof out.value !== "string" || !out.value) {
+      if (typeof out.defaultValue === "string") out.value = out.defaultValue;
+    }
+    delete out.defaultValue;
+    return out;
+  },
+  // Same defect, same shape: TabPanelWithDeepLink.tabs is an actionPicker
+  // array that defaults to null, and its component drives the strip from it.
+  TabPanelWithDeepLink: (p) => {
+    if (Array.isArray((p as any).tabs)) return p;
+    return { ...p, tabs: [] };
   },
   Badge: (p) => {
     const out = { ...p };

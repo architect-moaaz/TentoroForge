@@ -45,7 +45,7 @@ def _package_name(spec: str) -> str:
 
 
 def _template_deps() -> set[str]:
-    text = TMPL.read_text()
+    text = TMPL.read_text(encoding="utf-8")
     # Stub {{...}} / <<...>> placeholders so json.loads succeeds.
     text = re.sub(r"\{\{[^}]*\}\}", "__PLACEHOLDER__", text)
     text = re.sub(r"<<[^>]*>>", "__PLACEHOLDER__", text)
@@ -63,7 +63,7 @@ def _floor_imported_packages() -> set[str]:
     for path in FLOOR_SRC.rglob("*"):
         if path.suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
             continue
-        for spec in import_re.findall(path.read_text()):
+        for spec in import_re.findall(path.read_text(encoding="utf-8")):
             # Skip relative and alias imports.
             if spec.startswith(".") or spec.startswith("@/") or spec.startswith("~"):
                 continue

@@ -40,6 +40,11 @@ export function SearchInput({
   const styleProps = resolveStyle(style);
 
   const fetchResults = React.useCallback(async (q: string): Promise<void> => {
+    // `endpoint` is required but the registry seeds it with "", and "" is
+    // CONSUMED rather than skipped: `"" + "?q=…"` is a relative URL that
+    // resolved against whatever page the component sat on, so an unconfigured
+    // SearchInput fired a request at the editor itself on every keystroke.
+    if (!endpoint) return;
     // Cancel any in-flight request — only the newest query wins.
     if (abortRef.current) abortRef.current.abort();
     const ctrl = new AbortController();

@@ -49,7 +49,7 @@ def _mk(tmp_path: Path, *, routes: list[str], detail_rel: str,
 
 
 def _tab_row(root: Path, detail_rel: str) -> dict | None:
-    doc = json.loads((root / "src/schemas" / detail_rel).read_text())
+    doc = json.loads((root / "src/schemas" / detail_rel).read_text(encoding="utf-8"))
     for c in doc["root"]["children"]:
         if isinstance(c, dict) and (c.get("props") or {}).get("data-subresource-tabs"):
             return c
@@ -146,7 +146,7 @@ class TestUnchangedGuarantees:
             "/events/[id]/sessions", "/events/[id]/agenda"])
         inject_subresource_tabs(str(root))
         inject_subresource_tabs(str(root))
-        doc = json.loads((root / "src/schemas/events/[id].json").read_text())
+        doc = json.loads((root / "src/schemas/events/[id].json").read_text(encoding="utf-8"))
         rows = [c for c in doc["root"]["children"]
                 if isinstance(c, dict) and (c.get("props") or {}).get("data-subresource-tabs")]
         assert len(rows) == 1
@@ -156,7 +156,7 @@ class TestUnchangedGuarantees:
             "/events", "/events/[id]",
             "/events/[id]/sessions", "/events/[id]/agenda"])
         inject_subresource_tabs(str(root))
-        kids = json.loads((root / "src/schemas/events/[id].json").read_text())["root"]["children"]
+        kids = json.loads((root / "src/schemas/events/[id].json").read_text(encoding="utf-8"))["root"]["children"]
         types = [c.get("type") for c in kids]
         assert types.index("Row") < types.index("Card")
 

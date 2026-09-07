@@ -28,7 +28,7 @@ def _doc(steps, trigger=None):
 def _load(tmp_path: Path) -> dict:
     files = list((tmp_path / "src/lib/workflows/definitions").glob("*.json"))
     assert len(files) == 1
-    return json.loads(files[0].read_text())
+    return json.loads(files[0].read_text(encoding="utf-8"))
 
 
 def test_every_node_carries_the_editor_type_and_sits_in_a_column(tmp_path):

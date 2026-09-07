@@ -21,7 +21,7 @@ def _load_brief(output_dir: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -49,7 +49,7 @@ def build_section_instruction(
     filepath = Path(output_dir) / page_file
     page_source = ""
     if filepath.exists():
-        page_source = filepath.read_text()
+        page_source = filepath.read_text(encoding="utf-8")
 
     # Author the section description
     if template_id:

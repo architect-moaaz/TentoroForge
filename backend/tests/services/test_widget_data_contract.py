@@ -141,7 +141,7 @@ export const notifications = pgTable("notifications", {
   isRead: boolean("is_read"),
   createdAt: timestamp("created_at"),
 });
-''')
+''', encoding="utf-8")
         return tmp_path
 
     def test_it_reads_the_real_columns(self, tmp_path):

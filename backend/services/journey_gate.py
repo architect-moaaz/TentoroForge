@@ -314,7 +314,8 @@ async def run_journey_gate(
                 "hints": hints,
             }
             (Path(output_dir) / "journey-remediation-report.json").write_text(
-                _json.dumps(report, indent=2)
+                _json.dumps(report, indent=2),
+                encoding="utf-8",
             )
         except Exception as exc:
             logger.warning("journey_gate: failed to write remediation report: %s", exc)

@@ -99,10 +99,10 @@ def test_workspace_star_shape_still_normalised():
 def _make_vendored(root: Path, ns: str, pkg: str, *, with_dist: bool = True) -> None:
     p = root / ns / pkg
     p.mkdir(parents=True, exist_ok=True)
-    (p / "package.json").write_text('{"name":"' + f"{ns}/{pkg}" + '","main":"dist/index.js"}')
+    (p / "package.json").write_text('{"name":"' + f"{ns}/{pkg}" + '","main":"dist/index.js"}', encoding="utf-8")
     if with_dist:
         (p / "dist").mkdir(exist_ok=True)
-        (p / "dist" / "index.js").write_text("module.exports = {};\n")
+        (p / "dist" / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
 
 
 def test_verify_returns_empty_when_all_present(tmp_path):
@@ -150,7 +150,7 @@ def broken_project(tmp_path, monkeypatch):
             "@tentoroforge/editor":   "file:../../packages/editor",
             "next": "^15.1.0",
         },
-    }))
+    }), encoding="utf-8")
 
     # Stub _vendor_engine_packages so we don't actually shell out to build
     # the workspace packages during the test. Populate the vendor tree
@@ -168,7 +168,7 @@ def broken_project(tmp_path, monkeypatch):
 
 def test_refresh_fixes_broken_project(broken_project):
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     # deps rewritten to vendor paths
     assert pkg["dependencies"]["@tentoroforge/schema"] == "file:./vendor/@tentoroforge/schema"
     assert pkg["dependencies"]["@tentoroforge/renderer"] == "file:./vendor/@tentoroforge/renderer"
@@ -185,7 +185,7 @@ def test_refresh_fixes_broken_project(broken_project):
 
 def test_refresh_raises_when_dist_missing(tmp_path, monkeypatch):
     """Loud failure when the workspace packages haven't been built."""
-    (tmp_path / "package.json").write_text('{"name":"x","dependencies":{}}')
+    (tmp_path / "package.json").write_text('{"name":"x","dependencies":{}}', encoding="utf-8")
 
     def bad_vendor(root: Path) -> None:
         # Populate dirs but no dist
@@ -221,9 +221,9 @@ def test_refresh_raises_when_package_json_missing(tmp_path, monkeypatch):
 def test_refresh_is_idempotent(broken_project):
     """Running twice must not toggle state or reintroduce dropped deps."""
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    first = (broken_project / "package.json").read_text()
+    first = (broken_project / "package.json").read_text(encoding="utf-8")
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    second = (broken_project / "package.json").read_text()
+    second = (broken_project / "package.json").read_text(encoding="utf-8")
     assert first == second
 
 
@@ -236,7 +236,7 @@ def test_refresh_overwrites_stale_next_config_with_feel_lite_alias(broken_projec
         "module.exports = { reactStrictMode: true };\n"
     )
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    text = (broken_project / "next.config.js").read_text()
+    text = (broken_project / "next.config.js").read_text(encoding="utf-8")
     assert "@tentoroforge/feel-lite" in text
     assert "./src/lib/feel-lite" in text
     assert "@forge/patches" in text
@@ -261,7 +261,7 @@ def test_refresh_copies_fix_rsc_manifest_script(broken_project):
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
     script = broken_project / "scripts" / "fix-rsc-manifest.js"
     assert script.is_file()
-    body = script.read_text()
+    body = script.read_text(encoding="utf-8")
     assert "page_client-reference-manifest.js" in body
     assert ".next/server/app" in body or ".next\", \"server\", \"app\"" in body
 
@@ -272,11 +272,11 @@ def test_refresh_normalises_build_script_to_chain_manifest_fix(broken_project):
     # Broken-project fixture writes a package.json with default scripts;
     # ensure the vanilla "next build" is present so we're actually
     # testing the rewrite.
-    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     pkg["scripts"] = {"build": "next build", "dev": "next dev"}
-    (broken_project / "package.json").write_text(json.dumps(pkg))
+    (broken_project / "package.json").write_text(json.dumps(pkg), encoding="utf-8")
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    out = json.loads((broken_project / "package.json").read_text())
+    out = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     assert out["scripts"]["build"] == "next build && node scripts/fix-rsc-manifest.js"
     # Unrelated scripts untouched.
     assert out["scripts"]["dev"] == "next dev"
@@ -287,16 +287,16 @@ def test_refresh_appends_fix_to_custom_build_chain(broken_project):
     (migrate + seed + next build). The RSC-manifest fix must be
     appended to the chain, not skipped — otherwise Vercel still errors
     with ENOENT on page_client-reference-manifest.js."""
-    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     pkg["scripts"] = {
         "build": (
             "npx drizzle-kit push --config=drizzle.config.ts --force --verbose"
             " && npx tsx src/db/seed.ts && next build"
         )
     }
-    (broken_project / "package.json").write_text(json.dumps(pkg))
+    (broken_project / "package.json").write_text(json.dumps(pkg), encoding="utf-8")
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    out = json.loads((broken_project / "package.json").read_text())
+    out = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     assert out["scripts"]["build"] == (
         "npx drizzle-kit push --config=drizzle.config.ts --force --verbose"
         " && npx tsx src/db/seed.ts && next build"
@@ -308,22 +308,22 @@ def test_refresh_leaves_unrelated_custom_build_alone(broken_project):
     """A build that doesn't end in `next build` (e.g. author replaced
     it with a custom bundler) is left untouched — the fix only makes
     sense chained after next build."""
-    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     pkg["scripts"] = {"build": "npm run bundle && npm run static"}
-    (broken_project / "package.json").write_text(json.dumps(pkg))
+    (broken_project / "package.json").write_text(json.dumps(pkg), encoding="utf-8")
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    out = json.loads((broken_project / "package.json").read_text())
+    out = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     assert out["scripts"]["build"] == "npm run bundle && npm run static"
 
 
 def test_refresh_leaves_already_chained_build_alone(broken_project):
     """Idempotent: if the build already chains the manifest fix, don't
     double-append."""
-    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     pkg["scripts"] = {"build": "next build && node scripts/fix-rsc-manifest.js"}
-    (broken_project / "package.json").write_text(json.dumps(pkg))
+    (broken_project / "package.json").write_text(json.dumps(pkg), encoding="utf-8")
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    out = json.loads((broken_project / "package.json").read_text())
+    out = json.loads((broken_project / "package.json").read_text(encoding="utf-8"))
     assert out["scripts"]["build"] == "next build && node scripts/fix-rsc-manifest.js"
 
 
@@ -332,6 +332,6 @@ def test_refreshed_next_config_ignores_ts_and_eslint_errors(broken_project):
     block the Vercel build. Regression guard for the api/tasks/route.ts
     `.rows` failure on UAT."""
     refresh_vendor_and_deps(broken_project, project_slug="test-app")
-    text = (broken_project / "next.config.js").read_text()
+    text = (broken_project / "next.config.js").read_text(encoding="utf-8")
     assert "ignoreBuildErrors: true" in text
     assert "ignoreDuringBuilds: true" in text

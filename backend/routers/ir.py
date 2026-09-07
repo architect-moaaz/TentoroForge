@@ -396,14 +396,30 @@ async def get_registry_workflows(project_id: str) -> list[WorkflowSchema]:
         pass
 
     # 2) Fall back to the on-disk workflow files (the actual generated workflows).
-    wf_dir = _Path(output) / "workflows"
+    #
+    # THIS IS THE ENDPOINT EVERY WORKFLOW PICKER IN THE EDITOR QUERIES —
+    # ActionPicker, WorkflowBindingPanel, DataBindingPanel, ContextPanel — and
+    # it looked only in the LEGACY `<output>/workflows` directory. A Blueprint
+    # project writes `app/src/lib/workflows/definitions/*.json`, so this
+    # returned [] for every one of them and the UI degraded to the literal
+    # string "workflow-id (registry empty — type manually)" while a downstream
+    # gate (`functional_completeness.py:150`) hard-rejects any id the user
+    # then mistypes. Resolved through the same helper the workflows router
+    # uses, so the two cannot drift apart again.
+    from routers.workflows import _workflows_path
+
+    wf_dir = _workflows_path(str(output))
     if wf_dir.is_dir():
         for f in sorted(wf_dir.glob("*.json")):
             try:
-                d = _json.loads(f.read_text())
+                d = _json.loads(f.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            wf_id = d.get("id") or f.stem
+            # `blueprintId` is the id the Blueprint, the page contracts and
+            # `Form.workflow` all use (FLOW-001); the file's own `id` is a
+            # generated slug. Offering the slug in the picker produced a
+            # value the completeness gate rejects.
+            wf_id = d.get("blueprintId") or d.get("id") or f.stem
             if wf_id in seen:
                 continue
             seen.add(wf_id)

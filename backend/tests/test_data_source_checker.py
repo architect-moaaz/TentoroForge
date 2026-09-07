@@ -16,7 +16,7 @@ from services.data_source_checker import check_data_source
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _write_registry(root: Path, entities: list[dict]) -> None:
@@ -208,7 +208,7 @@ def test_missing_file_returns_error(tmp_path):
 def test_unparseable_file_returns_error(tmp_path):
     p = tmp_path / "src/schemas/bad.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{not json")
+    p.write_text("{not json", encoding="utf-8")
     result = check_data_source(tmp_path, "src/schemas/bad.json")
     assert result.get("error") is not None
 

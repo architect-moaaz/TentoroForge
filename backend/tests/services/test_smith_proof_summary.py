@@ -17,7 +17,7 @@ from services.smith_memory import build_memory_block, build_proof_summary
 
 def _write_report(dir_: Path, data: dict) -> None:
     (dir_ / "contracts").mkdir(parents=True, exist_ok=True)
-    (dir_ / "contracts" / "proof_report.json").write_text(json.dumps(data))
+    (dir_ / "contracts" / "proof_report.json").write_text(json.dumps(data), encoding="utf-8")
 
 
 def test_empty_when_no_report(tmp_path: Path):
@@ -95,7 +95,7 @@ def test_warning_cap_respected(tmp_path: Path):
 
 def test_malformed_report_returns_empty(tmp_path: Path):
     (tmp_path / "contracts").mkdir()
-    (tmp_path / "contracts" / "proof_report.json").write_text("not json")
+    (tmp_path / "contracts" / "proof_report.json").write_text("not json", encoding="utf-8")
     assert build_proof_summary(str(tmp_path)) == ""
 
 

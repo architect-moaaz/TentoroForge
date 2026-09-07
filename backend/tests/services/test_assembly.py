@@ -25,10 +25,10 @@ def test_assembly_never_overwrites_what_the_projections_wrote(tmp_path):
     app = tmp_path / "app"
     (app / "src" / "schemas").mkdir(parents=True)
     marker = app / "src" / "schemas" / "roles.json"
-    marker.write_text('{"id":"PAGE-001"}')
+    marker.write_text('{"id":"PAGE-001"}', encoding="utf-8")
 
     assembly.copy_scaffold(app, project_short_id="t")
-    assert marker.read_text() == '{"id":"PAGE-001"}', (
+    assert marker.read_text(encoding="utf-8") == '{"id":"PAGE-001"}', (
         "the scaffold is the shell; the projections are the application")
 
 
@@ -76,7 +76,7 @@ def test_runtime_is_read_off_the_app_not_declared(tmp_path):
     (app / "package.json").write_text(json.dumps({
         "dependencies": {"next": "15.0.0", "typescript": "5.0.0"},
         "engines": {"node": ">=22"},
-    }))
+    }), encoding="utf-8")
     assert assembly.describe_runtime(app) == {
         "framework": "nextjs", "language": "typescript",
         "packageManager": "npm", "nodeVersion": ">=22",
@@ -90,14 +90,14 @@ def test_edge_page_placeholders_are_substituted(tmp_path):
     app = tmp_path / "app"
     (app / "src" / "app").mkdir(parents=True)
     page = app / "src" / "app" / "error.tsx"
-    page.write_text('<Link href="{{home_route}}">{{app_name}}</Link>')
+    page.write_text('<Link href="{{home_route}}">{{app_name}}</Link>', encoding="utf-8")
 
     touched = assembly.interpolate_edge_pages(app, {
         "application": {"name": "Recruitment Tracker"},
         "pages": [{"route": "/sign-in"}, {"route": "/overview"}],
     })
     assert touched == ["src/app/error.tsx"]
-    assert page.read_text() == '<Link href="/overview">Recruitment Tracker</Link>'
+    assert page.read_text(encoding="utf-8") == '<Link href="/overview">Recruitment Tracker</Link>'
 
 
 def test_the_landing_route_skips_auth_pages():
@@ -116,11 +116,11 @@ def test_assembly_invalidates_the_build_cache_but_not_the_served_app(tmp_path):
     app = tmp_path / "app"
     stale = app / ".next" / "cache"
     stale.mkdir(parents=True)
-    (stale / "old.js").write_text("stale")
-    (app / ".next" / "routes-manifest.json").write_text("{}")
+    (stale / "old.js").write_text("stale", encoding="utf-8")
+    (app / ".next" / "routes-manifest.json").write_text("{}", encoding="utf-8")
     verify = app / assembly.VERIFY_DIST_DIR
     verify.mkdir()
-    (verify / "old.js").write_text("stale")
+    (verify / "old.js").write_text("stale", encoding="utf-8")
 
     assembly.assemble({"application": {"name": "T"}}, app, project_short_id="t")
     assert not stale.exists()
@@ -231,8 +231,8 @@ def test_remove_except_keeps_preserved_paths_and_clears_the_rest(tmp_path):
     from services.runtime_injector import _remove_except
 
     (tmp_path / "src/lib/workflows/definitions").mkdir(parents=True)
-    (tmp_path / "src/lib/workflows/definitions/a.json").write_text("{}")
-    (tmp_path / "src/lib/workflows/engine.ts").write_text("//")
+    (tmp_path / "src/lib/workflows/definitions/a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src/lib/workflows/engine.ts").write_text("//", encoding="utf-8")
 
     _remove_except(tmp_path / "src/lib/workflows", tmp_path,
                    ("src/lib/workflows/definitions",))
@@ -279,28 +279,32 @@ def test_assembly_substitutes_the_interface_language(tmp_path):
     app = tmp_path / "app"
     assembly.assemble({"application": {"name": "T"},
                        "product": {"locale": "ar"}}, app, project_short_id="t")
-    layout = (app / "src" / "app" / "layout.tsx").read_text()
+    layout = (app / "src" / "app" / "layout.tsx").read_text(encoding="utf-8")
     assert '<html lang="ar" dir="rtl"' in layout
     assert "__APP_" not in layout
 
     other = tmp_path / "other"
     assembly.assemble({"application": {"name": "T"}}, other, project_short_id="t")
     assert '<html lang="en" dir="ltr"' in (
-        other / "src" / "app" / "layout.tsx").read_text()
+        other / "src" / "app" / "layout.tsx").read_text(encoding="utf-8")
 
 
 def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
     """`install` runs at second zero of a build and `preview` compiles at the
     end of it; each issues only its own command."""
+    import shutil
     import subprocess
 
     from services.blueprint import assembly
 
+    # `verify_build` resolves npm through `shutil.which` so Windows gets
+    # `npm.cmd`; compare against the same resolution, not the bare name.
+    npm = shutil.which("npm") or "npm"
     seen: list[list[str]] = []
     monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: seen.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
     assert assembly.install_dependencies(tmp_path) == 0
-    assert [c[:2] for c in seen] == [["npm", "install"]]
+    assert [c[:2] for c in seen] == [[npm, "install"]]
     seen.clear()
     assembly.verify_build(tmp_path, install=False)
-    assert [c[:3] for c in seen] == [["npm", "run", "build"]]
+    assert [c[:3] for c in seen] == [[npm, "run", "build"]]

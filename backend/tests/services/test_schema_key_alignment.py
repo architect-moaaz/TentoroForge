@@ -25,7 +25,7 @@ from services.nav_route_reconcile_guard import align_schema_keys_to_routes
 def _page(tmp_path: Path, rel: str, body: str) -> Path:
     p = tmp_path / "src" / "app" / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
     return p
 
 
@@ -40,7 +40,7 @@ def test_a_group_nested_page_asks_for_its_own_url(tmp_path):
     """The live opmk18qr shape."""
     p = _page(tmp_path, "(dashboard)/dashboard/page.tsx", CALL)
     res = align_schema_keys_to_routes(str(tmp_path))
-    assert 'renderSchemaPage("/dashboard"' in p.read_text()
+    assert 'renderSchemaPage("/dashboard"' in p.read_text(encoding="utf-8")
     assert res["fixed"] == 1
 
 
@@ -49,26 +49,26 @@ def test_the_group_root_itself_is_left_alone(tmp_path):
     URL segment. Rewriting it would break the one case that was right."""
     p = _page(tmp_path, "(dashboard)/page.tsx", CALL)
     assert align_schema_keys_to_routes(str(tmp_path))["fixed"] == 0
-    assert 'renderSchemaPage("/"' in p.read_text()
+    assert 'renderSchemaPage("/"' in p.read_text(encoding="utf-8")
 
 
 def test_nested_groups_contribute_no_segments(tmp_path):
     p = _page(tmp_path, "(app)/(shell)/reports/page.tsx", CALL)
     align_schema_keys_to_routes(str(tmp_path))
-    assert 'renderSchemaPage("/reports"' in p.read_text()
+    assert 'renderSchemaPage("/reports"' in p.read_text(encoding="utf-8")
 
 
 def test_a_deeper_route_gets_its_full_path(tmp_path):
     p = _page(tmp_path, "(dashboard)/admin/employees/page.tsx", CALL)
     align_schema_keys_to_routes(str(tmp_path))
-    assert 'renderSchemaPage("/admin/employees"' in p.read_text()
+    assert 'renderSchemaPage("/admin/employees"' in p.read_text(encoding="utf-8")
 
 
 def test_a_page_already_asking_correctly_is_untouched(tmp_path):
     body = 'return renderSchemaPage("/dashboard", undefined, x);'
     p = _page(tmp_path, "(dashboard)/dashboard/page.tsx", body)
     assert align_schema_keys_to_routes(str(tmp_path))["fixed"] == 0
-    assert p.read_text() == body
+    assert p.read_text(encoding="utf-8") == body
 
 
 def test_a_page_asking_for_something_else_is_not_second_guessed(tmp_path):
@@ -77,7 +77,7 @@ def test_a_page_asking_for_something_else_is_not_second_guessed(tmp_path):
     body = 'return renderSchemaPage("/custom-key");'
     p = _page(tmp_path, "(dashboard)/dashboard/page.tsx", body)
     assert align_schema_keys_to_routes(str(tmp_path))["fixed"] == 0
-    assert p.read_text() == body
+    assert p.read_text(encoding="utf-8") == body
 
 
 def test_authoring_drift_still_matches(tmp_path):
@@ -85,7 +85,7 @@ def test_authoring_drift_still_matches(tmp_path):
     p = _page(tmp_path, "(dashboard)/dashboard/page.tsx",
               "return renderSchemaPage( '/' );")
     align_schema_keys_to_routes(str(tmp_path))
-    assert 'renderSchemaPage("/dashboard"' in p.read_text()
+    assert 'renderSchemaPage("/dashboard"' in p.read_text(encoding="utf-8")
 
 
 def test_the_trailing_arguments_are_preserved(tmp_path):
@@ -93,7 +93,7 @@ def test_the_trailing_arguments_are_preserved(tmp_path):
     searchParams` would break every page it 'fixed'."""
     p = _page(tmp_path, "(dashboard)/dashboard/page.tsx", CALL)
     align_schema_keys_to_routes(str(tmp_path))
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     assert 'renderSchemaPage("/dashboard", undefined, await searchParams)' in body
 
 
@@ -101,7 +101,7 @@ def test_a_single_argument_call_also_works(tmp_path):
     p = _page(tmp_path, "(dashboard)/reports/page.tsx",
               'return renderSchemaPage("/");')
     align_schema_keys_to_routes(str(tmp_path))
-    assert 'renderSchemaPage("/reports");' in p.read_text()
+    assert 'renderSchemaPage("/reports");' in p.read_text(encoding="utf-8")
 
 
 def test_a_dynamic_segment_page_is_skipped(tmp_path):

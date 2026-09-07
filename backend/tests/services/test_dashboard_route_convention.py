@@ -8,7 +8,7 @@ _BASE = Path("templates/app-foundation/src/app/(dashboard)")
 
 
 def _read(p: str) -> str:
-    return (_BASE / p).read_text()
+    return (_BASE / p).read_text(encoding="utf-8")
 
 
 def test_entity_list_uses_route_key_with_home_alias():

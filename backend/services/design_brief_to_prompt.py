@@ -67,7 +67,7 @@ def load_brief_from_disk(output_dir: str | Path) -> DesignBrief | None:
     if not path.exists():
         return None
     try:
-        return DesignBrief.model_validate_json(path.read_text())
+        return DesignBrief.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception:
         return None
 

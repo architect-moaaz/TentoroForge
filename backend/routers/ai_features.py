@@ -34,7 +34,7 @@ def _read_config(output_dir: str) -> dict:
     """Read the full AI config from the project."""
     config_file = _ai_config_path(output_dir) / "config.json"
     if config_file.exists():
-        return json.loads(config_file.read_text())
+        return json.loads(config_file.read_text(encoding="utf-8"))
     return {
         "config": {
             "provider": "anthropic",
@@ -51,7 +51,7 @@ def _read_config(output_dir: str) -> dict:
 
 def _write_config(output_dir: str, data: dict) -> None:
     config_file = _ai_config_path(output_dir) / "config.json"
-    config_file.write_text(json.dumps(data, indent=2))
+    config_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

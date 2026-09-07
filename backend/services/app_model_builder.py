@@ -210,6 +210,6 @@ def write_app_model(output_dir: str, plan: dict, registry: dict | None = None) -
     model = build_app_model(plan, registry)
     path = Path(output_dir) / "src" / "contracts" / "app-model.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(model, indent=2))
+    path.write_text(json.dumps(model, indent=2), encoding="utf-8")
     logger.info("Wrote app-model.json: %d entities", len(model["entities"]))
     return str(path)

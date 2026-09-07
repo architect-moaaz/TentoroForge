@@ -249,5 +249,5 @@ def test_the_observer_sees_every_line_the_ledger_writes(tmp_path):
     ledger.node_done("data_model", 3)
 
     on_disk = [json.loads(line) for line in
-               (tmp_path / ".forge" / "runs" / "run-2.jsonl").read_text().splitlines()]
+               (tmp_path / ".forge" / "runs" / "run-2.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [e["event"] for e in seen] == [e["event"] for e in on_disk]

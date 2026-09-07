@@ -297,13 +297,13 @@ class TestCompile:
 
     def test_fintech_compiles_without_error(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         assert isinstance(tokens, dict)
 
     def test_fintech_produces_full_token_tree(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         # Top-level groups
         for group in ("color", "spacing", "radius", "shadow", "typography", "motion", "imagery", "semantic"):
@@ -311,7 +311,7 @@ class TestCompile:
 
     def test_fintech_color_primary_anchor_at_500(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         # Anchor (the design-spec primary) should be at color.primary.500
         # The fintech spec uses "#1d4ed8" — check it lands at stop 500
@@ -319,13 +319,13 @@ class TestCompile:
 
     def test_healthcare_compiles_without_error(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         assert isinstance(tokens, dict)
 
     def test_healthcare_density_spacious_grows_spacing(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         # spacious density -> 1.25x multiplier
         # Stop 4 (anchor 1.0rem in defaults) -> 1.25rem
@@ -333,14 +333,14 @@ class TestCompile:
 
     def test_fintech_density_compact_shrinks_spacing(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         # compact density -> 0.75x multiplier
         assert tokens["spacing"]["4"] == "0.75rem"
 
     def test_status_colors_lowercase_entity_names(self):
         from services.design_compiler import compile
-        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "healthcare-design-spec.json").read_text(encoding="utf-8"))
         tokens = compile(spec)
         # Healthcare statusColors has Active/Critical/Stable
         assert tokens["semantic"]["status"]["active"] == "green"
@@ -376,12 +376,12 @@ class TestCompileToFile:
 
     def test_compile_to_file_writes_valid_json(self, tmp_path):
         from services.design_compiler import compile_to_file
-        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text())
+        spec = json.loads((FIXTURE_DIR / "fintech-design-spec.json").read_text(encoding="utf-8"))
         out_path = tmp_path / "tokens.custom.json"
         compile_to_file(spec, str(out_path))
         assert out_path.exists()
         # Re-read and verify it parses as valid JSON
-        loaded = json.loads(out_path.read_text())
+        loaded = json.loads(out_path.read_text(encoding="utf-8"))
         assert "color" in loaded
 
     def test_compile_to_file_creates_parent_dirs(self, tmp_path):

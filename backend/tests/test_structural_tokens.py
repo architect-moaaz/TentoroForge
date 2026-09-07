@@ -76,9 +76,9 @@ def test_rewrite_globals_writes_derived_structural_tokens(tmp_path):
 
     css = tmp_path / "globals.css"
     # A :root the LLM authored with GENERIC grey border (hue 0 / slate), no tint.
-    css.write_text(":root {\n  --primary: 173 79% 26%;\n  --border: 0 0% 90%;\n}\n")
+    css.write_text(":root {\n  --primary: 173 79% 26%;\n  --border: 0 0% 90%;\n}\n", encoding="utf-8")
     _rewrite_globals_root(css, {"primary": "#0f766e", "background": "#ffffff"})
-    out = css.read_text()
+    out = css.read_text(encoding="utf-8")
     assert "--border:" in out and "--ring:" in out and "--foreground:" in out
     # the border hue must now be teal (~165-185), not 0 (grey)
     m = re.search(r"--border:\s*(\d+) ", out)

@@ -21,7 +21,13 @@ export interface FileUploadProps extends FileUploadPropsType {
   uploadUrl?: string;
 }
 
-type Item = { file: File; status: "uploading" | "done" | "error"; ref?: FileUploadRef };
+type Item = {
+  file: File;
+  status: "uploading" | "done" | "error";
+  ref?: FileUploadRef;
+  /** Why it failed, shown to the user. See `uploadOne`. */
+  error?: string;
+};
 
 /**
  * Uploads selected files to the app's storage endpoint and carries the resulting
@@ -38,29 +44,58 @@ export function FileUpload({
   const [items, setItems] = React.useState<Item[]>([]);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const uploadOne = async (file: File): Promise<FileUploadRef | null> => {
+  // Report WHY, not just that it failed. The reported question was "check if
+  // the fileupload is working" — and the component's answer to that was a 10px
+  // muted "· failed" that is identical whether the endpoint is missing (a 404,
+  // which is exactly what the editor canvas and the render-scaffold give you,
+  // since neither serves /api/files/upload), the server rejected the type, or
+  // the network dropped. Those need different actions from the user.
+  const uploadOne = async (
+    file: File,
+  ): Promise<{ ref: FileUploadRef } | { error: string }> => {
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch(uploadUrl, { method: "POST", body: fd });
-      if (!res.ok) return null;
-      return (await res.json()) as FileUploadRef;
-    } catch {
-      return null;
+      if (!res.ok) {
+        const detail = res.status === 404
+          ? `no upload endpoint at ${uploadUrl}`
+          : `server returned ${res.status}`;
+        return { error: detail };
+      }
+      return { ref: (await res.json()) as FileUploadRef };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "upload failed" };
     }
   };
 
   const acceptFiles = async (list: FileList | null) => {
     if (!list) return;
-    const arr = Array.from(list).filter((f) => maxSizeMb === undefined || f.size <= maxSizeMb * 1024 * 1024);
-    if (!arr.length) return;
+    const all = Array.from(list);
+    const cap = maxSizeMb === undefined ? Infinity : maxSizeMb * 1024 * 1024;
+    const arr = all.filter((f) => f.size <= cap);
+    // Oversize files used to be dropped on the floor: `arr` was filtered and,
+    // when nothing survived, acceptFiles simply returned — pick one file that
+    // is over `maxSizeMb` and the component did NOTHING, no message, no state
+    // change, indistinguishable from a broken control.
+    const rejected: Item[] = all
+      .filter((f) => f.size > cap)
+      .map((file) => ({ file, status: "error" as const, error: `over the ${maxSizeMb} MB limit` }));
+    if (!arr.length) {
+      if (rejected.length) setItems((prev) => (multiple ? [...prev, ...rejected] : rejected));
+      return;
+    }
     onFiles?.(arr);
     const fresh: Item[] = arr.map((file) => ({ file, status: "uploading" }));
-    setItems((prev) => (multiple ? [...prev, ...fresh] : fresh));
+    setItems((prev) => (multiple ? [...prev, ...fresh, ...rejected] : [...fresh, ...rejected]));
     const settled: Item[] = [];
     for (const it of fresh) {
-      const ref = await uploadOne(it.file);
-      settled.push({ ...it, status: ref ? "done" : "error", ref: ref ?? undefined });
+      const r = await uploadOne(it.file);
+      settled.push(
+        "ref" in r
+          ? { ...it, status: "done", ref: r.ref }
+          : { ...it, status: "error", error: r.error },
+      );
     }
     setItems((prev) => {
       const next = multiple ? prev.map((p) => settled.find((s) => s.file === p.file) ?? p) : settled;
@@ -106,17 +141,25 @@ export function FileUpload({
       >
         <span>{busy ? "Uploading…" : "Drag & drop or click to browse"}</span>
         {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+        {/* `accept` defaults to "" in the registry, and an empty accept
+          * attribute makes some browsers' file pickers show nothing at all as
+          * selectable. Only emit it when the user actually set a filter. */}
         <input
-          ref={inputRef} data-testid="file-upload-input" type="file" accept={accept} multiple={multiple}
+          ref={inputRef} data-testid="file-upload-input" type="file"
+          accept={accept || undefined} multiple={multiple}
           className="hidden" onChange={(e) => acceptFiles(e.target.files)} />
       </div>
       {items.length > 0 && (
         <ul className="text-xs text-foreground">
           {items.map((it, i) => (
-            <li key={i} className="flex items-center gap-1">
+            <li key={i} className="flex flex-wrap items-center gap-1" data-upload-status={it.status}>
               <span>{it.file.name} ({Math.round(it.file.size / 1024)} KB)</span>
               <span className={it.status === "error" ? "text-destructive" : "text-muted-foreground"}>
-                {it.status === "uploading" ? "· uploading…" : it.status === "done" ? "· ✓" : "· failed"}
+                {it.status === "uploading"
+                  ? "· uploading…"
+                  : it.status === "done"
+                    ? "· ✓"
+                    : `· failed — ${it.error ?? "unknown error"}`}
               </span>
             </li>
           ))}

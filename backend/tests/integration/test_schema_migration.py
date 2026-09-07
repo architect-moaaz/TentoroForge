@@ -143,7 +143,7 @@ def test_existing_schema_parses(fixture_path: Path):
     if not _list_fixtures():
         pytest.skip(f"no fixtures present in {_FIXTURE_DIR}")
 
-    text = fixture_path.read_text()
+    text = fixture_path.read_text(encoding="utf-8")
     try:
         schema = json.loads(text)
     except json.JSONDecodeError as e:

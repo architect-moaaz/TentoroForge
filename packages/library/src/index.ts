@@ -60,6 +60,11 @@ export type { BuildDefaultRegistryOptions } from "./buildDefaultRegistry";
 export { Box, Text, Image } from "./primitives/index";
 export { layouts } from "./layouts/index";
 
+// Icons. `ICON_NAMES` is the enumerable list the editor's icon-picker control
+// needs; without it `iconPicker` degraded to a free-text field and authors
+// guessed names, which is how an IconButton ended up rendering the word "Plus".
+export { ICON_NAMES, resolveIcon, inferIcon, looksLikeIconName } from "./icons";
+
 // Interactive components
 export { Button } from "./components/Button/Button";
 export { ButtonProps } from "./components/Button/Button.schema";

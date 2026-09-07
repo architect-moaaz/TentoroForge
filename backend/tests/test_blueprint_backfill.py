@@ -45,12 +45,12 @@ def _make_project(tmp_path: Path) -> Path:
             {"route": "/candidates", "schema_path": "src/schemas/candidates/index.json"},
             {"route": "/candidates/new", "schema_path": "src/schemas/candidates/new.json"},
         ],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "workflows").mkdir()
     (tmp_path / "workflows" / "CreateCandidate.json").write_text(json.dumps({
         "id": "CreateCandidate", "trigger": {"type": "form_submit"},
         "nodes": [], "edges": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "schemas").mkdir()
     return tmp_path

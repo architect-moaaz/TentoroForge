@@ -71,7 +71,7 @@ def test_generate_definitions_emits_ai_generate_node(tmp_path):
     }
     n = generate_workflow_definitions(str(tmp_path), plan)
     assert n == 1
-    wf = json.loads(next((tmp_path / "workflows").glob("*.json")).read_text())
+    wf = json.loads(next((tmp_path / "workflows").glob("*.json")).read_text(encoding="utf-8"))
     nodes = wf["definition"]["nodes"]
     ai = [x for x in nodes if x["type"] == "ai_generate"]
     assert len(ai) == 1

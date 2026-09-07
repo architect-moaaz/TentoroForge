@@ -22,7 +22,7 @@ def _run(tmp_path, page, llm_route):
 
 
 def _written(tmp_path, slug):
-    return json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text())
+    return json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text(encoding="utf-8"))
 
 
 def test_pins_route_over_llm_dashboard_hallucination(tmp_path):

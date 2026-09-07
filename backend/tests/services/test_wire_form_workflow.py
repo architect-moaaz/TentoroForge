@@ -212,13 +212,13 @@ def test_wire_writes_form_props_and_workflow_trigger(tmp_path):
     assert r["error"] is None
     # Page: Form.props.workflow was set
     updated_page = json.loads(
-        (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(),
+        (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8"),
     )
     form_props = updated_page["root"]["children"][0]["props"]
     assert form_props["workflow"] == "ParseCvWorkflow"
     # Workflow: trigger.type flipped from manual to "form", source recorded
     updated_wf = json.loads(
-        (outdir / "workflows" / "parsecvworkflow.json").read_text(),
+        (outdir / "workflows" / "parsecvworkflow.json").read_text(encoding="utf-8"),
     )
     assert updated_wf["definition"]["trigger"]["type"] == "form"
     assert updated_wf["source"] == {"kind": "form", "page": "/candidates/new"}
@@ -267,8 +267,8 @@ def test_wire_unresolved_input_returns_error_no_writes(tmp_path):
         {"name": "candidateId", "type": "string", "required": True},  # unresolved
     ])
     outdir = _scaffold_project(tmp_path, page, wf)
-    before_page = (outdir / "src" / "schemas" / "candidates" / "new.json").read_text()
-    before_wf   = (outdir / "workflows" / "w.json").read_text()
+    before_page = (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8")
+    before_wf   = (outdir / "workflows" / "w.json").read_text(encoding="utf-8")
 
     r = wire_form_to_workflow(
         str(outdir),
@@ -279,8 +279,8 @@ def test_wire_unresolved_input_returns_error_no_writes(tmp_path):
     assert r["applied"] is False
     assert "candidateId" in r["error"]
     # Verify no writes occurred
-    assert (outdir / "src" / "schemas" / "candidates" / "new.json").read_text() == before_page
-    assert (outdir / "workflows" / "w.json").read_text() == before_wf
+    assert (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8") == before_page
+    assert (outdir / "workflows" / "w.json").read_text(encoding="utf-8") == before_wf
 
 
 # --------------------------------------------------------------------------- #
@@ -317,7 +317,7 @@ def test_wire_mirrors_page_submit_to_plan(tmp_path):
     )
     assert r["applied"] is True
 
-    plan = json.loads((outdir / "src" / "contracts" / "plan.json").read_text())
+    plan = json.loads((outdir / "src" / "contracts" / "plan.json").read_text(encoding="utf-8"))
     # page.submit populated
     page_entry = next(p for p in plan["pages"] if p["route"] == "/candidates/new")
     assert page_entry["submit"] == {

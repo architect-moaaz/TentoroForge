@@ -149,7 +149,7 @@ def test_flag_on_candidates_calls_composer_and_persists(monkeypatch, tmp_path):
     # Cache file written.
     cache_file = tmp_path / "contracts" / CACHE_FILENAME
     assert cache_file.exists()
-    data = json.loads(cache_file.read_text())
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
     assert isinstance(data, dict) and len(data) == 1
     entry = next(iter(data.values()))
     assert "vocab" in entry and "visual_lock" in entry
@@ -199,7 +199,7 @@ def test_corrupt_cache_falls_back_to_fresh_call(monkeypatch, tmp_path):
     monkeypatch.setenv(FLAG_ENV, "1")
     cache_dir = tmp_path / "contracts"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / CACHE_FILENAME).write_text("{ not valid json ")
+    (cache_dir / CACHE_FILENAME).write_text("{ not valid json ", encoding="utf-8")
 
     call_count = {"n": 0}
 
@@ -241,7 +241,7 @@ def test_patterns_from_discovery_are_threaded_to_composer(monkeypatch, tmp_path)
             {"name": "Capacity Bar", "description": "slot saturation"},
             {"name": "Waitlist FIFO", "description": "queue order"},
         ],
-    }))
+    }), encoding="utf-8")
 
     seen_kwargs: dict = {}
 
@@ -311,7 +311,7 @@ def test_single_fallback_not_persisted(monkeypatch, tmp_path):
     ))
     assert prov["source"] == "single_fallback"
     cache_file = tmp_path / "contracts" / CACHE_FILENAME
-    assert not cache_file.exists() or json.loads(cache_file.read_text()) == {}
+    assert not cache_file.exists() or json.loads(cache_file.read_text(encoding="utf-8")) == {}
 
 
 # --------------------------------------------------------------------- #
@@ -393,5 +393,5 @@ def test_library_manifest_threaded_to_composer_and_persisted(monkeypatch, tmp_pa
     # Persisted next to the composer cache for inspection.
     manifest_path = tmp_path / "contracts" / LIBRARY_MANIFEST_COMPACT_FILENAME
     assert manifest_path.exists()
-    disk = json.loads(manifest_path.read_text())
+    disk = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert set(disk["components"].keys()) == set(manifest["components"].keys())

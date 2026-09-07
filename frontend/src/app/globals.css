@@ -3,12 +3,33 @@
 @import "shadcn/tailwind.css";
 @plugin "@tailwindcss/typography";
 
+/* PATH DEPTH: three `../`, not four.
+   This file is at frontend/src/app/globals.css, so `../../../` is the repo
+   root — where `packages/` and `output/` actually live. These globs carried
+   FOUR levels, resolving to a directory above the repo that does not exist, so
+   Tailwind scanned NOTHING through them and silently emitted no CSS for any
+   class used only by the library/renderer packages or only inside a generated
+   schema. The `@import` of motion.css below has always used three levels and
+   worked, which is the discrepancy that gives the game away.
+
+   The failure was invisible because coverage looked partial rather than
+   absent: `grid-cols-1..6`, `min-w-[140px]` and `max-h-48` are all present
+   because frontend/src uses them too. Only genuinely library-only classes went
+   missing — `grid-cols-7` (Calendar's week row, the product's sole 7-column
+   grid), `aspect-video` (the scanner/camera previews) and `min-h-[6rem]`
+   (RichTextEditor). Calendar rendered SUN..SAT stacked vertically down the
+   page at 1150x1511.
+
+   apps/render-scaffold/tailwind.config.ts already documents this exact class of
+   bug for the generated app: "without these globs, every generated page renders
+   with class attributes that don't resolve to compiled CSS". The editor canvas
+   had the same hole. */
 /* Pull the schema-editor + library packages into Tailwind's content scan so
    their className-based chrome (Toolbar, Palette) and any Tailwind classes
    used by library components get compiled. */
-@source "../../../../packages/editor/src/**/*.{ts,tsx}";
-@source "../../../../packages/library/src/**/*.{ts,tsx}";
-@source "../../../../packages/renderer/src/**/*.{ts,tsx}";
+@source "../../../packages/editor/src/**/*.{ts,tsx}";
+@source "../../../packages/library/src/**/*.{ts,tsx}";
+@source "../../../packages/renderer/src/**/*.{ts,tsx}";
 
 /* Per-project generated schemas carry the deterministic Figma mapper's
    arbitrary-value Tailwind classes (`text-[#hex]`, `bg-[#hex]`, `text-[Npx]`,
@@ -16,7 +37,7 @@
    time, so scan every JSON schema under output/ — without this glob the
    editor canvas renders the schema in default colours and ignores all the
    styling extracted from Figma. */
-@source "../../../../output/**/*.json";
+@source "../../../output/**/*.json";
 
 /* Motion stylesheet for FadeIn / Stagger / data-motion="fade-in" et al. */
 @import "../../../packages/library/src/style/motion.css";
@@ -206,6 +227,54 @@ button, a, input, select, textarea {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ---------------------------------------------------------------------------
+   Fixed R x C grids — EDITOR CANVAS ONLY.
+
+   The user's decision was "fixed in the editor, responsive in the app": while
+   designing they must see the exact grid they chose, but the shipped page must
+   keep stepping down through Grid.tsx's breakpoint ladder
+   (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`) so a 3-column row does not stay
+   3 columns at 375px.
+
+   That rules out doing it in the renderer. Grid.tsx's own comment records what
+   happens when you try: the old `equalCols` set an inline
+   `grid-template-columns: repeat(N, minmax(0,1fr))`, an inline style beats every
+   media query, and the entire ladder went dead. So <Grid> publishes only the
+   COUNT as `data-grid-columns`, and the fixed template lives here — in the
+   EDITOR's stylesheet, scoped to `[data-canvas-root]`, which no generated
+   application ever loads.
+
+   Why the ladder loses to these rules and not the other way round: the canvas
+   also injects the project's own compiled Tailwind at runtime, so both a v4
+   (cascade-layered) and a v3 (unlayered, media-query) `lg:grid-cols-3` can be in
+   play. `[data-canvas-root] [data-grid-columns="3"]` is two attribute selectors
+   (0,2,0) and unlayered, so it outranks a single utility class (0,1,0) in the
+   v3 case and outranks a layered utility outright in the v4 case. It is still a
+   stylesheet rule, not an inline style, so a user's own explicit
+   `node.style.gridTemplateColumns` continues to win. */
+[data-canvas-root] [data-grid-columns="1"]  { grid-template-columns: repeat(1,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="2"]  { grid-template-columns: repeat(2,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="3"]  { grid-template-columns: repeat(3,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="4"]  { grid-template-columns: repeat(4,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="5"]  { grid-template-columns: repeat(5,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="6"]  { grid-template-columns: repeat(6,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="7"]  { grid-template-columns: repeat(7,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="8"]  { grid-template-columns: repeat(8,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="9"]  { grid-template-columns: repeat(9,  minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="10"] { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="11"] { grid-template-columns: repeat(11, minmax(0, 1fr)); }
+[data-canvas-root] [data-grid-columns="12"] { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+
+/* An empty <GridCell> is a flex column with no children: zero height, so the
+   row it sits in collapses and the cell is both invisible and impossible to
+   drop into — the same failure SelectionOverlay documents for an empty
+   Stack/Row/Grid. A floor on the canvas makes every cell of the chosen R x C a
+   real, hittable target from the moment the grid is created. Editor-only, like
+   the template above: in the shipped app an empty cell should take no space. */
+[data-canvas-root] [data-grid-rows] > [data-grid-cell] {
+  min-height: 56px;
 }
 
 @keyframes xp-glow {

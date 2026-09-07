@@ -37,7 +37,7 @@ def _write_schema(tmp_path: Path, name: str, schema: dict) -> Path:
     d = tmp_path / "src" / "schemas"
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{name}.json"
-    p.write_text(json.dumps(schema, indent=2))
+    p.write_text(json.dumps(schema, indent=2), encoding="utf-8")
     return p
 
 
@@ -180,7 +180,7 @@ class TestEnsureListPagesHaveCreateAction:
         assert result.inserted[0].slug == "Applicant"
         assert result.inserted[0].label == "New Applicant"
         # File actually changed.
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         assert _has_create_button(after, "Applicant") is True
 
     def test_idempotent(self, tmp_path: Path):
@@ -290,7 +290,7 @@ class TestEnsureListPagesHaveCreateAction:
         p = _write_schema(tmp_path, "applicants", page)
         result = ensure_list_pages_have_create_action(str(tmp_path))
         assert len(result.inserted) == 1
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         assert _has_create_button(after, "Applicant") is True
         # Header row synthesized at top of children.
         assert after["children"][0]["type"] == "Row"

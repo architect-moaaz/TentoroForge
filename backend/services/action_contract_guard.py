@@ -36,6 +36,7 @@ import json
 import re
 import logging
 import os
+import pathlib
 
 from services.binding_validator import (
     _SlugResolver,
@@ -211,7 +212,8 @@ def backfill_record_button_args(output_dir: str) -> dict:
                                     dirty["v"] = True
                                     report["summary"]["buttons_patched"] += 1
                                     report["patched"].append({
-                                        "file": os.path.relpath(fp, sdir),
+                                        "file": pathlib.PurePath(
+                                            os.path.relpath(fp, sdir)).as_posix(),
                                         "label": _action_label(node),
                                         "workflow": wf_ref,
                                         "arg": var,
@@ -357,7 +359,13 @@ def reconcile_action_contract(output_dir: str) -> dict:
             for fp in sorted(glob.glob(os.path.join(sdir, "**", "*.json"), recursive=True)):
                 if os.path.basename(fp) in ("nav-flow.json",):
                     continue
-                rel = os.path.relpath(fp, sdir)
+                # POSIX separators: this becomes the `file` key of
+                # contracts/action-contract.json, which `app_map.py:302`
+                # looks up as a dict key against a `.as_posix()`-derived
+                # path. `os.path.relpath` returns OS separators, so on
+                # Windows the lookup missed for every nested page and the
+                # app map reported no form dispatching a workflow.
+                rel = pathlib.PurePath(os.path.relpath(fp, sdir)).as_posix()
                 try:
                     with open(fp, encoding="utf-8") as fh:
                         page = json.load(fh)

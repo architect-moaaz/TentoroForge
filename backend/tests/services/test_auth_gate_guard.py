@@ -16,23 +16,23 @@ _LAYOUT = (
 def _seed(tmp_path, gated: bool):
     c = tmp_path / "src" / "contracts"
     c.mkdir(parents=True, exist_ok=True)
-    (c / "nav-flow.json").write_text(json.dumps({"authGated": gated, "pages": []}))
+    (c / "nav-flow.json").write_text(json.dumps({"authGated": gated, "pages": []}), encoding="utf-8")
     lay = tmp_path / "src" / "app" / "(dashboard)"
     lay.mkdir(parents=True, exist_ok=True)
-    (lay / "layout.tsx").write_text(_LAYOUT)
+    (lay / "layout.tsx").write_text(_LAYOUT, encoding="utf-8")
     return lay / "layout.tsx"
 
 
 def test_public_app_removes_gate(tmp_path):
     layout = _seed(tmp_path, gated=False)
     assert guard_auth_gate(str(tmp_path)) == {"patched": 1}
-    assert 'redirect("/login")' not in layout.read_text()
+    assert 'redirect("/login")' not in layout.read_text(encoding="utf-8")
 
 
 def test_gated_app_keeps_gate(tmp_path):
     layout = _seed(tmp_path, gated=True)
     assert guard_auth_gate(str(tmp_path)) == {"patched": 0}
-    assert 'if (!session) redirect("/login");' in layout.read_text()
+    assert 'if (!session) redirect("/login");' in layout.read_text(encoding="utf-8")
 
 
 def test_idempotent(tmp_path):

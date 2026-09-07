@@ -8,12 +8,12 @@ from services.self_heal import heal_missing_workflows
 def _app(tmp_path, with_delete_workflow=False):
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {"Member": {"fields": {"id": {"type": "uuid"}, "name": {"type": "varchar"}}}},
-    }))
+    }), encoding="utf-8")
     wf = tmp_path / "workflows"
     wf.mkdir()
-    (wf / "CreateMember.json").write_text('{"name": "CreateMember"}')
+    (wf / "CreateMember.json").write_text('{"name": "CreateMember"}', encoding="utf-8")
     if with_delete_workflow:
-        (wf / "DeleteMember.json").write_text('{"name": "DeleteMember"}')
+        (wf / "DeleteMember.json").write_text('{"name": "DeleteMember"}', encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     # A list page with a Delete row action referencing a workflow that's missing.
@@ -23,7 +23,7 @@ def _app(tmp_path, with_delete_workflow=False):
             {"type": "Table", "props": {"rowActions": [
                 {"label": "Delete", "action": {"type": "workflow", "workflow": "DeleteMember"}}]}},
         ]},
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -44,12 +44,12 @@ def test_ignores_non_crud_missing_refs(tmp_path):
     # A domain workflow reference that isn't Create/Update/Delete<Entity> is NOT
     # deterministically regenerable — left for flag/neutralize, not fabricated.
     (tmp_path / "registry.json").write_text(json.dumps(
-        {"entities": {"Member": {"fields": {"id": {"type": "uuid"}}}}}))
+        {"entities": {"Member": {"fields": {"id": {"type": "uuid"}}}}}), encoding="utf-8")
     (tmp_path / "workflows").mkdir()
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     (sdir / "x.json").write_text(json.dumps(
-        {"root": {"type": "Button", "props": {"label": "Go", "workflow": "SomeMagicWorkflow"}}}))
+        {"root": {"type": "Button", "props": {"label": "Go", "workflow": "SomeMagicWorkflow"}}}), encoding="utf-8")
     res = heal_missing_workflows(str(tmp_path))
     assert res["entities"] == [] and res["healed"] == []
 

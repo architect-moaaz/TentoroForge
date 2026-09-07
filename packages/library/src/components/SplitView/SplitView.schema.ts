@@ -21,8 +21,16 @@ export const SplitViewProps = z
     masterWidth: z.number().int().min(160).max(600).default(320),
     /** Empty-state text for when nothing is selected. */
     emptyText: z.string().optional(),
-    /** Hides the master column on narrow viewports if true. */
+    /** Stacks the two panes below 768px when true (the default). */
     responsive: z.boolean().optional(),
+    /**
+     * Restores the pre-fix behaviour where the detail pane stays empty until
+     * `?<syncKey>=` carries a selection. Off by default: the editor never puts
+     * that param on the preview URL, so gating on it made the second child and
+     * everything inside it invisible (docs/editor-audit/containment.md #2 —
+     * 117 of 133 child pairs failed).
+     */
+    requireSelection: z.boolean().optional(),
     style: StyleSlot.optional(),
     className: z.string().optional(),
   })

@@ -94,7 +94,7 @@ class TestHeaderNormalization:
         # Two builds ~1s apart with same content should not drift.
         _write(tmp_path, "contracts/plan.json", {"name": "App"})
         write_blueprint(tmp_path, source="generation")
-        text_1 = (tmp_path / "BLUEPRINT.md").read_text()
+        text_1 = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
 
         # Hand-edit the header to a different timestamp / different source.
         text_2 = text_1.replace(

@@ -7,7 +7,7 @@ from services.read_binding_guard import reconcile_read_bindings
 def _write(tmp_path, schema, name="page"):
     (tmp_path / "src" / "schemas").mkdir(parents=True, exist_ok=True)
     (tmp_path / "src" / "db" / "schema").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "src" / "schemas" / f"{name}.json").write_text(json.dumps(schema))
+    (tmp_path / "src" / "schemas" / f"{name}.json").write_text(json.dumps(schema), encoding="utf-8")
 
 
 def _schema(pg):  # minimal RecruitmentDrive table with status enum
@@ -17,7 +17,7 @@ def _schema(pg):  # minimal RecruitmentDrive table with status enum
         '  id: uuid("id").primaryKey(),\n'
         '  title: varchar("title", { length: 255 }).notNull(),\n'
         '  status: varchar("status", { length: 50 }),\n'
-        '  createdAt: timestamp("created_at"),\n});\n')
+        '  createdAt: timestamp("created_at"),\n});\n', encoding="utf-8")
 
 
 def _entity_schema(pg, slug):  # a generic table `<slug>` with a plain status column
@@ -27,7 +27,7 @@ def _entity_schema(pg, slug):  # a generic table `<slug>` with a plain status co
         '  id: uuid("id").primaryKey(),\n'
         '  name: varchar("name", { length: 255 }).notNull(),\n'
         '  status: varchar("status", { length: 50 }),\n'
-        '  createdAt: timestamp("created_at"),\n});\n')
+        '  createdAt: timestamp("created_at"),\n});\n', encoding="utf-8")
 
 
 def _workflow(tmp_path, table, statuses, name="wf"):
@@ -41,7 +41,7 @@ def _workflow(tmp_path, table, statuses, name="wf"):
         for i, s in enumerate(statuses)
     ]
     (wdir / f"{name}.json").write_text(json.dumps({
-        "id": name, "name": name, "definition": {"nodes": nodes}}))
+        "id": name, "name": name, "definition": {"nodes": nodes}}), encoding="utf-8")
 
 
 # ── Task 2: resolve + remap ──────────────────────────────────────────────────
@@ -129,9 +129,9 @@ def test_idempotent(tmp_path):
     _write(tmp_path, {"dataSources": [{"name": "recruitmentDrives", "entity": "RecruitmentDrive", "op": "list"}],
                       "root": {"type": "Table", "rows": "{{activeRecruitmentDrives}}"}})
     reconcile_read_bindings(str(tmp_path))
-    first = (tmp_path / "src" / "schemas" / "page.json").read_text()
+    first = (tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8")
     reconcile_read_bindings(str(tmp_path))
-    assert (tmp_path / "src" / "schemas" / "page.json").read_text() == first
+    assert (tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8") == first
 
 
 # ── Task 4: data-contract.json ───────────────────────────────────────────────
@@ -147,9 +147,9 @@ def test_data_contract_written_and_deterministic(tmp_path):
     assert node["action"] == "materialized"
     assert node["node_type"].lower() == "table"
     assert node["binding_prop"] == "rows"
-    first = (tmp_path / "contracts" / "data-contract.json").read_text()
+    first = (tmp_path / "contracts" / "data-contract.json").read_text(encoding="utf-8")
     reconcile_read_bindings(str(tmp_path))
-    assert (tmp_path / "contracts" / "data-contract.json").read_text() == first
+    assert (tmp_path / "contracts" / "data-contract.json").read_text(encoding="utf-8") == first
 
 
 # ── Task 5: wired into the full post_generate_fixes pipeline ──────────────────
@@ -240,6 +240,6 @@ def test_status_vocabulary_idempotent(tmp_path):
     _write(tmp_path, {"dataSources": [{"name": "things", "entity": "Thing", "op": "list"}],
                       "root": {"type": "Table", "rows": "{{activeThings}}"}})
     reconcile_read_bindings(str(tmp_path))
-    first = (tmp_path / "src" / "schemas" / "page.json").read_text()
+    first = (tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8")
     reconcile_read_bindings(str(tmp_path))
-    assert (tmp_path / "src" / "schemas" / "page.json").read_text() == first
+    assert (tmp_path / "src" / "schemas" / "page.json").read_text(encoding="utf-8") == first

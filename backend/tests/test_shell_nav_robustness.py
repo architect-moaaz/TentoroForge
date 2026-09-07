@@ -17,12 +17,12 @@ _LAYOUT = (
     / "templates" / "app-foundation" / "src" / "app" / "(dashboard)" / "layout.tsx"
 )
 _MOBILE = _LAYOUT.parent / "MobileNav.tsx"
-_SRC = _LAYOUT.read_text()
+_SRC = _LAYOUT.read_text(encoding="utf-8")
 
 
 def test_mobile_nav_component_exists():
     assert _MOBILE.exists(), "MobileNav.tsx (mobile drawer) must exist"
-    m = _MOBILE.read_text()
+    m = _MOBILE.read_text(encoding="utf-8")
     assert "md:hidden" in m, "MobileNav must be mobile-only (md:hidden)"
     assert "data-nav-item" in m and "data-nav-label" in m, "drawer must render real nav items"
 
@@ -81,7 +81,7 @@ from services.shell_nav_guard import (  # noqa: E402
 def _write_layout(root: _pl.Path, body: str) -> _pl.Path:
     dash = root / "src" / "app" / "(dashboard)"
     dash.mkdir(parents=True)
-    (dash / "layout.tsx").write_text(body)
+    (dash / "layout.tsx").write_text(body, encoding="utf-8")
     return dash / "layout.tsx"
 
 
@@ -100,7 +100,7 @@ def test_guard_patches_a_recognized_buggy_layout():
         root = _pl.Path(d)
         lay = _write_layout(root, _OLD_BUGGY)
         r = ensure_mobile_nav(str(root))
-        out = lay.read_text()
+        out = lay.read_text(encoding="utf-8")
         assert r["layout_patched"] is True
         assert "const mobileNav = (" in out, "mobileNav element must be defined"
         assert 'import { MobileNav }' in out, "MobileNav must be imported"
@@ -114,10 +114,10 @@ def test_guard_is_idempotent():
         root = _pl.Path(d)
         lay = _write_layout(root, _OLD_BUGGY)
         ensure_mobile_nav(str(root))
-        once = lay.read_text()
+        once = lay.read_text(encoding="utf-8")
         r2 = ensure_mobile_nav(str(root))
         assert r2["already_ok"] is True
-        assert lay.read_text() == once, "second run must not change the file"
+        assert lay.read_text(encoding="utf-8") == once, "second run must not change the file"
 
 
 def test_guard_leaves_unrecognized_layout_byte_identical():
@@ -133,6 +133,6 @@ def test_guard_leaves_unrecognized_layout_byte_identical():
         lay = _write_layout(root, unrec)
         r = ensure_mobile_nav(str(root))
         assert r == {"mobilenav_copied": False, "layout_patched": False, "already_ok": False}
-        assert lay.read_text() == unrec, "unrecognized layout must be untouched"
-        assert "import { MobileNav }" not in lay.read_text(), "must not orphan an import"
+        assert lay.read_text(encoding="utf-8") == unrec, "unrecognized layout must be untouched"
+        assert "import { MobileNav }" not in lay.read_text(encoding="utf-8"), "must not orphan an import"
         assert not (lay.parent / "MobileNav.tsx").exists(), "must not copy MobileNav in"

@@ -80,7 +80,7 @@ class TestFlag:
 class TestSubstitution:
     def test_substitutes_across_all_edge_files(self, tmp_path):
         _seed_templates(tmp_path)
-        (tmp_path / "package.json").write_text(json.dumps({"name": "leaseflow"}))
+        (tmp_path / "package.json").write_text(json.dumps({"name": "leaseflow"}), encoding="utf-8")
         res = customize_edge_pages(str(tmp_path))
         # loading.tsx has no tokens in this fixture (matches real
         # template: loading is copy-free); the other 4 tsx + 1 component
@@ -90,7 +90,7 @@ class TestSubstitution:
         for rel in ("src/app/not-found.tsx", "src/app/error.tsx",
                     "src/app/forbidden.tsx", "src/app/maintenance.tsx",
                     "src/components/EdgePageFrame.tsx"):
-            text = (tmp_path / rel).read_text()
+            text = (tmp_path / rel).read_text(encoding="utf-8")
             assert "{{app_name}}" not in text, f"leftover in {rel}"
 
     def test_home_route_from_nav_flow(self, tmp_path):
@@ -99,10 +99,10 @@ class TestSubstitution:
         contracts.mkdir(parents=True)
         (contracts / "nav-flow.json").write_text(json.dumps({
             "home": "/dashboard",
-        }))
-        (tmp_path / "package.json").write_text(json.dumps({"name": "leaseflow"}))
+        }), encoding="utf-8")
+        (tmp_path / "package.json").write_text(json.dumps({"name": "leaseflow"}), encoding="utf-8")
         customize_edge_pages(str(tmp_path))
-        nf = (tmp_path / "src/app/not-found.tsx").read_text()
+        nf = (tmp_path / "src/app/not-found.tsx").read_text(encoding="utf-8")
         assert 'href="/dashboard"' in nf
         assert "Return to Leaseflow" in nf
 
@@ -112,56 +112,56 @@ class TestSubstitution:
         contracts.mkdir(parents=True)
         (contracts / "nav-flow.json").write_text(json.dumps({
             "entries": [{"route": "/leases", "label": "Leases"}],
-        }))
+        }), encoding="utf-8")
         customize_edge_pages(str(tmp_path), app_name="Rentr")
-        nf = (tmp_path / "src/app/not-found.tsx").read_text()
+        nf = (tmp_path / "src/app/not-found.tsx").read_text(encoding="utf-8")
         assert 'href="/leases"' in nf
 
     def test_home_route_falls_back_to_slash(self, tmp_path):
         _seed_templates(tmp_path)
         customize_edge_pages(str(tmp_path), app_name="Rentr")
-        nf = (tmp_path / "src/app/not-found.tsx").read_text()
+        nf = (tmp_path / "src/app/not-found.tsx").read_text(encoding="utf-8")
         assert 'href="/"' in nf
 
     def test_app_name_from_explicit_override(self, tmp_path):
         _seed_templates(tmp_path)
         customize_edge_pages(str(tmp_path), app_name="Property Manager Pro")
-        m = (tmp_path / "src/app/maintenance.tsx").read_text()
+        m = (tmp_path / "src/app/maintenance.tsx").read_text(encoding="utf-8")
         assert "Property Manager Pro is offline" in m
 
     def test_app_name_from_plan_json(self, tmp_path):
         _seed_templates(tmp_path)
         contracts = tmp_path / "src" / "contracts"
         contracts.mkdir(parents=True)
-        (contracts / "plan.json").write_text(json.dumps({"app_name": "HireOps"}))
+        (contracts / "plan.json").write_text(json.dumps({"app_name": "HireOps"}), encoding="utf-8")
         customize_edge_pages(str(tmp_path))
-        assert "HireOps" in (tmp_path / "src/app/maintenance.tsx").read_text()
+        assert "HireOps" in (tmp_path / "src/app/maintenance.tsx").read_text(encoding="utf-8")
 
     def test_app_name_from_package_json_kebab(self, tmp_path):
         _seed_templates(tmp_path)
-        (tmp_path / "package.json").write_text(json.dumps({"name": "hospital-scheduler"}))
+        (tmp_path / "package.json").write_text(json.dumps({"name": "hospital-scheduler"}), encoding="utf-8")
         customize_edge_pages(str(tmp_path))
-        assert "Hospital Scheduler" in (tmp_path / "src/app/maintenance.tsx").read_text()
+        assert "Hospital Scheduler" in (tmp_path / "src/app/maintenance.tsx").read_text(encoding="utf-8")
 
     def test_app_name_from_dir_when_no_metadata(self, tmp_path):
         _seed_templates(tmp_path)
         # No plan.json, no package.json — falls back to dir basename.
         customize_edge_pages(str(tmp_path))
         # tmp_path basename is randomized; just check SOME name substituted.
-        text = (tmp_path / "src/app/maintenance.tsx").read_text()
+        text = (tmp_path / "src/app/maintenance.tsx").read_text(encoding="utf-8")
         assert "{{app_name}}" not in text
         assert "is offline" in text
 
     def test_app_initial_derived_from_first_alnum(self, tmp_path):
         _seed_templates(tmp_path)
         customize_edge_pages(str(tmp_path), app_name="  9Property Manager")
-        frame = (tmp_path / "src/components/EdgePageFrame.tsx").read_text()
+        frame = (tmp_path / "src/components/EdgePageFrame.tsx").read_text(encoding="utf-8")
         assert 'APP_INITIAL = "9"' in frame
 
     def test_app_initial_falls_back_to_bullet_for_symbols_only(self, tmp_path):
         _seed_templates(tmp_path)
         customize_edge_pages(str(tmp_path), app_name="---")
-        frame = (tmp_path / "src/components/EdgePageFrame.tsx").read_text()
+        frame = (tmp_path / "src/components/EdgePageFrame.tsx").read_text(encoding="utf-8")
         assert 'APP_INITIAL = "•"' in frame
 
 
@@ -226,7 +226,7 @@ def test_the_home_route_skips_patterns_and_takes_the_first_real_one(tmp_path):
     (nav / "nav-flow.json").write_text(json.dumps({
         "pages": [{"route": "/survey/[slug]"}, {"route": "/responses/[id]"},
                   {"route": "/surveys"}],
-    }))
+    }), encoding="utf-8")
     assert _derive_home_route(tmp_path) == "/surveys"
 
 
@@ -239,5 +239,5 @@ def test_an_app_of_only_detail_routes_falls_back_to_root(tmp_path):
     nav.mkdir(parents=True)
     (nav / "nav-flow.json").write_text(json.dumps({
         "pages": [{"route": "/survey/[slug]"}],
-    }))
+    }), encoding="utf-8")
     assert _derive_home_route(tmp_path) == "/"

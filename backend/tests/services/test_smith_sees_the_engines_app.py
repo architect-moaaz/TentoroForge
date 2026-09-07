@@ -120,10 +120,10 @@ def test_smiths_own_file_still_wins_when_it_exists(tmp_path):
     (forge / "blueprint.json").write_text(json.dumps({
         "project_id": "t",
         "pages": [{"route": "/only-mine", "schema_path": "x.json"}],
-    }))
+    }), encoding="utf-8")
     engine = forge / "blueprint" / "current.json"
     engine.parent.mkdir()
-    engine.write_text(json.dumps({"pages": [{"route": "/from-engine"}]}))
+    engine.write_text(json.dumps({"pages": [{"route": "/from-engine"}]}), encoding="utf-8")
 
     bp = Blueprint.load(project_id="t", output_dir=str(tmp_path))
     assert [p["route"] for p in bp.pages] == ["/only-mine"]

@@ -40,8 +40,12 @@ export function Wizard({
 
   const cleanSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
   const total = cleanSteps.length;
-  const reviewIdx = skipReview ? -1 : total;
-  const isReview = !skipReview && stepIdx === reviewIdx;
+  // With `total === 0` the review index is 0 too, so an unconfigured Wizard
+  // opened directly on its own review screen with an ARMED submit button —
+  // "Review your entries before submitting" over no entries at all. A wizard
+  // with no steps has nothing to review and nothing to submit.
+  const reviewIdx = skipReview || total === 0 ? -1 : total;
+  const isReview = !skipReview && total > 0 && stepIdx === reviewIdx;
   const step = cleanSteps[stepIdx];
 
   const setField = (name: string, v: unknown) =>

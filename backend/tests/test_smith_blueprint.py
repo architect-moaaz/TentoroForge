@@ -103,7 +103,7 @@ def test_save_is_atomic_via_temp_file_and_replace(tmp_path: Path, monkeypatch):
                   distinctive_shape="", why="")
     bp.save()
 
-    original = (tmp_path / ".forge" / "blueprint.json").read_text()
+    original = (tmp_path / ".forge" / "blueprint.json").read_text(encoding="utf-8")
 
     bp.set_domain(name="v2", primary_actors=[], core_verbs=[],
                   distinctive_shape="", why="")
@@ -121,7 +121,7 @@ def test_save_is_atomic_via_temp_file_and_replace(tmp_path: Path, monkeypatch):
 
     # The on-disk file is still v1; the crashed write left no dangling state
     # the next reader can see.
-    assert (tmp_path / ".forge" / "blueprint.json").read_text() == original
+    assert (tmp_path / ".forge" / "blueprint.json").read_text(encoding="utf-8") == original
 
 
 # --------------------------------------------------------------------------- #
@@ -279,9 +279,9 @@ def test_load_tolerates_unknown_top_level_fields(tmp_path: Path):
         "design_decisions": [],
         "change_log": [],
         "future_field": {"invented_later": True},
-    }))
+    }), encoding="utf-8")
     bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
     bp.save()
 
-    reloaded_raw = json.loads((forge / "blueprint.json").read_text())
+    reloaded_raw = json.loads((forge / "blueprint.json").read_text(encoding="utf-8"))
     assert reloaded_raw.get("future_field") == {"invented_later": True}

@@ -102,3 +102,27 @@ describe("StyleSlot position fields", () => {
     expect(bad.success).toBe(false);
   });
 });
+
+// motionDuration lands inside motion.css's `animation` shorthand, where one bad
+// component invalidates the whole shorthand and the animation stops entirely —
+// so a typo has to fail at validation rather than silently killing the motion.
+describe("StyleSlot.motionDuration", () => {
+  it("accepts CSS times in both units", () => {
+    for (const t of ["1s", "500ms", "0.25s", "0.5ms", "10s"]) {
+      expect(StyleSlot.safeParse({ motion: "slide-in", motionDuration: t }).success,
+        `${t} should parse`).toBe(true);
+    }
+  });
+
+  it("rejects unitless numbers and bogus units", () => {
+    for (const t of ["1", "1sec", "500", "fast", "1 s", "-1s", ""]) {
+      expect(StyleSlot.safeParse({ motionDuration: t }).success,
+        `${t} should NOT parse`).toBe(false);
+    }
+  });
+
+  it("is optional — schemas written before it still validate", () => {
+    expect(StyleSlot.safeParse({ motion: "fade-in" }).success).toBe(true);
+    expect(StyleSlot.safeParse({}).success).toBe(true);
+  });
+});

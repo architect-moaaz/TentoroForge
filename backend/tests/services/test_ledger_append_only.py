@@ -94,7 +94,7 @@ def _plan_for_builder(lifecycle: str | None) -> dict:
 
 def test_schema_builder_omits_updated_at_for_append_only(tmp_path):
     build_schema_files(_plan_for_builder("append_only"), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     # createdAt still emitted — every ledger row needs an insertion timestamp.
     assert 'createdAt: timestamp("created_at")' in src
     # updatedAt MUST NOT be auto-appended.
@@ -106,13 +106,13 @@ def test_schema_builder_omits_updated_at_for_append_only(tmp_path):
 
 def test_schema_builder_default_crud_still_emits_updated_at(tmp_path):
     build_schema_files(_plan_for_builder(None), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert 'updatedAt: timestamp("updated_at")' in src
 
 
 def test_schema_builder_stamps_ledger_comment(tmp_path):
     build_schema_files(_plan_for_builder("append_only"), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     # The header comment makes the contract legible to a human reader.
     assert "APPEND-ONLY LEDGER" in src
 
@@ -121,7 +121,7 @@ def test_schema_builder_stamps_ledger_comment(tmp_path):
 
 def test_manifest_emitted_with_append_only_names(tmp_path):
     build_schema_files(_plan_for_builder("append_only"), str(tmp_path))
-    manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text(encoding="utf-8")
     assert "APPEND_ONLY_ENTITIES" in manifest
     assert "isAppendOnly" in manifest
     # Every reachable name should be in the set — Pascal, snake_case table,
@@ -137,7 +137,7 @@ def test_manifest_still_emitted_when_no_append_only(tmp_path):
     build_schema_files(_plan_for_builder(None), str(tmp_path))
     manifest_path = tmp_path / "src" / "lib" / "append-only-entities.ts"
     assert manifest_path.is_file()
-    manifest = manifest_path.read_text()
+    manifest = manifest_path.read_text(encoding="utf-8")
     assert "APPEND_ONLY_ENTITIES: ReadonlySet<string> = new Set([" in manifest
     # No entity names — only the export scaffold.
     assert '"Transaction"' not in manifest
@@ -173,12 +173,12 @@ def _bootstrap_app(root: Path) -> Path:
         "route": "/transactions/new",
         "root": {"type": "Form", "props": {"workflow": "CreateTransaction"},
                   "children": []},
-    }))
+    }), encoding="utf-8")
     (sdir / "notes" / "new.json").write_text(json.dumps({
         "route": "/notes/new",
         "root": {"type": "Form", "props": {"workflow": "CreateNote"},
                   "children": []},
-    }))
+    }), encoding="utf-8")
     contracts = root / "src" / "contracts"
     contracts.mkdir(parents=True)
     (contracts / "registry.json").write_text(json.dumps({
@@ -187,7 +187,7 @@ def _bootstrap_app(root: Path) -> Path:
                              "slug": "transactions", "fields": {}},
             "Note": {"table": "notes", "slug": "notes", "fields": {}},
         }
-    }))
+    }), encoding="utf-8")
     return sdir
 
 

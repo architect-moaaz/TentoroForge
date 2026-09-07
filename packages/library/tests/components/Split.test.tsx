@@ -44,4 +44,21 @@ describe("Split", () => {
     const splitDiv = container.querySelector("[data-split-ratio]") as HTMLElement;
     expect(splitDiv.getAttribute("data-motion")).toBe("fade-in");
   });
+  it("folds a third child into the second pane instead of wrapping a row", () => {
+    const { container } = render(
+      <Split ratio="1:1"><div>a</div><div>b</div><div>c</div></Split>
+    );
+    const grid = container.querySelector("[data-split-id]")!;
+    expect(grid.children.length).toBe(2);
+    expect(container.querySelector('[data-split-pane="2"]')!.textContent).toBe("bc");
+  });
+
+  it("breakpoint 'none' emits the ratio with no media query", () => {
+    const { container } = render(
+      <Split ratio="2:1" breakpoint={"none" as any}><div>a</div><div>b</div></Split>
+    );
+    const css = container.querySelector("style")!.textContent!;
+    expect(css).not.toContain("@media");
+    expect(css).toContain("grid-template-columns: 2fr 1fr");
+  });
 });

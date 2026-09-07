@@ -100,7 +100,7 @@ class TestBackTargetUsesNearestExistingAncestor:
         root = _mk(tmp_path, routes=["/products", "/products/[id]/edit"],
                    schemas={"products/[id]/edit.json": _detail()})
         apply_page_anatomy(root)
-        doc = json.loads((root / "src/schemas/products/[id]/edit.json").read_text())
+        doc = json.loads((root / "src/schemas/products/[id]/edit.json").read_text(encoding="utf-8"))
         btn = doc["root"]["children"][0]
         assert btn["props"]["onClick"]["target"] == "/products"
 

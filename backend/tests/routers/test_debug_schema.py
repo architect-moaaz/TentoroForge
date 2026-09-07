@@ -75,9 +75,9 @@ def _write_design_spec(base: Path, short_id: str, content: str | dict) -> Path:
     contracts_dir.mkdir(parents=True, exist_ok=True)
     spec_path = contracts_dir / "design-spec.json"
     if isinstance(content, dict):
-        spec_path.write_text(json.dumps(content))
+        spec_path.write_text(json.dumps(content), encoding="utf-8")
     else:
-        spec_path.write_text(content)
+        spec_path.write_text(content, encoding="utf-8")
     return spec_path
 
 
@@ -128,7 +128,7 @@ def test_recompile_tokens_happy_path(client):
     tokens_file = tmp / short_id / "src" / "theme" / "tokens.custom.json"
     assert tokens_file.exists(), "tokens.custom.json was not created on disk"
 
-    written = json.loads(tokens_file.read_text())
+    written = json.loads(tokens_file.read_text(encoding="utf-8"))
     # color, spacing, radius, typography sections expected
     assert "color" in written
     assert "spacing" in written

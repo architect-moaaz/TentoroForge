@@ -35,7 +35,7 @@ def test_catalog_entry_disambiguates_from_field_interaction():
 def test_handler_rejects_incomplete_rule_without_db():
     # No name / no rule_type → applied False, and it never reaches the DB.
     d = tempfile.mkdtemp()
-    Path(d, ".env.local").write_text("FORGE_PROJECT_ID=00000000-0000-0000-0000-000000000000\n")
+    Path(d, ".env.local").write_text("FORGE_PROJECT_ID=00000000-0000-0000-0000-000000000000\n", encoding="utf-8")
     r1 = smith_tools._smith_create_business_rule(d, {"rule_type": "validation", "config": {}})
     assert r1["applied"] is False and "name" in r1["reason"].lower()
     r2 = smith_tools._smith_create_business_rule(d, {"name": "x", "config": {}})

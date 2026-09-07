@@ -104,7 +104,7 @@ def read_file(output_dir: str, args: dict) -> dict:
     if p.is_dir():
         return {"error": f"path is a directory, not a file: {rel}"}
     try:
-        content = p.read_text()
+        content = p.read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         return {"error": f"read failed: {exc}"}
     truncated = False
@@ -163,7 +163,7 @@ def edit_file(output_dir: str, args: dict) -> dict:
     if p.is_dir():
         return {"error": f"path is a directory, not a file: {rel}"}
     try:
-        content = p.read_text()
+        content = p.read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         return {"error": f"read failed: {exc}"}
     count = content.count(old)
@@ -189,7 +189,7 @@ def edit_file(output_dir: str, args: dict) -> dict:
         return {"error": struct_error}
 
     try:
-        p.write_text(new_content)
+        p.write_text(new_content, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         return {"error": f"write failed: {exc}"}
 
@@ -318,7 +318,7 @@ def verify_promise(output_dir: str, args: dict) -> dict:
     if p.is_dir():
         return {"error": f"path is a directory, not a file: {rel}"}
     try:
-        content = p.read_text()
+        content = p.read_text(encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         return {"error": f"read failed: {exc}"}
 

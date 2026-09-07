@@ -110,10 +110,10 @@ def test_reconcile_page_file_rewrites_schema(tmp_path):
         "root": {"children": [{"type": "MetricTile", "props": {"value": "{{dashboardStats.todayCount}}"}}]},
     }
     fp = tmp_path / "analytics.json"
-    fp.write_text(json.dumps(page))
+    fp.write_text(json.dumps(page), encoding="utf-8")
     registry = {"entities": {"Appointment": {"fields": [{"name": "createdAt"}]}}}
     report = reconcile_page_file(fp, registry)
-    out = json.loads(fp.read_text())
+    out = json.loads(fp.read_text(encoding="utf-8"))
     assert out["dataSources"][0]["metrics"]["todayCount"]["fn"] == "count"
     assert report["synthesised"] == 1
 
@@ -219,3 +219,51 @@ def test_delta_demotes_bad_field_but_stays_delta():
     assert m["kind"] == "delta" and m["window"] == "week"   # kind + window preserved
     assert m["fn"] == "count"                                # bad field demoted to count
     assert rep["demoted"] == 1
+
+
+# ---------------------------------------------------------------------------
+# B13 — the `expression` dialect reaches this validator too
+# ---------------------------------------------------------------------------
+
+def _inventory_registry():
+    return {"entities": {"Item": {"fields": [
+        {"name": "id"}, {"name": "quantity"}, {"name": "price"},
+    ]}}}
+
+
+def _inventory_page(metrics):
+    return {
+        "dataSources": [{"name": "kpi", "entity": "Item", "op": "aggregate",
+                         "metrics": metrics}],
+        "root": {"children": [
+            {"type": "MetricTile", "props": {"value": "{{kpi.totalValue}}"}}]},
+    }
+
+
+def test_an_expression_metric_is_translated_before_it_is_judged():
+    """The composer writes `{"expression": "sum(quantity * price)"}`. With no
+    `fn`, the demote rule read it as a metric that had none and rewrote it into
+    a plain count — a currency tile reporting a row count."""
+    page = _inventory_page({"totalValue": {"expression": "sum(quantity * price)",
+                                           "format": "currency"}})
+    out, report = reconcile_aggregate_specs(page, _inventory_registry())
+    metric = out["dataSources"][0]["metrics"]["totalValue"]
+    assert metric["fn"] == "sum"
+    assert metric["expr"] == "quantity * price"
+    assert report["demoted"] == 0
+
+
+def test_an_expression_over_a_column_that_does_not_exist_is_still_demoted():
+    """`expr` is only trusted when every identifier is a real column; the
+    runtime would otherwise build a query over a column that isn't there."""
+    page = _inventory_page({"totalValue": {"expression": "sum(quantity * markup)"}})
+    out, report = reconcile_aggregate_specs(page, _inventory_registry())
+    assert out["dataSources"][0]["metrics"]["totalValue"] == {"fn": "count",
+                                                              "entity": "Item"}
+    assert report["demoted"] == 1
+
+
+def test_count_of_a_column_survives_as_a_count():
+    page = _inventory_page({"totalValue": {"expression": "count(id)"}})
+    out, _ = reconcile_aggregate_specs(page, _inventory_registry())
+    assert out["dataSources"][0]["metrics"]["totalValue"]["fn"] == "count"

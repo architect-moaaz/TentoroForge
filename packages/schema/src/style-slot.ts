@@ -45,12 +45,27 @@ export const PositionSlot = z.object({
 // the same way and documents intent.
 const SizeValue = z.string().min(1);
 
+// A CSS <time>: "1s", "500ms", "0.25s". Same "raw CSS value, not a token ref"
+// precedent as SizeValue, but unlike sizing this one IS pattern-checked —
+// the value lands in an `animation` shorthand, where a malformed component
+// invalidates the WHOLE shorthand and silently kills the animation instead of
+// just the duration. Rejecting it at validation time surfaces the typo.
+const DurationValue = z.string().regex(
+  /^\d+(\.\d+)?(ms|s)$/,
+  "must be a CSS time such as \"1s\", \"500ms\" or \"0.25s\"",
+);
+
 export const StyleSlot = z.object({
   background: z.union([Background, z.string().min(1)]).optional(),
   padding:    SpacingTokenRef.optional(),
   radius:     RadiusTokenRef.optional(),
   shadow:     ShadowTokenRef.optional(),
   motion:     Motion.optional(),
+  // Per-node animation duration for `motion`. Without it every animated node
+  // ran at the global --token-motion-duration-normal, so "slide in over 1s"
+  // could not be expressed at all. Meaningless on its own — the renderer only
+  // emits it when `motion` is also set to something other than "none".
+  motionDuration: DurationValue.optional(),
   position:   PositionSlot.optional(),
   // Sizing (raw CSS). Optional + backward-compatible: schemas without them
   // validate + render exactly as before.

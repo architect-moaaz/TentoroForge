@@ -19,7 +19,7 @@ def _client_photo_url(query: str, size: str = "1600x900") -> str:
 
 @lru_cache(maxsize=1)
 def _load_seeds() -> dict:
-    return json.loads(_SEEDS_PATH.read_text())
+    return json.loads(_SEEDS_PATH.read_text(encoding="utf-8"))
 
 
 def _query_for(entity_name: str, domain: str, project_seed: str | None = None) -> str:

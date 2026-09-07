@@ -115,7 +115,18 @@ def _validate_simple(metric: dict, default_entity: str, fields: dict[str, set[st
     demoted = False
     if fn != "count":
         field = m.get("field")
-        if entity not in fields or not field or field not in fields[entity]:
+        known = fields.get(entity) or set()
+        ok = bool(field) and field in known
+        # `expr` — arithmetic over columns ("quantity * price"), for a value no
+        # single column holds. Valid when every identifier it names is a real
+        # column of the entity; the data engine compiles it to SQL and the
+        # editor preview evaluates it per row. Demoting this to count is what
+        # turned "Total Inventory Value" into a row count.
+        expr = m.get("expr")
+        if not ok and isinstance(expr, str) and expr.strip():
+            idents = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr))
+            ok = bool(idents) and idents <= known
+        if not ok:
             m = {"fn": "count", "entity": entity}
             for k in ("window", "dateField", "filter"):
                 if k in metric:
@@ -132,6 +143,14 @@ def _validate_metric(metric: dict, default_entity: str, fields: dict[str, set[st
     Without this dispatch, ratio/delta metrics (which carry no top-level `fn`) would
     be silently rewritten into a plain count, stripping the feature."""
     m = metric if isinstance(metric, dict) else {}
+    # ONE DIALECT FIRST. The page composer writes
+    # `{"expression": "sum(quantity * price)", "format": "currency"}`; nothing
+    # downstream parses that, so the metric arrived here with no `fn` and was
+    # rewritten into a plain count — a currency tile showing a row count. The
+    # translation happens before validation so the demote-to-count rule below
+    # judges the real function, not the absence of one.
+    from services.metric_dialect import normalize_metric
+    m = normalize_metric(m) or m
     kind = m.get("kind")
     entity = m.get("entity") or default_entity
 
@@ -205,10 +224,10 @@ from pathlib import Path
 def reconcile_page_file(path: "Path", registry: dict) -> dict:
     """Load a page schema JSON, reconcile its aggregate specs, write it back. Returns the report."""
     try:
-        page = _json.loads(Path(path).read_text())
+        page = _json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
         return {"synthesised": 0, "demoted": 0, "error": "unreadable"}
     out, report = reconcile_aggregate_specs(page, registry or {})
     if report["synthesised"] or report["demoted"] or report.get("normalised"):
-        Path(path).write_text(_json.dumps(out, indent=2))
+        Path(path).write_text(_json.dumps(out, indent=2), encoding="utf-8")
     return report

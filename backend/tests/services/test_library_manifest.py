@@ -34,7 +34,7 @@ class TestLoadCatalog:
 
     def test_corrupt_file_returns_empty(self, tmp_path):
         p = tmp_path / "bad.json"
-        p.write_text("{not json")
+        p.write_text("{not json", encoding="utf-8")
         assert load_component_catalog(p) == {}
 
 
@@ -252,7 +252,7 @@ class TestPersistAndLoad:
     def test_load_corrupt_file_returns_empty(self, tmp_path):
         d = tmp_path / "contracts"
         d.mkdir()
-        (d / "library-manifest.json").write_text("{not json")
+        (d / "library-manifest.json").write_text("{not json", encoding="utf-8")
         assert load_library_manifest(tmp_path) == {}
 
 

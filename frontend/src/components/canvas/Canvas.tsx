@@ -2,7 +2,7 @@
 import { useRef, useEffect, useMemo, type CSSProperties, type DragEvent } from "react";
 import { Plus } from "lucide-react";
 import { Engine, EngineProvider } from "@tentoroforge/engine";
-import { compileTokens } from "@tentoroforge/renderer";
+import { compileTokens, NavigatorProvider } from "@tentoroforge/renderer";
 import { defaultTokens } from "@tentoroforge/library";
 import { resolvePreviewSources } from "@/lib/preview-resolve";
 import { useArtifacts } from "./hooks/useArtifacts";
@@ -13,8 +13,11 @@ import { CanvasFrame } from "./CanvasFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { DropIndicator } from "./DropIndicator";
 import { ReorderIndicator } from "./ReorderIndicator";
+import { GridGuides } from "./GridGuides";
+import { EmptyNodeHints } from "./EmptyNodeHints";
 import { useEditorStore } from "@/lib/editor-store";
-import { syntheticNodeId } from "@forge/patches";
+import { syntheticNodeId, migrateBindingsDeep } from "@forge/patches";
+import { INERT_NAVIGATOR } from "@/lib/inert-navigator";
 
 /**
  * Recursively inject stable ids into every node that doesn't already have one.
@@ -27,7 +30,7 @@ import { syntheticNodeId } from "@forge/patches";
  * always produces the same walk order, so the same nodes get the same
  * disambiguated ids each render.
  */
-function normaliseSchema(raw: any): any {
+export function normaliseSchema(raw: any): any {
   const seen = new Set<string>();
   function uniq(base: string, path: string): string {
     if (!seen.has(base)) { seen.add(base); return base; }
@@ -46,6 +49,21 @@ function normaliseSchema(raw: any): any {
     return {
       ...node,
       id,
+      // HEAL LEGACY BINDINGS ON THE WAY IN.
+      //
+      // The Bindings tab used to write `{ $binding: "expr" }`, a shape nothing
+      // outside the editor implements — it reached React in child position and
+      // rendered "⚠ render error", then autosaved itself into the page schema
+      // and the generated app. The editor now writes "{{expr}}" instead, but
+      // pages saved before that still carry the object on disk.
+      //
+      // This is the one production path every page load goes through, so
+      // converting here means an affected page heals the moment it is opened,
+      // with no migration script to run and nothing for the user to notice.
+      // `migrateBindingsDeep` returns the same object when there is nothing to
+      // change, so the common case costs a walk and no allocation. It must run
+      // BEFORE `validateNoLegacyBindings` can reject the artifacts at commit.
+      props: node.props ? migrateBindingsDeep(node.props) : node.props,
       children: Array.isArray(node.children)
         ? node.children.map((c: any, i: number) =>
             injectIds(c, path ? `${path}.${i}` : `${i}`)
@@ -133,12 +151,33 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
   // invisible here. Merge the project's live colors so background refs pick up
   // the real brand palette.
   const tokenCssVars = useMemo(() => {
+    // MERGED PER STEP, NOT PER RAMP.
+    //
+    // This used to spread `liveTokens.color` straight over `defaultTokens.color`,
+    // which replaces a whole ramp object rather than merging into it. This
+    // project's `tokens.custom.json` overrides exactly `color.primary = {50: …}`
+    // (and `success = {50: …}`), so steps 100..950 of primary were ANNIHILATED:
+    // measured on the canvas, `primary` emitted `[50]` while `secondary` and
+    // `accent` emitted all eleven. `--token-color-primary-100` and `-500` were
+    // undefined, so a Style-panel background referencing them painted nothing —
+    // and two of the three primary options the panel offers were dead on arrival.
+    const overrideColors = (liveTokens?.color as Record<string, unknown>) ?? {};
+    const baseColors =
+      (defaultTokens as { color?: Record<string, unknown> }).color ?? {};
+    const mergedColors: Record<string, unknown> = { ...baseColors };
+    for (const [ramp, value] of Object.entries(overrideColors)) {
+      const base = baseColors[ramp];
+      // Only ramps are objects; a flat colour (`color.foreground: "#000"`) still
+      // overrides wholesale, which is correct for a scalar.
+      mergedColors[ramp] =
+        value && typeof value === "object" && !Array.isArray(value) &&
+        base && typeof base === "object" && !Array.isArray(base)
+          ? { ...(base as object), ...(value as object) }
+          : value;
+    }
     const merged = {
       ...(defaultTokens as Record<string, unknown>),
-      color: {
-        ...((defaultTokens as { color?: Record<string, unknown> }).color ?? {}),
-        ...((liveTokens?.color as Record<string, unknown>) ?? {}),
-      },
+      color: mergedColors,
     };
     try {
       // compileTokens drops the OUTERMOST key level (it walks each group's
@@ -158,8 +197,20 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
   // each page dataSource (list/get/aggregate/series) over the fixtures so KPI
   // tiles and charts show sample data instead of raw {{…}} / empty.
   const activeSchema = (liveSchema ?? schema) as any;
+  //
+  // `__authoring` is the EDITOR'S OPT-IN to seeing unresolved `{{…}}` bindings.
+  // The renderer renders an unresolved binding as empty everywhere else — a
+  // page whose `metrics` source doesn't exist used to ship
+  // `{{metrics.list_total_inventory_value}}` as literal on-screen text to end
+  // users, because "no data for this root" looks identical in a live app and on
+  // an authoring canvas. Only this canvas wants the placeholder, so only this
+  // canvas asks for it. It is a render-time flag on the data bag — it never
+  // enters `store.artifacts`, so it cannot be autosaved into a page schema.
   const resolvedPreview = useMemo(
-    () => resolvePreviewSources(activeSchema?.dataSources, previewData),
+    () => ({
+      ...resolvePreviewSources(activeSchema?.dataSources, previewData),
+      __authoring: true,
+    }),
     [activeSchema, previewData],
   );
 
@@ -174,11 +225,16 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
     const artifacts = {
       pageSchemas: { [pageId]: normalised },
       navFlow,
-      // Seed the editor token tree from the project's REAL tokens
-      // (src/theme/tokens.custom.json, fetched as cssVarTokens) so the Tokens
-      // tab shows the project's actual colors/typography instead of empty
-      // stubs. Fields the custom file omits default to {} so the TokenEditor
-      // sections still render.
+      // Seed the editor token tree from the project's OVERRIDE file
+      // (src/theme/tokens.custom.json, fetched as cssVarTokens). This is
+      // deliberately overrides-only, NOT merged with defaultTokens: whatever
+      // sits here is what persistence.ts writes straight back to
+      // tokens.custom.json, so merging the defaults in would materialise the
+      // whole library palette into every project's override file on the first
+      // autosave. The TOKENS panel does that merge for display instead — see
+      // TokenEditor's deepMerge. Fields the custom file omits default to {}
+      // so `tokens` stays truthy and the panel skips its "No tokens loaded."
+      // guard.
       tokens: {
         color: {}, typography: {}, spacing: {},
         radius: {}, shadow: {}, motion: {}, breakpoints: {},
@@ -198,6 +254,13 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
     const rootId = (activeSchema as any)?.root?.id;
     host.querySelectorAll<HTMLElement>("[data-node-id]").forEach((el) => {
       if (el.getAttribute("data-node-id") === rootId) return;
+      // A GridCell is structure, not content. Dragging one out of (or around
+      // inside) its grid would break the row-major addressing every other part
+      // of the fixed-grid feature relies on — the cell count would stop matching
+      // rows x columns and cell (1,2) would no longer be children[5]. The user
+      // reorders what is INSIDE the cells; the cells themselves move only when
+      // rows/columns change.
+      if (el.hasAttribute("data-grid-cell")) return;
       // Library components are wrapped in a display:contents span (no layout
       // box), so setting draggable there does nothing — Chromium won't start a
       // native drag from a boxless element. Walk to the inner box and mark THAT
@@ -261,9 +324,11 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
           className={`${editorPadding} relative`}
           style={tokenCssVars}
         >
-          <EngineProvider designSpec={designSpec ?? {}} navFlow={navFlow} cssVarTokens={(liveTokens as Record<string, unknown>) ?? cssVarTokens}>
-            <Engine schema={activeSchema} previewData={resolvedPreview} />
-          </EngineProvider>
+          <NavigatorProvider value={INERT_NAVIGATOR}>
+            <EngineProvider designSpec={designSpec ?? {}} navFlow={navFlow} cssVarTokens={(liveTokens as Record<string, unknown>) ?? cssVarTokens}>
+              <Engine schema={activeSchema} previewData={resolvedPreview} />
+            </EngineProvider>
+          </NavigatorProvider>
           {isEmptyCanvas && (
             // pointer-events-none so drops still land on the canvas root below.
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-8 text-center">
@@ -281,6 +346,11 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
           )}
         </div>
       </CanvasFrame>
+      <GridGuides canvasRef={canvasRef} />
+      {/* Editor-only annotation of nodes that render nothing. Draws over the
+          canvas and never into the schema, so it cannot reach a generated app —
+          see EmptyNodeHints for why demo props were rejected in its place. */}
+      <EmptyNodeHints canvasRef={canvasRef} />
       <SelectionOverlay canvasRef={canvasRef} />
       <DropIndicator hoverParent={hoverParent} canvasRef={canvasRef} />
       <ReorderIndicator indicator={reorder.indicator} canvasRef={canvasRef} />

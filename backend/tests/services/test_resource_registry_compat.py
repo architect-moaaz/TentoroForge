@@ -293,7 +293,7 @@ def test_plan_field_lookup_parity(tmp_path: Path):
 
     # Persist a plan.json so load_plan() has something to read.
     (tmp_path / "src" / "contracts").mkdir(parents=True)
-    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
 
     # Bust plan_field_lookup's mtime cache to avoid cross-test pollution.
     legacy._CACHE.clear()
@@ -369,7 +369,7 @@ def test_entity_needs_media_parity():
 
 def _write(p: Path, body: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
 
 
 def test_extract_entities_from_schema_parity(tmp_path: Path):

@@ -100,7 +100,7 @@ def test_flag_on_calls_modifier_and_writes_cache(monkeypatch, tmp_path):
 
     cache_file = tmp_path / "contracts" / CACHE_FILENAME
     assert cache_file.exists()
-    data = json.loads(cache_file.read_text())
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
     assert isinstance(data, dict) and len(data) == 1
     entry = next(iter(data.values()))
     assert entry["vocab"]["id"] == "banking-platform"
@@ -151,7 +151,7 @@ def test_corrupt_cache_file_falls_back_to_fresh_call(monkeypatch, tmp_path):
     # Write garbage into the cache file.
     cache_dir = tmp_path / "contracts"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / CACHE_FILENAME).write_text("{ not valid json ")
+    (cache_dir / CACHE_FILENAME).write_text("{ not valid json ", encoding="utf-8")
 
     call_count = {"n": 0}
 
@@ -184,4 +184,4 @@ def test_base_fallback_not_persisted_to_cache(monkeypatch, tmp_path):
     assert prov["source"] == "base_fallback"
     # No cache file written — a future healthy call gets to try again.
     cache_file = tmp_path / "contracts" / CACHE_FILENAME
-    assert not cache_file.exists() or json.loads(cache_file.read_text()) == {}
+    assert not cache_file.exists() or json.loads(cache_file.read_text(encoding="utf-8")) == {}
