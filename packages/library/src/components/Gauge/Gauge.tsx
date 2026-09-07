@@ -32,7 +32,7 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
  * safe). Distinct from Progress (linear / plain circular): supports arbitrary
  * ranges, zone bands, and a target-style needle.
  */
-export function Gauge({ value, min, max, label, unit, thresholds, size = 180, showValue = true, style }: GaugeProps) {
+export function Gauge({ value, min, max, label, unit, thresholds, size = 180, showValue = true, className, style }: GaugeProps) {
   const lo = min ?? 0;
   const hi = max ?? 100;
   const span = hi - lo || 1;
@@ -64,7 +64,7 @@ export function Gauge({ value, min, max, label, unit, thresholds, size = 180, sh
   const [nx, ny] = polar(cx, cy, r - stroke * 0.2, valueDeg);
 
   return (
-    <div className="inline-flex flex-col items-center" data-gauge="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
+    <div className={className ? `inline-flex flex-col items-center ${className}` : "inline-flex flex-col items-center"} data-gauge="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
       <svg width={s} height={s * 0.82} viewBox={`0 0 ${s} ${s * 0.82}`} role="img" aria-label={label ? `${label}: ${v}${unit ?? ""}` : `${v}${unit ?? ""}`}>
         {/* track */}
         <path d={arcPath(cx, cy, r, START, START + SWEEP)} fill="none"

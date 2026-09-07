@@ -98,38 +98,22 @@ export const gridEntry: RegistryEntry = {
       description:
         "Fixed row count. 0 = auto (rows grow to fit). Above 0 the grid holds exactly rows x columns cells you can drop into.",
     },
-    rowGap: {
-      type: "enum",
-      options: ["none", "xs", "sm", "md", "lg", "xl"],
-      default: "md",
-      control: "select",
-      group: "style",
-      description: "Vertical gap between rows.",
-    },
-    columnGap: {
-      type: "enum",
-      options: ["none", "xs", "sm", "md", "lg", "xl"],
-      default: "md",
-      control: "select",
-      group: "style",
-      description: "Horizontal gap between columns.",
-    },
-    padding: {
-      type: "enum",
-      options: ["none", "xs", "sm", "md", "lg", "xl"],
-      default: "md",
-      control: "select",
-      group: "style",
-      description: "Inner padding.",
-    },
-    align: {
-      type: "enum",
-      options: ["start", "center", "end", "stretch"],
-      default: "stretch",
-      control: "select",
-      group: "style",
-      description: "Align items in the block axis.",
-    },
+    // rowGap / columnGap / padding / align USED TO BE HERE and are gone.
+    //
+    // They were dead in both directions at once. `renderer/src/nodes/layout/
+    // Grid.tsx` reads exactly `columns`, `gap`, `rows`, `equalRows`, `equalCols`,
+    // `className` and `style` — the four had no reader, so setting them moved
+    // nothing on the canvas (the same write-with-no-reader bug Container.tsx's
+    // header describes, still standing on Grid). And `V2GridNode.props` is
+    // `.strict()` over { columns, rows, gap, equalRows, equalCols }, so seeding
+    // them ALSO made every palette-dropped Grid produce a page PageV2 rejects —
+    // which is what makes the scaffold log "schema validation failed … rendering
+    // raw" and drop the whole page out of validated rendering.
+    //
+    // `gap` below is the live control and covers the common case. Independent
+    // row/column gaps, grid padding and block-axis alignment need the RENDERER
+    // to implement them and V2GridNode to declare them before the editor can
+    // honestly offer them again — routed, not faked here.
     gap: {
       type: "enum",
       options: ["none", "xs", "sm", "md", "lg", "xl"],
@@ -263,13 +247,18 @@ export const inputEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label: {
@@ -324,13 +313,18 @@ export const textareaEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label: {
@@ -373,13 +367,18 @@ export const selectEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label: {
@@ -419,13 +418,18 @@ export const checkboxEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label: {
@@ -454,13 +458,18 @@ export const switchEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Enabled", control: "text",    group: "content",  description: "Switch label." },
@@ -477,13 +486,18 @@ export const numberInputEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Quantity", control: "text",    group: "content",  description: "Field label." },
@@ -507,13 +521,18 @@ export const moneyInputEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:            { type: "string",  default: "Amount", control: "text",    group: "content",  description: "Field label." },
@@ -560,13 +579,18 @@ export const radioGroupEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Choose one", control: "text",    group: "content", description: "Group label." },
@@ -595,13 +619,18 @@ export const sliderEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Value", control: "text",    group: "content",  description: "Slider label." },
@@ -634,13 +663,18 @@ export const fileUploadEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:    { type: "string",  default: "Upload file", control: "text",    group: "content",  description: "Field label." },
@@ -670,13 +704,18 @@ export const comboboxEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:       { type: "string",  default: "Select", control: "text",    group: "content",  description: "Field label." },
@@ -707,6 +746,45 @@ export const dropdownMenuEntry: RegistryEntry = {
   slots: { type: "leaf" },
   props: {
     trigger: { type: "string", default: "Actions", control: "text", group: "content", description: "Trigger button label." },
+    // THE PROP THE COMPONENT EXISTS FOR, and the editor offered no control for
+    // it at all: the persisted node was `{"type":"DropdownMenu","props":
+    // {"trigger":"Actions"}}`, the button opened a 160x10 empty popup, and the
+    // menu was unreachable from the editor entirely. Same defect on ContextMenu
+    // and Menubar below — one class, three instances.
+    //
+    // `json`, not `actionPicker`: an item is `{ label, value, icon?, disabled? }`
+    // (DropdownMenuNode/MenuItem is `.strict()` on exactly those four keys), and
+    // actionPicker's only output is an action object, which validateProps' step-3
+    // coercion would replace with `[]`.
+    //
+    // Seeded, like Breadcrumb.items and Select.options: an empty `json` textarea
+    // tells the user nothing about the shape it wants, and a menu that opens
+    // empty on drop is indistinguishable from a broken one.
+    items: {
+      type: "array",
+      default: [{ label: "Edit", value: "edit" }, { label: "Duplicate", value: "duplicate" }, { label: "Delete", value: "delete" }],
+      control: "json",
+      group: "content",
+      description: "Menu rows as [{ label, value, icon?, disabled? }]. `disabled: true` greys a row out.",
+    },
+    triggerIcon: {
+      type: "string",
+      // No default: an unset icon is absent, not "". DropdownMenuNode types it
+      // `z.string().optional()`, so `""` would be present-and-meaningless.
+      control: "iconPicker",
+      group: "content",
+      description: "Optional leading icon on the trigger button.",
+    },
+    align: {
+      type: "enum",
+      options: ["start", "center", "end"],
+      // No default: `align` is `.optional()` on the node and the component's own
+      // fallback decides. Seeding one here would freeze that choice on every
+      // dropped menu.
+      control: "select",
+      group: "behavior",
+      description: "Which edge of the trigger the menu aligns to.",
+    },
   },
 };
 
@@ -743,6 +821,16 @@ export const contextMenuEntry: RegistryEntry = {
   slots: { type: "leaf" },
   props: {
     label: { type: "string", default: "Right-click here", control: "text", group: "content", description: "Surface text." },
+    // See dropdownMenuEntry.items — same class, same shape. LABEL was the only
+    // control the panel offered, so the menu a ContextMenu exists to show could
+    // not be authored at all.
+    items: {
+      type: "array",
+      default: [{ label: "Edit", value: "edit" }, { label: "Duplicate", value: "duplicate" }, { label: "Delete", value: "delete" }],
+      control: "json",
+      group: "content",
+      description: "Menu rows as [{ label, value, icon?, disabled? }]. `disabled: true` greys a row out.",
+    },
   },
 };
 
@@ -765,7 +853,26 @@ export const menubarEntry: RegistryEntry = {
   icon: "Menu",
   description: "Horizontal application menu bar.",
   slots: { type: "leaf" },
-  props: {},
+  props: {
+    // `props: {}` — the whole entry had ZERO controls, so the Properties panel
+    // showed a breakpoint row and nothing else and the persisted node was
+    // literally `{"type":"Menubar","props":{}}`. Same class as Carousel /
+    // Lightbox / Tree in round 5, and the same class as the two menus above.
+    //
+    // Shape is MenubarNode's: a list of menus, each with its own item list.
+    // `MenubarItem` is `.strict()` on { label, value } — no icon, no disabled —
+    // so the seed says exactly that and no more.
+    menus: {
+      type: "array",
+      default: [
+        { label: "File", items: [{ label: "New", value: "new" }, { label: "Open", value: "open" }] },
+        { label: "Edit", items: [{ label: "Undo", value: "undo" }, { label: "Redo", value: "redo" }] },
+      ],
+      control: "json",
+      group: "content",
+      description: "Top-level menus as [{ label, items: [{ label, value }] }].",
+    },
+  },
 };
 
 export const drawerEntry: RegistryEntry = {
@@ -977,6 +1084,16 @@ export const headingEntry: RegistryEntry = {
       group: "style",
       description: "Font weight bucket.",
     },
+    id: {
+      type: "string",
+      // NO default. This is the element's DOM id — the anchor target an
+      // in-page nav or a deep link jumps to. `""` would stamp `id=""` on every
+      // heading on the page, and duplicate ids are exactly the failure a
+      // seeded default guarantees.
+      control: "text",
+      group: "behavior",
+      description: "DOM id, so in-page links and anchors can jump to this heading.",
+    },
   },
 };
 
@@ -1070,11 +1187,19 @@ export const metricTileEntry: RegistryEntry = {
       description: "Metric label.",
     },
     value: {
-      type: "string",
-      default: "0",
-      control: "text",
+      type: "number",
+      // `type: "string"` / `default: "0"` against `z.union([z.number(),
+      // z.string().min(1)])` (display-components.md C8). The string passed
+      // validation, but it declared the wrong primary shape: `format` is
+      // "number"|"currency"|"percent"|"duration" and every one of those paths in
+      // `MetricTile/formatValue` short-circuits on `typeof value === "string"`,
+      // so a string value silently opts the tile out of its own formatting.
+      // A number seed formats; a mustache binding still round-trips through the
+      // per-prop bind toggle, which is how the string case is meant to arrive.
+      default: 0,
+      control: "number",
       group: "content",
-      description: "Metric value (number or string).",
+      description: "Metric value. A number is formatted per FORMAT; bind it for live data.",
     },
     format: {
       type: "enum",
@@ -1125,6 +1250,37 @@ export const metricTileEntry: RegistryEntry = {
       control: "json",
       group: "data",
       description: "Array of numbers for the sparkline trend.",
+    },
+    // ── Widget anatomy (display-components.md C7) ────────────────────────
+    // `MetricTile.tsx` implements all three in full — a `<dl
+    // data-metric-breakdown>` grid and `pickThresholdTone` — and the editor
+    // exposed none of them. NONE carries a `default`: a seeded `breakdown` adds
+    // sub-lines to every dropped tile, and a seeded `threshold` is a colouring
+    // RULE, so any number in `warnAbove` would paint fresh tiles amber. Both
+    // are `.optional()` on MetricTileNode, and omission leaves the tile
+    // rendering exactly as it does today.
+    breakdown: {
+      type: "array",
+      control: "json",
+      group: "content",
+      description: "Sub-lines under the value, as [{ label, value }] — e.g. [{\"label\":\"Male\",\"value\":984}].",
+    },
+    threshold: {
+      type: "object",
+      control: "json",
+      group: "style",
+      description: "Colouring rule { warnAbove?, criticalAbove?, colorOnValue? }. Always stamps data-threshold for app CSS.",
+    },
+    trendWindow: {
+      type: "string",
+      control: "text",
+      group: "data",
+      // Honest label: unlike `breakdown`/`threshold`, `MetricTile.tsx` does not
+      // destructure this one — it is a composer hint that widens the upstream
+      // aggregate query, so setting it changes the DATA, never the pixels. Said
+      // in the description so it does not read as a broken control (the
+      // `Cascader.placeholder` mistake one file over).
+      description: "Data hint, not a visual: the window the delta/sparkline aggregate covers — week | month | quarter | year.",
     },
   },
 };
@@ -1331,19 +1487,22 @@ export const navLinkEntry: RegistryEntry = {
       group: "content",
       description: "Visible link text.",
     },
-    target: {
+    // WAS `target` AND `icon`, and NavLink.tsx reads NEITHER. Its props are
+    // `href | navigate | label | children | currentPath | className | style`
+    // (NavLink.schema.ts / NavLink.tsx), so `target` was a text box whose value
+    // was silently stripped by validateProps and `icon` was an icon picker with
+    // no reader at all — two live controls, zero effect, and a rendered
+    // `href="#"` the auditor clicked to nowhere.
+    //
+    // `navigate` is the name the component (and the `unifyLabelHref` remap, which
+    // folds `href` into it) actually reads. NO default: `""` here would put
+    // `href=""` on the anchor, which is the Link defect one entry over; absent
+    // lets NavLink.tsx's own `?? "#"` fallback apply.
+    navigate: {
       type: "string",
-      default: "",
       control: "text",
       group: "behavior",
-      description: "Target page ID or external URL.",
-    },
-    icon: {
-      type: "string",
-      default: "",
-      control: "iconPicker",
-      group: "content",
-      description: "Optional leading icon name.",
+      description: "Target route (e.g. /items) or absolute URL. The active page gets aria-current automatically.",
     },
   },
 };
@@ -1512,10 +1671,9 @@ export const badgeEntry: RegistryEntry = {
       // `accent` is implemented — `Badge.tsx` types it in `Variant` and carries a
       // full, commented `VARIANT_CLASS` row wired to --accent/--accent-foreground
       // — and was reachable from nothing. Listed here so the editor can express
-      // the second brand hue. NOTE: `BadgeProps` in
-      // packages/library/src/components/Badge/Badge.schema.ts is still a
-      // five-value `.strict()` enum, so `accent` needs adding there (and on
-      // BadgeNode) before it round-trips through validation cleanly.
+      // the second brand hue. `BadgeProps` (Badge.schema.ts) now carries the
+      // same six values, so the selection round-trips instead of being stripped
+      // back to the parameter default by validateProps.
       options: ["neutral", "primary", "accent", "success", "danger", "warning"],
       default: "neutral",
       control: "select",
@@ -2456,7 +2614,12 @@ export const personCardEntry: RegistryEntry = {
     },
     role: {
       type: "string",
-      default: "",
+      // "Senior Engineer", not "". `PersonCard.tsx:62` renders the role line
+      // only `{role && …}`, so the empty seed dropped a card with a name and a
+      // blank line where its subtitle belongs — the same headless-on-drop shape
+      // as `ActivityFeed.title: ""`. The dead `paletteDefaults.ts` table (C8)
+      // had this right all along.
+      default: "Senior Engineer",
       control: "text",
       group: "content",
       description: "Job title or role.",
@@ -2497,6 +2660,17 @@ export const personCardEntry: RegistryEntry = {
       control: "select",
       group: "state",
       description: "Presence / availability status.",
+    },
+    manager: {
+      type: "object",
+      // NO default. `manager` is the only thing `layout: "expanded"` renders
+      // that compact does not (`PersonCard.tsx:65-73`, gated on
+      // `expanded && manager`), so it must be reachable — but seeding it would
+      // stamp a fictional "Reports to" line onto every expanded card, and the
+      // schema's string branch is `z.string().min(1)`, which `""` fails.
+      control: "json",
+      group: "content",
+      description: "Reports-to, as a bare name \"Jane Doe\" or { name, role? }. Only rendered when LAYOUT is expanded.",
     },
     layout: {
       type: "enum",
@@ -2646,6 +2820,25 @@ export const activityFeedEntry: RegistryEntry = {
       control: "number",
       group: "style",
       description: "Maximum height in px before the feed scrolls (0 = unconstrained).",
+    },
+    // Two props the editor could not reach (display-components.md C7). Neither
+    // carries a `default`: `limit` is `z.number().int().positive()`, so the
+    // obvious `0` seed is BOTH schema-invalid AND the command "render no rows"
+    // — exactly the `maxHeight: 0` failure one prop above. `fields` is a
+    // partial column map; an empty `{}` is not "unset", it is "map nothing",
+    // and the component's contract-name fallbacks are the right behaviour
+    // until the composer or the user supplies a real map.
+    limit: {
+      type: "number",
+      control: "number",
+      group: "content",
+      description: "Max rows to render. Unset = all. Must be 1 or more.",
+    },
+    fields: {
+      type: "object",
+      control: "json",
+      group: "data",
+      description: "Map of contract slot to entity column, e.g. {\"actor\":\"user_name\",\"target\":\"order_id\"}. Stops a bound feed rendering \"Someone\" on every row.",
     },
   },
 };
@@ -2961,10 +3154,15 @@ export const skeletonEntry: RegistryEntry = {
     },
     lines: {
       type: "number",
-      default: 3,
+      // NO default. `variant` defaults to "rect" and SkeletonNode carries a
+      // cross-field refinement — "Skeleton.lines is only valid when variant is
+      // 'text'" — so seeding `lines: 3` next to `variant: "rect"` made every
+      // dropped Skeleton produce a page PageV2 rejects. Two defaults that
+      // contradict each other; the one that has to go is the one that is only
+      // meaningful in a variant the drop does not choose.
       control: "number",
       group: "style",
-      description: "Number of text lines to show (only when variant is text).",
+      description: "Number of shimmer lines. Only valid when VARIANT is text.",
     },
   },
 };
@@ -3029,17 +3227,25 @@ export const linkEntry: RegistryEntry = {
     },
     navigate: {
       type: "string",
-      default: "",
+      // NO default. `""` was seeded here and `Link.tsx` puts `navigate`
+      // straight into `href`, so every dropped Link rendered `<a href="">` —
+      // blue, underlined, cursor:pointer, and completely inert when clicked.
+      // Round 5's C3c class (`""` seeded where absent was correct), in the one
+      // component where the consequence is a dead link rather than an empty
+      // box. Absent lets `LinkProps.navigate`'s own `.default("#")` apply,
+      // which is the component's declared "no destination yet" value.
       control: "text",
       group: "behavior",
-      description: "Target page ID or absolute URL.",
+      description: "Target route (e.g. /items) or absolute URL. Internal routes go through the Navigator.",
     },
     workflow: {
       type: "string",
-      default: "",
+      // NO default, same reason: `workflow` is `.optional()` and `Link.tsx`
+      // gates its dispatch on `if (workflow)`, so `""` is only a longer way of
+      // spelling absent — and it makes the prop LOOK set in the panel.
       control: "text",
       group: "behavior",
-      description: "Optional workflow ID triggered on click (alongside or instead of navigate).",
+      description: "Optional workflow ID dispatched on click (alongside or instead of navigate).",
     },
   },
 };
@@ -3053,13 +3259,18 @@ export const timePickerEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Time", control: "text",    group: "content", description: "Field label." },
@@ -3089,13 +3300,18 @@ export const colorPickerEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Color", control: "text",    group: "content", description: "Field label." },
@@ -3122,13 +3338,18 @@ export const inputOtpEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Code", control: "text",    group: "content",  description: "Field label." },
@@ -3154,13 +3375,18 @@ export const ratingEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Rating", control: "text",    group: "content",  description: "Field label." },
@@ -3188,13 +3414,18 @@ export const maskedInputEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "Field", control: "text",    group: "content",  description: "Field label." },
@@ -3213,13 +3444,18 @@ export const keyValueInputEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:       { type: "string",  default: "Configuration", control: "text",   group: "content",  description: "Field label." },
@@ -3243,6 +3479,23 @@ export const gaugeEntry: RegistryEntry = {
     max:     { type: "number",  default: 100,            control: "number",  group: "behavior", description: "Range maximum." },
     label:   { type: "string",  default: "Utilization",  control: "text",    group: "content",  description: "Caption below the dial." },
     unit:    { type: "string",  default: "%",            control: "text",    group: "content",  description: "Value unit (e.g. %, °C)." },
+    // The threshold zones are the whole reason Gauge exists rather than
+    // Progress, and the editor could not reach them at all. Seeded ascending
+    // and spanning min→max so a dropped dial shows the banding immediately;
+    // `GaugeNode.props.thresholds` accepts the same {value,color,label} shape.
+    thresholds: {
+      type: "array",
+      default: [
+        { value: 60,  color: "#16a34a", label: "Healthy" },
+        { value: 85,  color: "#f59e0b", label: "Warning" },
+        { value: 100, color: "#dc2626", label: "Critical" },
+      ],
+      control: "json",
+      group: "style",
+      description: "Coloured zone bands as [{ value, color, label? }], ascending by value.",
+    },
+    size:      { type: "number",  default: 180,          control: "number",  group: "style",    description: "Dial diameter in px." },
+    showValue: { type: "boolean", default: true,         control: "toggle",  group: "content",  description: "Show the numeric value inside the dial." },
     bind: { type: "binding", default: null,           control: "binding", group: "data",     description: "Data path to bind the value." },
   },
 };
@@ -3254,12 +3507,31 @@ export const splitArcEntry: RegistryEntry = {
   description: "Half-arc gauge split across ≥2 coloured segments — the received-vs-costs / income-vs-spend ratio shape from consumer utility dashboards. Distinct from Gauge (single value + needle).",
   slots: { type: "leaf" },
   props: {
-    segments:      { type: "binding", default: null,                                                                                        control: "binding", group: "data",     description: "Data path to the segments array — each item {value, color, label, endLabel?, trend?}. In display order left→right along the arc." },
+    // `SplitArcProps.segments` is `z.array(...).min(1)` — REQUIRED — and this
+    // was declared `type:"binding", default:null`, so the one prop the
+    // component exists to draw could only ever be bound, never authored, and
+    // the seeded `null` coerced to `[]` → an arc with no segments on every
+    // drop. A literal array with a `json` editor (the Bindings tab still
+    // offers "{{expr}}" for the bound case, as it does for every prop).
+    segments: {
+      type: "array",
+      default: [
+        { value: 62, color: "#2563eb", label: "Received", endLabel: "2.15 kW" },
+        { value: 38, color: "#f59e0b", label: "Costs" },
+      ],
+      control: "json",
+      group: "data",
+      description: "Segments as [{ value, color, label, endLabel?, trend? }], in display order left→right along the arc. At least one is required.",
+    },
     total:         { type: "number",  default: 0,                                                                                          control: "number",  group: "behavior", description: "Optional normalisation total. 0/omitted → sum of segment values." },
     title:         { type: "string",  default: "Energy Balance Today",                                                                    control: "text",    group: "content",  description: "Title above the arc." },
     size:          { type: "number",  default: 220,                                                                                         control: "number",  group: "style",    description: "Diameter in px." },
     showLegend:    { type: "boolean", default: true,                                                                                        control: "toggle",  group: "content",  description: "Show the dot + label legend row." },
     showEndLabels: { type: "boolean", default: true,                                                                                        control: "toggle",  group: "content",  description: "Show endpoint values under the arc." },
+    // NO DEFAULT — the component derives the stroke from `size` (~11%). A
+    // seeded number is a command that overrides that derivation for every
+    // dropped arc; absent means "derive it".
+    stroke:        { type: "number",                                                                                                        control: "number",  group: "style",    description: "Arc stroke width in px. Leave empty to derive it from size." },
     bind:       { type: "binding", default: null,                                                                                        control: "binding", group: "data",     description: "Data path to bind the segments array." },
   },
 };
@@ -3271,7 +3543,29 @@ export const heatmapEntry: RegistryEntry = {
   description: "Matrix heatmap — rows × columns with colour intensity.",
   slots: { type: "leaf" },
   props: {
+    // `data` is the prop the component exists to render and the registry
+    // exposed no control for it, so every dropped Heatmap showed the dashed
+    // "No heatmap data." placeholder forever. The key names are configurable,
+    // so xKey/yKey/valueKey are seeded to match the seeded rows.
+    data: {
+      type: "array",
+      default: [
+        { x: "Mon", y: "Week 1", value: 12 }, { x: "Tue", y: "Week 1", value: 28 }, { x: "Wed", y: "Week 1", value: 19 },
+        { x: "Mon", y: "Week 2", value: 31 }, { x: "Tue", y: "Week 2", value: 8 },  { x: "Wed", y: "Week 2", value: 24 },
+      ],
+      control: "json",
+      group: "data",
+      description: "Flat cells as [{ x, y, value }] — field names configurable below.",
+    },
+    xKey:       { type: "string",  default: "x",     control: "text",   group: "data",    description: "Cell field holding the column key." },
+    yKey:       { type: "string",  default: "y",     control: "text",   group: "data",    description: "Cell field holding the row key." },
+    valueKey:   { type: "string",  default: "value", control: "text",   group: "data",    description: "Cell field holding the numeric value." },
     color:      { type: "string",  default: "var(--color-primary-500)", control: "text",   group: "style",   description: "Base cell colour." },
+    // NO DEFAULTS on min/max — the component infers the intensity scale from
+    // the data. A seeded 0/100 is a command that rescales every heatmap.
+    min:        { type: "number",                    control: "number", group: "behavior", description: "Value mapped to zero intensity. Leave empty to use the data minimum." },
+    max:        { type: "number",                    control: "number", group: "behavior", description: "Value mapped to full intensity. Leave empty to use the data maximum." },
+    cellSize:   { type: "number",  default: 34,      control: "number", group: "style",    description: "Cell size in px." },
     showValues: { type: "boolean", default: false,       control: "toggle",  group: "content", description: "Show numeric value in each cell." },
     bind:    { type: "binding", default: null,        control: "binding", group: "data",    description: "Data path to bind the cells [{x,y,value}]." },
   },
@@ -3286,6 +3580,40 @@ export const schematicEntry: RegistryEntry = {
   props: {
     width:      { type: "number",  default: 100,   control: "number",  group: "behavior", description: "Coordinate-space width." },
     height:     { type: "number",  default: 60,    control: "number",  group: "behavior", description: "Coordinate-space height." },
+    // `markers` is the data prop — with no control the SVG was always empty.
+    // Coordinates are in the width×height space declared above.
+    markers: {
+      type: "array",
+      default: [
+        { id: "m1", x: 25, y: 20, label: "Aisle A", status: "ok" },
+        { id: "m2", x: 60, y: 38, label: "Aisle B", status: "warning" },
+      ],
+      control: "json",
+      group: "data",
+      description: "Markers as [{ x, y, id?, label?, status?, color?, shape? }] in the coordinate space above.",
+    },
+    regions: {
+      type: "array",
+      default: [
+        { id: "z1", label: "Zone 1", x: 10, y: 8,  w: 35, h: 40 },
+        { id: "z2", label: "Zone 2", x: 52, y: 8,  w: 35, h: 40 },
+      ],
+      control: "json",
+      group: "data",
+      description: "Background regions as [{ x, y, w, h }] or [{ points: [[x,y], …] }], with an optional label/color.",
+    },
+    statusColors: {
+      type: "object",
+      default: { ok: "#16a34a", warning: "#f59e0b", error: "#dc2626" },
+      control: "json",
+      group: "style",
+      description: "Marker status → colour map, e.g. { ok: \"#16a34a\" }.",
+    },
+    // NO DEFAULT — a grid is an opt-in overlay; { cols, rows } drawn on every
+    // dropped schematic is a command, not an unset value. Same for heightPx,
+    // which the component defaults to 320.
+    grid:       { type: "object",                  control: "json",    group: "style",    description: "Optional grid overlay as { cols, rows }." },
+    heightPx:   { type: "number",                  control: "number",  group: "style",    description: "Rendered height in px. Leave empty for the 320px default." },
     showLabels: { type: "boolean", default: true,  control: "toggle",  group: "content",  description: "Show marker/region labels." },
     bind:    { type: "binding", default: null,  control: "binding", group: "data",     description: "Data path to bind the markers array." },
   },
@@ -3298,8 +3626,25 @@ export const stepperEntry: RegistryEntry = {
   description: "Generic process stepper (pending/active/complete/error).",
   slots: { type: "leaf" },
   props: {
+    // `StepperProps.steps` is REQUIRED (no `.optional()`, no `.default()`) and
+    // the registry exposed only the cosmetic knobs, so a dropped Stepper was an
+    // empty 24px strip and the node failed `StepperNode.props.steps: Required`.
+    steps: {
+      type: "array",
+      default: [
+        { id: "draft",  label: "Draft",     status: "complete" },
+        { id: "review", label: "In review", status: "active" },
+        { id: "done",   label: "Done",      status: "pending" },
+      ],
+      control: "json",
+      group: "content",
+      description: "Steps as [{ label, id?, description?, status? }]. Status is pending/active/current/complete/done/error/skipped.",
+    },
     orientation: { type: "enum",    default: "horizontal", control: "select", group: "style", options: ["horizontal", "vertical"], description: "Layout direction." },
     activeStep:  { type: "number",  default: 0,            control: "number", group: "state", description: "Active step index (derives status)." },
+    // NO DEFAULT — `activeId` matches a step by id/label; "" matches nothing
+    // and would silently override the index-derived status.
+    activeId:    { type: "string",                         control: "text",   group: "state", description: "Current step by id or label (e.g. \"{{record.status}}\"). Takes precedence over activeStep." },
     bind:     { type: "binding", default: null,        control: "binding", group: "data",  description: "Data path to bind the steps array." },
   },
 };
@@ -3314,7 +3659,7 @@ export const tagEntry: RegistryEntry = {
   slots: { type: "leaf" },
   props: {
     label:     { type: "string",  default: "Tag",      control: "text",   group: "content",  description: "Tag text." },
-    variant:   { type: "enum",    default: "default",  control: "select", group: "style", options: ["default", "primary", "success", "warning", "danger"], description: "Visual style." },
+    variant:   { type: "enum",    default: "default",  control: "select", group: "style", options: ["default", "primary", "accent", "success", "warning", "danger"], description: "Visual style." },
     removable: { type: "boolean", default: false,      control: "toggle", group: "behavior", description: "Show a remove (×) button." },
   },
 };
@@ -3341,6 +3686,26 @@ export const descriptionListEntry: RegistryEntry = {
   description: "Term/description key-value pairs.",
   slots: { type: "leaf" },
   props: {
+    // With neither `items` nor `emptyText` the component hits its
+    // `return null` branch — the dropped node had zero DOM under it and the
+    // page failed `DescriptionListNode.props.items: Required`. The canonical
+    // {term, description} shape is the one the strict node schema accepts.
+    items: {
+      type: "array",
+      default: [
+        { term: "Status",  description: "Active" },
+        { term: "Owner",   description: "Unassigned" },
+        { term: "Updated", description: "Today" },
+      ],
+      control: "json",
+      group: "content",
+      description: "Pairs as [{ term, description }].",
+    },
+    emptyText:   { type: "string",  default: "No details to show.", control: "text",    group: "content", description: "Shown instead of an empty list — without it the component renders nothing at all." },
+    // NO DEFAULT — `dataSource` is the bind-an-object alternative to `items`;
+    // an empty {} / [] is an empty configuration, not "unset".
+    dataSource:  { type: "binding",                                 control: "binding", group: "data",    description: "Bind an object (or array) and render one row per key/value with itemMode: \"entries\"." },
+    itemMode:    { type: "enum",    options: ["items", "entries"],  control: "select",  group: "data",    description: "\"items\" reads `items`; \"entries\" reads the bound `dataSource` object." },
     orientation: { type: "enum",    default: "vertical", control: "select", group: "style", options: ["vertical", "horizontal"], description: "Layout direction." },
   },
 };
@@ -3352,7 +3717,23 @@ export const listEntry: RegistryEntry = {
   description: "Data-driven item list with title/subtitle.",
   slots: { type: "leaf" },
   props: {
+    // `ListNode.props.items` is `.min(1)` required and the registry exposed
+    // only `divided`, so every dropped List was an empty bordered <ul> and an
+    // invalid node.
+    items: {
+      type: "array",
+      default: [
+        { title: "First item",  subtitle: "Subtitle" },
+        { title: "Second item", subtitle: "Subtitle" },
+      ],
+      control: "json",
+      group: "content",
+      description: "Rows as [{ title, subtitle?, icon? }]. At least one is required.",
+    },
     divided: { type: "boolean", default: true, control: "toggle",  group: "style", description: "Show dividers between items." },
+    // NO DEFAULT — `limit` is a positive-int cap; 0 is not "unlimited", it is
+    // "render nothing" (the ActivityFeed.maxHeight trap).
+    limit:   { type: "number",                 control: "number",  group: "behavior", description: "Max rows to render. Leave empty to render them all." },
   },
 };
 
@@ -3365,13 +3746,18 @@ export const segmentedControlEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "",   control: "text",    group: "content", description: "Field label." },
@@ -3398,6 +3784,24 @@ export const treeEntry: RegistryEntry = {
   description: "Hierarchical expandable tree view.",
   slots: { type: "leaf" },
   props: {
+    // The entry carried NO props at all: the Props panel was empty, the node
+    // rendered an empty <ul>, and `TreeNode.props.items` (`.min(1)`) made the
+    // saved page invalid. Items nest recursively via `children`.
+    items: {
+      type: "array",
+      default: [
+        {
+          label: "Root",
+          children: [
+            { label: "Child", value: "c1" },
+            { label: "Second child", value: "c2" },
+          ],
+        },
+      ],
+      control: "json",
+      group: "content",
+      description: "Nodes as [{ label, value?, children? }] — `children` nests recursively.",
+    },
   },
 };
 
@@ -3418,6 +3822,26 @@ export const transferEntry: RegistryEntry = {
       control: "json",
       group: "content",
       description: "Available items as [{ value, label }]. At least one is required.",
+    },
+    titles: {
+      type: "array",
+      // Seeded with the exact strings `Transfer.tsx:36,41` hardcodes as its
+      // `titles?.[0] ?? "Available"` fallbacks, so the control shows the labels
+      // actually on screen instead of an empty box the user has to guess at.
+      // Same value in, same value out — nothing renders differently on drop.
+      default: ["Available", "Selected"],
+      control: "json",
+      group: "content",
+      description: "Column headings as [availableTitle, selectedTitle]. Defaults to [\"Available\",\"Selected\"].",
+    },
+    selected: {
+      type: "array",
+      // `[]` is the component's own initial state (`useState(selected ?? [])`),
+      // so this is genuinely "nothing selected" rather than a command.
+      default: [],
+      control: "json",
+      group: "state",
+      description: "Initially-selected option values, as [\"one\"]. Read once on mount.",
     },
     bind: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to bind the selected values." },
   },
@@ -3444,7 +3868,14 @@ export const cascaderEntry: RegistryEntry = {
       group: "content",
       description: "Nested options as [{ value, label, children? }]. At least one is required.",
     },
-    placeholder: { type: "string",  default: "Select…", control: "text",    group: "content", description: "Placeholder text." },
+    // `placeholder` REMOVED — it was a dead control. `Cascader.tsx` destructures
+    // only `{ options, style, onChange }`; the string was written to the node,
+    // saved, and rendered nowhere (verified: innerText was ""). Cascader has no
+    // placeholder position to render one in either — it paints its columns
+    // inline, with no collapsed trigger — so honouring it would mean inventing a
+    // new UI affordance, not wiring an existing one. The prop stays in
+    // CascaderProps / CascaderNode so existing pages keep parsing; it is simply
+    // no longer offered as something the editor can usefully set.
     bind:     { type: "binding", default: null,       control: "binding", group: "data",    description: "Data path to bind the selected path." },
   },
 };
@@ -3455,19 +3886,112 @@ export const calendarEntry: RegistryEntry = {
   name: "Calendar",
   category: "input",
   icon: "Calendar",
-  description: "Month-grid date picker.",
+  // The palette used to say "Month-grid date picker", which is only half the
+  // component: `Calendar.tsx` gates on `Array.isArray(props.events)` and its own
+  // schema calls event mode "preferred for data views". Naming both modes here
+  // is how a user finds out the other one exists.
+  description: "Month/week/agenda calendar: plots bound records as events, or acts as a month-grid date picker.",
   slots: { type: "leaf" },
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
+    },
+    // ── Event-calendar mode ──────────────────────────────────────────────
+    // Ten props the component implements and the editor could reach none of
+    // (docs/editor-audit/input-components-3.md C9 — the largest contract gap in
+    // the library). `CalendarNode` was `.strict()` over `{name,value,bind}`, so
+    // these needed a schema slot before a descriptor here was safe to add; they
+    // are declared on CalendarNode now.
+    //
+    // ONLY `events` and `view` carry a `default`. Every other one is a FIELD
+    // NAME the component already falls back on ("date", "title"/"name") — a
+    // seeded default would replace a two-way fallback with a one-way command
+    // and silently break feeds whose date column is not called `date`. Omitting
+    // `default` means `defaultPropsFor` writes nothing on drop, so the
+    // component's own fallbacks stay in charge until the user types something.
+    events: {
+      type: "binding",
+      // `null`, not `[]`. Event mode is entered by `Array.isArray(props.events)`
+      // — an empty array IS the command "render event mode with no events", so
+      // seeding `[]` would flip every dropped Calendar out of picker mode into a
+      // permanently empty month grid. `null` is the honest "unset".
+      default: null,
+      control: "binding",
+      group: "data",
+      description: "Records to plot as events. Setting this switches the calendar from date-picker to event mode.",
+    },
+    view: {
+      type: "enum",
+      options: ["month", "week", "agenda"],
+      default: "month",
+      control: "select",
+      group: "style",
+      description: "Initial view. Users can switch between them in the header.",
+    },
+    dateField: {
+      type: "string",
+      control: "text",
+      group: "data",
+      description: "Event field holding the (start) date. Defaults to \"date\".",
+    },
+    endDateField: {
+      type: "string",
+      control: "text",
+      group: "data",
+      description: "Event field holding an end date, for multi-day spans.",
+    },
+    titleField: {
+      type: "string",
+      control: "text",
+      group: "data",
+      description: "Event field used as the label. Defaults to \"title\", then \"name\".",
+    },
+    colorField: {
+      type: "string",
+      control: "text",
+      group: "data",
+      description: "Categorical event field mapped to the event colour.",
+    },
+    eventHref: {
+      type: "string",
+      control: "text",
+      group: "behavior",
+      description: "Per-event deep link template, e.g. /bookings/{id}.",
+    },
+    detailFields: {
+      type: "array",
+      control: "json",
+      group: "data",
+      description: "Field names to show in the event-detail popup, as [\"status\",\"room\"]. Omitted = the record's own fields.",
+    },
+    emptyText: {
+      type: "string",
+      control: "text",
+      group: "content",
+      description: "Message shown when a day or the agenda has no events.",
+    },
+    // ── Date-picker mode ─────────────────────────────────────────────────
+    value: {
+      type: "string",
+      // No default. `value` is ISO yyyy-mm-dd and drives BOTH the displayed
+      // month and the selection; `""` would be a parse failure on every drop
+      // and any real date would pin every new calendar to that day.
+      control: "text",
+      group: "state",
+      description: "Selected date as ISO yyyy-mm-dd. Also controls which month is shown.",
     },
     bind: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to bind the selected date." },
   },
@@ -3480,6 +4004,28 @@ export const kanbanEntry: RegistryEntry = {
   description: "Column board with movable cards.",
   slots: { type: "leaf" },
   props: {
+    // `bind` was the ONLY prop, so eleven schema props were unreachable and
+    // `KanbanNode.props.columns` (`.min(1)`, required) was always absent.
+    // `columns` is the static mode and the one the strict node shape demands,
+    // so it is what a fresh drop is seeded with.
+    columns: {
+      type: "array",
+      default: [
+        { id: "todo",  title: "To do",       cards: [{ id: "c1", title: "Draft the brief" }] },
+        { id: "doing", title: "In progress", cards: [{ id: "c2", title: "Review the copy" }] },
+        { id: "done",  title: "Done",        cards: [] },
+      ],
+      control: "json",
+      group: "content",
+      description: "Columns as [{ id, title, cards: [{ id, title, description? }] }]. At least one is required.",
+    },
+    // Data-driven mode — NO DEFAULTS. These replace `columns` when set; a
+    // seeded groupBy/cardTitle field name would silently re-derive the board
+    // from data that is not there.
+    data:      { type: "binding",                    control: "binding", group: "data",    description: "Bind an array of records to derive columns from data instead of `columns`." },
+    groupBy:   { type: "string",                     control: "text",    group: "data",    description: "Record field whose distinct values become the columns (used with `data`)." },
+    cardTitle: { type: "string",                     control: "text",    group: "data",    description: "Record field rendered as the card title (used with `data`)." },
+    emptyText: { type: "string",                     control: "text",    group: "content", description: "Shown when the board has no cards." },
     bind: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to the columns array." },
   },
 };
@@ -3493,14 +4039,33 @@ export const resourceTimelineEntry: RegistryEntry = {
   props: {
     resources: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to the resource rows (rooms, staff, vehicles)." },
     items: { type: "binding", default: null, control: "binding", group: "data", description: "Data path to the items drawn as bars." },
+    // NO DEFAULTS on the resource field names: each one falls back through a
+    // chain ("name"/"label"/"title") when absent, and seeding one pins the
+    // resolution to a field the user's records may not have.
+    resourceIdField: { type: "string", control: "text", group: "data", description: "Resource field holding the id. Leave empty for \"id\"." },
+    resourceLabelField: { type: "string", control: "text", group: "data", description: "Resource field holding the row label. Leave empty to try name/label/title." },
+    resourceSubField: { type: "string", control: "text", group: "data", description: "Resource field for the secondary row line (e.g. \"1 King\")." },
     itemResourceField: { type: "string", default: "resourceId", control: "text", group: "data", description: "Item field holding the resource id." },
     startField: { type: "string", default: "start", control: "text", group: "data", description: "Item start-date field." },
     endField: { type: "string", default: "end", control: "text", group: "data", description: "Item end-date field." },
     titleField: { type: "string", default: "title", control: "text", group: "data", description: "Item bar label field." },
-    statusField: { type: "string", default: null, control: "text", group: "data", description: "Item status field → bar colour + legend." },
-    resourceGroupField: { type: "string", default: null, control: "text", group: "data", description: "Resource field to group rows under (room type, floor)." },
+    subtitleField: { type: "string", control: "text", group: "data", description: "Item field for the small secondary bar label." },
+    // THE `default` KEY IS DELIBERATELY ABSENT on these three. They were
+    // seeded `null` against `z.string().optional()`, which is not `undefined`:
+    // every dropped ResourceTimeline failed `ResourceTimelineNode` (and so
+    // `PageV2`) three times over. `""` is not the fix either — these are field
+    // NAMES and the empty string is not one. Absent is what "unset" means.
+    statusField: { type: "string", control: "text", group: "data", description: "Item status field → bar colour + legend." },
+    resourceGroupField: { type: "string", control: "text", group: "data", description: "Resource field to group rows under (room type, floor)." },
+    // NO DEFAULT — a seeded ISO date pins the grid to the day it was written.
+    // Absent means "start at today", which is what the component does.
+    rangeStart: { type: "string", control: "text", group: "behavior", description: "ISO date of the first column. Leave empty to start at today." },
     days: { type: "number", default: 14, control: "number", group: "content", description: "Number of day columns." },
-    itemHref: { type: "string", default: null, control: "text", group: "behavior", description: "Per-item deep link, e.g. /reservations/{id}." },
+    emptyText: { type: "string", control: "text", group: "content", description: "Shown when there are no resources to draw." },
+    itemHref: { type: "string", control: "text", group: "behavior", description: "Per-item deep link, e.g. /reservations/{id}." },
+    // No `default: null` here — see the three above; a binding descriptor that
+    // seeds `null` writes a value the node schema rejects.
+    bind: { type: "binding", control: "binding", group: "data", description: "Data path to bind the timeline data." },
   },
 };
 
@@ -3513,16 +4078,52 @@ export const richTextEditorEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:   { type: "string",  default: "",       control: "text",    group: "content", description: "Field label." },
+    // Four props the component/schema accept and the editor could reach none of
+    // (input-components-3.md C9). None carries a `default`:
+    //   • `value` is stamped into innerHTML once on mount, so a seeded default
+    //     is content the user cannot clear from the panel afterwards.
+    //   • `placeholder`/`mentions`/`embeds` are opt-in features; `""` / `{}` /
+    //     `[]` are not "unset" here, they are empty configurations that
+    //     `mentions.source: z.string().min(1)` would reject outright.
+    value: {
+      type: "string",
+      control: "textarea",
+      group: "content",
+      description: "Initial HTML content. Applied on mount only — edit it here and reload to see it.",
+    },
+    placeholder: {
+      type: "string",
+      control: "text",
+      group: "content",
+      description: "Placeholder shown while the editor is empty.",
+    },
+    mentions: {
+      type: "object",
+      control: "json",
+      group: "data",
+      description: "Mention autocomplete as { source: workflowName, trigger?: \"@\" }. `source` is required when set.",
+    },
+    embeds: {
+      type: "array",
+      control: "json",
+      group: "behavior",
+      description: "Inline block kinds insertable from the / menu, as [\"image\",\"link\",\"table\"].",
+    },
     bind: { type: "binding", default: null,     control: "binding", group: "data",    description: "Data path to bind the HTML value." },
   },
 };
@@ -3534,6 +4135,21 @@ export const carouselEntry: RegistryEntry = {
   description: "Slideshow with prev/next and dots.",
   slots: { type: "leaf" },
   props: {
+    // The entry carried NO props at all — an empty Props panel, a 45px empty
+    // div on the canvas, and `CarouselNode.props.items` (`.min(1)`) missing,
+    // which made the saved page invalid. `image` is left out of the seed on
+    // purpose: an empty <img> src is a broken-image icon, and the slide
+    // renders from title/caption alone.
+    items: {
+      type: "array",
+      default: [
+        { title: "Slide one", caption: "Replace this with your own slides." },
+        { title: "Slide two", caption: "Each slide takes an image, title and caption." },
+      ],
+      control: "json",
+      group: "content",
+      description: "Slides as [{ image?, title?, caption? }]. At least one is required.",
+    },
   },
 };
 
@@ -3544,6 +4160,21 @@ export const lightboxEntry: RegistryEntry = {
   description: "Thumbnail gallery with fullscreen viewer.",
   slots: { type: "leaf" },
   props: {
+    // The entry carried NO props at all, so the node rendered 960×0 — zero
+    // height, no hint overlay, undiagnosable — and `LightboxNode.props.images`
+    // (`.min(1)`) made the page invalid. The seed uses inline SVG data URIs
+    // rather than a CDN URL so a fresh gallery renders offline and the
+    // registry stays free of external hosts.
+    images: {
+      type: "array",
+      default: [
+        { src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='120'><rect width='160' height='120' fill='%23cbd5e1'/></svg>", alt: "Placeholder image one" },
+        { src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='120'><rect width='160' height='120' fill='%2394a3b8'/></svg>", alt: "Placeholder image two" },
+      ],
+      control: "json",
+      group: "content",
+      description: "Images as [{ src, alt? }]. At least one is required.",
+    },
   },
 };
 
@@ -3554,7 +4185,10 @@ export const codeBlockEntry: RegistryEntry = {
   description: "Monospace code block with copy button.",
   slots: { type: "leaf" },
   props: {
-    code:     { type: "string",  default: "",   control: "textarea", group: "content",  description: "Code to display." },
+    // `CodeBlockNode.props.code` is `z.string().min(1)`, so the old `""` seed
+    // was `too_small` — every dropped CodeBlock rendered an empty black block
+    // AND made the page fail PageV2.
+    code:     { type: "string",  default: "const total = items.length;", control: "textarea", group: "content",  description: "Code to display." },
     language: { type: "string",  default: "",   control: "text",     group: "content",  description: "Language label." },
     showCopy: { type: "boolean", default: true, control: "toggle",   group: "behavior", description: "Show a copy button." },
   },
@@ -3567,8 +4201,13 @@ export const qrCodeEntry: RegistryEntry = {
   description: "QR code generated from a value.",
   slots: { type: "leaf" },
   props: {
-    value:   { type: "string",  default: "",  control: "text",   group: "content", description: "Encoded value/URL." },
+    // `QRCodeNode.props.value` is `z.string().min(1)`: the old `""` seed was
+    // `too_small` and produced a scannable QR encoding the empty string.
+    value:   { type: "string",  default: "https://example.com",  control: "text",   group: "content", description: "Encoded value/URL." },
     size:    { type: "number",  default: 128, control: "number", group: "style",   description: "Pixel size." },
+    // NO DEFAULT — the caption is optional and a seeded one is copy the user
+    // has to delete rather than a value they have to fill in.
+    label:   { type: "string",                control: "text",   group: "content", description: "Caption rendered under the code." },
   },
 };
 
@@ -3584,6 +4223,27 @@ export const barcodeScannerEntry: RegistryEntry = {
     name:    { type: "string",  default: "barcode", control: "text",    group: "data",    description: "Form field name that receives the decoded value." },
     label:   { type: "string",  default: "Scan a barcode", control: "text", group: "content", description: "Field label." },
     hint:    { type: "string",  default: "",        control: "text",    group: "content", description: "Helper text under the scanner." },
+    autoSubmit: {
+      type: "boolean",
+      // `false` is the component's own behaviour today, so seeding it changes
+      // nothing on drop — it just makes the switch findable. The audit's point
+      // (BarcodeScanner.tsx:88-89) is that scan-to-search is the whole reason to
+      // put a scanner on an inventory page and it could not be turned on.
+      default: false,
+      control: "toggle",
+      group: "behavior",
+      description: "Submit the enclosing Form as soon as a code is decoded (scan-to-search).",
+    },
+    formats: {
+      type: "array",
+      // NO default. The schema comment reads "Empty = all", but that is the
+      // ABSENT case; writing `[]` onto every dropped node is an explicit
+      // "accept these formats" list with nothing in it. Left unset so the
+      // decoder keeps accepting every format it supports.
+      control: "json",
+      group: "behavior",
+      description: "BarcodeDetector format ids to accept, e.g. [\"ean_13\",\"qr_code\"]. Unset = all formats.",
+    },
     bind: { type: "binding", default: null,      control: "binding", group: "data",    description: "Data path to bind the decoded value." },
   },
 };
@@ -3597,13 +4257,18 @@ export const cameraCaptureEntry: RegistryEntry = {
   props: {
     name: {
       type: "string",
-      default: "",
+      // NO default. `name` is `z.string().min(1)` on every input's node schema,
+      // so `""` is not "unset" — it is present-and-too-short, and it made the
+      // registry's own seed the one value the schema is guaranteed to reject.
+      // It was never what a dropped field actually carried either:
+      // `buildDroppedNode` derives `name` from the node id (`input_a1b2c3`) so
+      // two "Email" fields on one page do not collide. Leaving it unseeded means
+      // the registry stops publishing an invalid value to every other consumer
+      // (the JSON export, the LLM catalog, the properties panel) while the drop
+      // path keeps doing exactly what it did. This control is how the user
+      // renames it.
       control: "text",
       group: "content",
-      // REQUIRED by the schema (`z.string().min(1)`) and previously exposed by
-      // nothing, so every input the palette dropped was invalid the moment it
-      // landed. `buildDroppedNode` seeds it so a fresh field is valid without
-      // the user typing anything; this control is how they rename it.
       description: "Form field name — the key this value submits under.",
     },
     label:        { type: "string",  default: "Capture Photo", control: "text",    group: "content", description: "Field label." },
@@ -3622,6 +4287,13 @@ export const scannerEntry: RegistryEntry = {
     label:      { type: "string",  default: "Scanner", control: "text",   group: "content",  description: "Panel label." },
     deviceType: { type: "enum",    default: "rfid",    control: "select", group: "behavior", options: ["rfid", "barcode", "qr"], description: "Device kind." },
     status:     { type: "enum",    default: "idle",    control: "select", group: "state",    options: ["idle", "scanning", "success", "error"], description: "Scan status." },
+    // Three props the component accepts and the editor could not reach. None
+    // carries a `default`: all three are optional strings the component renders
+    // only when present, and `""` would replace each internal fallback (the
+    // scan button's own caption, "no value yet", "no message") with a blank.
+    scanLabel:     { type: "string", control: "text", group: "content", description: "Caption on the scan trigger button." },
+    value:         { type: "string", control: "text", group: "state",   description: "Scanned value shown in the result panel." },
+    statusMessage: { type: "string", control: "text", group: "state",   description: "Message shown beside the status indicator." },
     bind:    { type: "binding", default: null,      control: "binding", group: "data",    description: "Data path to bind the scanned value." },
   },
 };
@@ -3633,7 +4305,23 @@ export const validationChecklistEntry: RegistryEntry = {
   description: "List of labelled pass/fail validation items.",
   slots: { type: "leaf" },
   props: {
-    orientation: { type: "enum",    default: "vertical", control: "select", group: "style", options: ["vertical", "horizontal"], description: "Layout direction." },
+    // `ValidationChecklistNode.props.items` is `.min(1)` required and the
+    // registry exposed only `orientation`, so the node was an empty div and
+    // the page failed PageV2. One passing and one failing row so the two
+    // states are both visible on drop.
+    items: {
+      type: "array",
+      default: [
+        { label: "Has a SKU", valid: true },
+        { label: "Price set", valid: false },
+      ],
+      control: "json",
+      group: "content",
+      description: "Checks as [{ label, valid }]. At least one is required.",
+    },
+    // Options ordered as the Zod enum orders them (`["horizontal","vertical"]`)
+    // so a reset lands on the schema's first value, not a different one.
+    orientation: { type: "enum",    default: "vertical", control: "select", group: "style", options: ["horizontal", "vertical"], description: "Layout direction." },
   },
 };
 
@@ -3754,10 +4442,18 @@ export const repeatEntry: RegistryEntry = {
   description: "Render children once per item in a bound list.",
   slots: { type: "list" },
   props: {
-    source: { type: "string", default: "", control: "text", group: "data",
-      description: "Binding path of the array (e.g. 'requests'). Alias: top-level `bind`." },
-    bind:   { type: "string", default: "", control: "text", group: "data",
-      description: "Shorthand for source — top-level binding path." },
+    // NO defaults on either. `source` is `z.string().min(1).optional()` on
+    // V2RepeatNode, so the seeded `""` was present-and-too-short — absent is
+    // valid, "" never is. `bind` is not a declared key of that `.strict()` props
+    // object at all (the node schema documents `bind` as a TOP-LEVEL key, while
+    // the editor can only ever write into `props`), even though the runtime
+    // Repeat does read `props.bind` as an alias — so seeding it guaranteed a
+    // page PageV2 rejects. Unseeded, a dropped Repeat carries neither and stays
+    // valid until the user binds it. See the ROUTED note for the schema gap.
+    source: { type: "string", control: "text", group: "data",
+      description: "Binding path of the array (e.g. 'requests'). Alias: `bind`." },
+    bind:   { type: "string", control: "text", group: "data",
+      description: "Shorthand for source — binding path of the array." },
     path:   { type: "string", default: "", control: "text", group: "data",
       description: "Optional dotted sub-path within the bound array." },
     as:     { type: "string", default: "item", control: "text", group: "data",
@@ -3774,8 +4470,12 @@ export const conditionalEntry: RegistryEntry = {
   description: "Render children when an expression is truthy; else otherwise.",
   slots: { type: "list" },
   props: {
-    when: { type: "string", default: "", control: "text", group: "data",
-      description: "Expression evaluated against scope; truthy renders children." },
+    // NO default. `V2ConditionalNode.props.when` is an Expression that rejects
+    // the empty string outright ("expression cannot be empty"), so the seed was
+    // the one value guaranteed to fail — same rule as the input `name` seeds
+    // above. Absent and "" both render nothing, so nothing on the canvas changes.
+    when: { type: "string", control: "text", group: "data",
+      description: "Expression evaluated against scope; truthy renders children, otherwise the else branch." },
   },
 };
 
@@ -3835,8 +4535,19 @@ export const redirectEntry: RegistryEntry = {
   description: "Route alias — replaces the current URL with `to` on mount. Used when two routes serve the same job.",
   slots: { type: "leaf" },
   props: {
-    to:    { type: "string", default: "/", control: "text", group: "content", description: "Destination route." },
-    label: { type: "string", default: "",  control: "text", group: "content", description: "Note shown while redirecting." },
+    // NO default on `to`. This is the command-default trap in its purest form:
+    // `Redirect.tsx` runs `nav.replace(to)` in a mount effect, so a seeded
+    // `to: "/"` is not a placeholder value, it is an instruction the component
+    // executes the instant the node exists. A Redirect dropped with its defaults
+    // made the page it was dropped on permanently unopenable — preview bounced
+    // to "/", Back bounced again, and nothing in the editor said why.
+    // Undefined is read as "not configured": the mount effect is gated on
+    // `if (to)`, so an unseeded Redirect sits quietly showing "Redirecting…"
+    // until the user names a destination.
+    to:    { type: "string", control: "text", group: "content", description: "Destination route, e.g. /items. Replaces the current URL on mount — nothing happens until it is set." },
+    // `label` is `.optional()` and the component renders `label || "Redirecting…"`,
+    // so `""` was only a longer spelling of absent.
+    label: { type: "string", control: "text", group: "content", description: "Note shown while redirecting (defaults to \"Redirecting…\")." },
   },
 };
 
@@ -3958,7 +4669,24 @@ export const bulkActionBarEntry: RegistryEntry = {
   description: "Selection toolbar: renders count + workflow actions when a Table has rows selected.",
   slots: { type: "leaf" },
   props: {
-    selectedCount: { type: "number",  default: 0,    control: "number", group: "state",   description: "Number of selected rows (0 = component renders nothing)." },
+    selectedCount: {
+      type: "number",
+      // 2, NOT 0. `BulkActionBar.tsx` returns `null` when selectedCount === 0,
+      // so the seeded 0 was not "unset" — it was the command "render nothing",
+      // and a dropped BulkActionBar arrived as an invisible, unselectable node.
+      //
+      // CHOSEN FIX: the registry seed, not a zero-selection render state. The
+      // component's hide-at-zero behaviour is its contract in a shipped app —
+      // `selectedCount` is bound to a live selection count, and a bar that
+      // painted "0 selected · Archive" permanently on every table page would be
+      // a real regression in every generated app to fix an editor-only problem.
+      // A non-zero seed makes the dropped node visible and editable (which is
+      // all the editor needs) and leaves the runtime semantics untouched.
+      default: 2,
+      control: "number",
+      group: "state",
+      description: "Number of selected rows. 0 hides the bar entirely — bind this to a live selection count.",
+    },
     actions: {
       type: "array",
       // A NON-EMPTY ARRAY, NOT A ONE-LINE TEXT BOX. `type:"string"` renders

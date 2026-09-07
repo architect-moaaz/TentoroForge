@@ -13,6 +13,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useEditorStore } from "@/lib/editor-store";
 import { EmptyNodeHints } from "@/components/canvas/EmptyNodeHints";
+import { hintFor, schemaMissingProp } from "@/components/canvas/empty-hints";
+import { starterRegistry } from "@forge/registry";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 if (!(globalThis as any).ResizeObserver) {
@@ -156,5 +158,128 @@ describe("EmptyNodeHints", () => {
     expect(hint.style.top).toBe("14px");
     expect(hint.style.width).toBe("400px");
     expect(hint.style.height).toBe("120px");
+  });
+});
+
+/**
+ * Audit rows 27–29 — the hint must name the prop the COMPONENT requires.
+ *
+ * Row 27 is the reason these assert the prop NAME and not merely that a hint
+ * appeared: Stepper's hint read "set 'bind'" — a real hint, on a real empty
+ * node, naming the one prop (`z.string().optional()`) that was never the
+ * problem. Any test that only checked for the presence of a hint passed
+ * against that bug.
+ *
+ * These read the answer off the component's own Zod schema via the live
+ * library registry, so they keep working when a component's schema changes and
+ * they cover components nobody has thought to write a case for.
+ */
+describe("hintFor — names the prop the component's own schema requires", () => {
+  it("names a required list prop, not an optional scalar that happens to be declared", () => {
+    // StepperProps: steps (required array) · bind (optional string).
+    expect(hintFor("Stepper", {})).toBe(
+      "Stepper — set “steps” in the Properties panel.",
+    );
+    expect(hintFor("Stepper", {})).not.toContain("bind");
+  });
+
+  it("names the content list even when its schema default is []", () => {
+    // Row 28: these five have no *required* prop — `items` defaults to [] —
+    // so the old code fell through to the palette blurb and named no prop.
+    for (const [type, prop] of [
+      ["Carousel", "items"],
+      ["DescriptionList", "items"],
+      ["List", "items"],
+      ["Tree", "items"],
+      ["ValidationChecklist", "items"],
+      ["Lightbox", "images"],
+    ] as const) {
+      expect(hintFor(type, {})).toBe(
+        `${type} — set “${prop}” in the Properties panel.`,
+      );
+    }
+  });
+
+  it("never falls back to the palette description while a prop is missing", () => {
+    // "Carousel — Slideshow with prev/next and dots." was the reported string.
+    expect(hintFor("Carousel", {})).not.toContain("Slideshow");
+  });
+
+  it("stops naming a prop once the user has filled it", () => {
+    expect(hintFor("Stepper", { steps: [{ label: "One" }] })).not.toContain("steps");
+  });
+
+  it("says so plainly when the required prop has no control in the panel", () => {
+    // Swept, not enumerated: every leaf in the registry whose schema names a
+    // missing prop the Properties panel has no control for. Those are registry
+    // gaps (ROUTED, not patched here) and the hint must not send the user
+    // hunting for a control that does not exist.
+    const gaps: string[] = [];
+    for (const [type, entry] of Object.entries(starterRegistry as Record<string, any>)) {
+      if (entry?.slots?.type && entry.slots.type !== "leaf") continue;
+      const prop = schemaMissingProp(type, {});
+      if (!prop) continue;
+      if (Object.prototype.hasOwnProperty.call(entry?.props ?? {}, prop)) continue;
+      gaps.push(type);
+      expect(hintFor(type, {})).toBe(
+        `${type} — needs “${prop}”, which has no control yet.`,
+      );
+    }
+    // Not an assertion about how many gaps there are — just a record of them.
+    if (gaps.length) console.log(`[no-control-for-required-prop] ${gaps.join(", ")}`);
+  });
+
+  it("never invents a hint for a type the palette does not know", () => {
+    expect(hintFor("__NotARealComponent__", {})).toBeNull();
+  });
+
+  it("prefers a required list over a required scalar declared before it", () => {
+    // Ranking, not declaration order: BulkActionBar declares selectedCount
+    // (defaulted number) before actions (required, .min(1) array).
+    expect(hintFor("BulkActionBar", {})).toContain("actions");
+  });
+});
+
+describe("EmptyNodeHints — zero-area nodes", () => {
+  it("annotates a node with no box instead of skipping it", () => {
+    // Row 29: Lightbox laid out 960x0 and Dialog 0x0, so the overlay's
+    // "too small to annotate" guard dropped them — the two nodes that most
+    // needed a marker were the only ones that never got one. The rule is
+    // geometric: any empty node smaller than the minimum hint box is padded
+    // out to one, whatever the component is.
+    const ZERO = { left: 30, top: 40, width: 0, height: 0, right: 30, bottom: 40, x: 30, y: 40, toJSON() {} };
+    const prev = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      return (this === host ? HOST_RECT : ZERO) as DOMRect;
+    };
+    try {
+      seed({ id: "lb-1", type: "Lightbox", props: {} });
+      host.innerHTML = `<div data-node-id="lb-1"></div>`;
+      renderOverlay();
+      const hint = host.querySelector("[data-empty-hint]") as HTMLElement;
+      expect(hint).not.toBeNull();
+      expect(hint.textContent).toContain("images");
+      // Padded to a readable minimum, positioned where the node is.
+      expect(hint.style.left).toBe("26px");
+      expect(hint.style.top).toBe("34px");
+      expect(parseFloat(hint.style.width)).toBeGreaterThanOrEqual(120);
+      expect(parseFloat(hint.style.height)).toBeGreaterThanOrEqual(16);
+      expect(hint.hasAttribute("data-empty-hint-ghost")).toBe(true);
+      // Still inert — a marker for an invisible node must not start eating
+      // the drops the canvas underneath it is there to receive.
+      expect(hint.className).toContain("pointer-events-none");
+    } finally {
+      Element.prototype.getBoundingClientRect = prev;
+    }
+  });
+
+  it("leaves a node that already has a real box at its own size", () => {
+    seed({ id: "lb-2", type: "Lightbox", props: {} });
+    host.innerHTML = `<div data-node-id="lb-2"></div>`;
+    renderOverlay();
+    const hint = host.querySelector("[data-empty-hint]") as HTMLElement;
+    expect(hint.style.width).toBe("400px");
+    expect(hint.style.height).toBe("120px");
+    expect(hint.hasAttribute("data-empty-hint-ghost")).toBe(false);
   });
 });

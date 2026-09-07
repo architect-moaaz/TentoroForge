@@ -13,10 +13,47 @@ function TestOpener({ id }: { id: string }) {
 }
 
 describe("Dialog", () => {
-  it("renders nothing when no DialogStateContext provider is mounted", () => {
-    const { container } = render(<Dialog id="x" title="No Provider">body</Dialog>);
-    // Closed → Radix Dialog.Portal renders nothing in the DOM.
+  // display 12 — with no provider the Portal rendered nothing: the editor node
+  // measured 0×0 and swallowed any child dropped into it. Now the content
+  // renders inline instead.
+  it("renders its children inline when no DialogStateContext provider is mounted", () => {
+    const { container, getByText } = render(
+      <Dialog id="x" title="No Provider" description="desc">
+        <span>inline child</span>
+      </Dialog>,
+    );
+    // Not a modal — no Radix portal/overlay.
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+    // …but the content is present and in place.
+    const root = container.querySelector("[data-dialog-inline]");
+    expect(root).not.toBeNull();
+    expect(root!.getAttribute("data-node-id")).toBe("x");
+    expect(getByText("inline child")).toBeInTheDocument();
+    expect(getByText("No Provider")).toBeInTheDocument();
+    expect(getByText("desc")).toBeInTheDocument();
+  });
+
+  it("applies className + StyleSlot on the provider-less inline fallback", () => {
+    const { container } = render(
+      <Dialog id="x" className="ring-2" style={{ padding: "tokens.spacing.4" } as any}>
+        <span>child</span>
+      </Dialog>,
+    );
+    const root = container.querySelector("[data-dialog-inline]") as HTMLElement;
+    expect(root.className).toContain("ring-2");
+    expect(root.style.padding).toBe("var(--token-spacing-4)");
+  });
+
+  it("stays closed (no inline fallback) when a provider IS mounted", () => {
+    const { container } = render(
+      <DialogStateProvider>
+        <Dialog id="y" title="Closed">
+          <span>hidden child</span>
+        </Dialog>
+      </DialogStateProvider>,
+    );
+    expect(container.querySelector("[data-dialog-inline]")).toBeNull();
+    expect(screen.queryByText("hidden child")).toBeNull();
   });
 
   it("renders content when the engine opens it via openDialog(id)", async () => {

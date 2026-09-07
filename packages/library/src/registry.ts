@@ -275,6 +275,20 @@ function setAtPath(obj: any, path: Array<string | number>, value: unknown): void
   }
   cur[path[path.length - 1]] = value;
 }
+function deleteAtPath(obj: any, path: Array<string | number>): void {
+  let cur = obj;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (cur == null || typeof cur !== "object") return;
+    cur = cur[path[i]];
+  }
+  if (cur == null || typeof cur !== "object") return;
+  // `delete` on an array index leaves a hole rather than re-indexing, so the
+  // remaining error paths in the same pass stay pointing at the right elements.
+  delete cur[path[path.length - 1] as any];
+}
+function samePath(a: Array<string | number>, b: Array<string | number>): boolean {
+  return a.length === b.length && a.every((s, i) => s === b[i]);
+}
 function getAtPath(obj: any, path: Array<string | number>): unknown {
   let cur = obj;
   for (const k of path) {
@@ -371,6 +385,7 @@ export function createRegistry() {
       } catch {
         coerced = { ...stripped };
       }
+      const nulled: Array<Array<string | number>> = [];
       for (const er of r.error.errors) {
         if (!er.path.length) continue;
         const exp = (er as any).expected;
@@ -390,10 +405,44 @@ export function createRegistry() {
             er.path,
             exp === "array" ? [] : exp === "object" ? {} : exp === "number" ? 0 : exp === "boolean" ? false : "",
           );
+        } else if (er.code === "invalid_type" && rec === "null") {
+          // `null` on a field whose own schema REJECTS null. This is the
+          // registry's `default: null` convention (binding/action descriptors)
+          // copied onto a node and persisted in project schemas already on
+          // disk. `null` is not `undefined`, so it fails an `.optional()`
+          // field — and because one bad key fails the WHOLE object parse, it
+          // silently skipped every `.default()` the component declares, which
+          // is why such nodes rendered as if they had no props at all.
+          // Dropping the key lets absence do its job. A field that is
+          // genuinely `.nullable()` accepts null and therefore never produces
+          // this error, so a legitimate null is preserved untouched.
+          deleteAtPath(coerced, er.path);
+          nulled.push(er.path);
         }
       }
       const r2 = e.propsSchema.safeParse(coerced);
       if (r2.success) return finish(r2.data);
+      if (nulled.length) {
+        // The dropped key turned out to be REQUIRED, not optional — absence is
+        // no better than null there. Fall back to the same empty value the
+        // `undefined` branch above uses and try once more.
+        let filled = false;
+        for (const er of r2.error.errors) {
+          if (er.code !== "invalid_type" || (er as any).received !== "undefined") continue;
+          if (!nulled.some((p) => samePath(p, er.path))) continue;
+          const exp2 = (er as any).expected;
+          setAtPath(
+            coerced,
+            er.path,
+            exp2 === "array" ? [] : exp2 === "object" ? {} : exp2 === "number" ? 0 : exp2 === "boolean" ? false : "",
+          );
+          filled = true;
+        }
+        if (filled) {
+          const r3 = e.propsSchema.safeParse(coerced);
+          if (r3.success) return finish(r3.data);
+        }
+      }
       return finish(coerced);
     },
   };

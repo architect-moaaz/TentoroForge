@@ -6,6 +6,7 @@ import type { DropdownMenuPropsType } from "./DropdownMenu.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { resolveIcon } from "../../icons";
+import { MenuEmptyNote } from "../../util/MenuEmptyNote";
 
 export interface DropdownMenuProps extends DropdownMenuPropsType {
   style?: StyleSlotT;
@@ -25,6 +26,7 @@ export function DropdownMenu({ trigger, triggerIcon, items = [], align = "start"
       <RDropdown.Portal>
         <RDropdown.Content align={align} sideOffset={4}
           className="z-50 min-w-[10rem] rounded-md border border-input bg-white p-1 shadow-md">
+          {items.length === 0 && <MenuEmptyNote />}
           {items.map((it) => {
             const Icon = it.icon ? resolveIcon(it.icon) : null;
             return (

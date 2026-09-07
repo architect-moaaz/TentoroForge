@@ -10,6 +10,8 @@ type Props = {
   navigate: string;
   workflow?: string;
   args?: Record<string, unknown>;
+  /** Where to open the destination. "_blank" also gets a safe `rel`. */
+  target?: "_self" | "_blank";
   style?: StyleSlotT;
   /** Schema-authored utility classes. When present the class is authoritative
    * for the link's look: the default underline/color inline styles are dropped
@@ -19,9 +21,30 @@ type Props = {
   __dispatch?: (workflow: string, args?: Record<string, unknown>) => void;
 };
 
-export function Link({ label, navigate, workflow, args, style, className, __dispatch }: Props) {
+/** An app-relative route the Navigator should handle, as opposed to an external
+ *  URL, a mail/tel scheme, or a bare fragment the browser resolves itself. */
+function isInternalRoute(dest: string): boolean {
+  return dest.startsWith("/") && !dest.startsWith("//");
+}
+
+export function Link({ label, navigate, workflow, args, target, style, className, __dispatch }: Props) {
   const ctxDispatch = useContext(WorkflowDispatcherContext);
   const nav = useNavigator();
+  const dest = typeof navigate === "string" ? navigate.trim() : "";
+
+  // A LINK WITH NOWHERE TO GO IS NOT A LINK.
+  //
+  // The registry seeds `navigate: ""`, which rendered `<a href="">` — an anchor
+  // that is focusable, blue, underlined, `cursor: pointer`, and reloads the
+  // current page when clicked. The user's report was exactly that: "a control
+  // styled as a working link that is inert". `href=""` is worse than no href,
+  // because an anchor WITHOUT href is not a link to any assistive technology
+  // and does not invite the click in the first place.
+  //
+  // A `workflow` with no `navigate` is still a real control, so it keeps its
+  // interactive rendering — only the "no destination and no behaviour at all"
+  // case is marked unset.
+  const inert = !dest && !workflow;
 
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (workflow) {
@@ -30,35 +53,45 @@ export function Link({ label, navigate, workflow, args, style, className, __disp
     }
     // Route internal links through the Navigator (soft nav + routed modals).
     // Keep the <a href> for accessibility / new-tab / crawlers, but hijack the
-    // plain left-click. Modifier clicks and external URLs fall through to the
-    // browser's default so open-in-new-tab still works.
+    // plain left-click. Modifier clicks, an explicit _blank target, and
+    // external URLs fall through to the browser's default so open-in-new-tab
+    // still works.
     if (
-      navigate &&
-      navigate.startsWith("/") &&
+      isInternalRoute(dest) &&
+      target !== "_blank" &&
       !e.defaultPrevented &&
       e.button === 0 &&
       !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey
     ) {
       e.preventDefault();
-      nav.push(navigate);
+      nav.push(dest);
     }
   };
 
   const defaultLook = className
     ? {}
     : {
-        color: `var(${tokenToCssVar("primary.500")})`,
-        textDecoration: "underline" as const,
+        // An unset link is rendered as the plain text it behaves like, so its
+        // look matches what it does.
+        color: inert ? "inherit" : `var(${tokenToCssVar("primary.500")})`,
+        textDecoration: inert ? ("none" as const) : ("underline" as const),
         fontSize: `var(${tokenToCssVar("typography.base")})`,
       };
   return (
     <a
-      href={navigate}
-      onClick={onClick}
+      // No `href` at all when there is nothing to go to — see above.
+      {...(inert ? {} : { href: dest || undefined })}
+      {...(inert ? { "data-link-unset": "", "aria-disabled": true } : {})}
+      {...(target === "_blank"
+        ? { target: "_blank", rel: "noopener noreferrer" }
+        : target
+          ? { target }
+          : {})}
+      onClick={inert ? undefined : onClick}
       className={className}
       style={{
         ...defaultLook,
-        cursor: "pointer",
+        cursor: inert ? "default" : "pointer",
         ...resolveStyle(style),
       }}
       {...useMotion(style?.motion)}

@@ -130,6 +130,12 @@ export const ListNode = z.object({
       icon:     z.string().optional(),
     }).strict()).min(1),
     divided: z.boolean().optional(),
+    // WIDER THAN IT LOOKS, ON PURPOSE. The registry exposes these in the
+    // Properties panel because the component accepts them; a `.strict()`
+    // node that omits them means the drop is valid and the user's FIRST
+    // EDIT writes a page PageV2 rejects. The editor's own contract has to
+    // be at least as wide as the control surface it offers.
+    limit: z.number().int().positive().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

@@ -29,9 +29,17 @@ export function FadeIn({ delay, duration, style, children }: FadeInProps) {
   const motionLevel = useMotionLevel();
   const env = MOTION_ENVELOPE[motionLevel];
 
-  // When motion is disabled, render children without any animation wrapper.
+  // When motion is disabled, render children WITHOUT any animation — but still
+  // honour the Style slot. Returning a bare fragment here used to drop every
+  // Style-panel value (background/padding/…) for any app whose motion token is
+  // "none". The wrapper carries no `motion-wrapper` class and no data-motion,
+  // so nothing animates.
   if (!env.enabled) {
-    return <>{children}</>;
+    return (
+      <div data-motion-disabled="fade-in" style={resolveStyle(style)}>
+        {children}
+      </div>
+    );
   }
 
   // Use prop overrides when provided; fall back to envelope values.

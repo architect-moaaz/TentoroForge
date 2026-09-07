@@ -131,6 +131,12 @@ function isUrlDescriptor(d: any): boolean {
  */
 export function normalizeSeed(descriptor: any, value: unknown): unknown {
   if (value === undefined) return undefined;
+  // `default: null` is the registry's convention for "no seed" on binding and
+  // action descriptors (~50 entries). It is NOT a value: the component schemas
+  // type those props `z.string().optional()`, and `null` is not `undefined`, so
+  // copying it onto a dropped node fails the whole props parse and silently
+  // skips every Zod `.default()` the component declares. Omit it instead.
+  if (value === null) return undefined;
   if (
     isNumericDomain(descriptor) &&
     typeof value === "string" &&

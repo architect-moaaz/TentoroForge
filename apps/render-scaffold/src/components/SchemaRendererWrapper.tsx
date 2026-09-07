@@ -15,9 +15,14 @@
  */
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Engine, EngineProvider } from "@tentoroforge/engine";
 import type { DesignSpec } from "@tentoroforge/engine";
-import { WorkflowDispatcherProvider } from "@tentoroforge/renderer";
+import {
+  WorkflowDispatcherProvider,
+  NavigatorProvider,
+  createBasePathNavigator,
+} from "@tentoroforge/renderer";
 import { resolvePreviewSync } from "@/lib/resolvePreviewSync";
 
 interface SchemaRendererWrapperProps {
@@ -57,6 +62,8 @@ export function SchemaRendererWrapper({
   // Synthetic designSpec from the discrete scaffold inputs. EngineProvider
   // reads register + tokens from this object; Engine reads illustrationBasePath
   // to thread the per-project illustration asset route into buildDefaultRegistry.
+  const router = useRouter();
+
   const designSpec = React.useMemo<DesignSpec>(
     () => ({
       register,
@@ -96,11 +103,38 @@ export function SchemaRendererWrapper({
     [navFlow, projectId],
   );
 
+  // EVERY SCHEMA-DRIVEN NAVIGATION, UNDER THIS PROJECT'S PREFIX.
+  //
+  // With no Navigator mounted, `useNavigator()` falls back to the
+  // window.location-backed default, which resolves "/items" against the ORIGIN
+  // root — so on /p/<project>/<route> a Link, a Redirect, a Button navigate, a
+  // Table rowHref or a post-submit redirect all left the previewed app and
+  // landed on a 404. Verified: clicking a Link with navigate="/items" on
+  // /p/gh0mlpbp/nav-lab-6 went to localhost:6503/items.
+  //
+  // The prefix added here is the PROJECT segment only, and the inner navigator
+  // is the Next router rather than window.location. That is what makes it
+  // correct under both deployments: `basePath` ("/p", from NEXT_BASE_PATH) is
+  // applied by the framework to router pushes and NOT to location.assign, so
+  // routing through the router lets Next own its own prefix and leaves this
+  // with the one segment Next does not know about. Soft navigation comes free.
+  const navigator = React.useMemo(
+    () => createBasePathNavigator(projectId ? `/${projectId}` : "", {
+      push: (url: string) => router.push(url),
+      replace: (url: string) => router.replace(url),
+      back: () => router.back(),
+      refresh: () => router.refresh(),
+    }),
+    [projectId, router],
+  );
+
   return (
     <EngineProvider designSpec={designSpec} navFlow={navFlow ?? null} cssVarTokens={cssVarTokens ?? null}>
-      <WorkflowDispatcherProvider dispatch={authDispatcher}>
-        <Engine schema={page} previewData={resolvedPreview} apiBaseUrl="" />
-      </WorkflowDispatcherProvider>
+      <NavigatorProvider value={navigator}>
+        <WorkflowDispatcherProvider dispatch={authDispatcher}>
+          <Engine schema={page} previewData={resolvedPreview} apiBaseUrl="" />
+        </WorkflowDispatcherProvider>
+      </NavigatorProvider>
     </EngineProvider>
   );
 }

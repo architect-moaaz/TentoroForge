@@ -35,8 +35,6 @@ export function Dialog({
   children,
 }: Props) {
   const ctx = useContext(DialogStateContext);
-  // No engine wrapper supplied (e.g. component rendered standalone in tests)
-  // → render closed; tests can supply a stub context.
   const open = ctx?.open?.[id] ?? false;
   const onOpenChange = (next: boolean) => {
     if (!ctx) return;
@@ -45,6 +43,45 @@ export function Dialog({
   };
 
   const maxW = SIZE_TO_MAXW[size] ?? SIZE_TO_MAXW.md;
+
+  // ── Design-time fallback ────────────────────────────────────────────────
+  // With no DialogStateProvider in scope (the editor canvas, or a standalone
+  // render) `open` can never become true, so the Radix Portal rendered NOTHING:
+  // the node measured 0×0 and any child dropped into it disappeared — work lost
+  // invisibly. When there is no provider we render the dialog's content inline,
+  // as a plain bordered container, so the node and its children are visible and
+  // selectable. A generated app always mounts DialogStateProvider, so this
+  // branch never runs there and runtime open/close behaviour is unchanged.
+  if (!ctx) {
+    const inlineClass = [
+      "relative w-full",
+      maxW,
+      "bg-background rounded-lg border border-border shadow-sm",
+      "p-6",
+      className ?? "",
+    ].filter(Boolean).join(" ");
+    return (
+      <div
+        data-node-id={id}
+        data-dialog-inline=""
+        className={inlineClass}
+        style={resolveStyle(style)}
+      >
+        {(title || description) && (
+          <div className="space-y-1 mb-4">
+            {title && (
+              <div className="text-lg font-semibold leading-none">{title}</div>
+            )}
+            {description && (
+              <div className="text-sm text-muted-foreground">{description}</div>
+            )}
+          </div>
+        )}
+        {children}
+      </div>
+    );
+  }
+
   const contentClass = [
     "fixed start-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
     "w-full mx-4",

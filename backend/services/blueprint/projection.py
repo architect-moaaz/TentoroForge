@@ -832,6 +832,27 @@ _TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def _css_value_ok(value: str) -> bool:
+    """True when `value` can legally sit inside a CSS declaration.
+
+    THE GENERATED APP DID NOT START BECAUSE OF THIS. `designSystem` is authored
+    by an LLM, and alongside real tokens it carries prose guidance under the
+    same keys — e.g. radius.usageTable = "lg on the outer table container only;
+    rows and cells stay square". Every string was emitted verbatim as a custom
+    property, so that semicolon closed the declaration early and left
+    `rows and cells stay square;` as a stray token. PostCSS reported
+    "Unknown word", `tokens.css` failed to compile, and because `globals.css`
+    imports it unconditionally EVERY route returned 500. Observed on
+    output/gh0mlpbp: `GET /items 500`.
+
+    A declaration value cannot contain `;`, `{`, `}` or a newline. A string that
+    does is not a token — it is documentation that happens to live in the token
+    map — so it is skipped rather than escaped: emitting
+    `--radius-usage-table: <a sentence>` would be valid CSS and still meaningless.
+    """
+    return not any(c in value for c in ";{}\n\r")
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -881,7 +902,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                "muted", "mutedForeground", "destructive", "destructiveForeground",
                "border", "input", "ring", "card", "cardForeground"}
     for role, value in sorted(colors.items()):
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and _css_value_ok(value):
             out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
             lines.append(f"  --{_kebab(role)}: {out_value};")
     for token, candidates in _TOKEN_ALIASES:
@@ -889,13 +910,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
             continue
         for role in candidates:
             raw = colors.get(role)
-            if isinstance(raw, str) and raw:
+            if isinstance(raw, str) and raw and _css_value_ok(raw):
                 triplet = _hsl_triplet(raw)
                 lines.append(f"  {token}: {triplet or raw};")
                 break
 
     radius = design.get("radius")
-    if isinstance(radius, str) and radius:
+    if isinstance(radius, str) and radius and _css_value_ok(radius):
         lines.append(f"  --radius: {radius};")
     elif isinstance(radius, dict):
         for key, value in sorted(radius.items()):
@@ -920,7 +941,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        ("baseSize", "--font-size-base"),
                        ("lineHeightBase", "--line-height-base")):
         value = typography.get(key)
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and _css_value_ok(value):
             lines.append(f"  {token}: {value};")
 
     spacing = design.get("spacing")

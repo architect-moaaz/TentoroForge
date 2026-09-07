@@ -14,10 +14,6 @@
     "props": {
       "columns": {},
       "rows": {},
-      "rowGap": {},
-      "columnGap": {},
-      "padding": {},
-      "align": {},
       "gap": {}
     }
   },
@@ -223,7 +219,8 @@
     "props": {
       "content": {},
       "level": {},
-      "weight": {}
+      "weight": {},
+      "id": {}
     }
   },
   "MetricTile": {
@@ -234,7 +231,10 @@
       "importance": {},
       "icon": {},
       "delta": {},
-      "trend": {}
+      "trend": {},
+      "breakdown": {},
+      "threshold": {},
+      "trendWindow": {}
     }
   },
   "Avatar": {
@@ -249,8 +249,7 @@
   "NavLink": {
     "props": {
       "label": {},
-      "target": {},
-      "icon": {}
+      "navigate": {}
     }
   },
   "Breadcrumb": {
@@ -448,6 +447,7 @@
       "avatarInitials": {},
       "email": {},
       "status": {},
+      "manager": {},
       "layout": {}
     }
   },
@@ -471,7 +471,9 @@
       "entries": {},
       "title": {},
       "showFilter": {},
-      "maxHeight": {}
+      "maxHeight": {},
+      "limit": {},
+      "fields": {}
     }
   },
   "EmptyStateRich": {
@@ -619,6 +621,9 @@
       "max": {},
       "label": {},
       "unit": {},
+      "thresholds": {},
+      "size": {},
+      "showValue": {},
       "bind": {}
     }
   },
@@ -630,12 +635,20 @@
       "size": {},
       "showLegend": {},
       "showEndLabels": {},
+      "stroke": {},
       "bind": {}
     }
   },
   "Heatmap": {
     "props": {
+      "data": {},
+      "xKey": {},
+      "yKey": {},
+      "valueKey": {},
       "color": {},
+      "min": {},
+      "max": {},
+      "cellSize": {},
       "showValues": {},
       "bind": {}
     }
@@ -644,14 +657,21 @@
     "props": {
       "width": {},
       "height": {},
+      "markers": {},
+      "regions": {},
+      "statusColors": {},
+      "grid": {},
+      "heightPx": {},
       "showLabels": {},
       "bind": {}
     }
   },
   "Stepper": {
     "props": {
+      "steps": {},
       "orientation": {},
       "activeStep": {},
+      "activeId": {},
       "bind": {}
     }
   },
@@ -673,12 +693,18 @@
   },
   "DescriptionList": {
     "props": {
+      "items": {},
+      "emptyText": {},
+      "dataSource": {},
+      "itemMode": {},
       "orientation": {}
     }
   },
   "List": {
     "props": {
-      "divided": {}
+      "items": {},
+      "divided": {},
+      "limit": {}
     }
   },
   "SegmentedControl": {
@@ -690,29 +716,47 @@
     }
   },
   "Tree": {
-    "props": {}
+    "props": {
+      "items": {}
+    }
   },
   "Transfer": {
     "props": {
       "options": {},
+      "titles": {},
+      "selected": {},
       "bind": {}
     }
   },
   "Cascader": {
     "props": {
       "options": {},
-      "placeholder": {},
       "bind": {}
     }
   },
   "Calendar": {
     "props": {
       "name": {},
+      "events": {},
+      "view": {},
+      "dateField": {},
+      "endDateField": {},
+      "titleField": {},
+      "colorField": {},
+      "eventHref": {},
+      "detailFields": {},
+      "emptyText": {},
+      "value": {},
       "bind": {}
     }
   },
   "Kanban": {
     "props": {
+      "columns": {},
+      "data": {},
+      "groupBy": {},
+      "cardTitle": {},
+      "emptyText": {},
       "bind": {}
     }
   },
@@ -720,28 +764,43 @@
     "props": {
       "resources": {},
       "items": {},
+      "resourceIdField": {},
+      "resourceLabelField": {},
+      "resourceSubField": {},
       "itemResourceField": {},
       "startField": {},
       "endField": {},
       "titleField": {},
+      "subtitleField": {},
       "statusField": {},
       "resourceGroupField": {},
+      "rangeStart": {},
       "days": {},
-      "itemHref": {}
+      "emptyText": {},
+      "itemHref": {},
+      "bind": {}
     }
   },
   "RichTextEditor": {
     "props": {
       "name": {},
       "label": {},
+      "value": {},
+      "placeholder": {},
+      "mentions": {},
+      "embeds": {},
       "bind": {}
     }
   },
   "Carousel": {
-    "props": {}
+    "props": {
+      "items": {}
+    }
   },
   "Lightbox": {
-    "props": {}
+    "props": {
+      "images": {}
+    }
   },
   "CodeBlock": {
     "props": {
@@ -753,7 +812,8 @@
   "QRCode": {
     "props": {
       "value": {},
-      "size": {}
+      "size": {},
+      "label": {}
     }
   },
   "CameraCapture": {
@@ -769,6 +829,8 @@
       "name": {},
       "label": {},
       "hint": {},
+      "autoSubmit": {},
+      "formats": {},
       "bind": {}
     }
   },
@@ -777,11 +839,15 @@
       "label": {},
       "deviceType": {},
       "status": {},
+      "scanLabel": {},
+      "value": {},
+      "statusMessage": {},
       "bind": {}
     }
   },
   "ValidationChecklist": {
     "props": {
+      "items": {},
       "orientation": {}
     }
   },
@@ -857,7 +923,10 @@
   },
   "DropdownMenu": {
     "props": {
-      "trigger": {}
+      "trigger": {},
+      "items": {},
+      "triggerIcon": {},
+      "align": {}
     }
   },
   "Popover": {
@@ -883,7 +952,8 @@
   },
   "ContextMenu": {
     "props": {
-      "label": {}
+      "label": {},
+      "items": {}
     }
   },
   "HoverCard": {
@@ -894,7 +964,9 @@
     }
   },
   "Menubar": {
-    "props": {}
+    "props": {
+      "menus": {}
+    }
   },
   "AddToCart": {
     "props": {

@@ -2,7 +2,14 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { useEditorStore } from "@/lib/editor-store";
-import { hintFor, isVisuallyEmpty, resolveBoxEl, type HintBox } from "./empty-hints";
+import {
+  hintFor,
+  isVisuallyEmpty,
+  resolveBoxEl,
+  MIN_HINT_H,
+  MIN_HINT_W,
+  type HintBox,
+} from "./empty-hints";
 
 /**
  * EmptyNodeHints — the label that tells the user what the blank box they just
@@ -109,9 +116,22 @@ export function EmptyNodeHints({
         const label = hintFor(node.type, node.props);
         if (!label) return;
         const rect = box.getBoundingClientRect();
-        // A box with no area cannot be annotated legibly and, more to the
-        // point, the user cannot see it either.
-        if (rect.width < 24 || rect.height < 12) return;
+        // ZERO-AREA NODES GET A MINIMUM HIT-BOX RATHER THAN NO HINT.
+        //
+        // This used to `return` when the box was smaller than 24x12, which is
+        // exactly backwards: a node that lays out at 960x0 or 0x0 is the one
+        // the user most needs told about — it is invisible AND, with no
+        // annotation, undiagnosable. Reported against Lightbox (960x0), Dialog
+        // (0x0), BulkActionBar and CartBadge, but the rule is geometric, not
+        // per-component: ANY empty node whose box is too small to carry a
+        // label is padded out to one here.
+        //
+        // Editor-only. This inflates the OVERLAY's rectangle, never the node's
+        // — the hint is a sibling painted in canvas coordinates and the
+        // component's own layout in a shipped app is untouched.
+        const width = Math.max(rect.width, MIN_HINT_W);
+        const height = Math.max(rect.height, MIN_HINT_H);
+        const ghost = rect.width < MIN_HINT_W || rect.height < MIN_HINT_H;
         // OFFSET FROM THE CANVAS ROOT — and NO scroll term.
         //
         // The hint and the node it labels are now inside the same scrolled
@@ -131,8 +151,9 @@ export function EmptyNodeHints({
           label,
           left: rect.left - hostRect.left,
           top: rect.top - hostRect.top,
-          width: rect.width,
-          height: rect.height,
+          width,
+          height,
+          ghost,
         });
       });
       setBoxes(next);
@@ -195,6 +216,12 @@ export function EmptyNodeHints({
         <div
           key={b.key}
           data-empty-hint={b.type}
+          // A node with no box of its own is marked so the user (and a test)
+          // can tell "this renders nothing at all" from "this renders an empty
+          // box". Still pointer-events-none: the hint must never eat a click
+          // or a drop, and a ghost sits over whatever the zero-height node's
+          // neighbours occupy.
+          {...(b.ghost ? { "data-empty-hint-ghost": "" } : {})}
           className="pointer-events-none absolute z-20 flex items-center justify-center overflow-hidden rounded-[3px] px-2"
           style={{
             left: b.left,
@@ -204,8 +231,12 @@ export function EmptyNodeHints({
             // Inline rather than Tailwind classes for the same reason
             // GridGuides does it: globals.css applies a base border-colour
             // reset to `*`, which silently repaints utility borders.
-            border: "1px dashed rgba(217, 119, 6, 0.55)",
-            background: "rgba(217, 119, 6, 0.06)",
+            border: b.ghost
+              ? "1px dashed rgba(217, 119, 6, 0.85)"
+              : "1px dashed rgba(217, 119, 6, 0.55)",
+            background: b.ghost
+              ? "rgba(217, 119, 6, 0.14)"
+              : "rgba(217, 119, 6, 0.06)",
           }}
         >
           <span

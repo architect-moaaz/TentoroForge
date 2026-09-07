@@ -52,6 +52,7 @@ export function SplitArc({
   stroke,
   showLegend = true,
   showEndLabels = true,
+  className,
   style,
 }: SplitArcProps) {
   const values = segments.map((s) => Math.max(0, Number(s.value) || 0));
@@ -88,7 +89,7 @@ export function SplitArc({
 
   return (
     <div
-      className="inline-flex flex-col items-stretch min-w-[220px]"
+      className={["inline-flex flex-col items-stretch min-w-[220px]", className].filter(Boolean).join(" ")}
       data-splitarc=""
       style={resolveStyle(style)}
       {...useMotion(style?.motion)}

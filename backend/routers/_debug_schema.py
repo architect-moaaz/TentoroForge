@@ -943,6 +943,37 @@ async def write_project_file(short_id: str, file_path: str, request: Request):
     full = (base_dir / file_path).resolve()
     if not str(full).startswith(str(base)):
         raise HTTPException(403, "path traversal blocked")
+
+    # WRITE WHERE THE READ READ FROM. This is the fix for the editor silently
+    # discarding every edit.
+    #
+    # The GET above resolves `<output>/src/...` and, on a miss, FALLS THROUGH to
+    # `<output>/app/src/...` — because the Blueprint engine projects the app into
+    # the `app/` subdirectory. This POST did not mirror that: it always wrote the
+    # root path, and `mkdir(parents=True)` happily CREATED the missing directory.
+    #
+    # So for a Blueprint-generated app the sequence was: the editor GETs a page,
+    # misses at the root, reads the real file from `app/src/schemas/x.json`; the
+    # user edits; the editor POSTs and a brand-new SHADOW file appears at
+    # `src/schemas/x.json`. From then on the GET finds the shadow first, so the
+    # editor shows the user their own edits and the running application never
+    # sees another one. Everything looks healthy — the canvas updates, the
+    # toolbar says "Saved" — while the app is no longer being edited at all.
+    # Observed on project gh0mlpbp: 17 pages in the editor's directory, 1 in the
+    # app's.
+    #
+    # Resolution order, matching the GET and then falling back to layout:
+    #   1. the root path, if that file already exists (older flat projects);
+    #   2. the app/ path, if THAT file exists (the Blueprint layout);
+    #   3. for a file that exists in neither — a page the user has just created —
+    #      follow the project's own shape: if `<output>/app/src` is present this
+    #      is a Blueprint app and new files belong beside its siblings.
+    nested = (base_dir / "app" / file_path).resolve()
+    nested_ok = str(nested).startswith(str((base_dir / "app").resolve()))
+    if not full.exists() and nested_ok:
+        if nested.exists() or (base_dir / "app" / "src").is_dir():
+            full = nested
+
     try:
         body = await request.json()
     except Exception:
@@ -955,4 +986,4 @@ async def write_project_file(short_id: str, file_path: str, request: Request):
         full.write_text(content, encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"write failed: {e}")
-    return {"ok": True, "path": file_path, "bytes": len(content)}
+    return {"ok": True, "path": str(full.relative_to(base)), "bytes": len(content)}

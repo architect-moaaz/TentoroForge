@@ -6,7 +6,7 @@ import { compileTokens, NavigatorProvider } from "@tentoroforge/renderer";
 import { defaultTokens } from "@tentoroforge/library";
 import { resolvePreviewSources } from "@/lib/preview-resolve";
 import { useArtifacts } from "./hooks/useArtifacts";
-import { useCanvasClick } from "./hooks/useSelection";
+import { useCanvasClick, useCanvasPointerDown } from "./hooks/useSelection";
 import { useCanvasDrop } from "./hooks/useDrop";
 import { useCanvasReorder } from "./hooks/useReorder";
 import { CanvasFrame } from "./CanvasFrame";
@@ -106,6 +106,7 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
     useArtifacts(projectId, pagePath);
   const canvasRef = useRef<HTMLDivElement>(null);
   const onClick = useCanvasClick();
+  const onPointerDownCapture = useCanvasPointerDown();
   const palette = useCanvasDrop();
   const reorder = useCanvasReorder();
   const setInitial = useEditorStore(s => s.setInitial);
@@ -315,6 +316,11 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
         <div
           ref={canvasRef}
           onClick={onClick}
+          // Capture phase: selection wins over any runtime handler on the node,
+          // so a component that opens an overlay on pointer-down is still
+          // selectable and still configurable. See useCanvasPointerDown.
+          onPointerDownCapture={onPointerDownCapture}
+          onMouseDownCapture={onPointerDownCapture}
           onDragStart={reorder.onDragStart}
           onDragEnd={reorder.onDragEnd}
           onDragOver={onDragOver}

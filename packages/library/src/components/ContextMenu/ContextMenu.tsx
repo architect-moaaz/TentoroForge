@@ -6,6 +6,7 @@ import type { ContextMenuPropsType } from "./ContextMenu.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { resolveIcon } from "../../icons";
+import { MenuEmptyNote } from "../../util/MenuEmptyNote";
 
 export interface ContextMenuProps extends ContextMenuPropsType {
   style?: StyleSlotT;
@@ -24,6 +25,7 @@ export function ContextMenu({ label, items = [], style, onSelect, children }: Co
       </RContextMenu.Trigger>
       <RContextMenu.Portal>
         <RContextMenu.Content className="z-50 min-w-[10rem] rounded-md border border-input bg-white p-1 shadow-md">
+          {items.length === 0 && <MenuEmptyNote />}
           {items.map((it) => {
             const Icon = it.icon ? resolveIcon(it.icon) : null;
             return (

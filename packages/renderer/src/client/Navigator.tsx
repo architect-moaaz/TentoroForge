@@ -42,6 +42,53 @@ const defaultNavigator: Navigator = {
   refresh: () => { if (typeof window !== "undefined") window.location.reload(); },
 };
 
+/**
+ * Rewrite an app-relative route so it resolves under `basePath`.
+ *
+ * WHY THIS IS THE SEAM'S PROBLEM AND NOT EACH COMPONENT'S
+ * ------------------------------------------------------
+ * Schema-authored routes are written the way the shipped app serves them
+ * ("/items"). A host that serves the same pages under a prefix — the preview
+ * renderer at `/p/<project>/…`, an app mounted under a sub-path — therefore
+ * has to translate every one of them. Nothing did, so `defaultNavigator` ran
+ * `window.location.assign("/items")` against the ORIGIN root: clicking a Link
+ * on `/p/gh0mlpbp/nav-lab-6` landed on `localhost:6503/items`, a 404. Measured,
+ * not inferred. The same single line broke `Redirect`, `Link`, `NavLink`,
+ * `Button navigate`, `Table rowHref` and the post-submit redirect, because all
+ * six of them route through this one seam — which is also why the fix belongs
+ * here rather than six times over.
+ *
+ * Left alone: absolute URLs, protocol-relative URLs, other schemes
+ * (mailto:/tel:), bare fragments and queries, relative paths, and anything
+ * already under `basePath`. Only an app-absolute route is prefixed.
+ */
+export function resolveWithBasePath(basePath: string, url: string): string {
+  if (!basePath || basePath === "/" || typeof url !== "string" || url === "") return url;
+  const base = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+  if (!url.startsWith("/") || url.startsWith("//")) return url;
+  if (url === base || url.startsWith(`${base}/`)) return url;
+  return url === "/" ? base || "/" : `${base}${url}`;
+}
+
+/**
+ * A Navigator that serves app-relative routes from under `basePath`.
+ *
+ * `inner` defaults to the window.location-backed navigator; hosts with a real
+ * router pass their own so soft navigation is preserved and only the path
+ * translation is added.
+ */
+export function createBasePathNavigator(
+  basePath: string,
+  inner: Navigator = defaultNavigator,
+): Navigator {
+  return {
+    push: (url) => inner.push(resolveWithBasePath(basePath, url)),
+    replace: (url) => inner.replace(resolveWithBasePath(basePath, url)),
+    back: () => inner.back(),
+    refresh: () => inner.refresh(),
+  };
+}
+
 export const NavigatorContext = React.createContext<Navigator | null>(null);
 
 /** Returns the host-provided Navigator, or a window.location-backed default. */
