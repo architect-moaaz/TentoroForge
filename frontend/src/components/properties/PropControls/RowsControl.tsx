@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { RawJsonEditor } from "./RawJsonEditor";
+import { looksLikeRoute, useRouteHints } from "./RouteControl";
 
 const labelCls = "flex flex-col gap-1 text-sm";
 const labelText = "text-xs uppercase tracking-wide text-muted-foreground";
@@ -36,7 +37,11 @@ const VALUE_KEYS = ["value", "key", "id"] as const;
 const LABEL_KEYS = ["label", "name", "title", "text"] as const;
 
 export type RowShape =
-  | { kind: "objects"; valueKey: string; labelKey: string | null; extraKeys: string[] }
+  // `valueKey` is the row's FIRST editable field and `labelKey` its second.
+  // It is null when the rows carry no identity key at all — a breadcrumb crumb
+  // is `{label, href}` — in which case the label takes the first field and the
+  // row's other shared key, if it has one, takes the second.
+  | { kind: "objects"; valueKey: string | null; labelKey: string | null; extraKeys: string[] }
   | { kind: "strings" }
   | { kind: "unknown"; reason: string };
 
@@ -70,11 +75,21 @@ export function analyzeRows(value: unknown): RowShape {
   if (value.every((v) => typeof v === "string")) return { kind: "strings" };
   if (value.every(isPlainObject)) {
     const rows = value as PlainObject[];
-    const valueKey = sharedKey(rows, VALUE_KEYS);
-    if (!valueKey) {
-      return { kind: "unknown", reason: "no value / key / id on every row" };
-    }
+    const identityKey = sharedKey(rows, VALUE_KEYS);
     const labelKey = sharedKey(rows, LABEL_KEYS);
+    // An identity key is not what makes a row editable — having a field the
+    // user can read is. Rows shaped `{label, href}` (every breadcrumb crumb,
+    // and the reason this loosened) used to fall through to a raw JSON
+    // textarea reading "no value / key / id on every row", which named the
+    // thing the row lacked instead of editing the two fields it has.
+    if (!identityKey && !labelKey) {
+      return { kind: "unknown", reason: "no value / key / id / label on every row" };
+    }
+    // Every key present on EVERY row, in first-row order — the ones it is safe
+    // to show a field for. Keys only some rows carry stay in the JSON.
+    const shared = Object.keys(rows[0]).filter((k) => rows.every((r) => k in r));
+    const valueKey =
+      identityKey ?? shared.find((k) => k !== labelKey) ?? null;
     const extraKeys = Array.from(
       new Set(rows.flatMap((r) => Object.keys(r))),
     ).filter((k) => k !== valueKey && k !== labelKey);
@@ -86,7 +101,8 @@ export function analyzeRows(value: unknown): RowShape {
 function newRow(shape: RowShape): unknown {
   if (shape.kind === "strings") return "";
   if (shape.kind === "objects") {
-    const row: PlainObject = { [shape.valueKey]: "" };
+    const row: PlainObject = {};
+    if (shape.valueKey) row[shape.valueKey] = "";
     if (shape.labelKey) row[shape.labelKey] = "";
     return row;
   }
@@ -111,22 +127,34 @@ function RowField({
 }) {
   const [draft, setDraft] = React.useState(value);
   React.useEffect(() => { setDraft(value); }, [value]);
+  // A cell holding a destination gets the project's real routes as
+  // suggestions and a notice when it reaches no page — the same treatment a
+  // whole route-valued prop gets, decided by the VALUE's shape so it applies
+  // to a breadcrumb `href`, a menu row's `to`, or anything added later. The
+  // commit-on-blur contract above is untouched.
+  const { listId, datalist, warning } = useRouteHints(draft);
+  const isRoute = looksLikeRoute(draft);
   return (
-    <input
-      type="text"
-      aria-label={ariaLabel}
-      className="border rounded px-1.5 py-0.5 text-xs bg-background min-w-0 flex-1"
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { if (draft !== value) onCommit(draft); }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          setDraft(value);
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-    />
+    <>
+      <input
+        type="text"
+        aria-label={ariaLabel}
+        list={isRoute ? listId : undefined}
+        className="border rounded px-1.5 py-0.5 text-xs bg-background min-w-0 flex-1"
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft !== value) onCommit(draft); }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            setDraft(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {isRoute ? datalist : null}
+      {isRoute ? warning : null}
+    </>
   );
 }
 
@@ -183,30 +211,45 @@ export function RowsControl({
       <ul className="flex flex-col gap-1 list-none p-0 m-0">
         {rows.map((row, i) => {
           const obj = isPlainObject(row) ? row : null;
-          const valueText =
+          // Which keys get a field, and in which order. A row with an identity
+          // key leads with it (`{value,label}` — the registry-wide shape); a
+          // row without one leads with the label, because that is the part the
+          // user reads (`{label,href}`). Each field is named after the key it
+          // edits, so the second box on a crumb says `href`, not "value".
+          const keys: Array<string | null> =
             shape.kind === "strings"
-              ? String(row ?? "")
-              : String((obj?.[shape.valueKey] as unknown) ?? "");
-          const labelKey = shape.kind === "objects" ? shape.labelKey : null;
-          const labelTextValue = labelKey ? String((obj?.[labelKey] as unknown) ?? "") : null;
+              ? [null]
+              : (shape.valueKey && (VALUE_KEYS as readonly string[]).includes(shape.valueKey)
+                  ? [shape.valueKey, shape.labelKey]
+                  : [shape.labelKey, shape.valueKey]
+                ).filter((k) => k !== null);
           return (
             <li key={i} className="flex items-center gap-1">
-              <RowField
-                ariaLabel={`${label} row ${i + 1} value`}
-                value={valueText}
-                placeholder="value"
-                onCommit={(v) =>
-                  setRow(i, shape.kind === "strings" ? v : { ...(obj ?? {}), [shape.valueKey]: v })
-                }
-              />
-              {labelKey && (
-                <RowField
-                  ariaLabel={`${label} row ${i + 1} label`}
-                  value={labelTextValue ?? ""}
-                  placeholder="label"
-                  onCommit={(v) => setRow(i, { ...(obj ?? {}), [labelKey]: v })}
-                />
-              )}
+              {keys.map((key, fieldIndex) => {
+                const name = key ?? "value";
+                const text =
+                  key === null
+                    ? String(row ?? "")
+                    : String((obj?.[key] as unknown) ?? "");
+                return (
+                  <RowField
+                    key={name}
+                    ariaLabel={
+                      // The first field keeps the historic "…row N value"
+                      // wording whatever key it edits, so existing callers and
+                      // tests still find it; later fields are named for real.
+                      fieldIndex === 0
+                        ? `${label} row ${i + 1} value`
+                        : `${label} row ${i + 1} ${name}`
+                    }
+                    value={text}
+                    placeholder={name}
+                    onCommit={(v) =>
+                      setRow(i, key === null ? v : { ...(obj ?? {}), [key]: v })
+                    }
+                  />
+                );
+              })}
               <button
                 type="button" className={btnCls} disabled={i === 0}
                 aria-label={`Move ${label} row ${i + 1} up`}

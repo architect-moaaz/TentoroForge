@@ -4,6 +4,7 @@ import { BindingControl } from "./BindingControl";
 import { ImageControl } from "./ImageControl";
 import { RawJsonEditor } from "./RawJsonEditor";
 import { RowsControl } from "./RowsControl";
+import { RouteControl, RouteField, looksLikeRoute } from "./RouteControl";
 import type { ImageShape } from "@forge/registry";
 
 const labelCls = "flex flex-col gap-1 text-sm";
@@ -27,17 +28,39 @@ export interface ControlProps {
   projectId?: string | null;
 }
 
+/**
+ * Plain text, with one exception: a value that IS a route gets the project's
+ * real routes as suggestions and a notice when it points at a page that does
+ * not exist.
+ *
+ * The check is on the VALUE's shape, not the prop's name, for the reason
+ * JsonControl delegates to RowsControl on the value's shape: the registry has
+ * no `control:"route"` today, and a control that only wakes up once another
+ * package is rebuilt helps nobody now. A root-relative string is a route in
+ * this schema; `#anchor`, `https://…` and ordinary label text are not, and
+ * they get the ordinary box. See RouteControl.tsx.
+ */
 export function TextControl({ label, value, onChange, placeholder }: ControlProps) {
+  const text = typeof value === "string" ? value : value ?? "";
   return (
     <label className={labelCls}>
       <span className={labelText}>{label}</span>
-      <input
-        type="text"
-        className="border rounded px-2 py-1 text-sm bg-background"
-        value={typeof value === "string" ? value : value ?? ""}
-        placeholder={placeholder ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      {looksLikeRoute(text) ? (
+        <RouteField
+          value={text}
+          onChange={onChange}
+          ariaLabel={label}
+          placeholder={placeholder}
+        />
+      ) : (
+        <input
+          type="text"
+          className="border rounded px-2 py-1 text-sm bg-background"
+          value={text}
+          placeholder={placeholder ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
     </label>
   );
 }
@@ -184,6 +207,9 @@ export const CONTROL_BY_TYPE = {
   image: ImageControl,       // drag-drop / browse upload + URL text, with dimensions
   json: JsonControl,         // structured props: rows for arrays, raw JSON otherwise
   rows: RowsControl,         // repeating {value,label} rows (option lists, chips)
+  // Not in the registry's ControlType union yet — see RouteControl.tsx. Until a
+  // descriptor says "route", TextControl reaches the same field by value shape.
+  route: RouteControl,       // destination picker over the project's real routes
 } as const;
 
-export { ImageControl, RowsControl, RawJsonEditor };
+export { ImageControl, RowsControl, RawJsonEditor, RouteControl };

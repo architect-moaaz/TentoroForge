@@ -2311,10 +2311,17 @@ export const sparklineEntry: RegistryEntry = {
     },
     color: {
       type: "string",
-      default: "",
+      // NO default. `Sparkline.tsx` declares `color = "currentColor"` as a JS
+      // PARAMETER default, and a parameter default only fires for `undefined` —
+      // `""` is a value, so the seed beat the component's own fallback, the
+      // polyline got `stroke=""`, and SVG resolves an invalid paint to `none`.
+      // The geometry was right and the ink was off: every dropped Sparkline drew
+      // an invisible line in a 24px-tall box. Same class as `ActivityFeed.
+      // maxHeight: 0` — a seed the component reads as a command rather than as
+      // "unset" — and the only `""` left on a `control: "color"` descriptor.
       control: "color",
       group: "style",
-      description: "CSS color or token path for the sparkline stroke.",
+      description: "Stroke colour (CSS colour or token path). Unset inherits the surrounding text colour.",
     },
     showDots: {
       type: "boolean",
@@ -4561,6 +4568,13 @@ export const bannerEntry: RegistryEntry = {
     variant: { type: "enum",   default: "info",        control: "select", group: "style", options: ["info", "success", "warning", "error"], description: "Banner style." },
     title:   { type: "string", default: "",            control: "text",   group: "content", description: "Banner title." },
     message: { type: "string", default: "Message",     control: "text",   group: "content", description: "Banner message." },
+    // The only Banner prop with no descriptor, and the one that turns the ✕ on:
+    // `BannerProps.dismissible` is declared, `Banner.tsx:29` destructures it and
+    // it gates the entire close button, and the editor could not set it — so a
+    // dismissible banner was not authorable at all. `false` is a safe seed, not
+    // a command: it is exactly what the component already does when the prop is
+    // absent, and `BannerNode` types it `z.boolean().optional()`.
+    dismissible: { type: "boolean", default: false, control: "toggle", group: "behavior", description: "Show a ✕ that lets the reader dismiss the banner." },
   },
 };
 
