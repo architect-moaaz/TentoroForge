@@ -4,6 +4,7 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { SplitArcPropsType } from "./SplitArc.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { paintOr } from "../../util/paint";
 
 export interface SplitArcProps extends SplitArcPropsType {
   style?: StyleSlotT;
@@ -144,7 +145,7 @@ export function SplitArc({
             key={i}
             d={a.d}
             fill="none"
-            stroke={a.color}
+            stroke={paintOr(a.color, "currentColor")}
             strokeWidth={strokeW}
             strokeLinecap={i === 0 || i === arcs.length - 1 ? "round" : "butt"}
           />

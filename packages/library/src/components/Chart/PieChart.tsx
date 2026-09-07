@@ -5,6 +5,7 @@ import * as React from "react";
 import { PieChart as RePieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 const DEFAULT_PALETTE = [
   "hsl(var(--primary))",
@@ -48,7 +49,7 @@ export function PieChartImpl(props: ChartPropsType) {
             label
           >
             {data.map((_, i) => (
-              <Cell key={i} fill={props.series?.[i]?.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]} />
+              <Cell key={i} fill={paintOr(props.series?.[i]?.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])} />
             ))}
           </Pie>
         </RePieChart>

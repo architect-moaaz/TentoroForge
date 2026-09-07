@@ -39,9 +39,18 @@ describe("shape sniffing", () => {
     }
   });
 
+  it("reads a row that has a label but no identity key", () => {
+    // A breadcrumb crumb is `{label, href}` and never carries a value/key/id.
+    // It used to be pushed into the raw JSON textarea with the note "no value /
+    // key / id on every row" — the reported Breadcrumb complaint. Having a
+    // readable field is what makes a row editable, not having an identity.
+    expect(analyzeRows([{ href: "/a", label: "A" }]))
+      .toMatchObject({ kind: "objects", labelKey: "label", valueKey: "href" });
+  });
+
   it("stands down for shapes it cannot read", () => {
-    // No value/key/id on every row…
-    expect(analyzeRows([{ href: "/a", label: "A" }]).kind).toBe("unknown");
+    // Nothing nameable on every row — no identity key AND no label…
+    expect(analyzeRows([{ href: "/a", note: "n" }]).kind).toBe("unknown");
     // …rows that are not all the same kind…
     expect(analyzeRows(["a", { value: "b" }]).kind).toBe("unknown");
     // …a value key missing from ONE row (a partially-hand-edited list)…
@@ -134,7 +143,9 @@ describe("rows the editor understands", () => {
 describe("shapes it does not understand are handed back, not rewritten", () => {
   it("falls through to the JSON editor with a reason", () => {
     const onChange = vi.fn();
-    const odd = [{ href: "/a", label: "A" }];
+    // No identity key AND no label key — nothing here is safe to put a named
+    // field on, so the value is handed back untouched.
+    const odd = [{ href: "/a", note: "n" }];
     render(<RowsControl label="items" value={odd} onChange={onChange} />);
     const box = screen.getByLabelText("items JSON") as HTMLTextAreaElement;
     expect(JSON.parse(box.value)).toEqual(odd);

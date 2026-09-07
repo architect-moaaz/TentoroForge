@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 // Palette prefers the shadcn root tokens (--primary / --accent) so bar
 // colors are the same swatches Badge, Tag, and Button use. The Tailwind
@@ -54,7 +55,7 @@ export function BarChartImpl(props: ChartPropsType) {
               key={s.dataKey}
               dataKey={s.dataKey}
               name={s.name}
-              fill={s.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]}
+              fill={paintOr(s.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])}
             />
           ))}
         </ReBarChart>

@@ -4538,6 +4538,24 @@ export const progressEntry: RegistryEntry = {
     label:   { type: "string", default: "Progress", control: "text",   group: "content",  description: "Label." },
     value:   { type: "number", default: 50,         control: "number", group: "state",    description: "Current value." },
     variant: { type: "enum",   default: "bar",      control: "select", group: "style", options: ["bar", "circular"], description: "Bar or circular." },
+    // Three of the eight schema props were unreachable, and they are the three
+    // that make a Progress mean anything.
+    //
+    // `max`: without it every Progress was hardwired to a 0-100 scale, so
+    // "3 of 7 steps complete" could not be expressed at all. Seeded 100 — the
+    // component's own parameter default, so this changes no render — because an
+    // empty number box next to VALUE reads as broken, and `pct` is computed as
+    // `value / max`, which the author needs to see both halves of.
+    max:       { type: "number",  default: 100,   control: "number", group: "state",   description: "Scale the value is a fraction of. 50 of 100 and 3 of 7 are both expressible." },
+    // `showValue`: the flag that gates the percentage readout in BOTH branches.
+    // Unreachable, it made `variant: "circular"` a decorative arc with no label
+    // and no number — an unreadable progress ring. `false` is what the component
+    // already does when the prop is absent, so it is a seed, not a command.
+    showValue: { type: "boolean", default: false, control: "toggle", group: "content", description: "Show the percentage readout (the only text a circular Progress has)." },
+    // `bind`: without it the value could only ever be the literal typed at
+    // design time. `null` is the registry's documented "no seed" marker for
+    // binding descriptors — see `normalizeSeed`, which strips it at drop.
+    bind:      { type: "binding", default: null,  control: "binding", group: "data",   description: "Data path driving the value at runtime." },
   },
 };
 
@@ -4870,9 +4888,26 @@ export const illustratedEmptyEntry: RegistryEntry = {
     kind:    { type: "enum",   default: "list", control: "select", group: "content",
                options: ["list", "search", "filtered", "first-use", "no-data", "success", "error", "coming-soon", "no-access", "offline"],
                description: "Which built-in glyph to render." },
-    title:   { type: "string", default: "",     control: "text",   group: "content", description: "Primary heading." },
-    message: { type: "string", default: "",     control: "text",   group: "content", description: "Optional supporting sentence." },
-    action:  { type: "string", default: "",     control: "text",   group: "behavior", description: "Optional {label, workflow} CTA below the illustration." },
+    // `title` is `z.string().min(1)` and NOT optional, so the `""` seed was the
+    // one value its own schema rejects — and the visible result was a 240px
+    // illustration with a blank heading where the headline belongs. Seeded with
+    // a real sentence, exactly as the sibling `EmptyState.message` is, so the
+    // ten `kind` presets are usable out of the box.
+    title:   { type: "string", default: "Nothing here yet", control: "text", group: "content", description: "Primary heading. Required — the component has no fallback." },
+    // `.optional()`, so `""` was only a longer spelling of absent.
+    message: { type: "string",                              control: "text", group: "content", description: "Optional supporting sentence under the heading." },
+    // WAS `type: "string" / control: "text" / default: ""` against a union of
+    // two `.strict()` OBJECT shapes. The panel offered a plain text box for a
+    // structured action, and the `""` seed failed the props parse a second time
+    // with `invalid_union` — and because `validateProps`' step-3 coercion has no
+    // branch for `too_small` or `invalid_union`, BOTH errors fell through and the
+    // raw props were handed to the component uncoerced, skipping every Zod
+    // `.default()` it declares. Typed honestly as an object and edited through
+    // `json`, the same way the sibling `EmptyState.action` already is — and
+    // seeded with the same shape, so the control shows what it wants instead of
+    // an empty textarea.
+    action:  { type: "object", default: { label: "Get started", workflow: "createRecord" }, control: "json", group: "behavior",
+               description: "CTA under the illustration: { label, workflow } or { label, navigate } — exactly one destination, never both." },
   },
 };
 
@@ -4888,9 +4923,20 @@ export const undoManagerEntry: RegistryEntry = {
     "Global toast bar that listens for undoable mutations emitted by the runtime queue; renders nothing when idle.",
   slots: { type: "leaf" },
   props: {
-    position:    { type: "string", default: "bottom-center", control: "text", group: "style",   description: "Dock corner: bottom-left|bottom-center|bottom-right|top-center." },
+    // WAS a free-text box against a four-value Zod enum. The panel invited the
+    // user to type, and any near-miss — `bottom-centre`, `bottomCenter` — failed
+    // the props parse; `validateProps` has no coercion branch for
+    // `invalid_enum_value`, so the raw string was passed straight through,
+    // `POSITION_STYLES[position]` came back `undefined`, and the toast stack
+    // landed unpositioned in the top-left corner of the viewport. A typo in a
+    // text box should not be able to move a fixed overlay somewhere it was never
+    // offered. Same class as `SplitArc.segments`, one prop type over.
+    position:    { type: "enum",   default: "bottom-center", control: "select", group: "style",
+                   options: ["bottom-left", "bottom-center", "bottom-right", "top-center"],
+                   description: "Which corner the toast bar docks to." },
     timeoutMs:   { type: "number", default: 6000,            control: "number", group: "behavior", description: "Auto-dismiss timeout in ms (0 = keep until dismissed)." },
-    labelPrefix: { type: "string", default: "",              control: "text",   group: "content",  description: "Optional label prefix prepended to the emitted mutation label." },
+    // `.optional()`, so `""` was only a longer spelling of absent.
+    labelPrefix: { type: "string",                           control: "text",   group: "content",  description: "Optional label prefix prepended to the emitted mutation label." },
     maxStack:    { type: "number", default: 5,               control: "number", group: "behavior", description: "Maximum stacked undo entries visible at once." },
   },
 };

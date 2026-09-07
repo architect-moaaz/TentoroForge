@@ -893,7 +893,10 @@
     "props": {
       "label": {},
       "value": {},
-      "variant": {}
+      "variant": {},
+      "max": {},
+      "showValue": {},
+      "bind": {}
     }
   },
   "Spinner": {
