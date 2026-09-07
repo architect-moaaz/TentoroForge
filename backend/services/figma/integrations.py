@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +79,11 @@ def _run(coro: Any) -> Any:
 async def _fetch(org_id: Any, provider: str = PROVIDER) -> dict[str, str]:
     from sqlalchemy import select
 
-    from database import async_session
     from models.platform_integration import PlatformIntegration
     from services.platform_integrations_crypto import decrypt
 
     out: dict[str, str] = {}
-    async with async_session() as db:
+    async with _session_on_this_loop() as db:
         rows = (await db.execute(
             select(PlatformIntegration).where(
                 PlatformIntegration.org_id == org_id,
@@ -111,15 +111,39 @@ async def _org_for_output_dir(output_dir: str | Path) -> Any:
     """
     from sqlalchemy import select
 
-    from database import async_session
     from models.project import Project
 
     target = str(output_dir).rstrip("/")
-    async with async_session() as db:
+    async with _session_on_this_loop() as db:
         row = (await db.execute(
             select(Project).where(Project.output_dir == target)
         )).scalars().first()
     return getattr(row, "org_id", None)
+
+
+@asynccontextmanager
+async def _session_on_this_loop() -> AsyncIterator[Any]:
+    """A session whose connection belongs to the loop running the query.
+
+    The shared engine's pool is bound to the server's loop, and `_run` bridges
+    these queries from synchronous callers — on another loop, or on a worker
+    thread with none — so a pooled connection's futures then belong elsewhere
+    ("got Future attached to a different loop"). `config_for` read that as
+    "store unavailable" and used the environment on every extraction: a token
+    saved on the organisation's settings page was never the one used. One
+    connection is opened here, on this loop, and closed with the query.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    import config
+
+    engine = create_async_engine(config.DATABASE_URL, poolclass=NullPool)
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as db:
+            yield db
+    finally:
+        await engine.dispose()
 
 
 def config_for(output_dir: str | Path, provider: str = PROVIDER) -> dict[str, str]:
