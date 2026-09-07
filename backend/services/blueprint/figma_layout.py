@@ -299,9 +299,23 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     page.get("id"))
         return None
 
+    # A DRAWN ENTRY POINT OPENS A FORM FOR WHAT ITS WORKFLOW NEEDS. "+ New
+    # Case" drawn on a page whose file never drew the New Case screen binds to
+    # the case workflow, and a lone button collects no `caseType`: the contract
+    # refused four pages of one file on that. The button opens a dialog whose
+    # form takes the workflow's required inputs and runs it.
+    sources = list(schema.get("dataSources") or []) + live_sources + extra_sources
+    try:
+        from services.figma import entry_points as _entry
+        root, picker_sources, opened = _entry.open_forms(svc.doc, page, root, sources)
+        if opened:
+            sources += picker_sources
+            logger.info("[figma] %s: %d entry point(s) now open a form", page.get("id"), opened)
+    except Exception as exc:  # noqa: BLE001 — never the page
+        logger.warning("[figma] entry points for %s: %s", page.get("id"), exc)
     out = {
         "root": root,
-        "dataSources": list(schema.get("dataSources") or []) + live_sources + extra_sources,
+        "dataSources": sources,
         "assets": dict(assets or {}),
         "provider": provider,
     }

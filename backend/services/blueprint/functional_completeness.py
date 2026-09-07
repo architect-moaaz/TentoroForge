@@ -167,7 +167,14 @@ def page_findings(doc: dict) -> list[dict]:
 
         declared = {str(s.get("name")) for s in (layout.get("dataSources") or [])
                     if isinstance(s, dict) and s.get("name")}
-        node_ids = {str(n.get("id")) for n in _walk(layout.get("root")) if n.get("id")}
+        # A DIALOG IS NAMED BY ITS OWN `id` PROP — that is the registry's
+        # contract for it, and what `opensDialog` points at. Node ids are
+        # composition-time and stripped before commit, so a page whose only
+        # dialog was declared correctly read as opening nothing.
+        node_ids = {str(n.get("id")) for n in _walk(layout.get("root")) if n.get("id")} | {
+            str((n.get("props") or {}).get("id"))
+            for n in _walk(layout.get("root"))
+            if n.get("type") == "Dialog" and (n.get("props") or {}).get("id")}
 
         for node in _walk(layout.get("root")):
             kind = str(node.get("type"))
