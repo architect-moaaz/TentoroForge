@@ -41,6 +41,10 @@ def begin(project_id: str, *, phase: str) -> None:
         "stage": None,
         "nodesDone": 0,
         "nodesTotal": 0,
+        "callsDone": 0,
+        #: The plan's nodes in order, each with the state the panel draws —
+        #: so a reloaded page gets its rows back, not just a count.
+        "nodes": [],
         "awaitingApproval": False,
         "status": "running",
     }
@@ -60,10 +64,28 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
         nodes = data.get("nodes")
         if isinstance(nodes, list):
             run["nodesTotal"] = len(nodes)
+            run["nodes"] = [{"key": str(k), "state": "waiting", "calls": 0}
+                            for k in nodes]
     elif event == "node:start":
         run["stage"] = data.get("label") or data.get("node") or run.get("stage")
+        _node(run, data)["state"] = "running"
+    elif event == "node:subject":
+        # One page of a fan-out finished; the node has not. The counts come
+        # from the event — the stream's reader of the ledger already did the
+        # arithmetic, and adding one here per subject is what reported a run
+        # as 23 of 19.
+        node = _node(run, data)
+        node["calls"] = node.get("calls", 0) + 1
+        if data.get("index") is not None and data.get("total"):
+            node["subject"] = f"{data['index']} of {data['total']}"
+        _counts(run, data)
     elif event == "node:done":
-        run["nodesDone"] = run.get("nodesDone", 0) + 1
+        node = _node(run, data)
+        node["state"] = "done"
+        node.pop("subject", None)
+        _counts(run, data)
+    elif event in ("node:failed", "node:blocked", "node:skipped"):
+        _node(run, data)["state"] = "failed"
     elif event == "done":
         # §25 — the approval gate is a pause, not an end. A client arriving
         # here must see a decision waiting rather than a run in progress.
@@ -78,6 +100,24 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
         finish(project_id, "complete")
     elif event == "error":
         finish(project_id, "error", detail=str(data.get("message") or "")[:400])
+
+
+def _node(run: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """The snapshot's entry for the event's node, added if the plan never
+    named it (a resumed run can start a node the plan line omitted)."""
+    key = str(data.get("node") or "")
+    for node in run.setdefault("nodes", []):
+        if node.get("key") == key:
+            return node
+    node = {"key": key, "state": "waiting", "calls": 0}
+    run["nodes"].append(node)
+    return node
+
+
+def _counts(run: dict[str, Any], data: dict[str, Any]) -> None:
+    for key in ("nodesDone", "nodesTotal", "callsDone"):
+        if isinstance(data.get(key), int):
+            run[key] = data[key]
 
 
 def finish(project_id: str, status: str, *, detail: str | None = None) -> None:

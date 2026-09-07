@@ -34,18 +34,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 import {
-  CheckCircle2,
-  Loader2,
-  Circle,
   AlertCircle,
-  Send,
-  SkipForward,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  ListChecks,
-  Paperclip,
-  Mic,
+  Circle,
   Image as ImageIcon,
+  ListChecks,
+  Loader2,
+  Mic,
+  Paperclip,
+  Send,
+  SkipForward,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -85,6 +86,7 @@ const STAGE_VERB: Record<string, string> = {
   workflows: "Working out the workflows",
   business_rules: "Writing the rules down",
   apis: "Designing the endpoints",
+  figma_design_system: "Holding to the Figma design",
   page_layouts: "Composing the screens",
   backend: "Generating the backend",
   frontend: "Generating the frontend",
@@ -117,6 +119,7 @@ const STAGE_LABEL: Record<string, string> = {
   security: "Security & Roles",
   integrations: "Integrations",
   apis: "API Surface",
+  figma_design_system: "Figma Design System",
   page_layouts: "Page Design",
   frontend: "Frontend",
   backend: "Backend",
@@ -1459,7 +1462,9 @@ function StageRow({ node }: { node: RunNode }) {
       ? CheckCircle2
       : node.state === "running"
         ? Loader2
-        : Circle;
+        : node.state === "failed"
+          ? XCircle
+          : Circle;
 
   return (
     <li className="flex items-center gap-2 text-xs">
@@ -1468,6 +1473,7 @@ function StageRow({ node }: { node: RunNode }) {
           "h-3.5 w-3.5 shrink-0",
           node.state === "done" && "text-green-600",
           node.state === "running" && "animate-spin text-primary",
+          node.state === "failed" && "text-destructive",
           node.state === "waiting" && "text-muted-foreground/40",
         )}
       />
