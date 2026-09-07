@@ -27,7 +27,11 @@ python-multipart>=0.0.9
 # MCP client (platform-side tools/list + test-connection for
 # Agent Builder mcp tool nodes). Pinned <3.0 as a conservative guard
 # against future breaking releases; verified working with 2.x.
-mcp>=1.0,<3.0
+# Held to the 1.x line: the a2ui MCP server the composer spawns
+# (services/a2ui_authority.py) registers `list_resources`/`read_resource`
+# on the low-level `Server`, and mcp 2.x removed those decorators — the
+# first UAT image resolved 2.1.1 and the server died at import.
+mcp>=1.26,<2.0
 
 # Redis (optional — caching and job queues)
 redis>=5.0.0
