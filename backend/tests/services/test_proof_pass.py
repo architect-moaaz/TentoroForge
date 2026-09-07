@@ -11,12 +11,12 @@ from services.proof_pass import persist_report, run_proof_pass
 
 def _write_page(schemas_dir: Path, name: str, data: dict) -> None:
     schemas_dir.mkdir(parents=True, exist_ok=True)
-    (schemas_dir / name).write_text(json.dumps(data))
+    (schemas_dir / name).write_text(json.dumps(data), encoding="utf-8")
 
 
 def _write_wf(wf_dir: Path, name: str, data: dict) -> None:
     wf_dir.mkdir(parents=True, exist_ok=True)
-    (wf_dir / name).write_text(json.dumps(data))
+    (wf_dir / name).write_text(json.dumps(data), encoding="utf-8")
 
 
 # ---------- empty-page ----------------------------------------------------
@@ -114,7 +114,7 @@ def test_persist_writes_json(tmp_path: Path):
     report = run_proof_pass(tmp_path)
     path = persist_report(report, tmp_path)
     assert path.exists()
-    loaded = json.loads(path.read_text())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
     assert "passed" in loaded
     assert "findings" in loaded
 

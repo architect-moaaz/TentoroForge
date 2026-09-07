@@ -20,7 +20,7 @@ from services.smith_blueprint import Blueprint
 def _write_registry(root: Path, data: dict) -> None:
     p = root / "contracts" / "resource-registry.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data))
+    p.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _seed_bp(tmp_path, entities=None, workflows=None, pages=None) -> Blueprint:
@@ -118,7 +118,7 @@ def test_reconcile_missing_registry_returns_error_not_raise(tmp_path):
 
 def test_reconcile_malformed_registry_returns_error(tmp_path):
     (tmp_path / "contracts").mkdir()
-    (tmp_path / "contracts" / "resource-registry.json").write_text("{ not json")
+    (tmp_path / "contracts" / "resource-registry.json").write_text("{ not json", encoding="utf-8")
     _seed_bp(tmp_path)
     r = reconcile_blueprint_with_registry(project_id="p1", output_dir=str(tmp_path))
     assert r.reconciled is False

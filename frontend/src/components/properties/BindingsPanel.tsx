@@ -2,21 +2,17 @@
 import * as React from "react";
 import { useEditorStore } from "@/lib/editor-store";
 import { BindingControl } from "./PropControls/BindingControl";
+import { bindingExpression, isLegacyBinding } from "@forge/patches";
 
 const sectionLabelCls =
   "block px-3 py-2 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase";
 
-const MUSTACHE_RE = /\{\{[\s\S]+?\}\}/;
-const isMustache = (v: unknown): boolean => typeof v === "string" && MUSTACHE_RE.test(v);
-/** Inner expression from either binding form, for the BindingControl value. */
-function innerExpr(v: unknown): string {
-  if (v && typeof v === "object" && "$binding" in (v as any)) return String((v as any).$binding ?? "");
-  if (typeof v === "string") {
-    const m = v.match(/\{\{\s*([\s\S]*?)\s*\}\}/);
-    return m ? m[1] : v;
-  }
-  return "";
-}
+/**
+ * Binding predicates live in @forge/patches so the panel, the reducer and the
+ * commit guard cannot disagree about what "bound" means — the disagreement is
+ * precisely how the editor came to write a format nothing could render.
+ */
+const innerExpr = bindingExpression;
 
 function findNodeAndPage(
   artifacts: any,
@@ -46,11 +42,12 @@ function collectBindings(node: any): Array<{ propPath: string; binding: string }
   const out: Array<{ propPath: string; binding: string }> = [];
   const walk = (obj: any, prefix: string) => {
     if (!obj || typeof obj !== "object") return;
-    // Detect the $binding KEY presence (not truthiness) so a freshly-toggled
-    // bind — which starts as { $binding: "" } — is listed instead of silently
-    // hidden. An empty binding renders with an "unset" hint below.
-    if ("$binding" in (obj as any)) {
-      out.push({ propPath: prefix, binding: String((obj as any).$binding ?? "") });
+    // Legacy {$binding} objects are still LISTED, by key presence rather than
+    // truthiness, so a page that has not been through the load-time migration
+    // still shows its bindings here instead of hiding them. New binds are
+    // "{{expr}}" strings and are caught by the branches below.
+    if (isLegacyBinding(obj)) {
+      out.push({ propPath: prefix, binding: String(obj.$binding ?? "") });
       return;
     }
     if (typeof obj === "string" && obj.includes("{{") && obj.includes("}}")) {
@@ -141,23 +138,17 @@ export function BindingsPanel() {
                 pageId={hit.pageId}
                 value={innerExpr(rawValue)}
                 onChange={(v) => {
-                  if (isMustache(rawValue) || typeof rawValue === "string") {
-                    dispatch({
-                      type: "updateProp",
-                      pageId: hit.pageId,
-                      nodeId: selectedNodeId,
-                      propName: path,
-                      value: v ? `{{${v}}}` : "",
-                    });
-                  } else {
-                    dispatch({
-                      type: "bindProp",
-                      pageId: hit.pageId,
-                      nodeId: selectedNodeId,
-                      propName: path,
-                      binding: v,
-                    });
-                  }
+                  // One format, one action. The old fork wrote a "{{…}}" string
+                  // for values that were already strings and the unrenderable
+                  // {$binding} object for everything else; bindProp now emits
+                  // the string in both cases.
+                  dispatch({
+                    type: "bindProp",
+                    pageId: hit.pageId,
+                    nodeId: selectedNodeId,
+                    propName: path,
+                    binding: v,
+                  });
                 }}
               />
             </li>

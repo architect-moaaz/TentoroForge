@@ -262,7 +262,7 @@ async def _prefetch_figma_data(
                         _prune_deep_children(pruned[key], max_depth=8)
             styles_json = json.dumps(pruned, indent=2)
 
-        styles_path.write_text(styles_json)
+        styles_path.write_text(styles_json, encoding="utf-8")
 
         # 5. Download image fills
         if all_image_refs:
@@ -325,7 +325,7 @@ async def _prefetch_figma_data(
             if img_file.is_file():
                 image_manifest[img_file.name] = f"/images/{img_file.name}"
         manifest_path = Path(output_dir) / "images_manifest.json"
-        manifest_path.write_text(json.dumps(image_manifest, indent=2))
+        manifest_path.write_text(json.dumps(image_manifest, indent=2), encoding="utf-8")
 
         # 8. Annotate style tree with image paths for exported nodes
         _annotate_image_paths(all_styles, all_exportable_nodes, images_dir)
@@ -344,7 +344,7 @@ async def _prefetch_figma_data(
                     if isinstance(pruned[key], dict):
                         _prune_deep_children(pruned[key], max_depth=8)
             styles_json = json.dumps(pruned, indent=2)
-        styles_path.write_text(styles_json)
+        styles_path.write_text(styles_json, encoding="utf-8")
 
     # Note: AHTML generation happens later in the IR pipeline (Step 8)
     # which is Figma-aware and runs after the main agents complete.
@@ -970,7 +970,7 @@ async def run_design_reviewer_agent(
         if plan_file.exists():
             try:
                 import json
-                plan_data = json.loads(plan_file.read_text())
+                plan_data = json.loads(plan_file.read_text(encoding="utf-8"))
                 entities = [t.get("name", "") for t in plan_data.get("database", {}).get("tables", [])]
                 pages = [p.get("path", "") for p in plan_data.get("pages", [])]
                 plan_summary = f"Entities: {', '.join(entities[:10])}\nPages: {', '.join(pages[:10])}"

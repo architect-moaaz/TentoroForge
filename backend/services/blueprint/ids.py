@@ -344,7 +344,7 @@ class IdAllocator:
             "retired": sorted(self.retired),
         }
         tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), "utf-8")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, p)  # atomic
         return p
 

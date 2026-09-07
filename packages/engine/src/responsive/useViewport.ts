@@ -57,5 +57,13 @@ export function pickResponsiveValue<T>(value: T | Record<Breakpoint, T>, bp: Bre
   for (let i = startIdx; i < order.length; i++) {
     if (obj[order[i]] !== undefined) return obj[order[i]] as T;
   }
-  return value as T;
+  // Nothing defined at or below the active breakpoint. The old
+  // `return value as T` handed the ENVELOPE back as the resolved value, so a
+  // base-less override like `{ lg: "ONLY LG" }` was rendered to the end user
+  // as the literal text {"lg":"ONLY LG"} at every width under 1024px (audit
+  // probe probe_props_4). An envelope is never a legal rendered value: the
+  // absence of a match means "no value here", which is `undefined` — the
+  // component then falls back to its own default, exactly as it does for a
+  // prop that was never set.
+  return undefined as unknown as T;
 }

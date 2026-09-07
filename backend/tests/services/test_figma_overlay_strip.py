@@ -19,27 +19,27 @@ def _mkapp(tmp_path, shell_targets=("/dashboard", "/history")):
             for t in shell_targets
         ],
     }
-    (schemas / "shell.json").write_text(json.dumps(shell))
+    (schemas / "shell.json").write_text(json.dumps(shell), encoding="utf-8")
     return out, schemas
 
 
 def test_strips_flag_from_menu_pages_only(tmp_path):
     out, schemas = _mkapp(tmp_path)
     (schemas / "dashboard.json").write_text(json.dumps(
-        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}))
+        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}), encoding="utf-8")
     # /login is NOT in the shell menu — a standalone Figma page keeps its escape.
     (schemas / "login.json").write_text(json.dumps(
-        {"route": "/login", "_figmaDerived": True, "root": {"type": "Stack"}}))
+        {"route": "/login", "_figmaDerived": True, "root": {"type": "Stack"}}), encoding="utf-8")
     res = strip_figma_overlay(str(out))
     assert res["stripped"] == 1
-    assert "_figmaDerived" not in json.loads((schemas / "dashboard.json").read_text())
-    assert json.loads((schemas / "login.json").read_text())["_figmaDerived"] is True
+    assert "_figmaDerived" not in json.loads((schemas / "dashboard.json").read_text(encoding="utf-8"))
+    assert json.loads((schemas / "login.json").read_text(encoding="utf-8"))["_figmaDerived"] is True
 
 
 def test_route_derived_from_path_when_missing(tmp_path):
     out, schemas = _mkapp(tmp_path, shell_targets=("/history",))
     (schemas / "history.json").write_text(json.dumps(
-        {"_figmaDerived": True, "root": {"type": "Stack"}}))
+        {"_figmaDerived": True, "root": {"type": "Stack"}}), encoding="utf-8")
     res = strip_figma_overlay(str(out))
     assert res["stripped"] == 1
 
@@ -47,11 +47,11 @@ def test_route_derived_from_path_when_missing(tmp_path):
 def test_idempotent_and_noop_without_shell(tmp_path):
     out, schemas = _mkapp(tmp_path)
     (schemas / "dashboard.json").write_text(json.dumps(
-        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}))
+        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}), encoding="utf-8")
     strip_figma_overlay(str(out))
     assert strip_figma_overlay(str(out))["stripped"] == 0
     # no shell.json → leave everything alone
     (schemas / "shell.json").unlink()
     (schemas / "dashboard.json").write_text(json.dumps(
-        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}))
+        {"route": "/dashboard", "_figmaDerived": True, "root": {"type": "Stack"}}), encoding="utf-8")
     assert strip_figma_overlay(str(out))["stripped"] == 0

@@ -15,7 +15,7 @@ def _app(tmp_path):
             {"from_entity": "ClassBooking", "to_entity": "Member", "type": "many-to-one"},
             {"from_entity": "ClassBooking", "to_entity": "FitnessClass", "type": "many-to-one"},
         ],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     return sdir
@@ -31,15 +31,15 @@ def test_relabels_fk_columns_and_emits_metadata(tmp_path):
             {"key": "fitnessClassId", "label": "Fitness Class"},
             {"key": "status", "label": "Status"},
         ]}},
-    }))
+    }), encoding="utf-8")
     res = relabel_fk_columns(str(tmp_path))
     assert res["relabeled"] == 2
-    cols = json.loads((sdir / "bookings.json").read_text())["root"]["props"]["columns"]
+    cols = json.loads((sdir / "bookings.json").read_text(encoding="utf-8"))["root"]["props"]["columns"]
     keys = [c["key"] for c in cols]
     assert keys == ["memberIdLabel", "fitnessClassIdLabel", "status"]  # FKs relabeled, status left
 
     # fk-labels.json emitted with target + label field, keyed by a route alias.
-    meta = json.loads((tmp_path / "src" / "lib" / "fk-labels.json").read_text())
+    meta = json.loads((tmp_path / "src" / "lib" / "fk-labels.json").read_text(encoding="utf-8"))
     assert "classbookings" in meta or "classbooking" in meta
     m = meta.get("classbookings") or meta.get("classbooking")
     assert m["memberId"] == {"targetEntity": "Member", "labelField": "fullName"}
@@ -52,7 +52,7 @@ def test_idempotent(tmp_path):
         "route": "/bookings",
         "dataSources": [{"name": "bookings", "entity": "ClassBooking", "op": "list"}],
         "root": {"type": "Table", "props": {"columns": [{"key": "memberId", "label": "Member"}]}},
-    }))
+    }), encoding="utf-8")
     relabel_fk_columns(str(tmp_path))
     res = relabel_fk_columns(str(tmp_path))
     assert res["relabeled"] == 0   # already ...Label

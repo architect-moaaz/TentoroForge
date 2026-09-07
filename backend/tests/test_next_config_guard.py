@@ -23,11 +23,11 @@ module.exports = {
 
 
 def test_rewrites_llm_config_with_jsdom_in_transpile(tmp_path):
-    (tmp_path / "next.config.js").write_text(_BAD)
-    (tmp_path / "next.config.ts").write_text("export default {}")
+    (tmp_path / "next.config.js").write_text(_BAD, encoding="utf-8")
+    (tmp_path / "next.config.ts").write_text("export default {}", encoding="utf-8")
     res = normalize_next_config(str(tmp_path))
     assert res == {"normalized": 1, "removed_variants": 1}
-    out = (tmp_path / "next.config.js").read_text()
+    out = (tmp_path / "next.config.js").read_text(encoding="utf-8")
     assert "serverExternalPackages" in out
     # jsdom + subtree no longer bundled
     for bad in ("jsdom", "cssstyle", "@asamuzakjp", "parse5"):
@@ -36,7 +36,7 @@ def test_rewrites_llm_config_with_jsdom_in_transpile(tmp_path):
 
 
 def test_leaves_authoritative_config_untouched(tmp_path):
-    (tmp_path / "next.config.js").write_text(_AUTHORITATIVE)
+    (tmp_path / "next.config.js").write_text(_AUTHORITATIVE, encoding="utf-8")
     res = normalize_next_config(str(tmp_path))
     assert res == {"normalized": 0, "removed_variants": 0}
 
@@ -44,10 +44,10 @@ def test_leaves_authoritative_config_untouched(tmp_path):
 def test_missing_config_is_created(tmp_path):
     res = normalize_next_config(str(tmp_path))
     assert res["normalized"] == 1
-    assert "serverExternalPackages" in (tmp_path / "next.config.js").read_text()
+    assert "serverExternalPackages" in (tmp_path / "next.config.js").read_text(encoding="utf-8")
 
 
 def test_idempotent(tmp_path):
-    (tmp_path / "next.config.js").write_text(_BAD)
+    (tmp_path / "next.config.js").write_text(_BAD, encoding="utf-8")
     assert normalize_next_config(str(tmp_path))["normalized"] == 1
     assert normalize_next_config(str(tmp_path))["normalized"] == 0

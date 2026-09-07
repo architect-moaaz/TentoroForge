@@ -5,7 +5,7 @@ from services.fk_type_guard import guard_fk_types, pk_type_to_fk_type
 def _schema(root, name, text):
     d = root / "src" / "db" / "schema"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{name}.ts").write_text(text)
+    (d / f"{name}.ts").write_text(text, encoding="utf-8")
 
 
 LANDLORD = '''import { pgTable, uuid, varchar } from "drizzle-orm/pg-core";
@@ -45,7 +45,7 @@ def test_fixes_integer_fk_to_uuid(tmp_path):
     assert (ch["column"], ch["from"], ch["to"], ch["references"]) == (
         "landlordId", "integer", "uuid", "landlords")
 
-    out = (tmp_path / "src/db/schema/property.ts").read_text()
+    out = (tmp_path / "src/db/schema/property.ts").read_text(encoding="utf-8")
     assert 'landlordId: uuid("landlord_id")' in out
     assert 'landlordId: integer' not in out
     # uuid was already imported; integer is now unused → pruned.
@@ -67,7 +67,7 @@ export const posts = pgTable("posts", {
 ''')
     res = guard_fk_types(tmp_path)
     assert res["fixed"] == 1
-    out = (tmp_path / "src/db/schema/post.ts").read_text()
+    out = (tmp_path / "src/db/schema/post.ts").read_text(encoding="utf-8")
     assert 'authorId: integer("author_id")' in out
     assert "integer" in out.split("pgTable")[0]  # import added
 
@@ -85,7 +85,7 @@ export const members = pgTable("members", {
 ''')
     res = guard_fk_types(tmp_path)
     assert res["fixed"] == 1
-    out = (tmp_path / "src/db/schema/member.ts").read_text()
+    out = (tmp_path / "src/db/schema/member.ts").read_text(encoding="utf-8")
     assert 'orgId: uuid("org_id")' in out
 
 
@@ -104,7 +104,7 @@ def test_leaves_unrelated_columns_alone(tmp_path):
     _schema(tmp_path, "landlord", LANDLORD)
     _schema(tmp_path, "property", PROPERTY_BAD)
     guard_fk_types(tmp_path)
-    out = (tmp_path / "src/db/schema/property.ts").read_text()
+    out = (tmp_path / "src/db/schema/property.ts").read_text(encoding="utf-8")
     assert 'name: varchar("name", { length: 255 })' in out  # untouched
 
 

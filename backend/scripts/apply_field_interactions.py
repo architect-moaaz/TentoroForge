@@ -114,7 +114,7 @@ def _process_app(
     for schema_path in schema_files:
         stats["schemas_scanned"] += 1
         try:
-            schema = json.loads(schema_path.read_text())
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             if verbose:
                 log.warning("  skip (invalid JSON): %s", schema_path.name)
@@ -140,7 +140,7 @@ def _process_app(
             stats["schemas_changed"] += 1
             if not dry_run:
                 tmp = schema_path.with_suffix(schema_path.suffix + ".tmp")
-                tmp.write_text(json.dumps(schema, indent=2) + "\n")
+                tmp.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
                 tmp.replace(schema_path)
 
     return stats

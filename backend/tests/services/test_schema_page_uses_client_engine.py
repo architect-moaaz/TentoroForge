@@ -9,7 +9,7 @@ _SP = Path("templates/app-foundation/src/lib/schema-page.tsx")
 
 
 def test_renders_via_client_engine_not_server_renderer():
-    src = _SP.read_text()
+    src = _SP.read_text(encoding="utf-8")
     assert 'from "@tentoroforge/engine"' in src
     assert "<Engine" in src
     # The hazard is the server-side SchemaRenderer COMPONENT, which cannot run
@@ -27,6 +27,6 @@ def test_renders_via_client_engine_not_server_renderer():
 
 
 def test_keeps_workflow_dispatch_wrapper_and_registry():
-    src = _SP.read_text()
+    src = _SP.read_text(encoding="utf-8")
     assert "WorkflowDispatchProvider" in src
     assert "getSchema" in src

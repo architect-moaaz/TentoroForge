@@ -12,7 +12,7 @@ from services import page_critic_summary as pcs
 def _write_report(tmp_path: Path, slug: str, payload: dict) -> None:
     d = tmp_path / "reports" / "page-critic"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{slug}.json").write_text(json.dumps(payload))
+    (d / f"{slug}.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ── No-input behavior ──────────────────────────────────────────────────
@@ -118,7 +118,7 @@ def test_summary_skips_memory_ledger_and_summary_itself(tmp_path):
 
 def test_summary_survives_malformed_report(tmp_path):
     _write_report(tmp_path, "good", {"passes": True, "score": 8, "gaps": []})
-    (tmp_path / "reports" / "page-critic" / "bad.json").write_text("{ not json")
+    (tmp_path / "reports" / "page-critic" / "bad.json").write_text("{ not json", encoding="utf-8")
     s = pcs.build_summary(str(tmp_path))
     assert s["total_pages"] == 1
 
@@ -129,5 +129,5 @@ def test_persist_summary_writes_expected_path(tmp_path):
     expected = tmp_path / "reports" / "page-critic" / "summary.json"
     assert result == expected
     assert expected.exists()
-    written = json.loads(expected.read_text())
+    written = json.loads(expected.read_text(encoding="utf-8"))
     assert written["total_pages"] == 1

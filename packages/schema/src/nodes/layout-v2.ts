@@ -8,7 +8,11 @@ export const SplitNode = z.object({
   type: z.literal("Split"),
   props: z.object({
     ratio: z.enum(["1:1", "2:1", "1:2", "1:3", "3:1"]),
-    breakpoint: z.enum(["sm", "md", "lg"]).optional(),
+    // "none" = never stack. A two-column split that is meaningless as a
+    // vertical stack (a diff view, a form beside its live preview) had no way
+    // to say so — the only choices were three different widths at which it
+    // WOULD collapse. See Sidebar.breakpoint for the same addition.
+    breakpoint: z.enum(["sm", "md", "lg", "none"]).optional(),
   }).strict(),
   style: StyleSlot.optional(),
   // children recurse through NodeV2Ref (forward reference from page.ts) so
@@ -22,6 +26,12 @@ export const SidebarNode = z.object({
   type: z.literal("Sidebar"),
   props: z.object({
     width: z.string().regex(/^\d+(?:px|rem|%)$/),
+    // The stacking point was hard-coded at 768px inside Sidebar.tsx with no
+    // prop at all, so the two-column layout a user arranged in the editor
+    // became a vertical stack on every phone and tablet with no way to say
+    // otherwise (docs/editor-audit/containment.md, feature gaps: "Sidebar's
+    // two-column split is hard-coded ... Split at least exposes breakpoint").
+    breakpoint: z.enum(["sm", "md", "lg", "none"]).optional(),
   }).strict(),
   style: StyleSlot.optional(),
   // children recurse through NodeV2Ref (forward reference from page.ts) so

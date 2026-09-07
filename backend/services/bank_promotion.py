@@ -32,8 +32,8 @@ def find_candidates(output_root: Path) -> list[dict[str, Any]]:
             continue
 
         try:
-            log = json.loads(log_path.read_text())
-            spec = json.loads(spec_path.read_text()) if spec_path.exists() else {}
+            log = json.loads(log_path.read_text(encoding="utf-8"))
+            spec = json.loads(spec_path.read_text(encoding="utf-8")) if spec_path.exists() else {}
         except json.JSONDecodeError:
             continue
 
@@ -99,13 +99,13 @@ def promote_candidate(candidate: dict[str, Any], bank_root: Path) -> Path:
     next_idx = len(existing) + 1
     stem = f"exemplar_{next_idx:02d}"
 
-    schema_text = Path(candidate["schema_path"]).read_text()
-    (cell / f"{stem}.json").write_text(schema_text)
+    schema_text = Path(candidate["schema_path"]).read_text(encoding="utf-8")
+    (cell / f"{stem}.json").write_text(schema_text, encoding="utf-8")
     (cell / f"{stem}.meta.json").write_text(json.dumps({
         "score": candidate["score"],
         "promoted_from": candidate["project_id"],
         "promoted_page": candidate["page_path"],
         "auto_promoted": True,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     return cell / f"{stem}.json"

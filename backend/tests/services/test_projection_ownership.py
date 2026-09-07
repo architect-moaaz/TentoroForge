@@ -75,7 +75,7 @@ def test_an_entity_with_no_rule_is_projected_unscoped():
 
 
 def test_only_scope_rules_reach_the_where_clause():
-    src = (RUNTIME / "data-engine.ts").read_text()
+    src = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     # scopeConditions drops attribution rules before building any predicate.
     assert 'r.kind !== "attribution"' in src
     # create() fills from EVERY rule — the fill is what both kinds share.
@@ -138,7 +138,7 @@ def test_the_manifest_is_written_even_when_empty(tmp_path):
     # The data engine imports it statically. A missing file must be a compile
     # error, never an app that silently stops scoping.
     project_ownership_rules(doc([]), tmp_path)
-    src = (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text()
+    src = (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text(encoding="utf-8")
     assert "export const OWNERSHIP_RULES" in src
     assert "export function ownershipRulesFor" in src
 
@@ -146,9 +146,9 @@ def test_the_manifest_is_written_even_when_empty(tmp_path):
 def test_projection_is_byte_identical_on_a_re_run(tmp_path):
     d = doc([{"entity": "Invoice", "column": "ownerId", "unscopedRoles": ["admin"]}])
     project_ownership_rules(d, tmp_path)
-    first = (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text()
+    first = (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text(encoding="utf-8")
     project_ownership_rules(d, tmp_path)
-    assert (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text() == first
+    assert (tmp_path / "src" / "lib" / "ownership-rules.ts").read_text(encoding="utf-8") == first
 
 
 def test_both_pipelines_render_the_same_module():
@@ -157,11 +157,11 @@ def test_both_pipelines_render_the_same_module():
     from services import schema_builder
 
     assert "render_ownership_rules_module" in Path(
-        schema_builder.__file__).read_text()
+        schema_builder.__file__).read_text(encoding="utf-8")
 
 
 def test_the_data_engine_reads_the_manifest():
-    src = (RUNTIME / "data-engine.ts").read_text()
+    src = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     assert 'from "./ownership-rules"' in src
     assert "ownershipRulesFor" in src
 
@@ -169,7 +169,7 @@ def test_the_data_engine_reads_the_manifest():
 def test_every_read_path_applies_the_scope():
     # The data engine is the chokepoint: the API route and the server render
     # both call these directly, so a control anywhere else would miss one.
-    src = (RUNTIME / "data-engine.ts").read_text()
+    src = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     for fn in ("create", "query", "findById", "stats", "update", "remove"):
         assert f"export async function {fn}(" in src
     # The predicate is applied, not merely defined. Call sites go through
@@ -180,13 +180,13 @@ def test_every_read_path_applies_the_scope():
 
 def test_the_route_hands_stats_the_same_context_as_the_list():
     route = (Path(__file__).resolve().parents[2]
-             / "templates" / "data-api-route.ts").read_text()
+             / "templates" / "data-api-route.ts").read_text(encoding="utf-8")
     assert "stats(entity, ctx)" in route
 
 
 def test_the_server_render_hands_the_actor_to_aggregates_and_charts():
     page = (Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
-            / "src" / "lib" / "schema-page.tsx").read_text()
+            / "src" / "lib" / "schema-page.tsx").read_text(encoding="utf-8")
     assert "resolveAggregate(s as any, engineCtx)" in page
     assert "resolveSeries(s as any, engineCtx)" in page
 
@@ -195,10 +195,10 @@ def test_the_fixture_blueprint_matches_the_contract():
     # The runtime test's fixture is a Blueprint fragment; if the contract moves
     # under it, the node test would be scoping against a shape nothing emits.
     fixture = json.loads(
-        (RUNTIME / "__tests__" / "ownership-fixture.blueprint.json").read_text())
+        (RUNTIME / "__tests__" / "ownership-fixture.blueprint.json").read_text(encoding="utf-8"))
     contract = json.loads(
         (Path(__file__).resolve().parents[2]
-         / "contracts" / "blueprint.schema.json").read_text())
+         / "contracts" / "blueprint.schema.json").read_text(encoding="utf-8"))
     item = (contract["properties"]["security"]["properties"]
             ["ownershipRules"]["items"])
     obj = next(o for o in item["oneOf"] if o["type"] == "object")
@@ -215,7 +215,7 @@ ATS = Path(__file__).resolve().parents[2] / "fleet" / "blueprints" / "ats-live.j
 
 
 def _ats():
-    return json.loads(ATS.read_text())
+    return json.loads(ATS.read_text(encoding="utf-8"))
 
 
 def test_ats_declares_every_actor_column_it_says_it_fills():
@@ -276,7 +276,7 @@ def test_row_access_is_a_rule_type_the_api_accepts():
 
 
 def test_the_runtime_declares_the_rule_type_and_its_config():
-    types = (RUNTIME / "rules" / "types.ts").read_text()
+    types = (RUNTIME / "rules" / "types.ts").read_text(encoding="utf-8")
     assert '| "row_access"' in types
     assert "RowAccessRuleConfig" in types
     # Named for the convention condition_action already set, not a new one.
@@ -284,20 +284,20 @@ def test_the_runtime_declares_the_rule_type_and_its_config():
 
 
 def test_the_rules_engine_exposes_row_rules_without_evaluating_them():
-    engine = (RUNTIME / "rules" / "engine.ts").read_text()
+    engine = (RUNTIME / "rules" / "engine.ts").read_text(encoding="utf-8")
     assert "export async function rowAccessRulesFor(" in engine
-    index = (RUNTIME / "rules" / "index.ts").read_text()
+    index = (RUNTIME / "rules" / "index.ts").read_text(encoding="utf-8")
     assert "rowAccessRulesFor" in index, "not exported = not reachable from the data engine"
 
 
 def test_a_row_rule_is_compiled_to_sql_not_applied_per_row():
     # The distinction is the point: a row removed after the query still counted
     # towards total, still paged, and still summed into every aggregate.
-    compiler = (RUNTIME / "rules" / "row-access-sql.ts").read_text()
+    compiler = (RUNTIME / "rules" / "row-access-sql.ts").read_text(encoding="utf-8")
     assert "export function compileRowAccess(" in compiler
     for op in ("inArray", "isNull", "isNotNull", "gte", "lte"):
         assert op in compiler, f"{op} is not compiled"
-    engine = (RUNTIME / "data-engine.ts").read_text()
+    engine = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     assert "compileRowAccess" in engine
     assert "async function rowAccessConditions(" in engine
 
@@ -305,7 +305,7 @@ def test_a_row_rule_is_compiled_to_sql_not_applied_per_row():
 def test_both_halves_land_in_one_where():
     # A declared ownership column and an authored row rule have to end up in
     # the same predicate, or one of them is not in the count.
-    src = (RUNTIME / "data-engine.ts").read_text()
+    src = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     assert "async function accessConditions(" in src
     assert "...scopeConditions(entityName, entity, ctx)," in src
     assert "await rowAccessConditions(entityName, entity, ctx)" in src
@@ -314,7 +314,7 @@ def test_both_halves_land_in_one_where():
 
 
 def test_an_uncompilable_rule_returns_no_rows():
-    src = (RUNTIME / "data-engine.ts").read_text()
+    src = (RUNTIME / "data-engine.ts").read_text(encoding="utf-8")
     where = src[src.index("async function rowAccessConditions("):]
     where = where[: where.index("async function accessConditions(")]
     assert "cannot be enforced" in where
@@ -323,7 +323,7 @@ def test_an_uncompilable_rule_returns_no_rows():
 
 def test_the_builder_offers_the_new_type():
     types = (Path(__file__).resolve().parents[3]
-             / "frontend" / "src" / "types" / "rules.ts").read_text()
+             / "frontend" / "src" / "types" / "rules.ts").read_text(encoding="utf-8")
     assert '| "row_access"' in types
     assert '{ value: "row_access", label: "Row Access" }' in types
     assert "whenFeel" in types

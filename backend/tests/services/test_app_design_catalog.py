@@ -127,7 +127,7 @@ def test_visual_product_search_exemplar_fixture_present_and_valid_json():
         / "services" / "schema_examples" / "visual_product_search.json"
     )
     assert fixture.exists(), fixture
-    data = json.loads(fixture.read_text())
+    data = json.loads(fixture.read_text(encoding="utf-8"))
     entity_names = {e["name"] for e in data["entities"]}
     assert {"scan_events", "retail_sources", "users"} <= entity_names
     assert data["app_archetype"] == "visual-product-search"

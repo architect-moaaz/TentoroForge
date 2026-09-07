@@ -60,7 +60,7 @@ async def get_app_model(
         raise HTTPException(status_code=404, detail="app-model.json not found — run indexer first")
 
     try:
-        model = json.loads(model_path.read_text())
+        model = json.loads(model_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="app-model.json is malformed")
 
@@ -75,7 +75,7 @@ async def get_app_model(
         registry_path = Path(project.output_dir) / "registry.json"
         if registry_path.exists():
             try:
-                registry = json.loads(registry_path.read_text())
+                registry = json.loads(registry_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 registry = {}
             tables = _tables_from_registry(registry)

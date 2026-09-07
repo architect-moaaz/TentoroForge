@@ -78,7 +78,7 @@ def set_field_interaction(
         )
 
     try:
-        schema = json.loads(schema_path.read_text())
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return _err(f"schema at {schema_path} is not valid JSON: {exc}")
     except OSError as exc:
@@ -204,7 +204,7 @@ def _write_and_summarize(
 
     try:
         tmp = schema_path.with_suffix(schema_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(schema, indent=2) + "\n")
+        tmp.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
         tmp.replace(schema_path)
     except OSError as exc:
         return _err(f"failed to write schema at {schema_path}: {exc}")
@@ -421,7 +421,7 @@ def _mirror_to_plan(root: Path, page: str, new_field_node: dict) -> str | None:
     if not plan_path.exists():
         return None
     try:
-        plan = json.loads(plan_path.read_text())
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
 
@@ -456,7 +456,7 @@ def _mirror_to_plan(root: Path, page: str, new_field_node: dict) -> str | None:
                 else:
                     f["interaction"] = copy.deepcopy(interaction)
                 try:
-                    plan_path.write_text(json.dumps(plan, indent=2) + "\n")
+                    plan_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
                     return str(plan_path.relative_to(root))
                 except OSError:
                     return None

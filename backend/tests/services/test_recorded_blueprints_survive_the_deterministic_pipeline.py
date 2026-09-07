@@ -38,7 +38,7 @@ def _recorded() -> list[tuple[str, dict]]:
     out = []
     for p in sorted(_FLEET.glob("*.json")):
         try:
-            doc = json.loads(p.read_text())
+            doc = json.loads(p.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 — a corrupt fixture is not a pipeline bug
             continue
         if isinstance(doc, dict) and doc.get("pages"):

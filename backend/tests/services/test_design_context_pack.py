@@ -216,7 +216,7 @@ def test_broken_brief_on_disk_does_not_crash(monkeypatch, tmp_path):
     monkeypatch.setenv("FORGE_DESIGN_CONTEXT_PACK", "1")
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "brief.json").write_text("{not-valid-json")
+    (contracts / "brief.json").write_text("{not-valid-json", encoding="utf-8")
     out = dcp.build_design_context_pack(
         plan={}, page={"type": "dashboard"}, output_dir=str(tmp_path),
     )

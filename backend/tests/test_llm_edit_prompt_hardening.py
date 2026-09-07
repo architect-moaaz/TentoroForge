@@ -81,7 +81,7 @@ def test_coordination_note_appears_for_fileupload_on_fk_column(app_root):
     must include an explicit coordination note so it doesn't preserve
     the Select 'because the workflow expects a uuid'."""
     current = json.loads(
-        (app_root / "src/schemas/candidates/new.json").read_text()
+        (app_root / "src/schemas/candidates/new.json").read_text(encoding="utf-8")
     )
     intent = "Change the cvUploadId field from a Select to a FileUpload"
     user_prompt = _build_user_prompt(
@@ -99,7 +99,7 @@ def test_coordination_note_appears_for_fileupload_on_fk_column(app_root):
 
 def test_coordination_note_lists_form_workflow(app_root):
     current = json.loads(
-        (app_root / "src/schemas/candidates/new.json").read_text()
+        (app_root / "src/schemas/candidates/new.json").read_text(encoding="utf-8")
     )
     user_prompt = _build_user_prompt(
         intent="make cvUploadId a FileUpload",
@@ -116,7 +116,7 @@ def test_coordination_note_absent_when_intent_has_no_fileupload(app_root):
     NOT trigger the coordination note — it's a red herring for asks that
     aren't control-type changes on FK columns."""
     current = json.loads(
-        (app_root / "src/schemas/candidates/new.json").read_text()
+        (app_root / "src/schemas/candidates/new.json").read_text(encoding="utf-8")
     )
     user_prompt = _build_user_prompt(
         intent="Add a pattern validator on passportNumber",
@@ -134,20 +134,20 @@ def test_coordination_note_absent_when_no_fk_fields_present(tmp_path):
     # Minimal seed: just the contracts + a simple page with no FK fields.
     (tmp_path / "contracts").mkdir()
     (tmp_path / "contracts" / "resource-registry.json").write_text(
-        json.dumps({"entities": {}, "relationships": []}))
+        json.dumps({"entities": {}, "relationships": []}), encoding="utf-8")
     (tmp_path / "contracts" / "action-contract.json").write_text(
-        json.dumps({"actions": []}))
+        json.dumps({"actions": []}), encoding="utf-8")
     (tmp_path / "contracts" / "generation-dossier.json").write_text(
-        json.dumps({"prompt": "x", "plan": {}}))
-    (tmp_path / "registry.json").write_text(json.dumps({}))
+        json.dumps({"prompt": "x", "plan": {}}), encoding="utf-8")
+    (tmp_path / "registry.json").write_text(json.dumps({}), encoding="utf-8")
     (tmp_path / "src" / "schemas").mkdir(parents=True)
     (tmp_path / "src" / "schemas" / "x.json").write_text(json.dumps({
         "route": "/x",
         "root": {"type": "Stack", "children": [
             {"type": "Input", "props": {"name": "name"}},
         ]},
-    }))
-    current = json.loads((tmp_path / "src/schemas/x.json").read_text())
+    }), encoding="utf-8")
+    current = json.loads((tmp_path / "src/schemas/x.json").read_text(encoding="utf-8"))
     user_prompt = _build_user_prompt(
         intent="change name to a FileUpload",
         target_path="src/schemas/x.json",
@@ -161,7 +161,7 @@ def test_coordination_note_triggers_for_camera_scanner_signature_too(app_root):
     """The pattern isn't specific to FileUpload — any non-FK control
     named on an FK-having page trips the detector."""
     current = json.loads(
-        (app_root / "src/schemas/candidates/new.json").read_text()
+        (app_root / "src/schemas/candidates/new.json").read_text(encoding="utf-8")
     )
     for control in ("CameraCapture", "Scanner", "Signature"):
         p = _build_user_prompt(

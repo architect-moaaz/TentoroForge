@@ -67,7 +67,7 @@ def test_non_figma_build_authors_and_persists_a_brief(tmp_path, monkeypatch):
 
     written = tmp_path / "contracts" / "brief.json"
     assert written.is_file(), "no brief.json written for a non-Figma build"
-    assert json.loads(written.read_text())["authored_by"] == "llm"
+    assert json.loads(written.read_text(encoding="utf-8"))["authored_by"] == "llm"
     assert called["domain"] == "Legislative"
     # The plan must reach the author — grounding is the whole point.
     assert "Session" in called["plan_summary"]
@@ -127,4 +127,4 @@ def test_figma_path_still_wins_and_skips_the_llm(tmp_path, monkeypatch):
 
     written = tmp_path / "contracts" / "brief.json"
     assert written.is_file()
-    assert json.loads(written.read_text())["authored_by"] == "figma"
+    assert json.loads(written.read_text(encoding="utf-8"))["authored_by"] == "figma"

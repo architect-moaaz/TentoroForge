@@ -88,7 +88,7 @@ def test_the_observer_and_the_file_agree(svc):
     seen = watch(svc, ok, plan=["business_rules"])
     run_id = seen[0]["runId"]
     path = svc.root.parent.parent / ".forge" / "runs" / f"{run_id}.jsonl"
-    on_disk = [json.loads(line) for line in path.read_text().splitlines()]
+    on_disk = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert kinds(seen) == kinds(on_disk)
 
 

@@ -83,7 +83,7 @@ def test_injects_filter_builder_above_table(tmp_path, monkeypatch):
     })
     report = run(str(tmp_path))
     assert report["pages_touched"] == ["src/schemas/orders.json"]
-    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text(encoding="utf-8"))
     children = schema["root"]["children"]
     types = [c["type"] for c in children]
     # FilterBuilder is inserted immediately before the Table.
@@ -106,7 +106,7 @@ def test_injects_when_no_table_present(tmp_path, monkeypatch):
         ]},
     })
     run(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text(encoding="utf-8"))
     types = [c["type"] for c in schema["root"]["children"]]
     assert types[0] == "FilterBuilder"
 
@@ -121,6 +121,6 @@ def test_works_with_top_level_components_list(tmp_path, monkeypatch):
         ],
     })
     run(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "orders.json").read_text(encoding="utf-8"))
     types = [c["type"] for c in schema["components"]]
     assert types == ["Heading", "FilterBuilder", "Table"]

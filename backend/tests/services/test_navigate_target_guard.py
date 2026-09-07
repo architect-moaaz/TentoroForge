@@ -13,13 +13,13 @@ from services.navigate_target_guard import apply_navigate_target_guard
 def _make_app(root: Path, *, plan: dict, schemas: dict[str, dict]) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     for name, doc in schemas.items():
-        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc))
+        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _read(root: Path, name: str) -> dict:
-    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text())
+    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 # ---------- known routes are left alone -----------------------------------
@@ -141,10 +141,10 @@ class TestNoOp:
     def test_no_known_routes(self, tmp_path: Path):
         (tmp_path / "src" / "contracts").mkdir(parents=True)
         (tmp_path / "src" / "schemas").mkdir(parents=True)
-        (tmp_path / "src" / "contracts" / "plan.json").write_text("{}")
+        (tmp_path / "src" / "contracts" / "plan.json").write_text("{}", encoding="utf-8")
         (tmp_path / "src" / "schemas" / "x.json").write_text(json.dumps({"nodes": [
             {"type": "Button", "props": {"navigate": "/anywhere"}},
-        ]}))
+        ]}), encoding="utf-8")
         r = apply_navigate_target_guard(str(tmp_path))
         # No plan routes → we don't have enough information to decide, skip.
         assert r["repaired"] == []

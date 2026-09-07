@@ -68,7 +68,7 @@ def get(domain: str) -> DesignBrief | None:
     if not path.exists():
         return None
     try:
-        b = DesignBrief.model_validate_json(path.read_text())
+        b = DesignBrief.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[brief-cache] disk read failed for %s: %s", domain, exc)
         return None
@@ -95,7 +95,7 @@ def put(domain: str, brief: DesignBrief) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(brief.model_dump_json(indent=2))
+        tmp.write_text(brief.model_dump_json(indent=2), encoding="utf-8")
         tmp.replace(path)
     except OSError as exc:
         logger.warning("[brief-cache] disk write failed for %s: %s", domain, exc)
@@ -128,7 +128,7 @@ def all_domains() -> list[str]:
             # Read the brief to recover the original domain label
             # (slug is lossy — "Property Management" ↔ "property-management").
             try:
-                b = DesignBrief.model_validate_json(p.read_text())
+                b = DesignBrief.model_validate_json(p.read_text(encoding="utf-8"))
                 domains.add(b.identity.domain)
             except Exception:  # noqa: BLE001
                 continue

@@ -20,8 +20,15 @@
 export type PreviewData = Record<string, unknown>;
 
 interface Metric {
-  fn: string;
+  fn?: string;
   field?: string;
+  /** Arithmetic over row fields ("quantity * price") when no single field holds
+   *  the value. Emitted by the generator's metric-dialect normaliser. */
+  expr?: string;
+  /** The page composer's own dialect: "sum(quantity * price)", "count(id)".
+   *  The generator normalises this away, but a project generated before that
+   *  fix still carries it on disk and the editor still has to render it. */
+  expression?: string;
   entity?: string;
   filter?: Record<string, unknown>;
 }
@@ -39,53 +46,33 @@ export interface PreviewDataSource {
   limit?: number;
 }
 
-const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+/**
+ * SHARED WITH THE SCAFFOLD — do not re-implement here.
+ *
+ * These helpers used to be private copies in this file. The scaffold's own
+ * resolver (`apps/render-scaffold/src/lib/resolvePreviewSync.ts`) had no
+ * equivalent at all: it looked up a pre-computed `<entity>Stats` blob instead
+ * of computing anything, so the SAME page whose KPI tiles showed numbers on
+ * this canvas rendered three blank tiles in the shipped preview. Two surfaces,
+ * two answers to "what is an aggregate metric?".
+ *
+ * `packages/engine/src/data/aggregate.ts` is now the single implementation and
+ * both import it, so they cannot drift again.
+ *
+ * Delegating also fixes a latent bug here: the local `matchesFilter` did strict
+ * equality only, so a comparator filter like `{ quantity: { lt: 5 } }` — which
+ * the generated schemas do emit — matched nothing and a "low stock" metric
+ * counted 0 rows on this canvas.
+ */
+import {
+  rowsFor,
+  matchesFilter,
+  aggValue,          // still used directly by resolveSeries below
+  computeAggregate as resolveAggregateShared,
+} from "@tentoroforge/engine";
 
-/** Find an entity's fixture rows in previewData across the many key aliases the
- *  fixture endpoint emits (Vehicle | vehicle | vehicles | …). */
-function rowsFor(entity: string | undefined, pd: PreviewData): any[] {
-  if (!entity) return [];
-  if (Array.isArray(pd[entity])) return pd[entity] as any[];
-  const want = norm(entity);
-  for (const [k, v] of Object.entries(pd)) {
-    if (!Array.isArray(v)) continue;
-    const nk = norm(k);
-    if (nk === want || nk === want + "s" || nk + "s" === want) return v as any[];
-  }
-  return [];
-}
-
-function matchesFilter(row: any, filter?: Record<string, unknown>): boolean {
-  if (!filter) return true;
-  return Object.entries(filter).every(([k, v]) => row?.[k] === v);
-}
-
-const toNum = (v: unknown): number => {
-  const n = Number(v);
-  return isNaN(n) ? 0 : n;
-};
-
-function aggValue(rows: any[], fn: string, field?: string): number {
-  if (fn === "count" || !field) return rows.length;
-  const nums = rows.map((r) => toNum(r?.[field]));
-  if (!nums.length) return 0;
-  switch (fn) {
-    case "sum": return nums.reduce((a, b) => a + b, 0);
-    case "avg": return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
-    case "min": return Math.min(...nums);
-    case "max": return Math.max(...nums);
-    default: return rows.length;
-  }
-}
-
-function resolveAggregate(s: PreviewDataSource, pd: PreviewData): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, m] of Object.entries(s.metrics || {})) {
-    const rows = rowsFor(m.entity || s.entity, pd).filter((r) => matchesFilter(r, m.filter));
-    out[key] = aggValue(rows, m.fn, m.field);
-  }
-  return out;
-}
+const resolveAggregate = (s: PreviewDataSource, pd: PreviewData): Record<string, number> =>
+  resolveAggregateShared(s as never, pd);
 
 /** Truncate a date to a bucket start; returns the display label + a numeric sort key. */
 function bucketLabel(raw: unknown, bucket: string): { label: string; key: number } {

@@ -34,9 +34,9 @@ def _seed_app(root: Path, *, dashboard: dict | None = None) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
     (root / "src" / "app").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
     if dashboard is not None:
-        (root / "src" / "schemas" / "dashboard.json").write_text(json.dumps(dashboard))
+        (root / "src" / "schemas" / "dashboard.json").write_text(json.dumps(dashboard), encoding="utf-8")
 
 
 class TestSkinCssStrip:
@@ -52,14 +52,14 @@ class TestSkinCssStrip:
         )
         res = strip_destructive_skin_css(str(tmp_path))
         assert res["stripped"] == 1
-        out = css.read_text()
+        out = css.read_text(encoding="utf-8")
         assert "!important" not in out
         assert ".keep { color: red; }" in out
         assert ".also-keep { gap: 1rem; }" in out
 
     def test_idempotent(self, tmp_path):
         _seed_app(tmp_path)
-        (tmp_path / "src" / "app" / "globals.css").write_text(".x{}")
+        (tmp_path / "src" / "app" / "globals.css").write_text(".x{}", encoding="utf-8")
         assert strip_destructive_skin_css(str(tmp_path))["stripped"] == 0
 
 
@@ -73,9 +73,9 @@ class TestTailwindSafelist:
 
     def test_inserts_safelist_once(self, tmp_path):
         cfg = tmp_path / "tailwind.config.ts"
-        cfg.write_text(self.CFG)
+        cfg.write_text(self.CFG, encoding="utf-8")
         assert ensure_tailwind_safelist(str(tmp_path))["added"] is True
-        assert "safelist" in cfg.read_text()
+        assert "safelist" in cfg.read_text(encoding="utf-8")
         # second run: already present → no-op
         assert ensure_tailwind_safelist(str(tmp_path))["added"] is False
 
@@ -89,7 +89,7 @@ class TestRhythmFloor:
         })
         res = floor_dashboard_rhythm(str(tmp_path))
         assert res["floored"] == ["src/schemas/dashboard.json"]
-        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text(encoding="utf-8"))
         assert data["root"]["props"]["gap"] == "tokens.spacing.4"
 
     def test_other_gaps_untouched(self, tmp_path):
@@ -131,7 +131,7 @@ class TestFilterEnums:
         _seed_app(tmp_path, dashboard=self._dashboard())
         res = align_dashboard_filter_enums(str(tmp_path))
         assert res["aligned"] == ["src/schemas/dashboard.json"]
-        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text(encoding="utf-8"))
         status, priority = data["root"]["children"][0]["children"]
         s_opts = status["props"]["options"]
         # label-matched to Event (not Task) even though both have `status`
@@ -148,7 +148,7 @@ class TestFilterEnums:
         dash["root"]["children"][0]["children"][0]["props"]["label"] = "Status"
         _seed_app(tmp_path, dashboard=dash)
         align_dashboard_filter_enums(str(tmp_path))
-        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text(encoding="utf-8"))
         status = data["root"]["children"][0]["children"][0]
         assert {"value": "active", "label": "active"} in status["props"]["options"]
 
@@ -164,8 +164,8 @@ class TestOrchestrator:
             "root": {"type": "Stack", "props": {"gap": "tokens.spacing.3"},
                      "children": []},
         })
-        (tmp_path / "src" / "app" / "globals.css").write_text(".x{}")
-        (tmp_path / "tailwind.config.ts").write_text(TestTailwindSafelist.CFG)
+        (tmp_path / "src" / "app" / "globals.css").write_text(".x{}", encoding="utf-8")
+        (tmp_path / "tailwind.config.ts").write_text(TestTailwindSafelist.CFG, encoding="utf-8")
         report = apply_platform_heals(str(tmp_path))
         assert report["tailwind_safelist"]["added"] is True
         assert report["dashboard_rhythm"]["floored"]
@@ -192,14 +192,14 @@ class TestWorkflowInboxRelocation:
         plan = dict(PLAN) if with_task_entity else {
             "entities": {"Event": PLAN["entities"]["Event"]}}
         _seed_app(tmp_path)
-        (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+        (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
         (tmp_path / "src" / "contracts" / "nav-flow.json").write_text(json.dumps({
             "pages": [{"route": "/task", "title": "Tasks"}],
             "personas": [{"id": "p1", "jobs": [{"label": "Tasks", "route": "/tasks"}]}],
-        }))
+        }), encoding="utf-8")
         tasks_dir = tmp_path / "src" / "app" / "tasks"
         tasks_dir.mkdir(parents=True)
-        (tasks_dir / "page.tsx").write_text(self.INBOX)
+        (tasks_dir / "page.tsx").write_text(self.INBOX, encoding="utf-8")
 
     def test_relocates_and_repoints(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FORGE_FIGMA_LLM", "0")   # real gate for icon_for_with_llm
@@ -208,9 +208,9 @@ class TestWorkflowInboxRelocation:
         res = relocate_workflow_inbox(str(tmp_path))
         assert res["relocated"] is True
         assert not (tmp_path / "src" / "app" / "tasks").exists()
-        moved = (tmp_path / "src" / "app" / "inbox" / "page.tsx").read_text()
+        moved = (tmp_path / "src" / "app" / "inbox" / "page.tsx").read_text(encoding="utf-8")
         assert '"/inbox/1"' in moved            # internal links rewritten
-        nav = json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         assert nav["personas"][0]["jobs"][0]["route"] == "/task"
         assert res["nav_repointed"] is True
 
@@ -225,14 +225,14 @@ class TestWorkflowInboxRelocation:
         from services.platform_heals import relocate_workflow_inbox
         self._seed(tmp_path)
         (tmp_path / "src" / "app" / "tasks" / "page.tsx").write_text(
-            "export default function Custom() { return null; }")
+            "export default function Custom() { return null; }", encoding="utf-8")
         assert relocate_workflow_inbox(str(tmp_path))["relocated"] is False
 
 
 class TestDetailShapedCollections:
     def _seed(self, tmp_path, schema: dict):
         _seed_app(tmp_path)
-        (tmp_path / "src" / "schemas" / "task.json").write_text(json.dumps(schema))
+        (tmp_path / "src" / "schemas" / "task.json").write_text(json.dumps(schema), encoding="utf-8")
 
     def test_detail_at_collection_route_becomes_kanban(self, tmp_path):
         from services.platform_heals import rebuild_detail_shaped_collections
@@ -244,7 +244,7 @@ class TestDetailShapedCollections:
         })
         res = rebuild_detail_shaped_collections(str(tmp_path))
         assert res["rebuilt"] == ["/task"]
-        schema = json.loads((tmp_path / "src" / "schemas" / "task.json").read_text())
+        schema = json.loads((tmp_path / "src" / "schemas" / "task.json").read_text(encoding="utf-8"))
         ops = [ds.get("op") for ds in schema.get("dataSources") or []]
         assert "list" in ops
         # Task.status enum (todo/in_progress/done) → kanban shape
@@ -261,7 +261,7 @@ class TestDetailShapedCollections:
         self._seed(tmp_path, original)
         assert rebuild_detail_shaped_collections(str(tmp_path))["rebuilt"] == []
         assert json.loads(
-            (tmp_path / "src" / "schemas" / "task.json").read_text()) == original
+            (tmp_path / "src" / "schemas" / "task.json").read_text(encoding="utf-8")) == original
 
     def test_idempotent_after_rebuild(self, tmp_path):
         from services.platform_heals import rebuild_detail_shaped_collections

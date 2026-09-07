@@ -17,14 +17,14 @@ def _mk_app(tmp_path: Path, schemas: dict[str, dict],
     (root / "src" / "schemas").mkdir(parents=True)
     (root / "src" / "contracts").mkdir(parents=True)
     if plan is not None:
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     for name, doc in schemas.items():
-        (root / "src" / "schemas" / name).write_text(json.dumps(doc))
+        (root / "src" / "schemas" / name).write_text(json.dumps(doc), encoding="utf-8")
     return root
 
 
 def _read(root: Path, name: str) -> dict:
-    return json.loads((root / "src" / "schemas" / name).read_text())
+    return json.loads((root / "src" / "schemas" / name).read_text(encoding="utf-8"))
 
 
 # ─────────────── required-prop backfills ───────────────
@@ -151,7 +151,7 @@ def test_global_search_workflow_backfilled_from_disk(tmp_path):
     (root / "workflows").mkdir()
     (root / "workflows" / "sw.json").write_text(json.dumps(
         {"id": "sw", "name": "SearchRecordsWorkflow",
-         "definition": {"nodes": []}}))
+         "definition": {"nodes": []}}), encoding="utf-8")
     repair_required_props(root)
     assert _read(root, "s.json")["root"]["props"]["workflow"] == \
         "SearchRecordsWorkflow"

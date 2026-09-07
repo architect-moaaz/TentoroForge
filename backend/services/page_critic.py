@@ -220,7 +220,7 @@ def persist_critique(
         # Nested slugs (e.g. patients/[id]/timeline) → mkdir the FULL
         # parent, not just the reports root, or write_text raises ENOENT.
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(critique, indent=2))
+        path.write_text(json.dumps(critique, indent=2), encoding="utf-8")
         return path
     except Exception:  # noqa: BLE001
         logger.exception(

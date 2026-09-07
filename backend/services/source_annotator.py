@@ -147,21 +147,21 @@ def _regex_strip_fallback(output_dir: str) -> int:
     count = 0
     for pattern in ["src/app/**/*.tsx", "src/components/**/*.tsx"]:
         for tsx_file in out.glob(pattern):
-            source = tsx_file.read_text()
+            source = tsx_file.read_text(encoding="utf-8")
             if "data-source-file=" not in source:
                 continue
             cleaned = re.sub(r'\s+data-source-file="[^"]*"', "", source)
             cleaned = re.sub(r'\s+data-source-line="[^"]*"', "", cleaned)
             cleaned = re.sub(r'\s+data-source-component="[^"]*"', "", cleaned)
             if cleaned != source:
-                tsx_file.write_text(cleaned)
+                tsx_file.write_text(cleaned, encoding="utf-8")
                 count += 1
     return count
 
 
 def _annotate_file_regex(tsx_file: Path, base: Path) -> bool:
     """Annotate a single TSX file using regex. Returns True if modified."""
-    source = tsx_file.read_text()
+    source = tsx_file.read_text(encoding="utf-8")
 
     if _SOURCE_ATTR_RE.search(source):
         return False
@@ -189,7 +189,7 @@ def _annotate_file_regex(tsx_file: Path, base: Path) -> bool:
         attrs += f' data-source-component="{component_name}"'
 
     annotated = source[: match.end(2)] + attrs + source[match.end(2) :]
-    tsx_file.write_text(annotated)
+    tsx_file.write_text(annotated, encoding="utf-8")
     return True
 
 

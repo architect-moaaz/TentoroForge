@@ -633,5 +633,5 @@ def persist_discovery(output_dir: str, discovery: dict) -> str:
     from pathlib import Path
     target = Path(output_dir) / "src" / "contracts" / "discovery.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(discovery, indent=2, sort_keys=True))
+    target.write_text(json.dumps(discovery, indent=2, sort_keys=True), encoding="utf-8")
     return str(target)

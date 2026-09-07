@@ -96,7 +96,7 @@ def test_rules_validator_end_to_end(tmp_path: Path):
     (rules_dir / "index.json").write_text(json.dumps([
         {"name": "scan-user-id-required", "entity": "Scan"},
         {"name": "phantom", "entity": "Ghost"},
-    ]))
+    ]), encoding="utf-8")
 
     findings = validate_output_dir(tmp_path)
     codes = {f.code for f in findings}
@@ -140,7 +140,7 @@ def test_planner_context_renders_archetype_and_renames(tmp_path: Path):
         "archetype": "visual-product-search",
         "reason": "matched keywords",
         "renames": {"Scan": "ArtworkScan"},
-    }))
+    }), encoding="utf-8")
     block = build_authoritative_inputs_block(tmp_path)
     assert "visual-product-search" in block
     assert "ArtworkScan" in block
@@ -166,7 +166,7 @@ def test_proof_sse_payload_shape(tmp_path: Path):
             {"severity": "warning", "code": "empty-page", "message": "w"},
             {"severity": "error", "code": "duplicate-route", "message": "e"},
         ],
-    }))
+    }), encoding="utf-8")
     payload = build_proof_sse_payload(tmp_path)
     assert payload is not None
     assert payload["passed"] is False
@@ -187,7 +187,7 @@ def test_proof_sse_truncation(tmp_path: Path):
             {"severity": "warning", "code": "empty-page", "message": f"f{i}"}
             for i in range(40)
         ],
-    }))
+    }), encoding="utf-8")
     payload = build_proof_sse_payload(tmp_path)
     assert payload is not None
     assert len(payload["findings"]) == 25  # _MAX_INLINE_FINDINGS
@@ -200,7 +200,7 @@ def test_verify_should_trigger_when_proof_failed(tmp_path: Path):
     from services.verify_trigger import should_trigger_verify
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}))
+    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}), encoding="utf-8")
     assert should_trigger_verify(tmp_path) is True
 
 
@@ -208,7 +208,7 @@ def test_verify_should_not_trigger_when_proof_passed(tmp_path: Path):
     from services.verify_trigger import should_trigger_verify
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "proof_report.json").write_text(json.dumps({"passed": True}))
+    (contracts / "proof_report.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
     assert should_trigger_verify(tmp_path) is False
 
 
@@ -216,7 +216,7 @@ def test_verify_should_not_trigger_env_opt_out(tmp_path: Path, monkeypatch):
     from services.verify_trigger import should_trigger_verify
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}))
+    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}), encoding="utf-8")
     monkeypatch.setenv("FORGE_VERIFY_AUTO", "false")
     assert should_trigger_verify(tmp_path) is False
 
@@ -227,7 +227,7 @@ def test_verify_trigger_writes_pending_marker(tmp_path: Path):
     from services.verify_trigger import trigger_verify
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}))
+    (contracts / "proof_report.json").write_text(json.dumps({"passed": False}), encoding="utf-8")
     result = trigger_verify(tmp_path)
     assert result["dispatched"] is False
     marker = tmp_path / "contracts" / "verify_pending.json"

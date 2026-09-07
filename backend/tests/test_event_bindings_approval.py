@@ -25,7 +25,7 @@ def _plan():
 def test_binds_created_event_to_the_approval_workflow(tmp_path):
     out = tmp_path / "event-bindings.json"
     _generate_event_bindings(out, _plan())
-    cfg = json.loads(out.read_text())
+    cfg = json.loads(out.read_text(encoding="utf-8"))
     created = [b for b in cfg["bindings"] if b["event"] == "leaverequest_created"]
     assert created, cfg
     assert "LeaveReviewWorkflow" in created[0]["workflows"]
@@ -45,7 +45,7 @@ def test_non_approval_workflow_is_not_created_bound(tmp_path):
     }
     out = tmp_path / "eb.json"
     _generate_event_bindings(out, plan)
-    cfg = json.loads(out.read_text())
+    cfg = json.loads(out.read_text(encoding="utf-8"))
     assert not [b for b in cfg["bindings"] if b["event"] == "invoice_created"]
 
 
@@ -63,13 +63,13 @@ def test_approval_workflow_without_a_matching_entity_is_skipped(tmp_path):
     }
     out = tmp_path / "eb.json"
     _generate_event_bindings(out, plan)
-    cfg = json.loads(out.read_text())
+    cfg = json.loads(out.read_text(encoding="utf-8"))
     assert not [b for b in cfg["bindings"] if b["event"].endswith("_created")]
 
 
 def test_created_binding_not_duplicated(tmp_path):
     out = tmp_path / "eb.json"
     _generate_event_bindings(out, _plan())
-    cfg = json.loads(out.read_text())
+    cfg = json.loads(out.read_text(encoding="utf-8"))
     created = [b for b in cfg["bindings"] if b["event"] == "leaverequest_created"]
     assert len(created) == 1

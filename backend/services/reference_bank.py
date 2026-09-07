@@ -45,8 +45,8 @@ def _load_from_cell(cell: Path, domain: str, page_type: str) -> list[Exemplar]:
         meta_file = schema_file.with_suffix(".meta.json")
         # Tolerate missing or unreadable files — just skip
         try:
-            schema = json.loads(schema_file.read_text())
-            meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+            schema = json.loads(schema_file.read_text(encoding="utf-8"))
+            meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         except (json.JSONDecodeError, OSError):
             continue
         score = float(meta.get("score", 0.0))

@@ -156,7 +156,7 @@ def apply_maquettes_to_collections(output_dir: str) -> dict[str, Any]:
             try:
                 _plan_path = Path(root) / "src" / "contracts" / "plan.json"
                 if _plan_path.exists():
-                    _plan = json.loads(_plan_path.read_text())
+                    _plan = json.loads(_plan_path.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
                 _plan = {}
             # Composer (FORGE_VOCAB_COMPOSER) supersedes modifier

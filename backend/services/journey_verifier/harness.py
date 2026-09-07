@@ -147,7 +147,7 @@ def _parse_results(
         )
 
     try:
-        report = json.loads(results_path.read_text())
+        report = json.loads(results_path.read_text(encoding="utf-8"))
     except Exception as exc:
         return SuiteResult(
             ok=False, total=0, passed=0, failed=0, duration_ms=duration_ms,

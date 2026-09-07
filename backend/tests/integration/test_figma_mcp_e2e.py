@@ -27,7 +27,7 @@ async def test_commitbiz_fixture_pipeline_end_to_end(tmp_path):
     async def fake_download(urls, output_dir, concurrency=8, project_id=None):
         return {u: f"/figma/asset_{i}.svg" for i, u in enumerate(urls)}
 
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
 
     with patch.object(
         figma_mcp_pipeline, "download_figma_assets", AsyncMock(side_effect=fake_download)

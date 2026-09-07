@@ -9,7 +9,7 @@ from services.runtime_injector import _generate_startup_script
 
 def _script(tmp_path) -> str:
     _generate_startup_script(Path(tmp_path))
-    return (Path(tmp_path) / "start.sh").read_text()
+    return (Path(tmp_path) / "start.sh").read_text(encoding="utf-8")
 
 
 def test_generated_start_sh_is_valid_bash(tmp_path):

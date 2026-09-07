@@ -35,7 +35,7 @@ class TestLoadBriefFrom:
         brief = healthcare_brief()
         contracts = tmp_path / "contracts"
         contracts.mkdir()
-        (contracts / "brief.json").write_text(brief.model_dump_json())
+        (contracts / "brief.json").write_text(brief.model_dump_json(), encoding="utf-8")
         loaded = load_brief_from(tmp_path)
         assert loaded is not None
         assert loaded.palette.brand == brief.palette.brand
@@ -43,13 +43,13 @@ class TestLoadBriefFrom:
     def test_malformed_json_returns_none(self, tmp_path: Path) -> None:
         contracts = tmp_path / "contracts"
         contracts.mkdir()
-        (contracts / "brief.json").write_text("{ not valid json")
+        (contracts / "brief.json").write_text("{ not valid json", encoding="utf-8")
         assert load_brief_from(tmp_path) is None
 
     def test_schema_mismatch_returns_none(self, tmp_path: Path) -> None:
         contracts = tmp_path / "contracts"
         contracts.mkdir()
-        (contracts / "brief.json").write_text('{"foo": "bar"}')
+        (contracts / "brief.json").write_text('{"foo": "bar"}', encoding="utf-8")
         assert load_brief_from(tmp_path) is None
 
     def test_accepts_string_output_dir(self, tmp_path: Path) -> None:
@@ -317,7 +317,7 @@ class TestBriefFirstPattern:
         brief = healthcare_brief()
         contracts = tmp_path / "contracts"
         contracts.mkdir()
-        (contracts / "brief.json").write_text(brief.model_dump_json())
+        (contracts / "brief.json").write_text(brief.model_dump_json(), encoding="utf-8")
 
         # Caller runs the standard pattern.
         loaded = load_brief_from(tmp_path)

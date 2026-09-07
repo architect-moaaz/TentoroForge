@@ -27,7 +27,7 @@ def test_reads_starter_json_when_present(tmp_path, monkeypatch):
     p.write_text(json.dumps({
         "Button": {"props": {"label": {}, "onClick": {}, "intent": {}}},
         "Table":  {"props": {"columns": {}, "dataSource": {}}},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
 
     assert cc.component_names() == ["Button", "Table"]
@@ -47,7 +47,7 @@ def test_missing_starter_returns_empty(tmp_path, monkeypatch):
 
 def test_malformed_starter_returns_empty(tmp_path, monkeypatch):
     p = tmp_path / "starter.json"
-    p.write_text("{ not valid json")
+    p.write_text("{ not valid json", encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
     assert cc.list_components() == {}
 
@@ -58,12 +58,12 @@ def test_malformed_starter_returns_empty(tmp_path, monkeypatch):
 
 def test_caches_by_default(tmp_path, monkeypatch):
     p = tmp_path / "starter.json"
-    p.write_text(json.dumps({"Button": {"props": {"label": {}}}}))
+    p.write_text(json.dumps({"Button": {"props": {"label": {}}}}), encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
 
     assert cc.component_names() == ["Button"]
     # Overwrite the file — cached result should NOT reflect it.
-    p.write_text(json.dumps({"Button": {}, "Table": {}}))
+    p.write_text(json.dumps({"Button": {}, "Table": {}}), encoding="utf-8")
     assert cc.component_names() == ["Button"]
     cc.invalidate_cache()
     assert cc.component_names() == ["Button", "Table"]
@@ -71,12 +71,12 @@ def test_caches_by_default(tmp_path, monkeypatch):
 
 def test_cache_disabled_env_forces_refresh(tmp_path, monkeypatch):
     p = tmp_path / "starter.json"
-    p.write_text(json.dumps({"Button": {}}))
+    p.write_text(json.dumps({"Button": {}}), encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_CACHE", "0")
 
     assert cc.component_names() == ["Button"]
-    p.write_text(json.dumps({"Button": {}, "Table": {}}))
+    p.write_text(json.dumps({"Button": {}, "Table": {}}), encoding="utf-8")
     assert cc.component_names() == ["Button", "Table"]
 
 
@@ -89,7 +89,7 @@ def test_format_component_context_lists_names_and_props(tmp_path, monkeypatch):
     p.write_text(json.dumps({
         "Button": {"props": {"label": {}, "onClick": {}, "intent": {}}},
         "Table":  {"props": {"columns": {}, "dataSource": {}}},
-    }))
+    }), encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
 
     out = cc.format_component_context()
@@ -105,7 +105,7 @@ def test_format_component_context_falls_back_to_names_only_over_budget(
     p.write_text(json.dumps({
         f"Comp{i}": {"props": {f"prop{j}": {} for j in range(20)}}
         for i in range(200)
-    }))
+    }), encoding="utf-8")
     monkeypatch.setenv("FORGE_COMPONENT_CATALOG_PATH", str(p))
 
     out = cc.format_component_context(budget_chars=500)

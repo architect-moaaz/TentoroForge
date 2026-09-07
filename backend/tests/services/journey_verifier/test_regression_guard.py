@@ -33,7 +33,7 @@ def _init_repo(path: Path) -> str:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=path, check=True)
     subprocess.run(["git", "config", "user.name",  "t"],   cwd=path, check=True)
-    (path / "seed.txt").write_text("seed")
+    (path / "seed.txt").write_text("seed", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=path, check=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", "seed", "--no-verify",
@@ -48,7 +48,7 @@ def _init_repo(path: Path) -> str:
 
 
 def _add_commit(path: Path, name: str, body: str) -> str:
-    (path / name).write_text(body)
+    (path / name).write_text(body, encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=path, check=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", f"add {name}", "--no-verify",

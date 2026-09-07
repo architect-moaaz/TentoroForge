@@ -18,7 +18,7 @@ def _app(tmp_path):
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {"Member": {"fields": {"membershipTier": {}, "status": {}}}},
         "relations": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "contracts").mkdir()
     (tmp_path / "contracts" / "seed-plan.json").write_text(json.dumps({
         "tables": [{"name": "members", "seed_data": [
@@ -26,7 +26,7 @@ def _app(tmp_path):
             {"membershipTier": "Gold", "status": "Frozen"},
             {"membershipTier": "Silver", "status": "Cancelled"},
         ]}],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     return sdir
@@ -41,10 +41,10 @@ def test_remaps_metric_filter_to_correct_field(tmp_path):
             "goldMembers": {"fn": "count", "filter": {"membershipTier": "Gold"}},
         }}],
         "root": {"type": "Stack", "children": []},
-    }))
+    }), encoding="utf-8")
     res = guard_filter_fields(str(tmp_path))
     assert res["remapped"] == 1
-    m = json.loads((sdir / "dashboard.json").read_text())["dataSources"][0]["metrics"]
+    m = json.loads((sdir / "dashboard.json").read_text(encoding="utf-8"))["dataSources"][0]["metrics"]
     assert m["activeMembers"]["filter"] == {"status": "Active"}   # remapped
     assert m["goldMembers"]["filter"] == {"membershipTier": "Gold"}  # already correct → untouched
 
@@ -56,7 +56,7 @@ def test_ambiguous_or_unknown_left_alone(tmp_path):
         "dataSources": [{"name": "s", "entity": "Member", "op": "list",
                          "filter": {"membershipTier": "Platinum"}}],  # value in no field
         "root": {"type": "Stack", "children": []},
-    }))
+    }), encoding="utf-8")
     assert guard_filter_fields(str(tmp_path))["remapped"] == 0
 
 

@@ -244,7 +244,7 @@ async def run_page_schema_agent(
                 )
                 # Emit a coherent stub so the REVISE loop sees SOMETHING
                 # on disk + can retry with a normalised plan entry.
-                out_path.write_text(json.dumps(_minimal_schema(slug, _type), indent=2))
+                out_path.write_text(json.dumps(_minimal_schema(slug, _type), indent=2), encoding="utf-8")
                 return
     except Exception as exc:  # noqa: BLE001
         logger.warning("[Schema] purge-custom check failed: %s", exc)
@@ -302,7 +302,7 @@ async def run_page_schema_agent(
         logger.exception("[Schema] contract check failed for %s (continuing)",
                          slug)
 
-    out_path.write_text(json.dumps(schema_dict, indent=2))
+    out_path.write_text(json.dumps(schema_dict, indent=2), encoding="utf-8")
     logger.info("[Schema] wrote %s", out_path)
 
     # ── Page critic (Sprint 3 of "Forge Great Again") ──
@@ -409,7 +409,7 @@ async def run_page_schema_agent(
                         revised.setdefault("schemaVersion", "2")
                         revised["_designer_authored"] = True
                         revised["_designer_revised"] = True
-                        out_path.write_text(json.dumps(revised, indent=2))
+                        out_path.write_text(json.dumps(revised, indent=2), encoding="utf-8")
                         schema_dict = revised
                         logger.info(
                             "[page-critic] %s — REVISE applied", slug,
@@ -432,7 +432,7 @@ async def run_page_schema_agent(
         design_spec = load_design_spec(output_dir) or {}
         n = enrich_schema_visuals(schema_dict, design_spec=design_spec, route=page.get("route"))
         if n > 0:
-            out_path.write_text(json.dumps(schema_dict, indent=2))
+            out_path.write_text(json.dumps(schema_dict, indent=2), encoding="utf-8")
             logger.info("[Schema] enriched %d visual node(s) in %s", n, out_path.name)
     except Exception:
         logger.exception(

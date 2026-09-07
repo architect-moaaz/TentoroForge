@@ -1406,7 +1406,7 @@ async def _author_and_persist_brief(
 
         target = _Path(output_dir) / "contracts" / "brief.json"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(brief.model_dump_json(indent=2))
+        target.write_text(brief.model_dump_json(indent=2), encoding="utf-8")
         logger.info("[brief] persisted → %s", target)
 
         # Composition Recipe Library (behind FORGE_COMPOSITION_RECIPES).
@@ -1865,7 +1865,7 @@ async def _run_relay_pipeline(
         from services.app_design_guardrail import normalize_app_design
         import json as _json
         _, _design_report = normalize_app_design(plan)
-        (Path(output_dir) / "app-design-report.json").write_text(_json.dumps(_design_report, indent=2))
+        (Path(output_dir) / "app-design-report.json").write_text(_json.dumps(_design_report, indent=2), encoding="utf-8")
         _archs = {p.get("archetype") for p in _design_report["pages"]}
         yield sse_event("log", {"text": f"[Design] archetypes: {sorted(a for a in _archs if a)}"})
     except Exception as _d_ex:
@@ -1913,7 +1913,8 @@ async def _run_relay_pipeline(
         try:
             total = sum(_phase_timings.values())
             (Path(output_dir) / "generation-timing.json").write_text(
-                json.dumps({"phases": _phase_timings, "total_seconds": round(total, 2)}, indent=2)
+                json.dumps({"phases": _phase_timings, "total_seconds": round(total, 2)}, indent=2),
+                encoding="utf-8",
             )
         except Exception:
             pass
@@ -2028,7 +2029,7 @@ async def _run_relay_pipeline(
         dna_brief = prompt_brief(design_dna)
         _dna_path = Path(output_dir) / "src" / "contracts" / "design-dna.json"
         _dna_path.parent.mkdir(parents=True, exist_ok=True)
-        _dna_path.write_text(json.dumps(design_dna, indent=2))
+        _dna_path.write_text(json.dumps(design_dna, indent=2), encoding="utf-8")
         _L = design_dna.get("layout", {})
         yield sse_event("log", {"text": (
             f"[Design DNA] {design_dna['archetype']} · {design_dna.get('mode','light')} mode · "
@@ -2286,7 +2287,7 @@ async def _run_relay_pipeline(
             from services.design_compiler import compile_to_file
             spec_path = Path(output_dir) / "src" / "contracts" / "design-spec.json"
             if spec_path.exists():
-                design_spec_for_tokens = json.loads(spec_path.read_text())
+                design_spec_for_tokens = json.loads(spec_path.read_text(encoding="utf-8"))
                 tokens_path = Path(output_dir) / "src" / "theme" / "tokens.custom.json"
                 compile_to_file(design_spec_for_tokens, str(tokens_path))
                 yield sse_event("log", {"text": f"[Tokens] ✓ Compiled tokens.custom.json from design-spec"})
@@ -2307,7 +2308,7 @@ async def _run_relay_pipeline(
         try:
             from services.design_compiler import compile_to_file as _ctf
             _spec_path = Path(output_dir) / "src" / "contracts" / "design-spec.json"
-            _spec_for_tokens = json.loads(_spec_path.read_text()) if _spec_path.exists() else {}
+            _spec_for_tokens = json.loads(_spec_path.read_text(encoding="utf-8")) if _spec_path.exists() else {}
             _tokens_path = Path(output_dir) / "src" / "theme" / "tokens.custom.json"
             _ctf(_spec_for_tokens, str(_tokens_path), dna=design_dna)
             yield sse_event("log", {"text": "[Tokens] ✓ DNA-merged tokens.custom.json compiled"})
@@ -2913,7 +2914,7 @@ async def _run_relay_pipeline(
             from services.post_emit_photo_injector import inject_photos_into_dir
             spec_path = Path(output_dir) / "src" / "contracts" / "design-spec.json"
             if spec_path.exists():
-                spec = json.loads(spec_path.read_text())
+                spec = json.loads(spec_path.read_text(encoding="utf-8"))
                 entity_photos = spec.get("entityPhotos") or {}
                 if entity_photos:
                     n = inject_photos_into_dir(output_dir, entity_photos)
@@ -3845,7 +3846,7 @@ async def _run_figma_relay_pipeline(
             import json as _json
             p = _P(output_dir) / "src" / "contracts" / "figma-context.json"
             if p.exists():
-                return _json.loads(p.read_text())
+                return _json.loads(p.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             pass
         return None
@@ -4197,7 +4198,7 @@ async def _run_figma_relay_pipeline(
                     # unknown is too strict; downstream LLM fallback can't
                     # rebuild what the deterministic mapper already produced.
                     file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_path.write_text(json.dumps(result.page, indent=2))
+                    file_path.write_text(json.dumps(result.page, indent=2), encoding="utf-8")
                     deterministic_pages.add(route)
                     if result.complete:
                         yield sse_event("log", {"text": f"[FigmaDeterministic] ✓ {route}"})
@@ -4222,7 +4223,7 @@ async def _run_figma_relay_pipeline(
                 existing = {}
                 if tokens_path.exists():
                     try:
-                        existing = json.loads(tokens_path.read_text())
+                        existing = json.loads(tokens_path.read_text(encoding="utf-8"))
                     except (json.JSONDecodeError, OSError):
                         existing = {}
                 # Shallow per-category merge so neighbouring categories survive
@@ -4231,7 +4232,7 @@ async def _run_figma_relay_pipeline(
                         existing[cat] = {**existing[cat], **sub}
                     else:
                         existing[cat] = sub
-                tokens_path.write_text(json.dumps(existing, indent=2))
+                tokens_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
                 yield sse_event("log", {
                     "text": f"[FigmaDeterministic] tokens merged from {len(all_walked_nodes)} walked node(s)"
                 })
@@ -4258,7 +4259,7 @@ async def _run_figma_relay_pipeline(
                     nav_flow_data: dict = {}
                     if nav_flow_path.exists():
                         try:
-                            nav_flow_data = json.loads(nav_flow_path.read_text())
+                            nav_flow_data = json.loads(nav_flow_path.read_text(encoding="utf-8"))
                         except (json.JSONDecodeError, OSError):
                             nav_flow_data = {}
                     if not nav_flow_data:
@@ -4381,7 +4382,8 @@ async def _run_figma_relay_pipeline(
         try:
             total = sum(_phase_timings.values())
             (Path(output_dir) / "generation-timing.json").write_text(
-                json.dumps({"phases": _phase_timings, "total_seconds": round(total, 2)}, indent=2)
+                json.dumps({"phases": _phase_timings, "total_seconds": round(total, 2)}, indent=2),
+                encoding="utf-8",
             )
         except Exception:
             pass
@@ -4481,7 +4483,7 @@ async def _run_figma_relay_pipeline(
     )
     if _spec_path_figma.exists():
         try:
-            _figma_spec = json.loads(_spec_path_figma.read_text())
+            _figma_spec = json.loads(_spec_path_figma.read_text(encoding="utf-8"))
             _figma_spec["register"] = _figma_register
             _figma_spec["cta_hierarchy"] = _defaults_for_register_figma(_figma_register)
             _save_design_spec(output_dir, _figma_spec, plan=plan)
@@ -4498,7 +4500,7 @@ async def _run_figma_relay_pipeline(
             from services.design_compiler import compile_to_file
             spec_path = Path(output_dir) / "src" / "contracts" / "design-spec.json"
             if spec_path.exists():
-                design_spec_for_tokens = json.loads(spec_path.read_text())
+                design_spec_for_tokens = json.loads(spec_path.read_text(encoding="utf-8"))
                 tokens_path = Path(output_dir) / "src" / "theme" / "tokens.custom.json"
                 compile_to_file(design_spec_for_tokens, str(tokens_path))
                 yield sse_event("log", {"text": f"[Tokens] ✓ Compiled tokens.custom.json from design-spec"})
@@ -4846,7 +4848,7 @@ async def _run_figma_relay_pipeline(
             from services.post_emit_photo_injector import inject_photos_into_dir
             spec_path = Path(output_dir) / "src" / "contracts" / "design-spec.json"
             if spec_path.exists():
-                spec = json.loads(spec_path.read_text())
+                spec = json.loads(spec_path.read_text(encoding="utf-8"))
                 entity_photos = spec.get("entityPhotos") or {}
                 if entity_photos:
                     n = inject_photos_into_dir(output_dir, entity_photos)
@@ -6322,7 +6324,7 @@ async def chat_with_project(
                     discovery_path = Path(project.output_dir) / "src" / "contracts" / "discovery.json"
                     if discovery_path.exists():
                         try:
-                            approved_discovery = json.loads(discovery_path.read_text())
+                            approved_discovery = json.loads(discovery_path.read_text(encoding="utf-8"))
                         except Exception:
                             logger.warning(f"[chat] discovery.json present but unreadable; pipeline will re-run discovery")
 
@@ -7749,7 +7751,7 @@ def _preview_fix_changes(output_dir: str, diagnosis: dict) -> list[dict]:
             wf_path = Path(output_dir) / rel_path
             if wf_path.exists():
                 try:
-                    defn = (json.loads(wf_path.read_text()).get("definition") or {})
+                    defn = (json.loads(wf_path.read_text(encoding="utf-8")).get("definition") or {})
                     for n in (defn.get("nodes") or []):
                         if isinstance(n, dict) and n.get("id") == node_id:
                             cfg = (n.get("data") or {}).get("config") or {}
@@ -9118,7 +9120,7 @@ def _save_pending_discovery(output_dir: str, discovery: dict) -> None:
     discovery run supersedes the previous awaiting-approval one)."""
     p = _pending_discovery_path(output_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(discovery, indent=2, sort_keys=True))
+    p.write_text(json.dumps(discovery, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _load_pending_discovery(output_dir: str) -> dict | None:
@@ -9128,7 +9130,7 @@ def _load_pending_discovery(output_dir: str) -> dict | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -9252,7 +9254,7 @@ async def _sync_pages_from_app_model(
         return
 
     try:
-        app_model = json.loads(app_model_path.read_text())
+        app_model = json.loads(app_model_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return
 
@@ -9475,7 +9477,7 @@ def _sync_workflows_from_plan(output_dir: str, plan: dict | None) -> None:
             }
         if _trig_contract:
             wf_data["trigger"] = _trig_contract
-        (wf_dir / f"{wf_id}.json").write_text(json.dumps(wf_data, indent=2))
+        (wf_dir / f"{wf_id}.json").write_text(json.dumps(wf_data, indent=2), encoding="utf-8")
 
     logger.info(f"[workflows] Synced {len(workflows)} workflows from plan to {wf_dir}")
 
@@ -9496,7 +9498,7 @@ def _auto_link_pages_to_workflows(output_dir: str, plan: dict | None) -> None:
     app_model_path = Path(output_dir) / "app-model.json"
     if app_model_path.exists():
         try:
-            app_model = json.loads(app_model_path.read_text())
+            app_model = json.loads(app_model_path.read_text(encoding="utf-8"))
             for p in app_model.get("pages", []):
                 pages.append({
                     "id": p.get("id", p.get("route", "/")),
@@ -9531,7 +9533,7 @@ def _auto_link_pages_to_workflows(output_dir: str, plan: dict | None) -> None:
     modified = 0
     for wf_file in wf_dir.glob("*.json"):
         try:
-            wf_data = json.loads(wf_file.read_text())
+            wf_data = json.loads(wf_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
 
@@ -9579,7 +9581,7 @@ def _auto_link_pages_to_workflows(output_dir: str, plan: dict | None) -> None:
                 changed = True
 
         if changed:
-            wf_file.write_text(json.dumps(wf_data, indent=2))
+            wf_file.write_text(json.dumps(wf_data, indent=2), encoding="utf-8")
             modified += 1
 
     if modified:
@@ -9999,7 +10001,7 @@ def _generate_schema_from_plan(output_dir: str, plan: dict | None) -> None:
     schema_content = f'import {{ {", ".join(import_list)} }} from "drizzle-orm/pg-core";\n\n'
     schema_content += "\n".join(table_code_blocks)
 
-    schema_path.write_text(schema_content)
+    schema_path.write_text(schema_content, encoding="utf-8")
     logger.info(f"[schema] Generated src/db/schema.ts with {len(data_models)} models from plan")
 
     # Also generate src/db/index.ts if missing
@@ -10015,7 +10017,7 @@ const pool = new Pool({
 
 export const db = drizzle(pool, { schema });
 '''
-        index_path.write_text(index_content)
+        index_path.write_text(index_content, encoding="utf-8")
 
 
 async def _persist_version(

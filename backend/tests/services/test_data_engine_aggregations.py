@@ -8,7 +8,7 @@ _RUNTIME_ROOT = Path(__file__).resolve().parents[3] / "backend" / "templates" / 
 def test_aggregations_module_exists():
     agg = _RUNTIME_ROOT / "data-engine" / "aggregations.ts"
     assert agg.exists()
-    text = agg.read_text()
+    text = agg.read_text(encoding="utf-8")
     assert "executeAggregation" in text
     assert "AggregationFn" in text
     assert "groupBy" in text
@@ -17,13 +17,13 @@ def test_aggregations_module_exists():
 def test_saved_views_module_exists():
     sv = _RUNTIME_ROOT / "data-engine" / "saved-views.ts"
     assert sv.exists()
-    text = sv.read_text()
+    text = sv.read_text(encoding="utf-8")
     assert "listSavedViews" in text
     assert "createSavedView" in text
     assert "deleteSavedView" in text
 
 
 def test_aggregation_supports_all_required_fns():
-    text = (_RUNTIME_ROOT / "data-engine" / "aggregations.ts").read_text()
+    text = (_RUNTIME_ROOT / "data-engine" / "aggregations.ts").read_text(encoding="utf-8")
     for fn in ["count", "sum", "avg", "min", "max"]:
         assert f'"{fn}"' in text or f"'{fn}'" in text, f"missing fn: {fn}"

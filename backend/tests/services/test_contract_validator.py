@@ -162,11 +162,11 @@ def test_validate_output_dir_uses_persisted_manifest(tmp_path: Path):
     (schemas / "scans.json").write_text(json.dumps({
         "route": "/scans",
         "root": {"type": "Button", "props": {"navigate": "/does-not-exist"}},
-    }))
+    }), encoding="utf-8")
     (schemas / "visitors.json").write_text(json.dumps({
         "route": "/visitors",  # not in manifest
         "root": {},
-    }))
+    }), encoding="utf-8")
     findings = validate_output_dir(tmp_path)
     codes = {f.code for f in findings}
     assert "route-not-in-manifest" in codes  # from visitors.json

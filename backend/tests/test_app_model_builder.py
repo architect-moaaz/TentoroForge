@@ -214,7 +214,7 @@ def test_write_app_model(tmp_path):
     p = tmp_path / "src" / "contracts" / "app-model.json"
     assert path == str(p)
     assert p.exists()
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding="utf-8"))
     assert data["name"] == "Order Manager"
     assert "Order" in data["entities"]
     assert any(r["route"] == "/orders" for r in data["pages"])

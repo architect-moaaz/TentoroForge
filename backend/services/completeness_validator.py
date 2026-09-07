@@ -112,7 +112,7 @@ def _extract_entities(schema_dir: Path) -> list[str]:
         if f.name == "index.ts":
             continue
         try:
-            content = f.read_text()
+            content = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         # Match: export const usersTable = pgTable("users", {
@@ -138,7 +138,7 @@ def _validate_sidebar_links(app_dir: Path) -> list[dict]:
         if not sf.is_file() or sf.suffix != ".tsx":
             continue
         try:
-            content = sf.read_text()
+            content = sf.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -179,12 +179,16 @@ def _validate_form_handlers(app_dir: Path) -> list[dict]:
     for page in app_dir.rglob("page.tsx"):
         if "node_modules" in str(page):
             continue
-        rel = str(page.relative_to(app_dir))
+        # `.as_posix()`: both tests below are forward-slash literals, so
+        # `str()` made this whole validator a no-op on Windows — every
+        # create page was skipped and a form shipping a TODO stub with no
+        # submit handler passed clean.
+        rel = page.relative_to(app_dir).as_posix()
         if "/new/" not in f"/{rel}" and not rel.endswith("new/page.tsx"):
             continue
 
         try:
-            content = page.read_text()
+            content = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -222,7 +226,7 @@ def _validate_list_pages(app_dir: Path) -> list[dict]:
             continue
 
         try:
-            content = page.read_text()
+            content = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -251,12 +255,15 @@ def _validate_no_system_fields(app_dir: Path) -> list[dict]:
     for page in app_dir.rglob("page.tsx"):
         if "node_modules" in str(page):
             continue
-        rel = str(page.relative_to(app_dir))
+        # `.as_posix()` — see _validate_form_handlers above; with `str()`
+        # this never inspected a page and create forms shipping
+        # createdAt/updatedAt inputs were never flagged.
+        rel = page.relative_to(app_dir).as_posix()
         if not rel.endswith("new/page.tsx"):
             continue
 
         try:
-            content = page.read_text()
+            content = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 

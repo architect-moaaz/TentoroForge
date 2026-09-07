@@ -88,7 +88,7 @@ def test_emitted_module_matches_the_scaffolds_shape():
     assert 'fullName: text("full_name").notNull(),' in src
     assert 'id: uuid("id").primaryKey().defaultRandom(),' in src
     if SCAFFOLD.exists():
-        ref = SCAFFOLD.read_text()
+        ref = SCAFFOLD.read_text(encoding="utf-8")
         assert "pgTable(" in ref and "drizzle-orm/pg-core" in ref
 
 
@@ -132,7 +132,7 @@ def test_projection_writes_a_module_per_entity_plus_a_barrel(tmp_path):
     r = project_data_layer(doc(), tmp_path)
     assert r["entities"] == 1
     assert (tmp_path / "src/db/schema/candidate.ts").exists()
-    barrel = (tmp_path / "src/db/schema/index.ts").read_text()
+    barrel = (tmp_path / "src/db/schema/index.ts").read_text(encoding="utf-8")
     assert 'export * from "./candidate";' in barrel
 
 
@@ -223,7 +223,7 @@ def test_frontend_projection_writes_a_renderable_schema_per_page(tmp_path):
     assert result["failed"] == [] and result["skipped"] == []
 
     written = tmp_path / "app" / "src" / "schemas" / "candidates.json"
-    schema = json.loads(written.read_text())
+    schema = json.loads(written.read_text(encoding="utf-8"))
     assert schema["route"] == "/candidates"
     assert schema["root"]["type"] == "Stack"
     # The columns are real definitions, derived from the entity's own fields.
@@ -241,9 +241,9 @@ def test_frontend_projection_is_idempotent(tmp_path):
 
     doc = _frontend_doc()
     project_frontend(doc, tmp_path / "app")
-    first = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text()
+    first = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text(encoding="utf-8")
     project_frontend(doc, tmp_path / "app")
-    second = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text()
+    second = (tmp_path / "app" / "src" / "schemas" / "candidates.json").read_text(encoding="utf-8")
     assert first == second
 
 
@@ -412,7 +412,7 @@ def test_a_blueprint_field_never_shadows_a_platform_column():
 
 def _matcher(app) -> str:
     import re as _re
-    text = (app / "src" / "middleware.ts").read_text()
+    text = (app / "src" / "middleware.ts").read_text(encoding="utf-8")
     return _re.search(r'matcher: \["(.+?)"\]', text).group(1)
 
 
@@ -504,7 +504,7 @@ def test_the_root_route_is_owned_inside_the_shell(tmp_path):
     def _scaffolded(root):
         (root / "src" / "app" / "(dashboard)").mkdir(parents=True)
         (root / "src" / "app" / "(dashboard)" / "page.tsx").write_text(
-            "// scaffold: renders / from the registry\n")
+            "// scaffold: renders / from the registry\n", encoding="utf-8")
         return root
 
     a = _scaffolded(tmp_path / "a")
@@ -517,14 +517,14 @@ def test_the_root_route_is_owned_inside_the_shell(tmp_path):
         "a root page outside (dashboard) resolves to / without the shell")
 
     b = _scaffolded(tmp_path / "b")
-    (b / "src" / "app" / "page.tsx").write_text("// stale from an older build\n")
+    (b / "src" / "app" / "page.tsx").write_text("// stale from an older build\n", encoding="utf-8")
     unclaimed = {"pages": [{"id": "PAGE-002", "route": "/sign-in"},
                            {"id": "PAGE-003", "route": "/overview"}]}
     r = project_root_route(unclaimed, b)
     assert r["redirectsTo"] == "/overview"
     assert r["removedStaleRoot"] is True
     assert not (b / "src" / "app" / "page.tsx").exists()
-    body = (b / "src" / "app" / "(dashboard)" / "page.tsx").read_text()
+    body = (b / "src" / "app" / "(dashboard)" / "page.tsx").read_text(encoding="utf-8")
     assert 'redirect("/overview")' in body
     # Only the *statement* matters — the comment explains the old bug and
     # legitimately names the route it used to hardcode.
@@ -560,7 +560,7 @@ def test_the_whole_design_system_reaches_the_stylesheet(tmp_path):
     from services.blueprint.projection import project_design_tokens
 
     project_design_tokens(_DESIGN, tmp_path)
-    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text(encoding="utf-8")
     assert "--status-paid: #1B6B3A;" in css       # a role shadcn never names
     assert "--radius-card: 8px;" in css           # radius is an object
     assert "--font-size-base: 15px;" in css       # typography was never read
@@ -572,7 +572,7 @@ def test_names_the_scaffold_wraps_are_emitted_as_hsl_triplets(tmp_path):
     from services.blueprint.projection import project_design_tokens
 
     project_design_tokens(_DESIGN, tmp_path)
-    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text(encoding="utf-8")
     assert "--primary: 202 77% 31%;" in css
     assert "--primary: #125E8A;" not in css
     # Roles the scaffold does not wrap keep their hex.
@@ -584,7 +584,7 @@ def test_a_shadcn_name_the_blueprint_omits_falls_back_to_a_declared_role(tmp_pat
     from services.blueprint.projection import project_design_tokens
 
     project_design_tokens(_DESIGN, tmp_path)
-    css = (tmp_path / "src" / "app" / "tokens.css").read_text()
+    css = (tmp_path / "src" / "app" / "tokens.css").read_text(encoding="utf-8")
     # Aliases are triplets too: the scaffold wraps these in hsl() as well.
     assert "--destructive: 3 69% 39%;" in css
     assert "--ring: 207 89% 41%;" in css
@@ -598,7 +598,7 @@ def test_the_scaffold_imports_the_tokens_and_defines_none_of_them_itself():
 
     globals_css = Path(__file__).resolve().parents[2] / (
         "templates/app-foundation/src/app/globals.css")
-    text = globals_css.read_text()
+    text = globals_css.read_text(encoding="utf-8")
     assert '@import "./tokens.css";' in text
     assert "__CSS_" not in text
 
@@ -698,7 +698,7 @@ def _nav(tmp_path):
 
     project_nav_flow(_nav_doc(), tmp_path / "app")
     return json.loads(
-        (tmp_path / "app" / "src" / "contracts" / "nav-flow.json").read_text())
+        (tmp_path / "app" / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
 
 
 def test_each_audience_gets_its_own_entry(tmp_path):

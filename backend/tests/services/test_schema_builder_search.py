@@ -126,7 +126,7 @@ def test_search_column_emitted_as_tsvector_generated(tmp_path):
         _plan([{"name": "content", "type": "text", "search": True}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text(encoding="utf-8")
     # tsvector customType is declared once per file, then used.
     assert 'customType<{ data: string }>({ dataType: () => "tsvector" })' in src
     # The `_search` column exists as tsvector, GENERATED ALWAYS AS to_tsvector.
@@ -144,7 +144,7 @@ def test_search_column_emits_gin_index(tmp_path):
         _plan([{"name": "content", "type": "text", "search": True}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text(encoding="utf-8")
     # Third-arg callback carries the GIN index on the _search column.
     assert '}, (t) => ({' in src
     assert 'index("documents_content_search_idx").using("gin", t.content_search)' in src
@@ -158,7 +158,7 @@ def test_search_multi_column_emits_two_indexes(tmp_path):
         ]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text(encoding="utf-8")
     # Two independent _search columns, two GIN indexes.
     assert 'content_search: tsvector' in src
     assert 'title_search: tsvector' in src
@@ -171,7 +171,7 @@ def test_no_search_column_leaves_pgtable_unchanged(tmp_path):
         _plan([{"name": "title", "type": "text"}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text(encoding="utf-8")
     # No tsvector, no GIN index, no third-arg pgTable callback.
     assert "tsvector" not in src
     assert "using(\"gin\"" not in src
@@ -187,7 +187,7 @@ def test_search_idempotent_when_plan_predeclares_search_name(tmp_path):
         _plan([{"name": "content_search", "type": "text", "search": True}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "documents.ts").read_text(encoding="utf-8")
     assert "content_search_search" not in src
 
 
@@ -202,7 +202,7 @@ def test_manifest_emitted_with_column_lists(tmp_path):
         ]),
         str(tmp_path),
     )
-    manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text(encoding="utf-8")
     assert "SEARCHABLE_COLUMNS" in manifest
     assert "hasSearchableColumns" in manifest
     assert "searchableColumnsFor" in manifest
@@ -222,7 +222,7 @@ def test_manifest_still_emitted_when_no_search_columns(tmp_path):
     )
     p = tmp_path / "src" / "lib" / "searchable-columns.ts"
     assert p.is_file()
-    manifest = p.read_text()
+    manifest = p.read_text(encoding="utf-8")
     assert "SEARCHABLE_COLUMNS: Record<string, string[]>" in manifest
     assert '"Document":' not in manifest
 
@@ -235,7 +235,7 @@ def test_manifest_normalises_predeclared_search_suffix(tmp_path):
         _plan([{"name": "content_search", "type": "text", "search": True}]),
         str(tmp_path),
     )
-    manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text(encoding="utf-8")
     # Base key present; suffixed key absent.
     assert '"content"' in manifest
     assert '"content_search"' not in manifest
@@ -255,12 +255,12 @@ def test_search_plays_nice_with_append_only(tmp_path):
     )
     plan["data_models"][0]["lifecycle"] = "append_only"
     build_schema_files(plan, str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert "APPEND-ONLY LEDGER" in src
     assert "updatedAt" not in src
     assert "description_search: tsvector" in src
     assert "transactions_description_search_idx" in src
-    ao_manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text()
+    ao_manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text(encoding="utf-8")
     assert '"Transaction"' in ao_manifest
-    s_manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text()
+    s_manifest = (tmp_path / "src" / "lib" / "searchable-columns.ts").read_text(encoding="utf-8")
     assert '"Transaction":' in s_manifest

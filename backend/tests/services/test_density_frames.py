@@ -61,7 +61,7 @@ def test_sparse_page_gets_centered_frame(tmp_path: Path):
     rep = apply_density_frames(tmp_path)
     assert rep["counts"]["sparse"] == 1
     assert rep["framed"] == ["documents/new.json"]
-    doc = json.loads((tmp_path / "src/schemas/documents/new.json").read_text())
+    doc = json.loads((tmp_path / "src/schemas/documents/new.json").read_text(encoding="utf-8"))
     assert doc["density"] == "sparse"
     assert "max-w-2xl" in doc["root"]["props"]["className"]
     assert "mx-auto" in doc["root"]["props"]["className"]
@@ -73,7 +73,7 @@ def test_regular_page_untouched(tmp_path: Path):
     _write(tmp_path, "src/schemas/documents.json", json.dumps(doc))
     rep = apply_density_frames(tmp_path)
     assert rep["framed"] == []
-    out = json.loads((tmp_path / "src/schemas/documents.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/documents.json").read_text(encoding="utf-8"))
     assert out["density"] == "regular"
     assert "className" not in out["root"].get("props", {})
 
@@ -83,7 +83,7 @@ def test_rerun_idempotent(tmp_path: Path):
     apply_density_frames(tmp_path)
     rep2 = apply_density_frames(tmp_path)
     assert rep2["framed"] == []
-    doc = json.loads((tmp_path / "src/schemas/new.json").read_text())
+    doc = json.loads((tmp_path / "src/schemas/new.json").read_text(encoding="utf-8"))
     assert doc["root"]["props"]["className"].count("max-w-2xl") == 1
 
 
@@ -93,7 +93,7 @@ def test_authored_width_constraint_respected(tmp_path: Path):
     _write(tmp_path, "src/schemas/new.json", json.dumps(doc))
     rep = apply_density_frames(tmp_path)
     assert rep["framed"] == []
-    out = json.loads((tmp_path / "src/schemas/new.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/new.json").read_text(encoding="utf-8"))
     assert out["root"]["props"]["className"] == "max-w-4xl"
 
 

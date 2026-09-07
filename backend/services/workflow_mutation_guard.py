@@ -425,7 +425,7 @@ def heal_workflow_mutations(output_dir: str | Path) -> dict:
     for f in sorted(wf_dir.glob("*.json")):
         report["workflows_scanned"] += 1
         try:
-            original = f.read_text()
+            original = f.read_text(encoding="utf-8")
             wf = json.loads(original)
         except Exception:  # noqa: BLE001 — a malformed file is another guard's job
             continue
@@ -440,7 +440,7 @@ def heal_workflow_mutations(output_dir: str | Path) -> dict:
             new_text = json.dumps(wf, indent=2)
             if new_text != original:
                 try:
-                    f.write_text(new_text)
+                    f.write_text(new_text, encoding="utf-8")
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[workflow_mutation_guard] write failed for %s: %s", f.name, exc)
     return report

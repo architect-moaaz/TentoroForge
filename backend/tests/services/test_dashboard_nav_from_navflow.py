@@ -9,7 +9,7 @@ property they exist to protect never stopped holding.
 """
 from pathlib import Path
 
-_L = Path("templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
+_L = Path("templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text(encoding="utf-8")
 
 
 def test_menu_reads_nav_flow():

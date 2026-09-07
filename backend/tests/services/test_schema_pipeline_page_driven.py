@@ -22,7 +22,7 @@ async def test_emits_one_file_per_plan_page(tmp_path):
         slug = slugify_route(page["route"])
         out_path = Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text("{}")
+        out_path.write_text("{}", encoding="utf-8")
 
     with patch("agents.page_schema_agent.run_page_schema_agent", new=fake_agent):
         events = []
@@ -35,7 +35,7 @@ async def test_emits_one_file_per_plan_page(tmp_path):
     assert (tmp_path / "src" / "schemas" / "notes.json").exists()
     assert (tmp_path / "src" / "schemas" / "notes" / "new.json").exists()
     # Registry generated
-    registry = (tmp_path / "src" / "schemas" / "registry.ts").read_text()
+    registry = (tmp_path / "src" / "schemas" / "registry.ts").read_text(encoding="utf-8")
     assert '"/notes": () => import("./notes.json")' in registry
     assert '"/notes/new": () => import("./notes/new.json")' in registry
 

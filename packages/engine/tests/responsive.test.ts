@@ -45,3 +45,30 @@ describe("pickResponsiveValue", () => {
     expect(pickResponsiveValue({}, "md")).toEqual({});
   });
 });
+
+/**
+ * Regression: a breakpoint override with no base value must NEVER surface as
+ * the envelope itself. Audit probe probe_props_4 rendered
+ * Heading.content = {lg:"ONLYLGHEADING"} as the literal text
+ * {"lg":"ONLYLGHEADING"} on every viewport under 1024px.
+ */
+describe("pickResponsiveValue — base-less envelopes never leak", () => {
+  it("returns undefined (not the envelope) when nothing matches at or below bp", () => {
+    expect(pickResponsiveValue({ lg: "ONLYLG" } as any, "default")).toBeUndefined();
+    expect(pickResponsiveValue({ lg: "ONLYLG" } as any, "sm")).toBeUndefined();
+    expect(pickResponsiveValue({ lg: "ONLYLG" } as any, "md")).toBeUndefined();
+  });
+
+  it("still resolves the override at and above its own breakpoint", () => {
+    expect(pickResponsiveValue({ lg: "ONLYLG" } as any, "lg")).toBe("ONLYLG");
+    expect(pickResponsiveValue({ lg: "ONLYLG" } as any, "xl")).toBe("ONLYLG");
+  });
+
+  it("never returns an object for any breakpoint of a bp-only envelope", () => {
+    const env = { md: 3, xl: 6 } as any;
+    for (const bp of ["default", "sm", "md", "lg", "xl"] as const) {
+      const v = pickResponsiveValue(env, bp);
+      expect(typeof v === "object" && v !== null).toBe(false);
+    }
+  });
+});

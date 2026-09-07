@@ -195,11 +195,11 @@ async def _fetch_figma_context(
         for f in figma_dir.iterdir():
             if f.suffix == ".json":
                 try:
-                    context[f.stem] = json.loads(f.read_text())
+                    context[f.stem] = json.loads(f.read_text(encoding="utf-8"))
                 except Exception:
                     pass
             elif f.suffix == ".txt":
-                context[f.stem] = f.read_text()
+                context[f.stem] = f.read_text(encoding="utf-8")
 
     # Check for reference screenshot
     ref_png = Path(output_dir) / "reference.png"

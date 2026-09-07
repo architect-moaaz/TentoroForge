@@ -190,7 +190,10 @@ async def list_project_files(
     skip_dirs = {"node_modules", ".next", ".git", "__pycache__"}
     for path in sorted(project_dir.rglob("*")):
         if path.is_file() and not any(part in skip_dirs for part in path.parts):
-            rel = str(path.relative_to(project_dir))
+            # `.as_posix()` — same contract as main.py: FileTree.tsx splits
+            # these on "/" to build the tree, and the path round-trips back
+            # as the read-file query param.
+            rel = path.relative_to(project_dir).as_posix()
             files.append(rel)
     return {"project_id": str(project.id), "files": files}
 
@@ -213,7 +216,7 @@ async def read_project_file(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    content = file_path.read_text(errors="replace")
+    content = file_path.read_text(errors="replace", encoding="utf-8")
     return {"path": path, "content": content}
 
 

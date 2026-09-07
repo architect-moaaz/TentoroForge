@@ -74,7 +74,7 @@ def test_build_tools_write_read_edit_glob(tmp_path):
     assert tools["Read"].invoke({"file_path": "src/a.txt"}) == "one"
     assert "src/a.txt" in tools["Glob"].invoke({"pattern": "src/*.txt"})
     tools["Edit"].invoke({"file_path": "src/a.txt", "old_string": "one", "new_string": "two"})
-    assert (tmp_path / "src" / "a.txt").read_text() == "two"
+    assert (tmp_path / "src" / "a.txt").read_text(encoding="utf-8") == "two"
 
 
 def test_build_tools_respects_allowlist(tmp_path):
@@ -105,7 +105,7 @@ async def test_query_runs_tool_loop_and_writes_file(tmp_path, monkeypatch):
             system_prompt="You are a file writer.")):
         msgs.append(m)
 
-    assert (tmp_path / "out" / "hello.txt").read_text() == "hi"
+    assert (tmp_path / "out" / "hello.txt").read_text(encoding="utf-8") == "hi"
     assistants = [m for m in msgs if isinstance(m, AssistantMessage)]
     assert any(isinstance(b, ToolUseBlock) and b.name == "Write"
                for m in assistants for b in m.content)

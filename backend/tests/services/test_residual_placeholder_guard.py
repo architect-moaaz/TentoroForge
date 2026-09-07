@@ -113,7 +113,7 @@ class TestReportArtifact:
         apply_residual_placeholder_guard(tmp_path)
         rep = tmp_path / "contracts" / "placeholder-report.json"
         assert rep.is_file()
-        assert json.loads(rep.read_text())["findings"] == []
+        assert json.loads(rep.read_text(encoding="utf-8"))["findings"] == []
 
     def test_report_carries_the_findings(self, tmp_path):
         d = tmp_path / "src" / "app"
@@ -121,5 +121,5 @@ class TestReportArtifact:
         (d / "not-found.tsx").write_text("Return to {{app_name}}", encoding="utf-8")
         apply_residual_placeholder_guard(tmp_path)
         data = json.loads(
-            (tmp_path / "contracts" / "placeholder-report.json").read_text())
+            (tmp_path / "contracts" / "placeholder-report.json").read_text(encoding="utf-8"))
         assert data["findings"][0]["token"] == "app_name"

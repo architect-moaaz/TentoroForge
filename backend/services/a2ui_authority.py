@@ -712,8 +712,16 @@ def _mcp_surface(requirement: str, domain_context: str,
         here = Path(A2UI_REPO) / "tools" / "a2ui-mcp"
         env = dict(os.environ)
         env["A2UI_REPO"] = A2UI_REPO
+        # NOT NECESSARILY OUR INTERPRETER. The server is a separate checkout
+        # with its own pins: it builds its handlers with `Server.list_resources`,
+        # removed in mcp 2.0, and Forge's backend runs mcp 2.0 as a CLIENT.
+        # Spawning it with `sys.executable` crashed it on import — the session
+        # then reports "Connection closed", which reads as a protocol fault
+        # rather than a wrong interpreter. `A2UI_PYTHON` points at the venv
+        # that satisfies the server; unset, this is `sys.executable` as before.
         params = StdioServerParameters(
-            command=sys.executable, args=[str(here / "server.py")], env=env)
+            command=os.environ.get("A2UI_PYTHON") or sys.executable,
+            args=[str(here / "server.py")], env=env)
         async with stdio_client(params, errlog=errlog) as (r, w):
             async with ClientSession(r, w) as s:
                 await s.initialize()
@@ -722,7 +730,16 @@ def _mcp_surface(requirement: str, domain_context: str,
                     "catalogId": catalog_id,
                     "domainContext": domain_context,
                 })
-                if out.isError:
+                # `isError` ON THE WIRE, `is_error` ON THE OBJECT. mcp 2.0
+                # renamed the field and kept the camelCase only as a
+                # serialisation alias, so reading `out.isError` raises
+                # AttributeError — and it raises on the SUCCESS path too,
+                # which is how a server-side refusal came back as
+                # "the composer returned nothing after 3 attempts
+                # ('CallToolResult' object has no attribute 'isError')"
+                # and hid the server's actual complaint through three retries.
+                # Both spellings, so this works either side of the rename.
+                if getattr(out, "is_error", None) or getattr(out, "isError", False):
                     text = getattr(out.content[0], "text", "") if out.content else ""
                     raise RuntimeError(f"a2ui server: {text[:400]}")
                 for block in out.content:
@@ -804,6 +821,32 @@ def _stderr_pump(progress: Any) -> tuple[Any, threading.Thread, Any]:
 
 
 # ------------------------------------------------------------------ compose
+
+def _contract_errors(schema: dict) -> list[str]:
+    """What `check_pattern_templates` will say about this tree, said now.
+
+    One import of the same two functions the commit gate calls, so the answer
+    here and the answer there cannot drift — a second implementation of "does
+    this tree render" is how the gate and the composer come to disagree about
+    a page that is already on disk.
+
+    Never fatal: a catalog that will not load must not turn a composition into
+    an exception. It degrades to what it was before, which is the commit
+    catching it.
+    """
+    try:
+        from services.blueprint.page_planner import (
+            load_catalog, validate_props, validate_template,
+        )
+
+        catalog = load_catalog()
+        body = {"root": schema.get("root")}
+        return list(validate_template(body, catalog)) + list(
+            validate_props(body, catalog))
+    except Exception as exc:  # noqa: BLE001 — a check, never a blocker
+        logger.warning("[a2ui] could not pre-check the composed tree: %s", exc)
+        return []
+
 
 def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list[dict]:
     """The substance floor for this page kind. One dispatch point, so the
@@ -1015,6 +1058,55 @@ def compose_page_via_a2ui(
             result["resolved_entities"] = hints
 
     schema = result["schema"]
+
+    # A REFUSAL MUST REACH THE LAYER THAT CAUSED IT.
+    #
+    # `check_pattern_templates` runs exactly these two checks — but at COMMIT
+    # time, after this function has already returned `applied: True`. The
+    # orchestrator catches the rejection, records it as this subject's feedback
+    # and re-runs the node, which composes with A2UI again. So a fault
+    # introduced HERE, in the translation, was reported to the LLM composer as
+    # though it were the composer's:
+    #
+    #     InvalidPatternTemplate: PAGE-003: root.children[1].props.(root):
+    #                             'items' is a required property
+    #
+    # gh0mlpbp's `/items/[id]` was refused twice for that, against two saved
+    # surfaces (`items-id.1.json`, `items-id.2.json`) which BOTH carry a
+    # well-formed `KeyValueList.items`. The binder dropped the prop; the
+    # composer was told it had omitted it. It rewrote the screen — the two
+    # surfaces differ — and could not possibly have fixed it, because nothing
+    # it can write survives a translator that discards the prop. The page was
+    # abandoned, so no layout was written, so no route entry was emitted, and
+    # a user clicking through from the list lands on a 404.
+    #
+    # Same catalog and same functions, one round earlier. A tree the commit
+    # will reject is a composition this module did not finish, so it declines
+    # here — and `executors._compose_via_a2ui` puts the reason straight into
+    # `spec.feedback` for the LLM page author, which writes the Forge tree
+    # itself and CAN act on a missing prop. The binder's own warnings ride
+    # along because they name what went where: "metaList.items: dropped a
+    # literal on a data prop" is the diagnosis that "'items' is required" hides.
+    contract_errors = _contract_errors(schema)
+    if contract_errors:
+        why = ("the composed tree does not satisfy the component contracts: "
+               + "; ".join(contract_errors[:4]))
+        translator = [w for w in result["warnings"] if "dropped" in w]
+        if translator:
+            # WHICH LAYER REMOVED IT. "'items' is a required property" is a
+            # true statement about the tree and a false accusation against the
+            # composer, which supplied it — the translation took it out. Saying
+            # only the first is what bought two identical retries.
+            why += (". The translation dropped: " + "; ".join(translator[:4])
+                    + " — the refusal follows from that drop, not from a prop "
+                    "the composer omitted, so recomposing the same screen "
+                    "without addressing it reproduces this exactly.")
+        logger.warning("[a2ui] %s refused by the component contracts: %s",
+                       route, why)
+        return {"applied": False, "route": route, "kind": kind, "reason": why,
+                "findings": contract_errors,
+                "unresolved": result["unresolved"],
+                "warnings": result["warnings"]}
 
     findings = _floor_findings(kind, route, schema, registry)
     pruned: list[str] = []

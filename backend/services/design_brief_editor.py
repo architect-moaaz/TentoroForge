@@ -120,7 +120,7 @@ def read_brief(output_dir: str | Path) -> DesignBrief | None:
     if not path.exists():
         return None
     try:
-        return DesignBrief.model_validate_json(path.read_text())
+        return DesignBrief.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[brief] read failed: %s", exc)
         return None
@@ -131,7 +131,7 @@ def write_brief(output_dir: str | Path, brief: DesignBrief) -> Path:
     path = Path(output_dir) / "contracts" / "brief.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(brief.model_dump_json(indent=2))
+    tmp.write_text(brief.model_dump_json(indent=2), encoding="utf-8")
     tmp.replace(path)
     return path
 

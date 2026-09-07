@@ -167,7 +167,7 @@ def _extract_entities(root: Path) -> dict[str, dict]:
     if not rr_path.exists():
         return {}
     try:
-        rr = json.loads(rr_path.read_text())
+        rr = json.loads(rr_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
     raw = rr.get("entities") or {}
@@ -265,7 +265,7 @@ def _extract_pages(root: Path, entities: dict[str, dict]) -> list[dict]:
     actions_by_file: dict[str, dict] = {}
     if ac_path.exists():
         try:
-            ac = json.loads(ac_path.read_text())
+            ac = json.loads(ac_path.read_text(encoding="utf-8"))
         except Exception:
             ac = {}
         for a in ac.get("actions") or []:
@@ -284,7 +284,7 @@ def _extract_pages(root: Path, entities: dict[str, dict]) -> list[dict]:
     pages: list[dict] = []
     for file in sorted(schemas_root.rglob("*.json")):
         try:
-            data = json.loads(file.read_text())
+            data = json.loads(file.read_text(encoding="utf-8"))
         except Exception:
             continue
         route = data.get("route")
@@ -324,7 +324,7 @@ def _extract_workflows(root: Path) -> dict[str, dict]:
 
     if ac_path.exists():
         try:
-            ac = json.loads(ac_path.read_text())
+            ac = json.loads(ac_path.read_text(encoding="utf-8"))
         except Exception:
             ac = {}
         for a in ac.get("actions") or []:
@@ -346,7 +346,7 @@ def _extract_workflows(root: Path) -> dict[str, dict]:
 
     if rr_path.exists():
         try:
-            rr = json.loads(rr_path.read_text())
+            rr = json.loads(rr_path.read_text(encoding="utf-8"))
         except Exception:
             rr = {}
         # Interactions tell us domain workflows' target entities via
@@ -387,7 +387,7 @@ def _extract_intent(root: Path) -> str:
     if not dos_path.exists():
         return ""
     try:
-        dos = json.loads(dos_path.read_text())
+        dos = json.loads(dos_path.read_text(encoding="utf-8"))
     except Exception:
         return ""
     prompt = dos.get("prompt")

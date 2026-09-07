@@ -42,7 +42,7 @@ def _setup(tmp_path):
                 "condition": "faker:helpers:arrayElement[New, Good, Fair]",
             },
         }
-    }))
+    }), encoding="utf-8")
     (tmp_path / "registry.json").write_text(json.dumps({"entities": {
         "Equipment": {"fields": {
             "id": {"type": "uuid"},
@@ -57,7 +57,7 @@ def _setup(tmp_path):
             "scheduledAt": {"type": "timestamp"},
             "status": {"type": "varchar", "enum_values": ["Available", "Rented", "Maintenance"]},
         }},
-    }}))
+    }}), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     return sdir
@@ -126,7 +126,7 @@ def test_harvest_status_from_node_labels(tmp_path):
         {"label": "Mark as Cancelled", "actionType": "db_update",
          "config": {"values": {"status": "{{status}}"}}},
         {"type": "gateway", "config": {"condition": "status == 'Reserved'"}},
-    ]}))
+    ]}), encoding="utf-8")
     out = harvest_workflow_statuses(str(tmp_path))
     assert "status" in out
     assert set(out["status"]) >= {"Reserved", "Returned", "Cancelled"}
@@ -135,12 +135,12 @@ def test_harvest_status_from_node_labels(tmp_path):
 def test_apply_retypes_equipment_form(tmp_path):
     sdir = _setup(tmp_path)
     (sdir / "equipment.json").write_text(json.dumps(
-        _all_inputs("name", "category", "dailyRate", "condition", "notes")))
+        _all_inputs("name", "category", "dailyRate", "condition", "notes")), encoding="utf-8")
 
     res = apply_semantic_field_types(str(tmp_path))
     assert res["retyped"] >= 4
 
-    schema = json.loads((sdir / "equipment.json").read_text())
+    schema = json.loads((sdir / "equipment.json").read_text(encoding="utf-8"))
     by_name = {}
     def walk(n):
         if isinstance(n, dict):
@@ -168,9 +168,9 @@ def test_leaves_fk_optionsfrom_untouched(tmp_path):
     (sdir / "equipment.json").write_text(json.dumps({"root": {"type": "Form", "children": [
         {"type": "Select", "props": {"name": "ownerId", "label": "Owner",
                                      "optionsFrom": {"source": "owners", "value": "id", "label": "name"}}},
-    ]}}))
+    ]}}), encoding="utf-8")
     apply_semantic_field_types(str(tmp_path))
-    schema = json.loads((sdir / "equipment.json").read_text())
+    schema = json.loads((sdir / "equipment.json").read_text(encoding="utf-8"))
     sel = schema["root"]["children"][0]
     assert sel["props"].get("optionsFrom")  # still a relational dropdown
     assert "options" not in sel["props"]
@@ -190,9 +190,9 @@ def test_downgrades_optionless_select_to_input_preserving_required(tmp_path):
         {"type": "Select", "props": {"name": "name", "label": "Name", "validators": {"required": True}}},
         {"type": "Select", "props": {"name": "notes", "label": "Notes"}},
         {"type": "Select", "props": {"name": "category", "label": "Category"}},  # has seed arrayElement opts
-    ]}}))
+    ]}}), encoding="utf-8")
     apply_semantic_field_types(str(tmp_path))
-    kids = json.loads((sdir / "equipment_new.json").read_text())["root"]["children"]
+    kids = json.loads((sdir / "equipment_new.json").read_text(encoding="utf-8"))["root"]["children"]
     by = {c["props"]["name"]: c for c in kids}
     assert by["name"]["type"] == "Input"          # option-less Select on varchar -> Input
     assert (by["name"]["props"].get("validators") or {}).get("required") is True  # required preserved
@@ -210,9 +210,9 @@ def _form(*nodes):
 def _apply_single(tmp_path, node):
     """Write a one-field equipment form, apply the pass, return the field node back."""
     sdir = _setup(tmp_path)
-    (sdir / "equipment.json").write_text(json.dumps(_form(node)))
+    (sdir / "equipment.json").write_text(json.dumps(_form(node)), encoding="utf-8")
     apply_semantic_field_types(str(tmp_path))
-    return json.loads((sdir / "equipment.json").read_text())["root"]["children"][0]
+    return json.loads((sdir / "equipment.json").read_text(encoding="utf-8"))["root"]["children"][0]
 
 
 def test_empty_select_on_plain_varchar_becomes_input_keeps_required(tmp_path):

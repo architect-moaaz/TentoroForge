@@ -46,7 +46,7 @@ def test_dedup_prefers_auth_users(tmp_path):
     assert not (d / "users.ts").exists()
     assert (d / "user.ts").exists()
 
-    barrel = (d / "index.ts").read_text()
+    barrel = (d / "index.ts").read_text(encoding="utf-8")
     assert './users"' not in barrel
     assert './user"' in barrel
 

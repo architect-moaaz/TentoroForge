@@ -58,7 +58,7 @@ async def fill_missing_pages(output_dir: str, plan: dict, domain_context: dict |
             sch = _minimal_schema(slug, page_type)
             sch["id"] = slug
             sch.setdefault("schemaVersion", "2")
-            out.write_text(json.dumps(sch, indent=2))
+            out.write_text(json.dumps(sch, indent=2), encoding="utf-8")
             result["minimal"].append(route)
         except Exception:
             logger.exception("[Pages] minimal floor failed for %s", route)

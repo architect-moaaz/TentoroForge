@@ -1,5 +1,29 @@
 import { generateNodeId } from "../../state/mutations";
 
+// DECISION (display-audit C8): KEPT, not deleted — the audit's "dead code"
+// finding is wrong, and deleting this would have shipped a regression.
+//
+// The audit checked only the frontend canvas drop path
+// (frontend/src/components/canvas/hooks/useDrop.ts, which reads
+// `starterRegistry`) and concluded this table is never called. It is:
+//   Editor.tsx → <DndProvider> → dnd/DndContext.tsx:34 → defaultsFor()
+// and `<Editor />` is mounted BOTH by frontend/src/components/schema-editor/
+// EditorMount.tsx and by backend/templates/app-foundation/src/lib/
+// editor-mount.tsx — i.e. the editor embedded in every generated app. Removing
+// this table would make every palette drop in that editor produce `{props:{}}`
+// and paint "⚠ invalid props".
+//
+// There are genuinely two drop paths and therefore two seed tables, and the
+// audit is right that they disagreed. They no longer disagree where it counted:
+// the C3 divergences (`Heading.level` string vs number, `Avatar.photoUrl`/`src`
+// seeded `""` against `.min(1)`) are fixed at the OTHER path's write boundary —
+// `defaultPropsFor` in useDrop.ts normalises registry seeds by descriptor type —
+// so both paths now emit the values this table already had right. Converging
+// the two tables outright (having `defaultsFor` fall back to the registry) would
+// change drop behaviour for ~130 components in the embedded editor and is not a
+// change to make under a deadline; it belongs in its own commit with its own
+// test. Until then this file stays, and stays authoritative for this path.
+
 /**
  * Default props (and starter children where applicable) for newly-dropped
  * palette items. Without these, dragging a Button onto the canvas would

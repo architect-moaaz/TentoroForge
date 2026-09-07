@@ -131,7 +131,7 @@ def generate_workflow_definitions(
         skip_write = False
         for ef in existing_files:
             try:
-                existing = json.loads(ef.read_text())
+                existing = json.loads(ef.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 continue
             if existing.get("name") == wf_name:

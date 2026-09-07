@@ -26,7 +26,7 @@ export const widgets = pgTable("widgets", {
 def _extract(tmp_path):
     sdir = tmp_path / "src" / "db" / "schema"
     sdir.mkdir(parents=True)
-    (sdir / "widgets.ts").write_text(_SCHEMA_TS)
+    (sdir / "widgets.ts").write_text(_SCHEMA_TS, encoding="utf-8")
     return extract_entities_from_schema(str(tmp_path))
 
 

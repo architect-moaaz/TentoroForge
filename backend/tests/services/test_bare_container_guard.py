@@ -13,11 +13,11 @@ from services.bare_container_guard import apply_bare_container_guard
 def _make(root: Path, schemas: dict[str, dict]) -> None:
     (root / "src" / "schemas").mkdir(parents=True)
     for name, doc in schemas.items():
-        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc))
+        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _read(root: Path, name: str) -> dict:
-    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text())
+    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 class TestPruneEmptyContainers:

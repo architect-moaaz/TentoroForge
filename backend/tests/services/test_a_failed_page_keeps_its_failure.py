@@ -77,9 +77,9 @@ def test_the_default_never_overwrites_the_real_palette(tmp_path):
 
     app = tmp_path / "app"
     (app / "src" / "app").mkdir(parents=True)
-    (app / "src" / "app" / "tokens.css").write_text(":root{--accent:#A16207}")
+    (app / "src" / "app" / "tokens.css").write_text(":root{--accent:#A16207}", encoding="utf-8")
     copy_scaffold(app, project_short_id="t")
-    assert "#A16207" in (app / "src" / "app" / "tokens.css").read_text()
+    assert "#A16207" in (app / "src" / "app" / "tokens.css").read_text(encoding="utf-8")
 
 
 def test_the_default_lands_when_nothing_projected_one(tmp_path):

@@ -37,7 +37,7 @@ class FidelityScore:
 def _load_index() -> dict:
     if not _INDEX_PATH.exists():
         return {"domains": {}}
-    return json.loads(_INDEX_PATH.read_text())
+    return json.loads(_INDEX_PATH.read_text(encoding="utf-8"))
 
 
 # Index keys that carry usable references. ``fitness`` is a key in the

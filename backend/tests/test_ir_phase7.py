@@ -168,7 +168,7 @@ class TestExportEject:
         assert not (tmp_path / ".ir").exists()
 
         # Verify boundaries are stripped
-        content = test_file.read_text()
+        content = test_file.read_text(encoding="utf-8")
         assert "@ir-node" not in content
         assert "@ir-end" not in content
         assert "Content" in content  # code preserved
@@ -210,7 +210,7 @@ class TestMigration:
             "relations": [],
             "components": {},
         }
-        (tmp_path / "registry.json").write_text(json.dumps(registry))
+        (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
 
         result = await migrate_to_ir(str(tmp_path))
         assert result["success"] is True

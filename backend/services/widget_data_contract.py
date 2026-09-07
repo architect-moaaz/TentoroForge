@@ -212,7 +212,7 @@ def entity_columns_from_app(app_root: str) -> dict[str, Any]:
         if f.name.startswith("_forge"):
             continue          # platform tables, never a domain entity
         try:
-            src = f.read_text()
+            src = f.read_text(encoding="utf-8")
         except Exception:  # noqa: BLE001
             continue
         for _var, table, body in table_re.findall(src):

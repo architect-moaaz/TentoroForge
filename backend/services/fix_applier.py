@@ -228,7 +228,7 @@ def _apply_workflow_node_config(output_dir: str, diagnosis: dict, *, git: bool) 
     if not node_id:
         return _noop("no locator.nodeId for workflow_node_config", seam="workflow_node_config")
 
-    pre_image = wf_file.read_text()
+    pre_image = wf_file.read_text(encoding="utf-8")
     try:
         data = json.loads(pre_image)
         definition = data.get("definition") or {}
@@ -241,7 +241,7 @@ def _apply_workflow_node_config(output_dir: str, diagnosis: dict, *, git: bool) 
             # Node not located — safe no-op, artifact untouched (never written).
             return _noop(f"node {node_id!r} not found in workflow", seam="workflow_node_config")
 
-        wf_file.write_text(json.dumps(data, indent=2))
+        wf_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
         # Do NOT run apply_post_generate_fixes here — see fix_applier
         # BUG-APPLY-1: the post-gen suite (form_scaffold especially)
@@ -251,12 +251,12 @@ def _apply_workflow_node_config(output_dir: str, diagnosis: dict, *, git: bool) 
         # Re-verify from disk.
         remaining = _verify_workflow(output_dir, wf_file)
         after_values = _node_config_values(
-            (json.loads(wf_file.read_text()).get("definition") or {}), node_id
+            (json.loads(wf_file.read_text(encoding="utf-8")).get("definition") or {}), node_id
         )
         changes = _value_changes(node_id, before_values, after_values)
     except Exception:
         # Transactional: never leave a half-written artifact.
-        wf_file.write_text(pre_image)
+        wf_file.write_text(pre_image, encoding="utf-8")
         raise
 
     committed = _commit(output_dir, f"fix(workflow): patch node {node_id}", git=git,
@@ -299,7 +299,7 @@ def _verify_workflow(output_dir: str, wf_file: Path) -> list[dict]:
         # an honest "resolved" only when there is nothing to check.
         return []
     try:
-        data = json.loads(wf_file.read_text())
+        data = json.loads(wf_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     defn = data.get("definition") if isinstance(data, dict) else None
@@ -311,7 +311,7 @@ def _columns_by_table(output_dir: str) -> dict:
     if not reg_path.exists():
         return {}
     try:
-        registry = json.loads(reg_path.read_text())
+        registry = json.loads(reg_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return columns_by_table_from_registry(registry)
@@ -332,7 +332,7 @@ def _apply_page_schema_patch(output_dir: str, diagnosis: dict, *, git: bool) -> 
     if not isinstance(patch_ops, list):
         return _noop("page_schema_patch expects a list of RFC-6902 ops", seam="page_schema_patch")
 
-    pre_image = schema_file.read_text()
+    pre_image = schema_file.read_text(encoding="utf-8")
     try:
         schema = json.loads(pre_image)
 
@@ -399,7 +399,7 @@ def _apply_page_schema_patch(output_dir: str, diagnosis: dict, *, git: bool) -> 
                 "committed": False,
             }
 
-        schema_file.write_text(json.dumps(patched, indent=2))
+        schema_file.write_text(json.dumps(patched, indent=2), encoding="utf-8")
 
         # Do NOT run apply_post_generate_fixes here — the post-gen suite
         # includes form_scaffold, which re-adds any field it thinks the
@@ -411,7 +411,7 @@ def _apply_page_schema_patch(output_dir: str, diagnosis: dict, *, git: bool) -> 
         # direct-edit wrapper; the seam-based apply path had the same
         # bug. Smith's edit is authoritative — no whole-app heal here.
     except PatchApplyError as e:
-        schema_file.write_text(pre_image)
+        schema_file.write_text(pre_image, encoding="utf-8")
         return {
             "applied": False,
             "seam": "page_schema_patch",
@@ -421,7 +421,7 @@ def _apply_page_schema_patch(output_dir: str, diagnosis: dict, *, git: bool) -> 
             "committed": False,
         }
     except Exception:
-        schema_file.write_text(pre_image)
+        schema_file.write_text(pre_image, encoding="utf-8")
         raise
 
     committed = _commit(output_dir, f"fix(page): patch schema {rel_path}", git=git,

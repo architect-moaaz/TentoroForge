@@ -52,7 +52,7 @@ def _page(children: list | None = None) -> dict:
 
 
 def _read(root: Path, rel: str) -> dict:
-    return json.loads((root / "src/schemas" / rel).read_text())
+    return json.loads((root / "src/schemas" / rel).read_text(encoding="utf-8"))
 
 
 def _crumb(root: Path, rel: str) -> dict | None:
@@ -202,7 +202,7 @@ class TestIdempotencyAndSafety:
         root = _mk(tmp_path, routes=["/products", "/products/new"],
                    schemas={"products/new.json": _page()})
         apply_page_nav(root)
-        rep = json.loads((root / "contracts" / "page-nav.json").read_text())
+        rep = json.loads((root / "contracts" / "page-nav.json").read_text(encoding="utf-8"))
         assert rep["summary"]["breadcrumbs_injected"] == 1
 
     def test_empty_app_no_crash(self, tmp_path):

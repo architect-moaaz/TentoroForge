@@ -97,7 +97,7 @@ class TestApply:
         res = apply_signature_moves(str(tmp_path), brief=_brief_with("ledger_row"))
         assert res["moves_applied"] == 1
         assert res["files"] == 1
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         table = after["root"]["children"][0]
         assert "borderLeft" in table["props"]["rowStyle"]
 
@@ -125,7 +125,7 @@ class TestApply:
         })
         res = apply_signature_moves(str(tmp_path), brief=_brief_with("keyline_breadcrumb"))
         assert res["moves_applied"] == 1
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         h1 = after["root"]["children"][0]
         h2 = after["root"]["children"][1]
         assert "borderBottom" in h1["props"]["style"]
@@ -213,7 +213,7 @@ class TestIdempotent:
         })
         brief = _brief_with("ledger_row")
         apply_signature_moves(str(tmp_path), brief=brief)
-        first = p.read_text()
+        first = p.read_text(encoding="utf-8")
         apply_signature_moves(str(tmp_path), brief=brief)
-        second = p.read_text()
+        second = p.read_text(encoding="utf-8")
         assert first == second

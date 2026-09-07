@@ -15,7 +15,7 @@ def test_save_design_spec_uses_brand_when_provided():
 :root {
   --background: 0 0% 100%;
   --primary: 221 83% 53%;
-}""")
+}""", encoding="utf-8")
 
         spec = {
             "register": "default",
@@ -38,10 +38,10 @@ def test_save_design_spec_uses_brand_when_provided():
             "colorPalette": {"background": "#FFFFFF", "primary": "#FFFFFF"},
         }
         save_design_spec(tmp, spec)
-        saved = json.loads((Path(tmp) / "src" / "contracts" / "design-spec.json").read_text())
+        saved = json.loads((Path(tmp) / "src" / "contracts" / "design-spec.json").read_text(encoding="utf-8"))
         assert saved["colorPalette"]["background"] == "#FEF2F2"
         assert saved["colorPalette"]["primary"] == "#DC2626"
         # globals.css should have updated --background
-        css = css_path.read_text()
+        css = css_path.read_text(encoding="utf-8")
         assert "--background:" in css
         assert "--background: 0 0% 100%" not in css

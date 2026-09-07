@@ -20,7 +20,7 @@ async def git_init(output_dir: str) -> None:
     # Create .gitignore
     gitignore = Path(output_dir) / ".gitignore"
     if not gitignore.exists():
-        gitignore.write_text("node_modules/\n.next/\n.env\n")
+        gitignore.write_text("node_modules/\n.next/\n.env\n", encoding="utf-8")
 
 
 #: Trailer key that records WHICH actor produced a commit. Without it

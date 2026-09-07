@@ -28,7 +28,7 @@ from services.plan_field_lookup import (
 def _write_plan(tmp_path: Path, plan: dict) -> str:
     p = tmp_path / "src" / "contracts"
     p.mkdir(parents=True)
-    (p / "plan.json").write_text(json.dumps(plan))
+    (p / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return str(tmp_path)
 
 
@@ -57,7 +57,7 @@ def test_load_invalidates_cache_on_mtime_change(tmp_path):
     assert load_plan(out)["module_name"] == "old"
     # Simulate re-persist with different content + advance mtime
     p = Path(out) / "src" / "contracts" / "plan.json"
-    p.write_text(json.dumps({"module_name": "new"}))
+    p.write_text(json.dumps({"module_name": "new"}), encoding="utf-8")
     import os
     st = p.stat()
     os.utime(p, (st.st_atime, st.st_mtime + 1))  # bump mtime forward

@@ -190,7 +190,7 @@ def test_persist_critique_writes_json_to_reports_page_critic(tmp_path):
     path = pc.persist_critique(str(tmp_path), "dashboard", critique)
     assert path is not None
     assert path.exists()
-    reloaded = json.loads(path.read_text())
+    reloaded = json.loads(path.read_text(encoding="utf-8"))
     assert reloaded == critique
     # Path shape.
     assert path.parent == tmp_path / "reports" / "page-critic"
@@ -201,7 +201,7 @@ def test_persist_critique_swallows_errors(tmp_path):
     """When the output dir can't be written to (e.g. a file blocks the
     reports/ dir), persistence returns None instead of raising."""
     blocker = tmp_path / "reports"
-    blocker.write_text("i am a file, not a dir")
+    blocker.write_text("i am a file, not a dir", encoding="utf-8")
     result = pc.persist_critique(str(tmp_path), "x", {"score": 1})
     assert result is None  # blocker prevents mkdir, but no exception
 

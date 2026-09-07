@@ -99,12 +99,12 @@ def polish_detail_schemas(output_dir: str | Path) -> dict:
     for p in sorted(schemas.rglob("[[]id[]].json")):
         files += 1
         try:
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         n = polish_detail_schema(data)
         if n:
-            p.write_text(json.dumps(data, indent=2))
+            p.write_text(json.dumps(data, indent=2), encoding="utf-8")
             converted += n
             changed_files.append(str(p.relative_to(schemas)))
     return {"files": files, "converted": converted, "changed_files": changed_files}

@@ -1,4 +1,5 @@
 "use client";
+import * as React from "react";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -88,6 +89,31 @@ export function PagePicker({
   });
 
   const pages: NavFlowPage[] = (navFlow as any)?.pages ?? [];
+
+  // What "New page" must de-duplicate against is the EDIT STORE, not this
+  // query: `dispatch({type:"addPage"})` lands in `artifacts`, and the query
+  // returns `{ pages: [] }` on any non-ok response and is undefined while
+  // loading. De-duplicating against the query alone meant that opening the
+  // dialog before the fetch settled (or with the backend down) offered a slug
+  // that collided with a real page. applyAction now refuses the collision, so
+  // the worst case is a clear error instead of a destroyed page — but taking
+  // the union here means the dialog disambiguates the slug up front and the
+  // user never sees the error at all.
+  const takenPageIds = React.useMemo(() => {
+    const ids = new Set<string>(pages.map((p) => p.id));
+    for (const id of Object.keys((artifacts as any)?.pageSchemas ?? {})) ids.add(id);
+    for (const p of ((artifacts as any)?.navFlow?.pages ?? []) as NavFlowPage[]) {
+      if (p?.id) ids.add(p.id);
+    }
+    return [...ids];
+  }, [pages, artifacts]);
+  const takenRoutes = React.useMemo(() => {
+    const routes = new Set<string>(pages.map((p) => p.route).filter(Boolean));
+    for (const p of ((artifacts as any)?.navFlow?.pages ?? []) as NavFlowPage[]) {
+      if (p?.route) routes.add(p.route);
+    }
+    return [...routes];
+  }, [pages, artifacts]);
 
   // Create a scaffolded page: add it to the store, flush to disk so the picker
   // + canvas can load it, refresh the nav-flow query, then activate it.
@@ -183,8 +209,8 @@ export function PagePicker({
       <NewPageDialog
         open={newPageOpen}
         onOpenChange={setNewPageOpen}
-        existingPageIds={pages.map((p) => p.id)}
-        existingRoutes={pages.map((p) => p.route)}
+        existingPageIds={takenPageIds}
+        existingRoutes={takenRoutes}
         onCreate={handleCreatePage}
       />
 

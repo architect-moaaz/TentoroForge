@@ -85,12 +85,12 @@ def test_ignores_non_kv_rows():
 def test_walks_detail_files(tmp_path):
     d = tmp_path / "src" / "schemas" / "technicians"
     d.mkdir(parents=True)
-    (d / "[id].json").write_text(json.dumps(_detail_schema()))
-    (tmp_path / "src/schemas/technicians.json").write_text(json.dumps({"root": {"type": "Text"}}))
+    (d / "[id].json").write_text(json.dumps(_detail_schema()), encoding="utf-8")
+    (tmp_path / "src/schemas/technicians.json").write_text(json.dumps({"root": {"type": "Text"}}), encoding="utf-8")
     res = polish_detail_schemas(tmp_path)
     assert res["files"] == 1
     assert res["converted"] == 1
-    out = json.loads((d / "[id].json").read_text())
+    out = json.loads((d / "[id].json").read_text(encoding="utf-8"))
     dl = out["root"]["children"][1]["children"][0]["children"][0]
     assert dl["type"] == "DescriptionList"
 

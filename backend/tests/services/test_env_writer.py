@@ -110,7 +110,7 @@ async def test_writes_managed_block_when_platform_has_values(tmp_path):
         _row("anthropic", "ANTHROPIC_API_KEY", "sk-ant-XYZ"),
     ])
     assert result["written"] is True
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert "RESEND_API_KEY=re_live" in env
     assert "ANTHROPIC_API_KEY=sk-ant-XYZ" in env
     # Managed marker present exactly once.
@@ -125,7 +125,7 @@ async def test_preserves_user_supplied_lines(tmp_path):
         "FORGE_URL=http://localhost:6500\n"
     )
     await _call(tmp_path, [_row("resend", "RESEND_API_KEY", "re_live")])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert "DATABASE_URL=postgresql://x:y@localhost/z" in env, "user URL wiped"
     assert "NEXTAUTH_SECRET=abc" in env, "user secret wiped"
     assert "FORGE_URL=http://localhost:6500" in env
@@ -139,7 +139,7 @@ async def test_updates_existing_managed_value(tmp_path):
         "RESEND_API_KEY=old_value\n"
     )
     await _call(tmp_path, [_row("resend", "RESEND_API_KEY", "new_value")])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert "old_value" not in env
     assert "RESEND_API_KEY=new_value" in env
 
@@ -151,7 +151,7 @@ async def test_cleared_row_removes_line(tmp_path):
         "RESEND_API_KEY=live_value\n"
     )
     result = await _call(tmp_path, [_cleared_row("resend", "RESEND_API_KEY")])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert "RESEND_API_KEY" not in env, "cleared row must remove the line"
     assert "DATABASE_URL=x" in env
     assert "RESEND_API_KEY" in result["cleared"]
@@ -176,7 +176,7 @@ async def test_unknown_key_reported_and_skipped(tmp_path):
     result = await _call(tmp_path, [unknown])
     env_path = tmp_path / ".env.local"
     if env_path.is_file():
-        assert "ARBITRARY_UNKNOWN_KEY" not in env_path.read_text()
+        assert "ARBITRARY_UNKNOWN_KEY" not in env_path.read_text(encoding="utf-8")
     assert any(s["key"] == "ARBITRARY_UNKNOWN_KEY" for s in result["skipped"])
 
 
@@ -190,7 +190,7 @@ async def test_decrypt_failure_skipped_not_crashing(tmp_path):
     )
     good = _row("anthropic", "ANTHROPIC_API_KEY", "sk-ant-good")
     result = await _call(tmp_path, [bad, good])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert "ANTHROPIC_API_KEY=sk-ant-good" in env
     assert "RESEND_API_KEY" not in env
     assert any(s["key"] == "RESEND_API_KEY" and "decrypt" in s["reason"] for s in result["skipped"])
@@ -206,7 +206,7 @@ async def test_mcp_bearer_server_emits_all_env_vars(tmp_path):
     result = await _call(tmp_path, [], mcp_rows=[
         _mcp_row(server_id=server_id, auth_kind="bearer", secret="fc-abc"),
     ])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     slug = server_id.hex[:12].upper()
     assert f"MCP_SERVER_{slug}_URL=https://mcp.firecrawl.dev" in env
     assert f"MCP_SERVER_{slug}_TRANSPORT=http" in env
@@ -226,7 +226,7 @@ async def test_mcp_apikey_header_includes_header_name(tmp_path):
             header_name="X-Api-Key",
         ),
     ])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     slug = server_id.hex[:12].upper()
     assert f"MCP_SERVER_{slug}_AUTH_KIND=apikey_header" in env
     assert f"MCP_SERVER_{slug}_SECRET=k" in env
@@ -239,7 +239,7 @@ async def test_mcp_none_auth_writes_no_secret(tmp_path):
     await _call(tmp_path, [], mcp_rows=[
         _mcp_row(server_id=server_id, auth_kind="none", secret=None),
     ])
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     slug = server_id.hex[:12].upper()
     assert f"MCP_SERVER_{slug}_AUTH_KIND=none" in env
     assert f"MCP_SERVER_{slug}_SECRET" not in env
@@ -256,11 +256,11 @@ async def test_disabled_mcp_server_removes_stale_env_lines(tmp_path):
         _mcp_row(server_id=server_id, auth_kind="bearer", secret="tok"),
     ])
     slug = server_id.hex[:12].upper()
-    env = (tmp_path / ".env.local").read_text()
+    env = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert f"MCP_SERVER_{slug}_URL" in env
 
     # Second pass — no mcp rows returned (simulates disable/delete).
     await _call(tmp_path, [], mcp_rows=[])
-    env2 = (tmp_path / ".env.local").read_text()
+    env2 = (tmp_path / ".env.local").read_text(encoding="utf-8")
     assert f"MCP_SERVER_{slug}_URL" not in env2
     assert f"MCP_SERVER_{slug}_SECRET" not in env2

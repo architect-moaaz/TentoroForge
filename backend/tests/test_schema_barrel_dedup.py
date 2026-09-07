@@ -12,7 +12,7 @@ def _schema(tmp_path: Path, files: dict[str, str]) -> Path:
     sdir = tmp_path / "src" / "db" / "schema"
     sdir.mkdir(parents=True)
     for name, body in files.items():
-        (sdir / name).write_text(body)
+        (sdir / name).write_text(body, encoding="utf-8")
     return sdir
 
 
@@ -23,7 +23,7 @@ def test_deduplicates_colliding_users_export(tmp_path):
         "rooms.ts": 'export const rooms = pgTable("rooms", {});',
     })
     res = reconcile_db_schema_barrel(tmp_path)
-    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text()
+    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text(encoding="utf-8")
     # `users` exported exactly once...
     assert barrel.count("users }") + barrel.count("{ users") >= 1
     assert barrel.count('export { users }') == 1
@@ -40,7 +40,7 @@ def test_no_collision_is_unchanged(tmp_path):
         "guests.ts": 'export const guests = pgTable("guests", {});',
     })
     reconcile_db_schema_barrel(tmp_path)
-    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text()
+    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text(encoding="utf-8")
     assert 'export { rooms } from "./rooms";' in barrel
     assert 'export { guests } from "./guests";' in barrel
 
@@ -53,7 +53,7 @@ def test_multi_symbol_file_keeps_its_fresh_symbols(tmp_path):
         "users.ts": 'export const users = pgTable("users", {});\nexport const usersRelations = relations();',
     })
     reconcile_db_schema_barrel(tmp_path)
-    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text()
+    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text(encoding="utf-8")
     assert 'export { users } from "./user";' in barrel
     assert 'usersRelations' in barrel and '"./users"' in barrel
     assert barrel.count("export { users }") == 1

@@ -130,7 +130,7 @@ def generate_contracts(output_dir: str, plan: dict, registry: dict | None = None
     # component/page agents. In schema-mode nothing imports it, but emitting it
     # deterministically lets the contract gate pass so the LLM agent is skipped.
     try:
-        (contracts_dir / "design-system.tsx").write_text(_DESIGN_SYSTEM_TSX)
+        (contracts_dir / "design-system.tsx").write_text(_DESIGN_SYSTEM_TSX, encoding="utf-8")
         generated.append("src/contracts/design-system.tsx")
     except Exception as e:
         errors.append(f"design-system.tsx: {e}")
@@ -355,7 +355,7 @@ def _generate_api_client(path: Path, plan: dict, registry: dict | None = None):
         lines.append("}")
         lines.append("")
 
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _generate_navigation_flow(path: Path, plan: dict, registry: dict | None = None):
@@ -440,7 +440,7 @@ def _generate_navigation_flow(path: Path, plan: dict, registry: dict | None = No
         "user_menu": ["Sign Out"],
     }
 
-    path.write_text(json.dumps(flow, indent=2))
+    path.write_text(json.dumps(flow, indent=2), encoding="utf-8")
 
 
 def _generate_event_bindings(path: Path, plan: dict, registry: dict | None = None):
@@ -507,7 +507,7 @@ def _generate_event_bindings(path: Path, plan: dict, registry: dict | None = Non
                 "description": trigger or f"Manual trigger for {wf_name}",
             })
 
-    path.write_text(json.dumps({"bindings": bindings}, indent=2))
+    path.write_text(json.dumps({"bindings": bindings}, indent=2), encoding="utf-8")
 
 
 _APPROVAL_KEYWORDS = ("approv", "reject", "review", "sign-off", "sign off", "decision", "authoriz")
@@ -529,7 +529,7 @@ def ensure_approval_bindings(output_dir, plan: dict) -> dict:
     entities = _plan_models(plan)
 
     try:
-        cfg = json.loads(path.read_text()) if path.exists() else {}
+        cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except Exception:  # noqa: BLE001
         cfg = {}
     if not isinstance(cfg, dict):
@@ -560,7 +560,7 @@ def ensure_approval_bindings(output_dir, plan: dict) -> dict:
     if added or not path.exists():
         cfg["bindings"] = bindings
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(cfg, indent=2))
+        path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     return {"added": added, "total": len(bindings)}
 
 
@@ -639,4 +639,4 @@ def _generate_seed_plan(path: Path, plan: dict):
         },
     }
 
-    path.write_text(json.dumps(seed_plan, indent=2))
+    path.write_text(json.dumps(seed_plan, indent=2), encoding="utf-8")

@@ -4,6 +4,7 @@ import { ChevronRight, PanelLeftClose, Search, X } from "lucide-react";
 import { starterRegistry } from "@forge/registry";
 import * as Lucide from "lucide-react";
 import { setDraggingComponent } from "@/lib/palette-drag";
+import { insertComponentByClick } from "@/components/canvas/hooks/useDrop";
 
 interface PaletteProps {
   collapsed?: boolean;
@@ -74,7 +75,11 @@ export function Palette({ collapsed = false, onToggleCollapsed }: PaletteProps =
     (e.description ?? "").toLowerCase().includes(q);
 
   // Group registry entries by category
+  // `hidden` entries are structure the editor creates on the user's behalf
+  // (GridCell) — real registry components, so validateForCommit's type closure
+  // accepts them, but never something you drag in yourself.
   const byCategory = Object.values(starterRegistry).reduce((acc, e: any) => {
+    if (e.hidden) return acc;
     (acc[e.category] = acc[e.category] || []).push(e);
     return acc;
   }, {} as Record<string, any[]>);
@@ -170,8 +175,22 @@ export function Palette({ collapsed = false, onToggleCollapsed }: PaletteProps =
                         setDraggingComponent(e.name);
                       }}
                       onDragEnd={() => setDraggingComponent(null)}
-                      className="mx-2 px-2 py-1.5 rounded-md hover:bg-muted/50 cursor-grab flex items-start gap-2.5"
-                      title={e.description ?? e.name}
+                      // CLICK IS A REAL WAY TO ADD A COMPONENT, not just drag.
+                      // This list was drag-only, so clicking an item did nothing
+                      // and there was no other route to the canvas — unusable for
+                      // anyone who cannot drag. Enter/Space give the same result
+                      // from the keyboard.
+                      onClick={() => insertComponentByClick(e.name)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.preventDefault();
+                          insertComponentByClick(e.name);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      className="mx-2 px-2 py-1.5 rounded-md hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 cursor-grab flex items-start gap-2.5"
+                      title={`${e.description ?? e.name} — drag onto the canvas, or click to add`}
                     >
                       <span
                         className={`flex-shrink-0 h-9 w-9 rounded-lg bg-gradient-to-br ${

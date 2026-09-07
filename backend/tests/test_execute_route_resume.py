@@ -8,7 +8,7 @@ from services.runtime_injector import _generate_workflow_api_route
 
 def _route_text(tmp_path):
     _generate_workflow_api_route(tmp_path)
-    return (tmp_path / "src" / "app" / "api" / "workflows" / "[id]" / "execute" / "route.ts").read_text()
+    return (tmp_path / "src" / "app" / "api" / "workflows" / "[id]" / "execute" / "route.ts").read_text(encoding="utf-8")
 
 
 def test_route_resolves_pending_task_by_entity(tmp_path):

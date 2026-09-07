@@ -411,7 +411,7 @@ async def _node_foundation(state: PipelineState, config: dict) -> dict:
     try:
         from services.app_design_guardrail import normalize_app_design
         _, _report = normalize_app_design(plan)
-        (Path(out) / "app-design-report.json").write_text(json.dumps(_report, indent=2))
+        (Path(out) / "app-design-report.json").write_text(json.dumps(_report, indent=2), encoding="utf-8")
     except Exception as exc:  # noqa: BLE001
         _log(config, f"[Design] report skipped: {exc}")
 
@@ -468,7 +468,7 @@ async def _node_design(state: PipelineState, config: dict) -> dict:
         dna_brief = prompt_brief(design_dna)
         _dna_path = Path(out) / "src" / "contracts" / "design-dna.json"
         _dna_path.parent.mkdir(parents=True, exist_ok=True)
-        _dna_path.write_text(json.dumps(design_dna, indent=2))
+        _dna_path.write_text(json.dumps(design_dna, indent=2), encoding="utf-8")
         _log(config, f"[Design DNA] {design_dna['archetype']} · "
                      f"{design_dna['typography']['pairing']} · primary "
                      f"{design_dna['color']['primary']}")
@@ -625,7 +625,7 @@ async def _node_design(state: PipelineState, config: dict) -> dict:
             from services.design_compiler import compile_to_file
             spec_path = Path(out) / "src" / "contracts" / "design-spec.json"
             if spec_path.exists():
-                compile_to_file(json.loads(spec_path.read_text()),
+                compile_to_file(json.loads(spec_path.read_text(encoding="utf-8")),
                                 str(Path(out) / "src" / "theme" / "tokens.custom.json"))
                 _log(config, "[Tokens] ✓ Compiled tokens.custom.json from design-spec")
         except Exception as exc:  # noqa: BLE001
@@ -635,7 +635,7 @@ async def _node_design(state: PipelineState, config: dict) -> dict:
         try:
             from services.design_compiler import compile_to_file as _ctf
             _spec_path = Path(out) / "src" / "contracts" / "design-spec.json"
-            _spec = json.loads(_spec_path.read_text()) if _spec_path.exists() else {}
+            _spec = json.loads(_spec_path.read_text(encoding="utf-8")) if _spec_path.exists() else {}
             _ctf(_spec, str(Path(out) / "src" / "theme" / "tokens.custom.json"), dna=design_dna)
             _log(config, "[Tokens] ✓ DNA-merged tokens.custom.json compiled")
         except Exception as exc:  # noqa: BLE001
@@ -1099,7 +1099,7 @@ async def _node_finish(state: PipelineState, config: dict) -> dict:
         from services.post_emit_photo_injector import inject_photos_into_dir
         spec_path = Path(out) / "src" / "contracts" / "design-spec.json"
         if spec_path.exists():
-            entity_photos = (json.loads(spec_path.read_text()).get("entityPhotos") or {})
+            entity_photos = (json.loads(spec_path.read_text(encoding="utf-8")).get("entityPhotos") or {})
             if entity_photos:
                 n = inject_photos_into_dir(out, entity_photos)
                 if n > 0:

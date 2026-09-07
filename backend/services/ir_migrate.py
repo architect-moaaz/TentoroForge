@@ -149,7 +149,7 @@ def _registry_to_plan(registry: dict, output_dir: str) -> dict:
     pkg_path = Path(output_dir) / "package.json"
     if pkg_path.exists():
         try:
-            pkg = json.loads(pkg_path.read_text())
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
             plan["module_name"] = pkg.get("name", "Migrated App")
         except Exception:
             pass
@@ -241,7 +241,7 @@ def _scan_source_for_plan(output_dir: str) -> dict | None:
     pkg_path = Path(output_dir) / "package.json"
     if pkg_path.exists():
         try:
-            pkg = json.loads(pkg_path.read_text())
+            pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
             plan["module_name"] = pkg.get("name", "Migrated App")
         except Exception:
             pass

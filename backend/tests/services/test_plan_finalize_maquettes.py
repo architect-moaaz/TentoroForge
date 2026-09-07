@@ -219,7 +219,7 @@ class TestAuthorCollectionMaquettes:
         self._run(author_collection_maquettes_if_enabled(_basic_plan(), str(tmp_path)))
         p = tmp_path / "src" / "contracts" / "collection-maquettes.json"
         assert p.is_file()
-        loaded = json.loads(p.read_text())
+        loaded = json.loads(p.read_text(encoding="utf-8"))
         assert isinstance(loaded, list)
         assert len(loaded) == 2
 

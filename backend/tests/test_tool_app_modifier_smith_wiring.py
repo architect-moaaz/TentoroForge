@@ -27,10 +27,10 @@ def _seed(tmp_path):
     (tmp_path / "contracts").mkdir(exist_ok=True)
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {"Candidate": {}}, "pages": [], "workflows": [], "dataSources": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "plan.json").write_text(json.dumps({
         "data_models": [], "pages": [], "workflows": [],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -104,7 +104,7 @@ def test_sync_wrapper_delegates_via_handler(tmp_path, monkeypatch):
     assert "FileUpload" in r["summary"]
     assert any(f["path"].endswith("new.json") for f in r["files_touched"])
     # File actually changed
-    assert "FileUpload" in (tmp_path / "src" / "schemas" / "candidates" / "new.json").read_text()
+    assert "FileUpload" in (tmp_path / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8")
 
 
 def test_sync_wrapper_survives_sdk_crash(tmp_path, monkeypatch):

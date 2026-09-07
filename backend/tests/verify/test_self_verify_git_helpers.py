@@ -26,7 +26,7 @@ def _init_repo(tmp: Path) -> None:
 
 
 def _commit(tmp: Path, filename: str, msg: str) -> str:
-    (tmp / filename).write_text("data")
+    (tmp / filename).write_text("data", encoding="utf-8")
     subprocess.run(["git", "add", filename], cwd=tmp, check=True)
     subprocess.run(["git", "commit", "-q", "-m", msg, "--no-verify"],
                    cwd=tmp, check=True)

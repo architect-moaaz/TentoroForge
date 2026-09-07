@@ -60,12 +60,12 @@ def sync_shell_menu(output_dir: str) -> dict:
         }
 
     try:
-        nav_flow = json.loads(nav_flow_path.read_text())
+        nav_flow = json.loads(nav_flow_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {"synced": False, "groups": [], "message": f"nav-flow parse failed: {exc}"}
 
     try:
-        shell = json.loads(shell_path.read_text())
+        shell = json.loads(shell_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {"synced": False, "groups": [], "message": f"shell parse failed: {exc}"}
 
@@ -120,7 +120,7 @@ def sync_shell_menu(output_dir: str) -> dict:
             "message": "shell.json has no props.groups anchor or button menu strip to update",
         }
 
-    shell_path.write_text(json.dumps(shell, indent=2))
+    shell_path.write_text(json.dumps(shell, indent=2), encoding="utf-8")
     return {
         "synced": True,
         "groups": groups,

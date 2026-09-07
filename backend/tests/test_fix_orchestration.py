@@ -90,7 +90,7 @@ def test_classify_intent_short_circuits_to_fix_without_model(tmp_path, monkeypat
     """classify_intent must return FIX from the deterministic gate on a has-code
     project WITHOUT invoking the LLM query()."""
     # Give the dir a real file so has_files is True.
-    (tmp_path / "app-model.json").write_text("{}")
+    (tmp_path / "app-model.json").write_text("{}", encoding="utf-8")
 
     def _boom(*a, **k):  # the model must never be called
         raise AssertionError("classify_intent hit the model on a gated FIX symptom")

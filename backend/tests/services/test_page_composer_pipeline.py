@@ -213,7 +213,7 @@ class TestFlagOnHappyPath:
         # Disk cache written.
         cache_path = output_dir / "contracts" / "page-composer-cache.json"
         assert cache_path.is_file()
-        cache_data = json.loads(cache_path.read_text())
+        cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
         assert len(cache_data) == 1
         entry = next(iter(cache_data.values()))
         assert entry["schema"] == valid_schema
@@ -403,7 +403,7 @@ class TestWritePageSchema:
         p = pcp._write_page_schema(page, valid_schema, tmp_path)
         assert p is not None
         assert p == tmp_path / "src" / "schemas" / "transactions.json"
-        written = json.loads(p.read_text())
+        written = json.loads(p.read_text(encoding="utf-8"))
         # Markers stamped on the schema so deterministic composers skip it.
         assert written["meta"]["page_composer_composed"] is True
         assert written["meta"]["maquette_composed"] is True
@@ -490,7 +490,7 @@ class TestEarlyExitInDeterministicComposers:
             or result["applied"] == 1  # tolerated — apply path reports ok
         # The written schema is what the LLM emitted, not the deterministic table.
         written = json.loads(
-            (tmp_path / "src" / "schemas" / "sessions.json").read_text(),
+            (tmp_path / "src" / "schemas" / "sessions.json").read_text(encoding="utf-8"),
         )
         assert written["id"] == "sessions-llm"
         assert written["meta"]["page_composer_composed"] is True

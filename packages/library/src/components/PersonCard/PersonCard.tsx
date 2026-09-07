@@ -1,10 +1,19 @@
 import * as React from "react";
+import type { StyleSlotT } from "@tentoroforge/schema";
+import { resolveStyle } from "../../style/resolveStyle";
+import { useMotion } from "../../style/useMotion";
 import { z } from "zod";
 import type { PersonCardNode } from "@tentoroforge/schema";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 import { useRadiusScale } from "../../theme/tokens-context";
 
-type Props = z.infer<typeof PersonCardNode>["props"];
+/** The renderer passes the node's `style` envelope alongside its props.
+ *  WITHOUT `style` here the Style panel wrote background / padding /
+ *  radius / shadow / motion into the page schema and this component
+ *  rendered none of it — the edit persisted to disk and was invisible on
+ *  the canvas, which reads as a broken Style tab rather than an
+ *  unsupported one. */
+type Props = z.infer<typeof PersonCardNode>["props"] & { style?: StyleSlotT };
 
 const STATUS_DOT: Record<string, string> = {
   active:    "bg-emerald-500",
@@ -27,13 +36,14 @@ function getInitials(name: string, fallback?: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function PersonCard({ name, role, department, avatarUrl, avatarInitials, email, status, manager, layout = "compact" }: Props) {
+export function PersonCard({ name, role, department, avatarUrl, avatarInitials, email, status, manager, layout = "compact", style }: Props) {
   const initials = getInitials(name, avatarInitials);
   const expanded = layout === "expanded";
   const radiusScale = useRadiusScale();
 
   return (
-    <div className={`flex ${expanded ? `flex-col gap-3 ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-card p-4` : "flex-row items-center gap-3"}`}>
+    <div className={`flex ${expanded ? `flex-col gap-3 ${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-card p-4` : "flex-row items-center gap-3"}`}
+      style={resolveStyle(style)} {...useMotion(style?.motion)}>
       <div className={`relative flex shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold ${expanded ? "h-16 w-16 text-xl" : "h-10 w-10 text-sm"}`}>
         {avatarUrl ? (
           <img src={avatarUrl} alt={name} className="h-full w-full rounded-full object-cover" />

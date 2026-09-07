@@ -90,7 +90,7 @@ def test_llm_output_is_written_verbatim(app_root, monkeypatch):
     assert result["applied"] is True
     assert target in result["edited_paths"]
 
-    written = json.loads((app_root / target).read_text())
+    written = json.loads((app_root / target).read_text(encoding="utf-8"))
     assert written == new_schema
 
 
@@ -118,7 +118,7 @@ def test_fileupload_persists_no_authority_clobber(app_root):
     assert result["applied"] is True
 
     # The FK-named column IS still a FileUpload on disk — no downgrade.
-    disk = json.loads((app_root / target).read_text())
+    disk = json.loads((app_root / target).read_text(encoding="utf-8"))
     def _walk(node, hits):
         if isinstance(node, dict):
             if node.get("props", {}).get("name") == "cvUploadId":

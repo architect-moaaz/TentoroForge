@@ -23,10 +23,10 @@ export const project = pgTable("project", { id: uuid("id").primaryKey(), name: v
 def _app(tmp_path: Path) -> Path:
     db = tmp_path / "src" / "db"
     (db / "schema").mkdir(parents=True)
-    (db / "schema" / "user.ts").write_text(_USER_TS)
-    (db / "schema" / "projects.ts").write_text(_SCHEMA_TS.replace("project", "projects2"))
-    (db / "schema" / "index.ts").write_text('export * from "./user";\nexport * from "./projects";\n')
-    (db / "schema.ts").write_text(_SCHEMA_TS)  # domain-only, NO users
+    (db / "schema" / "user.ts").write_text(_USER_TS, encoding="utf-8")
+    (db / "schema" / "projects.ts").write_text(_SCHEMA_TS.replace("project", "projects2"), encoding="utf-8")
+    (db / "schema" / "index.ts").write_text('export * from "./user";\nexport * from "./projects";\n', encoding="utf-8")
+    (db / "schema.ts").write_text(_SCHEMA_TS, encoding="utf-8")  # domain-only, NO users
     return tmp_path
 
 
@@ -40,7 +40,7 @@ def test_finds_auth_table_in_per_entity_dir(tmp_path):
 def test_ensure_seed_file_emits_correct_import(tmp_path):
     p = ensure_seed_file(_app(tmp_path))
     assert p is not None
-    seed = (tmp_path / "src" / "db" / "seed.ts").read_text()
+    seed = (tmp_path / "src" / "db" / "seed.ts").read_text(encoding="utf-8")
     assert 'import { users } from "./schema/user";' in seed
     assert "admin@example.com" in seed
     assert ".insert(users)" in seed
@@ -49,6 +49,6 @@ def test_ensure_seed_file_emits_correct_import(tmp_path):
 def test_still_works_with_single_file_schema_only(tmp_path):
     # legacy single-file layout where users IS in schema.ts
     db = tmp_path / "src" / "db"; db.mkdir(parents=True)
-    db.joinpath("schema.ts").write_text(_USER_TS)
+    db.joinpath("schema.ts").write_text(_USER_TS, encoding="utf-8")
     var, cols, import_module = _find_auth_source(tmp_path)
     assert var == "users" and import_module == "./schema"

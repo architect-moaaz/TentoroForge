@@ -143,13 +143,13 @@ async def phase_figma_schema_refine(
                 except Exception as _shot_ex:
                     yield sse_event("log", {"text": f"[Refiner] {route} screenshot fetch failed ({_shot_ex}) — text-only"})
                 try:
-                    det_schema = json.loads(schema_path.read_text())
+                    det_schema = json.loads(schema_path.read_text(encoding="utf-8"))
                     yield sse_event("status", {"message": f"Refining {route} into a responsive layout..."})
                     refined = await run_figma_schema_refiner(det_schema, shot_path, descriptor)
                     if refined is not None:
                         refined["id"] = det_schema.get("id", slug)
                         refined.setdefault("schemaVersion", det_schema.get("schemaVersion", "2"))
-                        schema_path.write_text(json.dumps(refined, indent=2))
+                        schema_path.write_text(json.dumps(refined, indent=2), encoding="utf-8")
                         yield sse_event("log", {"text": f"[Refiner] ✓ {route} → responsive schema"})
                     else:
                         yield sse_event("log", {"text": f"[Refiner] {route} kept deterministic (refine rejected)"})
@@ -269,7 +269,7 @@ async def phase_figma_mcp(
                             f"src/schemas/{slug}.json"
                         )
                         file_path.parent.mkdir(parents=True, exist_ok=True)
-                        file_path.write_text(json.dumps(schema, indent=2))
+                        file_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
                         mcp_success += 1
                         _asset_count = len(asset_paths)
                         yield sse_event("log", {
@@ -327,7 +327,7 @@ async def phase_figma_binding_pass(
             if not schema_path.exists():
                 continue
             try:
-                page_schema = _json.loads(schema_path.read_text())
+                page_schema = _json.loads(schema_path.read_text(encoding="utf-8"))
             except Exception:
                 continue
             # Merge deterministic CRUD actions + thread workflow set / page-type /
@@ -352,7 +352,7 @@ async def phase_figma_binding_pass(
             p["_page_type"] = p.get("type")
             p["_route"] = p.get("route")
             bound_schema, report = apply_bindings(page_schema, p, plan)
-            schema_path.write_text(_json.dumps(bound_schema, indent=2))
+            schema_path.write_text(_json.dumps(bound_schema, indent=2), encoding="utf-8")
             # Aggregate-spec floor: ensure MetricTile bindings to op:aggregate sources
             # resolve to real numbers (never literal {{…}}). Idempotent.
             try:
@@ -372,7 +372,7 @@ async def phase_figma_binding_pass(
                     f"buttons={report.get('buttons_bound')}")})
             elif report.get("reverted"):
                 yield sse_event("log", {"text": f"[Binding] {p.get('route')} reverted (invalid) — kept unbound"})
-        (Path(output_dir) / "binding-report.json").write_text(_json.dumps(binding_reports, indent=2))
+        (Path(output_dir) / "binding-report.json").write_text(_json.dumps(binding_reports, indent=2), encoding="utf-8")
         yield sse_event("log", {"text": f"[Binding] applied to {len(binding_reports)} page(s)"})
     except Exception as _bind_ex:
         yield sse_event("log", {"text": f"[Binding] phase skipped: {_bind_ex}"})

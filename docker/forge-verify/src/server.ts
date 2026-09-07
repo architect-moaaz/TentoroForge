@@ -8,6 +8,7 @@
  *   GET  /healthz       — liveness
  */
 import Fastify from "fastify";
+import { pathToFileURL } from "node:url";
 import { BrowserPool } from "./browserPool.js";
 import { runBatch } from "./orchestrator.js";
 import { RunReport, RunRequest } from "./types.js";
@@ -139,7 +140,10 @@ async function main(): Promise<void> {
 }
 
 // Only run when invoked as the entrypoint, not on import (tests import types).
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, not a `file://` template: on Windows argv[1] is a backslashed
+// drive path (C:\...\server.ts) while import.meta.url is file:///C:/.../server.ts,
+// so the naive comparison never matches and main() silently never runs.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     app.log.error(err);
     process.exit(1);

@@ -9,7 +9,7 @@ _DATA_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "typography_regi
 
 @lru_cache(maxsize=1)
 def _load() -> list[dict]:
-    return json.loads(_DATA_PATH.read_text())["registers"]
+    return json.loads(_DATA_PATH.read_text(encoding="utf-8"))["registers"]
 
 
 def list_registers() -> list[dict]:

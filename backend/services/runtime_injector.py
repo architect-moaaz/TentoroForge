@@ -198,9 +198,22 @@ def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
     Ownership of a shared directory has to be decided in one place. Handing the
     preserved list in — rather than teaching this module which paths are
     generated — keeps that decision with the caller that projects them.
+
+    `.as_posix()`, NOT `str()`. `str(PurePath)` renders the OS separator, so on
+    Windows this produced `src\\lib\\workflows\\definitions\\add-inventory-item.json`
+    and compared it against PROJECTED_PATHS' forward-slash
+    `src/lib/workflows/definitions`. Nothing ever matched, the guard preserved
+    nothing, and every workflow definition `project_workflows` had written
+    ~2 ms earlier was unlink()ed and its now-empty `definitions/` rmdir()ed —
+    while the Blueprint's own codeMap went on asserting all three files exist.
+    Result on Windows: every Blueprint build shipped an app whose forms
+    dispatch to workflows that are not there ("Workflow not found: FLOW-001"),
+    with the whole interpreter present and correct beside the missing JSON.
+    This is the same separator bug already fixed in
+    `blueprint/projection.py`'s stale-file sweep; see that fix's comment.
     """
     for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
-        rel = str(child.relative_to(root))
+        rel = child.relative_to(root).as_posix()
         if any(rel == p or rel.startswith(p + "/") for p in preserve):
             continue
         if child.is_file() or child.is_symlink():
@@ -216,9 +229,10 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         output_dir: Project output directory (e.g., output/abc123)
         app_name: Human app name used to replace the __APP_NAME__ placeholder
             baked into the foundation templates (sidebar brand, <title>, etc.).
-        project_id: UUID of THIS project row — seeded into .env.local as
-            FORGE_PROJECT_ID so the runtime error reporter can POST back
-            to /api/projects/<id>/runtime-exceptions. Without it the
+        project_id: UUID of THIS project row, or the short_id it resolves
+            from — seeded into .env.local as FORGE_PROJECT_ID so the runtime
+            error reporter can POST back to
+            /api/projects/<id>/runtime-exceptions. Without it the
             reporter silently no-ops (see error_reporter.ts:61) and the
             self-healing loop can never fire.
 
@@ -228,6 +242,22 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     output_path = Path(output_dir)
     if not output_path.exists():
         return {"copied": [], "errors": [f"Output dir does not exist: {output_dir}"]}
+
+    # NORMALISE AT THE DOOR. Both downstream consumers of `project_id` — the
+    # `project_rules` select and the FORGE_PROJECT_ID the app POSTs exceptions
+    # to — require the uuid row id, and the Blueprint path only has the
+    # short_id to give (blueprint/assembly.py:inject_runtime_layer, from
+    # `blueprint.application.id`). Doing it once here, rather than at each
+    # caller, is what stops the next caller reintroducing
+    # `invalid input syntax for type uuid: "gh0mlpbp"`.
+    resolved_project_id = resolve_project_uuid(project_id)
+    if project_id and not resolved_project_id:
+        logger.warning(
+            "[project-id] %r is neither a uuid nor a known short_id — DB rules "
+            "and runtime exception reporting will be disabled for this build",
+            project_id,
+        )
+    project_id = resolved_project_id
 
     src_lib = output_path / "src" / "lib"
     src_lib.mkdir(parents=True, exist_ok=True)
@@ -260,7 +290,12 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             shutil.copytree(src, dst, dirs_exist_ok=True)
             # Track files
             for f in dst.rglob("*.ts"):
-                copied.append(str(f.relative_to(output_path)))
+                # `.as_posix()`: `copied` IS the injection manifest
+                # (`_write_injection_manifest`), whose consumers — today
+                # `api_route_prune._load_injected_paths` — match it against
+                # forward-slash literals. `str()` shipped a manifest in two
+                # dialects and the backslash half was invisible.
+                copied.append(f.relative_to(output_path).as_posix())
         except Exception as e:
             errors.append(f"Failed to copy {subdir}: {e}")
 
@@ -270,7 +305,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     if loader_src.exists():
         try:
             shutil.copy2(loader_src, loader_dst)
-            copied.append(str(loader_dst.relative_to(output_path)))
+            copied.append(loader_dst.relative_to(output_path).as_posix())
         except Exception as e:
             errors.append(f"Failed to copy runtime-loader: {e}")
 
@@ -391,7 +426,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
                 shutil.rmtree(data_engine_helpers_dst)
             shutil.copytree(data_engine_helpers_src, data_engine_helpers_dst)
             for f in data_engine_helpers_dst.rglob("*.ts"):
-                copied.append(str(f.relative_to(output_path)))
+                copied.append(f.relative_to(output_path).as_posix())
         except Exception as e:
             errors.append(f"Failed to copy data-engine helpers: {e}")
 
@@ -509,6 +544,13 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         copied.append("rules/index.json")
     except Exception as e:
         errors.append(f"Failed to export rules: {e}")
+
+    # Carry the user's theme across the project-root/app-root boundary.
+    try:
+        if _mirror_theme_tokens(output_path):
+            copied.append("src/theme/tokens.custom.json")
+    except Exception as e:
+        errors.append(f"Failed to mirror theme tokens: {e}")
 
     # Guarantee the dashboard shell has a MOBILE menu. The custom chrome rails
     # are `hidden md:flex` — below 768px they vanish with no nav — and the
@@ -955,7 +997,7 @@ def _generate_data_api_route(output_path: Path) -> None:
         logger.warning("data-api-route.ts template not found at %s", template_src)
         return
 
-    content = template_src.read_text()
+    content = template_src.read_text(encoding="utf-8")
 
     # Discover schema files and replace barrel import with direct imports
     schema_dir = output_path / "src" / "db" / "schema"
@@ -1016,7 +1058,7 @@ def _generate_data_api_route(output_path: Path) -> None:
             "registerEntity(name, value as any, { slug: name, aliases: aliasesFor(name) });",
         )
 
-    (api_dir / "route.ts").write_text(content)
+    (api_dir / "route.ts").write_text(content, encoding="utf-8")
 
 
 def _canon_key(s: str) -> str:
@@ -2336,7 +2378,7 @@ def _resolve_app_description(output_path: Path, name: str, domain: str | None) -
     """A human page-meta description for the generated app. Prefers a design-spec
     tagline/description; falls back to a clean default from the app name/domain."""
     try:
-        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text())
+        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text(encoding="utf-8"))
         for key in ("tagline", "description", "subtitle"):
             v = ds.get(key)
             if isinstance(v, str) and v.strip():
@@ -2352,7 +2394,7 @@ def _resolve_login_image(output_path: Path, domain: str | None) -> str:
     """Industry-relevant login image: prefer the design-spec's loginBackground (set by
     the design agent), else the per-domain default."""
     try:
-        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text())
+        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text(encoding="utf-8"))
         url = (ds.get("imagery") or {}).get("loginBackground")
         if isinstance(url, str) and url.startswith("http"):
             return url
@@ -2504,7 +2546,7 @@ def _emit_library_color_vars(output_path: Path) -> bool:
         return False
     pal: dict = {}
     try:
-        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text())
+        ds = json.loads((output_path / "src" / "contracts" / "design-spec.json").read_text(encoding="utf-8"))
         pal = ds.get("colorPalette") or {}
     except Exception:
         pal = {}
@@ -2516,7 +2558,7 @@ def _emit_library_color_vars(output_path: Path) -> bool:
     # and a dark surface — light chips on a charcoal canvas scream template.
     dark = False
     try:
-        dna = json.loads((output_path / "src" / "contracts" / "design-dna.json").read_text())
+        dna = json.loads((output_path / "src" / "contracts" / "design-dna.json").read_text(encoding="utf-8"))
         dark = dna.get("mode") == "dark"
         if dark:
             dflt["surface"] = (dna.get("color") or {}).get("surface") or "#15181c"
@@ -2694,6 +2736,113 @@ def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:
         logger.info("Upserted %d key(s) in %s", len(updates), env_file)
 
 
+#: The one path the platform authors theme tokens at, relative to the PROJECT
+#: root (``output/<short_id>``). Named once so the next writer has something to
+#: agree with — four separate paths were in play before this.
+THEME_TOKENS_REL = Path("src") / "theme" / "tokens.custom.json"
+
+
+def _mirror_theme_tokens(app_root: Path) -> bool:
+    """Copy the project's authored tokens down into the app root.
+
+    THE EDITOR AND THE BUILT APP LIVE IN DIFFERENT ROOTS. Everything that
+    authors a theme — the Forge theme editor (``output_projects.py``
+    ``POST /{id}/theme``), ``design_compiler``, the Figma style extractor,
+    ``brief_loop_cascade`` — writes ``output/<id>/src/theme/tokens.custom.json``,
+    and the render preview reads exactly that, because ``loadTokens.ts`` is
+    handed the project root. The generated Next app is one level down: its cwd
+    is ``output/<id>/app``, so ``load-custom.ts`` resolved
+    ``output/<id>/app/src/theme/tokens.custom.json`` — a path the platform had
+    no writer for. Confirmed ENOENT for output/gh0mlpbp, swallowed by a bare
+    catch, so preview and production disagreed on the theme and neither
+    reported it.
+
+    A deployed bundle ships ``app/`` alone and cannot read the parent, so the
+    fix has to be a real copy at build time rather than only the parent-probe
+    fallback ``load-custom.ts`` now carries.
+
+    No-ops when the two roots are the same directory, which is the classic
+    (non-Blueprint) pipeline's layout — there ``output_dir`` IS the project
+    root and the canonical file is already in place.
+    """
+    src = app_root.parent / THEME_TOKENS_REL
+    dst = app_root / THEME_TOKENS_REL
+    if not src.is_file() or src.resolve() == dst.resolve():
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst)
+    logger.info("[theme] mirrored %s -> %s", src, dst)
+    return True
+
+
+def _libpq_url() -> str:
+    """DATABASE_URL in the dialect psycopg2 speaks, or "" if unset."""
+    import os
+
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        return ""
+    # asyncpg URL -> plain libpq URL for psycopg2
+    return url.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg2://", "postgresql://"
+    )
+
+
+def resolve_project_uuid(candidate: str | None) -> str | None:
+    """Return the `projects.id` UUID for a UUID *or* a short_id.
+
+    THE BLUEPRINT HAS NO UUID IN IT. `blueprint.application.id` is the eight
+    character short_id (`gh0mlpbp`), and that is the only project identifier
+    `blueprint/assembly.py` can reach — so it handed the short_id to
+    `inject_runtime(project_id=...)`, whose two consumers both require the
+    real row id:
+
+      * `_fetch_project_rules_sync` selects on `project_rules.project_id`,
+        a uuid column. Postgres answered
+        `invalid input syntax for type uuid: "gh0mlpbp"`, the caller's
+        blanket except logged `[rules] DB rule export failed, using
+        registry`, and every Blueprint app shipped `rules/index.json == []`
+        — no validation rule, row-access rule or computed field the user
+        authored ever executed.
+      * `FORGE_PROJECT_ID` in `.env.local`, which the generated app's
+        error_reporter POSTs to `/api/projects/<id>/runtime-exceptions` —
+        a route declared `project_id: uuid.UUID`, so a short_id 422s at the
+        door and the self-heal loop never closes.
+
+    Resolving here rather than catching the exception downstream keeps the
+    "this is a row id" contract that both consumers actually depend on, and
+    means a caller that legitimately holds a UUID pays nothing.
+    """
+    if not candidate:
+        return None
+    text = str(candidate).strip()
+    try:
+        import uuid as _uuid
+
+        return str(_uuid.UUID(text))
+    except (ValueError, AttributeError, TypeError):
+        pass
+
+    url = _libpq_url()
+    if not url:
+        return None
+    try:
+        import psycopg2  # type: ignore
+
+        conn = psycopg2.connect(url)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM projects WHERE short_id = %s", (text,))
+            row = cur.fetchone()
+            return str(row[0]) if row else None
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 — identity lookup must not break a build
+        logger.warning("[project-id] could not resolve %r to a project uuid: %s",
+                       text, exc)
+        return None
+
+
 def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     """Read a project's active rules straight from the project_rules table.
 
@@ -2704,17 +2853,11 @@ def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     (AI + manual). Sync psycopg2 read because inject_runtime is synchronous;
     best-effort — any failure falls back to the registry.
     """
-    import os
-
     import psycopg2  # type: ignore
 
-    url = os.environ.get("DATABASE_URL", "")
+    url = _libpq_url()
     if not url:
         return []
-    # asyncpg URL -> plain libpq URL for psycopg2
-    url = url.replace("postgresql+asyncpg://", "postgresql://").replace(
-        "postgresql+psycopg2://", "postgresql://"
-    )
     conn = psycopg2.connect(url)
     try:
         cur = conn.cursor()

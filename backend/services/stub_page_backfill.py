@@ -267,7 +267,7 @@ def backfill_stub_pages(output_dir: str) -> dict:
         detail_slugs = {_canon(p.parent.name) for p in sdir.glob("*/[[]id[]].json")}
 
         try:
-            registry = json.loads((root / "registry.json").read_text())
+            registry = json.loads((root / "registry.json").read_text(encoding="utf-8"))
         except Exception:
             registry = {}
         entities = registry.get("entities") if isinstance(registry.get("entities"), dict) else {}
@@ -287,7 +287,7 @@ def backfill_stub_pages(output_dir: str) -> dict:
 
         for path in sorted(sdir.rglob("*.json")):
             try:
-                page = json.loads(path.read_text())
+                page = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
             if not isinstance(page, dict) or not is_stub_page(page):
@@ -333,7 +333,7 @@ def backfill_stub_pages(output_dir: str) -> dict:
             page["dataSources"] = filled["dataSources"]
             page["root"] = filled["root"]
             page.setdefault("schemaVersion", "2")
-            path.write_text(json.dumps(page, indent=2))
+            path.write_text(json.dumps(page, indent=2), encoding="utf-8")
             result["backfilled"].append({"route": route, "id": pid, "kind": kind})
             logger.info("stub_page_backfill: filled %s (%s) in %s", pid, kind, output_dir)
 

@@ -7,15 +7,15 @@ from services.nav_apply import apply_transitions
 def _seed(tmp_path, pages, transitions, schemas):
     c = tmp_path / "src" / "contracts"
     c.mkdir(parents=True, exist_ok=True)
-    (c / "nav-flow.json").write_text(json.dumps({"pages": pages, "transitions": transitions}))
+    (c / "nav-flow.json").write_text(json.dumps({"pages": pages, "transitions": transitions}), encoding="utf-8")
     for rel, obj in schemas.items():
         p = tmp_path / "src" / "schemas" / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(obj))
+        p.write_text(json.dumps(obj), encoding="utf-8")
 
 
 def _schema(tmp_path, rel):
-    return json.loads((tmp_path / "src" / "schemas" / rel).read_text())
+    return json.loads((tmp_path / "src" / "schemas" / rel).read_text(encoding="utf-8"))
 
 
 def test_rewrites_button_navigate_to_transition_target(tmp_path):
@@ -61,7 +61,7 @@ def test_idempotent(tmp_path):
     assert apply_transitions(str(tmp_path))["applied"] == 0   # already correct
     # break it, then apply fixes exactly once
     s = tmp_path / "src/schemas/orders.json"
-    obj = json.loads(s.read_text()); obj["root"]["children"][0]["props"]["navigate"] = "/nope"; s.write_text(json.dumps(obj))
+    obj = json.loads(s.read_text(encoding="utf-8")); obj["root"]["children"][0]["props"]["navigate"] = "/nope"; s.write_text(json.dumps(obj), encoding="utf-8")
     assert apply_transitions(str(tmp_path))["applied"] == 1
     assert apply_transitions(str(tmp_path))["applied"] == 0
 

@@ -42,7 +42,7 @@ TRANSLATOR_MINTED = frozenset({"Repeat", "Stack"})
 
 
 def _registry() -> set[str]:
-    raw = json.loads(_REGISTRY.read_text())["components"]
+    raw = json.loads(_REGISTRY.read_text(encoding="utf-8"))["components"]
     return set(raw) if isinstance(raw, dict) else {c["name"] for c in raw}
 
 

@@ -47,14 +47,14 @@ class TestLoadPageRecipes:
 
     def test_brief_without_page_recipes_returns_empty(self, tmp_path):
         (tmp_path / "contracts").mkdir()
-        (tmp_path / "contracts" / "brief.json").write_text(json.dumps({"identity": {}}))
+        (tmp_path / "contracts" / "brief.json").write_text(json.dumps({"identity": {}}), encoding="utf-8")
         assert pipeline_hook.load_page_recipes(tmp_path) == {}
 
     def test_reads_page_recipes_dict(self, tmp_path):
         (tmp_path / "contracts").mkdir()
         (tmp_path / "contracts" / "brief.json").write_text(json.dumps({
             "page_recipes": {"/home": "member_home", "/console": "citizen_service"},
-        }))
+        }), encoding="utf-8")
         assert pipeline_hook.load_page_recipes(tmp_path) == {
             "/home": "member_home",
             "/console": "citizen_service",
@@ -69,12 +69,12 @@ class TestLoadPageRecipes:
                 "/x": "",                     # empty value dropped
                 "/y": None,                   # non-str value dropped
             },
-        }))
+        }), encoding="utf-8")
         assert pipeline_hook.load_page_recipes(tmp_path) == {"/home": "member_home"}
 
     def test_broken_json_returns_empty(self, tmp_path):
         (tmp_path / "contracts").mkdir()
-        (tmp_path / "contracts" / "brief.json").write_text("{not-json")
+        (tmp_path / "contracts" / "brief.json").write_text("{not-json", encoding="utf-8")
         assert pipeline_hook.load_page_recipes(tmp_path) == {}
 
 
@@ -86,7 +86,7 @@ def _write_brief(tmp_path: Path, recipes: dict[str, str]) -> None:
     (tmp_path / "contracts").mkdir(parents=True, exist_ok=True)
     (tmp_path / "contracts" / "brief.json").write_text(json.dumps(
         {"page_recipes": recipes},
-    ))
+    ), encoding="utf-8")
 
 
 class TestTryBuildRecipePage:

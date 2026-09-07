@@ -130,7 +130,7 @@ class TestSurfaceWrapGuardAssertMode:
         result = wrap_bare_data_displays(str(tmp_path))
         # Legacy behaviour: even with the marker, flag OFF means rewrite.
         assert result["wrapped"] > 0
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         # Table is now nested under a Card.
         first_child = after["root"]["children"][0]
         assert first_child["type"] == "Card"
@@ -141,18 +141,18 @@ class TestSurfaceWrapGuardAssertMode:
         result = wrap_bare_data_displays(str(tmp_path))
         # Non-composer-authored schema still gets rewritten under flag ON.
         assert result["wrapped"] > 0
-        after = json.loads(p.read_text())
+        after = json.loads(p.read_text(encoding="utf-8"))
         assert after["root"]["children"][0]["type"] == "Card"
 
     def test_flag_on_with_marker_asserts_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "1")
         p = _write_schema(tmp_path, "dashboard", _bare_data_display_schema(marker=True))
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = wrap_bare_data_displays(str(tmp_path))
         # No mutation; assert logged.
         assert result["wrapped"] == 0
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
 
 # ─────────────────────────── chart_data_source_guard ───────────────────
@@ -173,11 +173,11 @@ class TestChartDataSourceGuardAssertMode:
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "1")
         p = _write_schema(tmp_path, "dashboard", _chart_with_literal_data_schema(marker=True))
         _write_plan_with_dashboard(tmp_path)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = guard_chart_data_sources(str(tmp_path))
         assert result["converted"] == 0
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_on_no_marker_still_converts(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "1")
@@ -196,11 +196,11 @@ class TestWidgetDataSourceGuardAssertMode:
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "1")
         p = _write_schema(tmp_path, "dashboard", _widget_needing_binding_schema(marker=True))
         _write_plan_with_dashboard(tmp_path)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = bind_static_widgets(str(tmp_path))
         assert result["bound"] == 0
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_off_still_binds_or_skips_legacy(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "0")  # explicit opt-out — the flag now defaults ON
@@ -221,12 +221,12 @@ class TestDashboardCompletenessAssertMode:
         monkeypatch.setenv("FORGE_DASHBOARD_AUTHORITY", "1")
         p = _write_schema(tmp_path, "dashboard", _sparse_dashboard_schema(marker=True))
         _write_plan_with_dashboard(tmp_path)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = apply_dashboard_completeness(str(tmp_path))
         # No top-up; assert logged for the sparse-but-composer-authored dash.
         assert result["sections_added"] == 0
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_on_no_marker_takes_legacy_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

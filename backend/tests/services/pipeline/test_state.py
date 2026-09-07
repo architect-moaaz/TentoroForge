@@ -151,7 +151,7 @@ class TestWriteTiming:
         state.write_timing()
         path = tmp_path / "generation-timing.json"
         assert path.is_file()
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         assert data["phases"] == {"Contract": 3.4, "Schema": 5.6}
         assert data["total_seconds"] == 9.0
 

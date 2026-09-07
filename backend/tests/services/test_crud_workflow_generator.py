@@ -64,7 +64,7 @@ def test_generate_writes_three_per_entity(tmp_path):
     files = {p.name for p in (tmp_path / "workflows").glob("*.json")}
     assert "CreateTask.json" in files and "UpdateTask.json" in files and "DeleteTask.json" in files
     assert "CreateTag.json" in files  # table derived as "tags"
-    cfg = json.loads((tmp_path / "workflows" / "CreateTag.json").read_text())
+    cfg = json.loads((tmp_path / "workflows" / "CreateTag.json").read_text(encoding="utf-8"))
     table = next(n for n in cfg["definition"]["nodes"] if n["type"] == "action")["data"]["config"]["table"]
     assert table == "tags"
     assert "CreateTask" in created
@@ -74,10 +74,10 @@ def test_generate_does_not_overwrite_existing_nonempty(tmp_path):
     wdir = tmp_path / "workflows"; wdir.mkdir()
     existing = {"id": "create-task", "name": "CreateTask",
                 "definition": {"nodes": [{"id": "x", "type": "action"}], "edges": []}}
-    (wdir / "CreateTask.json").write_text(json.dumps(existing))
+    (wdir / "CreateTask.json").write_text(json.dumps(existing), encoding="utf-8")
     generate_crud_workflows(_plan(), str(tmp_path))
     # untouched (still the 1-node hand version)
-    assert json.loads((wdir / "CreateTask.json").read_text())["definition"]["nodes"][0]["id"] == "x"
+    assert json.loads((wdir / "CreateTask.json").read_text(encoding="utf-8"))["definition"]["nodes"][0]["id"] == "x"
 
 
 def test_generate_sources_columns_from_real_drizzle_schema(tmp_path):
@@ -98,7 +98,7 @@ def test_generate_sources_columns_from_real_drizzle_schema(tmp_path):
     plan = {"entities": {"User": {"table": "users", "fields": [
         {"name": "id", "type": "uuid"}, {"name": "email", "type": "text"}]}}}
     generate_crud_workflows(plan, str(tmp_path))
-    cfg = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())
+    cfg = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))
     values = next(
         n for n in cfg["definition"]["nodes"] if n["type"] == "action"
     )["data"]["config"]["values"]
@@ -129,7 +129,7 @@ def test_parse_handles_varchar_length_option_nested_braces(tmp_path):
         '  email: varchar("email", { length: 255 }).notNull().unique(),\n'
         '  password: text("password").notNull(),\n'
         '  name: varchar("name", { length: 255 }),\n'
-        '});\n')
+        '});\n', encoding="utf-8")
     cols = {c["name"] for c in _parse_schema_columns(str(tmp_path)).get("users", [])}
     assert {"id", "email", "password", "name"} <= cols   # password not lost
 

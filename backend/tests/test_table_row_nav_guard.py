@@ -24,7 +24,7 @@ def _schema(rows="{{reservations}}", row_key="id", row_href=None):
 def _write(tmp, rel, obj):
     p = tmp / "src" / "schemas" / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj))
+    p.write_text(json.dumps(obj), encoding="utf-8")
 
 
 def test_wires_rowhref_when_detail_route_exists(tmp_path):
@@ -32,7 +32,7 @@ def test_wires_rowhref_when_detail_route_exists(tmp_path):
     _write(tmp_path, "reservations/[id].json", {"root": {}})  # detail route exists
     res = guard_table_row_nav(str(tmp_path))
     assert _subset(res, {"wired": 1, "files": 1}) == {"wired": 1, "files": 1}
-    out = json.loads((tmp_path / "src/schemas/reservations.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/reservations.json").read_text(encoding="utf-8"))
     assert out["root"]["children"][0]["props"]["rowHref"] == "/reservations/{{id}}"
 
 
@@ -46,7 +46,7 @@ def test_leaves_correct_existing_rowhref(tmp_path):
     _write(tmp_path, "reservations.json", _schema(row_href="/reservations/{{id}}"))
     _write(tmp_path, "reservations/[id].json", {"root": {}})
     assert _subset(guard_table_row_nav(str(tmp_path)), {"wired": 0, "files": 0}) == {"wired": 0, "files": 0}
-    out = json.loads((tmp_path / "src/schemas/reservations.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/reservations.json").read_text(encoding="utf-8"))
     assert out["root"]["children"][0]["props"]["rowHref"] == "/reservations/{{id}}"
 
 
@@ -58,7 +58,7 @@ def test_repoints_wrong_rowhref_to_data_entity(tmp_path):
     _write(tmp_path, "rentals/[id].json", {"root": {}})
     res = guard_table_row_nav(str(tmp_path))
     assert _subset(res, {"wired": 1, "files": 1}) == {"wired": 1, "files": 1}
-    out = json.loads((tmp_path / "src/schemas/overdue.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/overdue.json").read_text(encoding="utf-8"))
     assert out["root"]["children"][0]["props"]["rowHref"] == "/rentals/{id}"
 
 
@@ -68,7 +68,7 @@ def test_strips_wrong_rowhref_when_no_detail_route(tmp_path):
     _write(tmp_path, "overdue.json", _schema(rows="{{rentals}}", row_href="/overdue/{id}"))
     res = guard_table_row_nav(str(tmp_path))
     assert _subset(res, {"wired": 1, "files": 1}) == {"wired": 1, "files": 1}
-    out = json.loads((tmp_path / "src/schemas/overdue.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/overdue.json").read_text(encoding="utf-8"))
     assert "rowHref" not in out["root"]["children"][0]["props"]
 
 
@@ -86,7 +86,7 @@ def test_wires_when_source_name_extends_route_slug(tmp_path):
     _write(tmp_path, "maintenance/[id].json", {"root": {}})
     res = guard_table_row_nav(str(tmp_path))
     assert _subset(res, {"wired": 1, "files": 1}) == {"wired": 1, "files": 1}
-    out = json.loads((tmp_path / "src/schemas/maintenance.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/maintenance.json").read_text(encoding="utf-8"))
     assert out["root"]["children"][0]["props"]["rowHref"] == "/maintenance/{{id}}"
 
 
@@ -94,7 +94,7 @@ def test_singular_plural_match_and_rowkey(tmp_path):
     _write(tmp_path, "guests.json", _schema(rows="{{guest}}", row_key="guestId"))
     _write(tmp_path, "guests/[id].json", {"root": {}})
     guard_table_row_nav(str(tmp_path))
-    out = json.loads((tmp_path / "src/schemas/guests.json").read_text())
+    out = json.loads((tmp_path / "src/schemas/guests.json").read_text(encoding="utf-8"))
     assert out["root"]["children"][0]["props"]["rowHref"] == "/guests/{{guestId}}"
 
 

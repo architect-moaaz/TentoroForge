@@ -92,6 +92,25 @@ export function Grid({ node, children }: { node: any; children: ReactNode[] }) {
   const extraStyle: React.CSSProperties = {};
   if (equalRows) extraStyle.gridAutoRows = "1fr";
 
+  // `rows` — the FIXED row count the user picked in the visual editor. A grid
+  // with rows > 0 holds exactly rows × columns <GridCell> children, in row-major
+  // order; a grid without it (every schema written before this prop existed)
+  // keeps the original behaviour where rows are implicit and children just wrap.
+  //
+  // It deliberately emits NO css here — no `grid-template-rows`, and above all
+  // no `grid-template-columns`. That is the same trap equalCols fell into: an
+  // inline template beats every media query, so pinning the desktop column count
+  // would kill the responsive ladder and put a 3-column row at ~100px per column
+  // on a phone. The user's decision is "fixed in the editor, responsive in the
+  // app", and the way to honour both is to publish the COUNT as an inert data
+  // attribute and let the editor's own stylesheet (frontend/src/app/globals.css,
+  // scoped to `[data-canvas-root]`) turn it into a fixed template. Nothing in the
+  // shipped CSS matches these selectors, so in the generated application the
+  // ladder above remains the only thing that decides the column count.
+  const fixedRows =
+    typeof p.rows === "number" && p.rows > 0 ? Math.min(12, Math.trunc(p.rows)) : 0;
+  const fixedCols = Math.max(1, Math.min(12, Math.trunc(columns)));
+
   // MCP pipeline emits per-node className + style derived from Figma Dev Mode output.
   const callerClass = typeof p.className === "string" ? ` ${p.className}` : "";
   const callerStyle = p.style && typeof p.style === "object" ? p.style as React.CSSProperties : {};
@@ -107,6 +126,8 @@ export function Grid({ node, children }: { node: any; children: ReactNode[] }) {
         ...callerStyle,
       }}
       data-motion={slotProps["data-motion"]}
+      data-grid-rows={fixedRows > 0 ? fixedRows : undefined}
+      data-grid-columns={fixedRows > 0 ? fixedCols : undefined}
       {...dataAttrProps(p)}
     >
       {children}

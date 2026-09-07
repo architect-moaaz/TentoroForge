@@ -29,7 +29,7 @@ def _make_stub_app(tmp_path: Path) -> Path:
         "entities": {"User": {"fields": {}}},
         "relations": [], "pages": {}, "components": {},
         "api_routes": {}, "workflow_bindings": {}, "rules": {},
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 

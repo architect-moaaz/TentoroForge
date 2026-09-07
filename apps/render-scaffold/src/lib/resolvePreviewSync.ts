@@ -9,7 +9,10 @@
  * fixture-driven rendering.
  */
 
-type DataSource = { name: string; entity?: string; table?: string; op?: string };
+import { computeAggregate, type AggregateSource } from "@tentoroforge/engine";
+
+type DataSource = { name: string; entity?: string; table?: string; op?: string;
+                    metrics?: Record<string, unknown>; filter?: Record<string, unknown> };
 
 export function resolvePreviewSync(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,10 +39,37 @@ export function resolvePreviewSync(
         entity && entity !== "Unknown"
           ? previewData[`${entity.toLowerCase()}Stats`]
           : undefined;
-      resolved[s.name] =
+      const looked =
         entityStats && typeof entityStats === "object" && !Array.isArray(entityStats)
           ? entityStats
-          : (previewData["stats"] ?? previewData[s.name] ?? {});
+          : (previewData["stats"] ?? previewData[s.name]);
+      const blob =
+        looked && typeof looked === "object" && !Array.isArray(looked)
+          ? (looked as Record<string, unknown>)
+          : {};
+
+      // THE SOURCE'S DECLARED `metrics` ARE THE CONTRACT — compute them.
+      //
+      // This branch used to just look up a pre-computed `<entity>Stats` object
+      // and hand it over whole. That LOOKS like it works, and it is why the bug
+      // survived: the fixture endpoint does return `itemStats`, so the lookup
+      // "succeeded" — with a generic blob (`total`, `count`, `active`,
+      // `growthRate`, …) containing NONE of the metric names the page actually
+      // declares (`totalValue`, `itemCount`, `lowStockCount`). Every
+      // `{{source.metric}}` binding resolved to undefined and all three KPI
+      // tiles on /items rendered blank, on a page whose schema was by then
+      // completely correct.
+      //
+      // So: when a source declares metrics, those names win and are calculated
+      // from the rows. The looked-up blob stays underneath, so a source that
+      // declares no metrics behaves exactly as before and any binding pointing
+      // at a generic key still resolves. `computeAggregate` is the engine's
+      // shared implementation — the editor canvas computes the same way, and
+      // the two surfaces disagreeing is what produced this in the first place.
+      const declared = s.metrics && Object.keys(s.metrics).length > 0;
+      resolved[s.name] = declared
+        ? { ...blob, ...computeAggregate(s as unknown as AggregateSource, previewData) }
+        : blob;
       continue;
     }
     // Build candidate keys to look up in previewData. The first match wins.

@@ -6,8 +6,8 @@ from services.phase_gates import check_pages_coverage
 def test_passes_when_every_route_has_a_schema(tmp_path):
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "home.json").write_text("{}")
-    (schemas / "login.json").write_text("{}")
+    (schemas / "home.json").write_text("{}", encoding="utf-8")
+    (schemas / "login.json").write_text("{}", encoding="utf-8")
     plan = {"pages": [
         {"route": "/", "name": "Home"},
         {"route": "/login", "name": "Login"},
@@ -20,7 +20,7 @@ def test_passes_when_every_route_has_a_schema(tmp_path):
 def test_fails_when_schema_missing(tmp_path):
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "home.json").write_text("{}")
+    (schemas / "home.json").write_text("{}", encoding="utf-8")
     plan = {"pages": [
         {"route": "/", "name": "Home"},
         {"route": "/login", "name": "Login"},
@@ -41,14 +41,14 @@ def test_dynamic_routes_resolved_by_their_parameter_segment(tmp_path):
     """
     schemas = tmp_path / "src" / "schemas" / "users"
     schemas.mkdir(parents=True)
-    (schemas / "[id].json").write_text("{}")
+    (schemas / "[id].json").write_text("{}", encoding="utf-8")
     plan = {"pages": [{"route": "/users/[id]", "name": "User detail"}]}
     result = check_pages_coverage(str(tmp_path), plan)
     assert result["passed"] is True, result
 
     # And the old convention no longer satisfies it.
     (schemas / "[id].json").unlink()
-    (schemas / "detail.json").write_text("{}")
+    (schemas / "detail.json").write_text("{}", encoding="utf-8")
     assert check_pages_coverage(str(tmp_path), plan)["passed"] is False
 
 
@@ -56,7 +56,7 @@ def test_nested_routes_use_folder_layout(tmp_path):
     """/requests/new should look for src/schemas/requests/new.json (folder, not kebab)."""
     schemas = tmp_path / "src" / "schemas" / "requests"
     schemas.mkdir(parents=True)
-    (schemas / "new.json").write_text("{}")
+    (schemas / "new.json").write_text("{}", encoding="utf-8")
     plan = {"pages": [{"route": "/requests/new", "name": "New Request"}]}
     result = check_pages_coverage(str(tmp_path), plan)
     assert result["passed"] is True
@@ -78,7 +78,7 @@ def test_skips_malformed_entries(tmp_path):
     """Non-dict entries / entries without route -> skip, don't crash."""
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "home.json").write_text("{}")
+    (schemas / "home.json").write_text("{}", encoding="utf-8")
     plan = {"pages": [
         {"route": "/"},
         "garbage",
@@ -101,8 +101,8 @@ def test_coverage_passes_for_figma_emitted_pages(tmp_path):
     from services.phase_gates import check_pages_coverage
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "login.json").write_text("{}")
-    (schemas / "dashboard.json").write_text("{}")
+    (schemas / "login.json").write_text("{}", encoding="utf-8")
+    (schemas / "dashboard.json").write_text("{}", encoding="utf-8")
     plan = {"pages": [
         {"route": "/login",     "figma_node_id": "1:2",  "file": "src/schemas/login.json"},
         {"route": "/dashboard", "figma_node_id": "1:74", "file": "src/schemas/dashboard.json"},
@@ -117,7 +117,7 @@ def test_coverage_fails_when_figma_node_id_missing_schema(tmp_path):
     from services.phase_gates import check_pages_coverage
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "login.json").write_text("{}")
+    (schemas / "login.json").write_text("{}", encoding="utf-8")
     # dashboard has figma_node_id but no actual schema on disk
     plan = {"pages": [
         {"route": "/login",     "figma_node_id": "1:2",  "file": "src/schemas/login.json"},

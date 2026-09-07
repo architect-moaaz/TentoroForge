@@ -21,7 +21,7 @@ import pytest
 from runtime.feel_lite.evaluator import evaluate_expression
 
 _FIXTURES = json.loads(
-    (pathlib.Path(__file__).parent / "fixtures" / "feel_conformance.json").read_text()
+    (pathlib.Path(__file__).parent / "fixtures" / "feel_conformance.json").read_text(encoding="utf-8")
 )
 
 

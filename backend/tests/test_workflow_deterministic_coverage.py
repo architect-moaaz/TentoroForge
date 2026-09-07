@@ -107,7 +107,7 @@ def test_generate_definitions_overwrites_noop_stub(tmp_path):
                        "nodes": [{"id": "trigger", "type": "trigger", "data": {"config": {}}},
                                  {"id": "s1", "type": "action",
                                   "data": {"config": {"actionType": "custom", "nodeType": "custom"}}}],
-                       "edges": []}}))
+                       "edges": []}}), encoding="utf-8")
     plan = {"workflows": [{
         "name": "Intake",
         "steps": [{"id": "trigger", "type": "trigger", "next": "ins"},
@@ -119,7 +119,7 @@ def test_generate_definitions_overwrites_noop_stub(tmp_path):
     # find the Intake file and assert it's now executable
     ok = False
     for f in wf_dir.glob("*.json"):
-        d = json.loads(f.read_text())
+        d = json.loads(f.read_text(encoding="utf-8"))
         if d.get("name") == "Intake" and is_executable_workflow(d):
             ok = True
     assert ok, "generate_workflow_definitions left the no-op stub in place"
@@ -146,8 +146,8 @@ def test_generate_definitions_preserves_executable_and_makes_no_duplicate(tmp_pa
         {}, set())
     assert is_executable_workflow(good), "fixture must be executable for this test to mean anything"
     good_file = wf_dir / "good.json"
-    good_file.write_text(json.dumps(good, indent=2))
-    before = good_file.read_text()
+    good_file.write_text(json.dumps(good, indent=2), encoding="utf-8")
+    before = good_file.read_text(encoding="utf-8")
 
     # A DIFFERENT but also-valid rich step list for the same workflow name.
     plan = {"workflows": [{
@@ -162,8 +162,8 @@ def test_generate_definitions_preserves_executable_and_makes_no_duplicate(tmp_pa
     # Nothing written: return count is 0.
     assert count == 0, "an already-executable workflow should not be regenerated"
     # Existing bytes untouched.
-    assert good_file.read_text() == before, "executable definition was clobbered"
+    assert good_file.read_text(encoding="utf-8") == before, "executable definition was clobbered"
     # No duplicate Intake-named file created — exactly one file with name=='Intake'.
     intake_files = [f for f in wf_dir.glob("*.json")
-                    if json.loads(f.read_text()).get("name") == "Intake"]
+                    if json.loads(f.read_text(encoding="utf-8")).get("name") == "Intake"]
     assert len(intake_files) == 1, f"expected 1 Intake file, found {len(intake_files)}"

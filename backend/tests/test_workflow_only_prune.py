@@ -12,7 +12,7 @@ from agents.business_logic_agent import BUSINESS_LOGIC_AGENT_SYSTEM_PROMPT
 
 def _touch(p: Path, body: str = "// stub\n") -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
 
 
 def _app(root: Path) -> Path:
@@ -163,7 +163,7 @@ def test_prune_reads_injection_manifest_as_allowlist(tmp_path):
             "src/app/api/audit/log/route.ts",  # ← the NEW infra route
             # Explicitly NOT listing invoices/[id]/approve/route.ts.
         ],
-    }))
+    }), encoding="utf-8")
 
     res = prune_entity_crud_routes(tmp_path)
 
@@ -221,7 +221,7 @@ def test_prune_manifest_shape_is_stable(tmp_path):
         "src/app/api/files/upload/route.ts",
         "src/lib/pdf.ts",
     ])
-    payload = _json.loads((tmp_path / _INJECTION_MANIFEST_REL).read_text())
+    payload = _json.loads((tmp_path / _INJECTION_MANIFEST_REL).read_text(encoding="utf-8"))
     assert payload["version"] == 1
     assert isinstance(payload["paths"], list)
     # Sorted + deduped.

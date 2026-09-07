@@ -184,7 +184,7 @@ def test_anonymous_allocation_is_refused():
 def test_corrupt_registry_raises_instead_of_resetting_to_zero(tmp_path):
     p = IdAllocator.path_for(tmp_path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{ not json", "utf-8")
+    p.write_text("{ not json", encoding="utf-8")
     # Silently starting from zero would renumber the whole application.
     with pytest.raises(InvalidArtifactId):
         IdAllocator.load(output_dir=tmp_path)
@@ -226,7 +226,7 @@ def test_two_processes_do_not_mint_the_same_id(tmp_path):
         """
     )
     runner = tmp_path / "runner.py"
-    runner.write_text(script, "utf-8")
+    runner.write_text(script, encoding="utf-8")
     backend = str(Path(__file__).resolve().parents[2])
 
     procs = [

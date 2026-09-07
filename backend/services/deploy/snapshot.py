@@ -103,7 +103,12 @@ def build_snapshot(root: Path) -> list[dict[str, Any]]:
             raise SnapshotTooLarge(
                 f"snapshot exceeds {_MAX_TOTAL_BYTES} bytes total"
             )
-        rel = str(path.relative_to(root))
+        # `.as_posix()`: this string is the `file` key Vercel builds its
+        # deployment tree from. `str()` shipped `src\app\page.tsx`, which
+        # Vercel reads as one flat filename in the deployment root — so a
+        # deploy triggered from a Windows host produced a tree with no
+        # `src/app` at all and failed the remote build.
+        rel = path.relative_to(root).as_posix()
         try:
             text = raw.decode("utf-8")
             files.append({"file": rel, "data": text})
@@ -143,7 +148,9 @@ def build_snapshot_upload(root: Path) -> list[dict[str, Any]]:
             raise SnapshotTooLarge(
                 f"snapshot exceeds {_MAX_TOTAL_BYTES} bytes total"
             )
-        rel = str(path.relative_to(root))
+        # Same as build_snapshot: `file` is the path Vercel reconstructs the
+        # tree from, and it must be forward-slash on every host.
+        rel = path.relative_to(root).as_posix()
         sha = hashlib.sha1(raw).hexdigest()
         files.append({"file": rel, "sha": sha, "size": size, "raw": raw})
     return files

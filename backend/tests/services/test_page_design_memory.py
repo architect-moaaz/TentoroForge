@@ -47,7 +47,7 @@ def test_record_page_writes_ledger_when_enabled(tmp_path, monkeypatch):
     )
     ledger = tmp_path / "reports" / "page-critic" / "_memory.json"
     assert ledger.exists()
-    data = json.loads(ledger.read_text())
+    data = json.loads(ledger.read_text(encoding="utf-8"))
     assert len(data["pages"]) == 1
     entry = data["pages"][0]
     assert entry["slug"] == "dashboard"
@@ -93,7 +93,7 @@ def test_load_memory_returns_empty_when_missing(tmp_path):
 def test_load_memory_returns_empty_on_malformed_file(tmp_path):
     p = tmp_path / "reports" / "page-critic" / "_memory.json"
     p.parent.mkdir(parents=True)
-    p.write_text("{ not: valid json")
+    p.write_text("{ not: valid json", encoding="utf-8")
     assert pdm.load_memory(str(tmp_path)) == {"pages": []}
 
 

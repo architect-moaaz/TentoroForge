@@ -31,7 +31,7 @@ def extract_element_props(
         return None
 
     try:
-        lines = filepath.read_text().splitlines()
+        lines = filepath.read_text(encoding="utf-8").splitlines()
     except Exception:
         return None
 

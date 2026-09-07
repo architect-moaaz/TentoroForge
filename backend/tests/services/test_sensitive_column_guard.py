@@ -142,7 +142,7 @@ class TestStripSensitiveColumns:
         assert result["table_columns_dropped"] == 1
         assert "members.json" in result["changed"]
 
-        data = json.loads((tmp_path / "src" / "schemas" / "members.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "members.json").read_text(encoding="utf-8"))
         cols = data["root"]["children"][0]["props"]["columns"]
         keys = [c["key"] for c in cols]
         assert "passwordHash" not in keys
@@ -171,7 +171,7 @@ class TestStripSensitiveColumns:
         })
         result = strip_sensitive_columns(tmp_path)
         assert result["table_columns_dropped"] == 1
-        data = json.loads((tmp_path / "src" / "schemas" / "users.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "users.json").read_text(encoding="utf-8"))
         assert data["root"]["props"]["columns"] == ["email", "role"]
 
     def test_nested_table_inside_card_inside_stack(self, tmp_path):
@@ -208,7 +208,7 @@ class TestStripSensitiveColumns:
         result = strip_sensitive_columns(tmp_path)
         assert result["description_items_dropped"] == 1
         data = json.loads(
-            (tmp_path / "src" / "schemas" / "user-detail.json").read_text()
+            (tmp_path / "src" / "schemas" / "user-detail.json").read_text(encoding="utf-8")
         )
         keys = [it["key"] for it in data["root"]["props"]["items"]]
         assert "passwordHash" not in keys
@@ -226,7 +226,7 @@ class TestStripSensitiveColumns:
         result = strip_sensitive_columns(tmp_path)
         assert result["description_items_dropped"] == 1
         data = json.loads(
-            (tmp_path / "src" / "schemas" / "user-detail.json").read_text()
+            (tmp_path / "src" / "schemas" / "user-detail.json").read_text(encoding="utf-8")
         )
         kids = data["root"]["children"]
         fields = [c["props"]["field"] for c in kids]
@@ -260,7 +260,7 @@ class TestStripSensitiveColumns:
         result = strip_sensitive_columns(tmp_path)
         assert result["table_columns_dropped"] == 0
         # Form untouched
-        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text(encoding="utf-8"))
         names = [f["name"] for f in data["root"]["props"]["fields"]]
         assert names == ["email", "password"]
 

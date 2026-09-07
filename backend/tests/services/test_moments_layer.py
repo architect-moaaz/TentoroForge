@@ -301,11 +301,11 @@ class TestApplyThreadsNewFields:
         schemas = tmp_path / "src" / "schemas"
         contracts.mkdir(parents=True)
         schemas.mkdir(parents=True)
-        (contracts / "dashboard-maquette.json").write_text(json.dumps(maquette))
+        (contracts / "dashboard-maquette.json").write_text(json.dumps(maquette), encoding="utf-8")
         (contracts / "plan.json").write_text(json.dumps({
             "pages": [{"route": "/dashboard", "type": "dashboard"}],
-        }))
-        (schemas / "dashboard.json").write_text("{}")
+        }), encoding="utf-8")
+        (schemas / "dashboard.json").write_text("{}", encoding="utf-8")
         return schemas / "dashboard.json"
 
     def test_section_rhythm_generous_maps_to_larger_gap(self, tmp_path):
@@ -319,7 +319,7 @@ class TestApplyThreadsNewFields:
         })
         result = apply_maquette_to_dashboard(str(tmp_path))
         assert result["applied"]
-        written = json.loads(schema_path.read_text())
+        written = json.loads(schema_path.read_text(encoding="utf-8"))
         assert written["root"]["props"]["gap"] == "tokens.spacing.10"
 
     def test_section_rhythm_tight_maps_to_smaller_gap(self, tmp_path):
@@ -333,7 +333,7 @@ class TestApplyThreadsNewFields:
         })
         result = apply_maquette_to_dashboard(str(tmp_path))
         assert result["applied"]
-        written = json.loads(schema_path.read_text())
+        written = json.loads(schema_path.read_text(encoding="utf-8"))
         # "tight" floors at spacing.4 — 12px between full sections read as
         # cramped on every live review (cwx1stzz), so density stays
         # relative (below the cozy spacing.6) without fusing sections.
@@ -350,7 +350,7 @@ class TestApplyThreadsNewFields:
         })
         result = apply_maquette_to_dashboard(str(tmp_path))
         assert result["applied"]
-        written = json.loads(schema_path.read_text())
+        written = json.loads(schema_path.read_text(encoding="utf-8"))
         sig = written["root"]["props"].get("data-signature-move", "")
         assert "sparkline-preview" in sig
         assert "activity-avatar-strip" in sig
@@ -414,10 +414,10 @@ class TestReferencePropagation:
         (ref_dir / "a.json").write_text(json.dumps({
             "name": "Balance Rings Dashboard",
             "description": "Circular progress rings with ambient background.",
-        }))
+        }), encoding="utf-8")
         (ref_dir / "b.json").write_text(json.dumps({
             "name": "Editorial Hero",
-        }))
+        }), encoding="utf-8")
         refs = _read_21st_references({"_output_dir": str(tmp_path)})
         assert len(refs) == 2
         assert any("Balance Rings" in r for r in refs)
@@ -426,8 +426,8 @@ class TestReferencePropagation:
     def test_ignores_bad_json_files(self, tmp_path):
         ref_dir = tmp_path / "src" / "contracts" / "references"
         ref_dir.mkdir(parents=True)
-        (ref_dir / "bad.json").write_text("not json {{{")
-        (ref_dir / "ok.json").write_text(json.dumps({"name": "Good One"}))
+        (ref_dir / "bad.json").write_text("not json {{{", encoding="utf-8")
+        (ref_dir / "ok.json").write_text(json.dumps({"name": "Good One"}), encoding="utf-8")
         refs = _read_21st_references({"_output_dir": str(tmp_path)})
         assert refs == ["Good One"]
 
@@ -470,7 +470,7 @@ class TestUserPromptComposition:
     def test_references_block_appears_when_refs_on_disk(self, tmp_path):
         ref_dir = tmp_path / "src" / "contracts" / "references"
         ref_dir.mkdir(parents=True)
-        (ref_dir / "hero.json").write_text(json.dumps({"name": "Aurora Hero"}))
+        (ref_dir / "hero.json").write_text(json.dumps({"name": "Aurora Hero"}), encoding="utf-8")
         prompt = _build_user_prompt(
             {"description": "x", "entities": {"e": {}}, "_output_dir": str(tmp_path)},
             brief_text=None,

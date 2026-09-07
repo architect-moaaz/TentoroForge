@@ -68,6 +68,11 @@ _DATA_PROPS = frozenset({"data", "rows", "items", "series", "columns", "value", 
 # Props A2UI needs but Forge's renderer does not.
 _DROP_PROPS = frozenset({"component", "id", "weight"})
 
+#: A pointer inside a literal row that names nothing this page fetches. Its own
+#: value because `None` is a legal thing to find in a row and "could not be
+#: resolved" is not the same answer.
+_UNBOUND = object()
+
 # Props whose value purports to be MEASURED — a sparkline, a breakdown, a
 # count. A literal here is invented data sitting directly on the component,
 # which the updateDataModel stripping never touches because it never went
@@ -841,6 +846,93 @@ def _enum_members(kind: str, prop: str) -> set[str]:
     return {str(m) for m in members} if isinstance(members, list) else set()
 
 
+def _pointer_paths(val: Any) -> list[str]:
+    """Every `{"path": …}` anywhere inside `val`, however deeply nested."""
+    out: list[str] = []
+    if isinstance(val, dict):
+        if "path" in val and isinstance(val.get("path"), str):
+            out.append(val["path"])
+        for v in val.values():
+            out += _pointer_paths(v)
+    elif isinstance(val, list):
+        for v in val:
+            out += _pointer_paths(v)
+    return out
+
+
+def _literal_is_the_contract(kind: str, prop: str) -> bool:
+    """Whether a LITERAL is what `kind.prop` is declared to hold.
+
+    THE RULE THAT REFUSED EVERY DETAIL PAGE. `_DATA_PROPS` is a list of prop
+    NAMES, and the drop below it assumed every one of them arrives as an A2UI
+    pointer. For `KeyValueList.items` that is false by contract — the catalog
+    types it `array` of `{label, value}` and the pointers are one level DOWN,
+    inside the rows — so `isinstance(val, dict)` was False, the whole prop was
+    discarded, and `validate_props` then refused the page for
+    `'items' is a required property`. Measured on this project's own saved
+    surfaces: both PAGE-003 attempts composed a well-formed `KeyValueList` and
+    both were refused for omitting the prop they had supplied, so `/items/[id]`
+    has no layout and 404s in the shipped app. Forty-three catalog components
+    carry a `_DATA_PROPS`-named prop that is not `columns`/`series`.
+
+    A NAME LIST CANNOT ANSWER THIS and that is why the old one was wrong:
+    `items` names authored rows on KeyValueList and a fetched feed on
+    ResourceTimeline, `rows` names table data on Table and axis labels on
+    Heatmap. Only the declaration knows. `props_for` merges the generated
+    contract (which knows required-ness) with the Zod catalog (which knows
+    array item shapes), so this reads exactly what the renderer enforces.
+
+    A literal belongs when, and only when:
+
+    * the prop is an ARRAY whose items declare a SHAPE — `{label, value}`,
+      `{label, href}`, `{key, label, format}`. Those rows are authored: a
+      breadcrumb trail, a key/value list, a column set. Bindings inside them
+      are rewritten by the caller, which is where the pointers actually live.
+    * the prop is a REQUIRED string/enum — `Tabs.value` naming the open tab,
+      `Calendar.value`, `QRCode.value`. The component cannot function without
+      it and nothing fetches it, so dropping it fails the page outright.
+
+    Everything else keeps being dropped, which is the original and still-real
+    defect this guard was written for:
+
+    * `any`/`union`-typed props (`Table.data`, `Table.rows`, `Chart.data`,
+      `Timeline.entries`, `MetricTile.value`) — the loose types are exactly
+      the ones that also accept a `{{binding}}` string, i.e. the props a
+      dataSource feeds. A literal there is invented rows.
+    * arrays of SCALARS or of OPEN objects (`Sparkline.data` — array of
+      number; `EditableLineGrid.rows` — array of `additionalProperties: {}`).
+      No declared shape means the elements are records or measurements, not
+      authored config. `trend: [8, 9, 10, 11, 12]` on a live tile stays gone.
+    * OPTIONAL scalars, which is how `Stat.value` — a KPI, the fiction case —
+      stays dropped while `Tabs.value` survives: a required scalar is
+      structural, an optional one on a measuring component is a claim.
+    * anything the catalog does not describe. An unknown component gets the
+      conservative answer, never the permissive one.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+
+        spec = props_for(kind, load_contracts()).get(prop)
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return False
+    if not isinstance(spec, dict) or not spec:
+        return False
+    raw = str(spec.get("type") or "").lower()
+    if raw == "array":
+        item = spec.get("items")
+        if not isinstance(item, dict) or not item:
+            return False
+        # `anyOf` because DescriptionList accepts either `{term, description}`
+        # or `{label, value}` rows; both are shaped, so both are authored.
+        variants = item.get("anyOf")
+        variants = variants if isinstance(variants, list) and variants else [item]
+        return all(isinstance(v, dict) and isinstance(v.get("properties"), dict)
+                   and v["properties"] for v in variants)
+    if raw in ("string", "enum") and not spec.get("optional"):
+        return True
+    return False
+
+
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
 #: them among the props and the binder lifts them out afterwards, so they are
 #: not unknown — they are early.
@@ -1072,9 +1164,16 @@ def translate(payload: dict, registry: dict, route: str = "/",
     tally: dict[str, int] = {}
     for c in comps.values():
         hints = [binder.label_of(c)]
-        for v in c.values():
-            if isinstance(v, dict) and "path" in v:
-                hints += [s2 for s2 in str(v["path"]).split("/") if s2]
+        # NESTED POINTERS COUNT TOO. This read only the component's top level,
+        # so a detail page whose pointers all live inside a literal the
+        # contract asked for — `KeyValueList.items` is rows of
+        # `{label, value: {"path": …}}` — tallied nothing and `dominant` came
+        # back None. Every one of those rows then fell through to the sample
+        # model and the page shipped one hardcoded fictional record, which is
+        # the failure the record binding exists to prevent, reached from
+        # inside an array instead of from a prop.
+        for raw in _pointer_paths(c):
+            hints += [s2 for s2 in raw.split("/") if s2]
         for h in hints:
             ent = _resolve_entity(h, binder.idx)
             if ent:
@@ -1109,6 +1208,84 @@ def translate(payload: dict, registry: dict, route: str = "/",
         for seg in [s2 for s2 in str(path).split("/") if s2]:
             node = node.get(seg) if isinstance(node, dict) else None
         return node
+
+    def bind_within(val: Any, comp: dict, prop: str, scope: str) -> Any:
+        """Rewrite the pointers INSIDE a literal the contract asked for.
+
+        `KeyValueList.items` is declared an array of `{label, value}`, so the
+        composer writes the rows and puts the bindings one level down:
+
+            "items": [{"label": "Added", "value": {"path": "/item/createdAt"}}]
+
+        Which is correct, and was fatal. The prop-level branches above see a
+        `list`, not a `{"path": …}`, so neither the pointer branch nor the
+        dict-of-pointers branch matched and the whole prop was discarded —
+        `'items' is a required property`, twice, on this project's `/items/[id]`.
+
+        The rows have to survive AND the pointers inside them have to become
+        bindings: a raw `{"path": …}` reaching `props` is rejected by the row's
+        own `.strict()` schema, which is the same failure one level in.
+
+        Precedence is the copy branch's, deliberately — a row's `value` and a
+        heading's `content` name the same field of the same record, and two
+        rules for that would bind them to two different sources on one page.
+        A pointer that resolves to nothing takes its ROW with it rather than
+        the whole prop: a key/value list missing one line is a list, and a
+        detail page missing its key/value list is a 404.
+        """
+        if isinstance(val, dict) and "path" in val:
+            raw = str(val["path"])
+            segs = [s2 for s2 in raw.strip("/").split("/") if s2]
+            if (binder.is_record_page() and len(segs) >= 2 and binder.dominant
+                    and isinstance(at_path("/" + segs[0]), dict)):
+                src = binder.record_source(binder.dominant)
+                out = f"{{{{{src}.{segs[-1]}}}}}"
+                binder.assumptions.append(
+                    f'{comp.get("id")}.{prop}: "{raw}" names a field of the '
+                    f"record this page shows — bound to {out!r} inside the row.")
+                return out
+            if scope and segs and not raw.startswith("/"):
+                return f"{{{{{scope}.{segs[-1]}}}}}"
+            lit = at_path(raw)
+            if isinstance(lit, (str, int, float, bool)):
+                # COPY, and said out loud. Same judgement the copy branch
+                # makes for a heading: off a record page there is no source to
+                # bind to, and the composer's own sample text is the only
+                # honest reading of what it meant the row to say.
+                #
+                # AS A STRING, because the shaped row types that carry pointers
+                # type them as one — `KeyValueList` items are
+                # `{label: string, value: string}`. Handing back the sample's
+                # raw `6` produced `props.items.1.value: 0 is not of type
+                # 'string'`, which refuses the page for a display value that
+                # was always going to be rendered as text. Measured on
+                # gh0mlpbp's own `items-id.2.json`.
+                binder.assumptions.append(
+                    f'{comp.get("id")}.{prop}: "{raw}" is not a field of a '
+                    f"record this page fetches — read as copy from the sample "
+                    f"model ({lit!r}).")
+                return lit if isinstance(lit, str) else str(lit)
+            binder.warnings.append(
+                f'{comp.get("id")}.{prop}: "{raw}" resolves to no source on '
+                f"this page — that row dropped rather than emitted as a "
+                f"pointer the renderer cannot read.")
+            return _UNBOUND
+        if isinstance(val, dict):
+            out_d: dict[str, Any] = {}
+            for k2, v2 in val.items():
+                r = bind_within(v2, comp, prop, scope)
+                if r is _UNBOUND:
+                    return _UNBOUND
+                out_d[k2] = r
+            return out_d
+        if isinstance(val, list):
+            out_l: list[Any] = []
+            for v2 in val:
+                r = bind_within(v2, comp, prop, scope)
+                if r is not _UNBOUND:
+                    out_l.append(r)
+            return out_l
+        return val
 
     def repeat_over(container: dict, template: dict, base: str) -> dict | None:
         """Homogeneous records → one Repeat over a real list source.
@@ -1297,6 +1474,29 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         if bound:
                             props[k] = bound
                             continue
+                    # A LITERAL THE CONTRACT ASKED FOR IS NOT FICTION. This
+                    # branch keyed on the prop's NAME and nothing else, so
+                    # `KeyValueList.items` — declared an array of {label,
+                    # value}, with the bindings one level down inside the rows
+                    # — was thrown away as invented data, and the page was then
+                    # refused for omitting the prop the composer had supplied.
+                    # Forty-three components carry a `_DATA_PROPS`-named prop
+                    # that is authored rather than fetched; a name list cannot
+                    # tell them from `Table.rows`, and the declaration can.
+                    if _literal_is_the_contract(kind, k):
+                        rows = bind_within(val, c, k, scope)
+                        if rows is _UNBOUND or (isinstance(rows, list) and not rows):
+                            # Every row lost its binding, so what is left is an
+                            # empty list where the contract wants content —
+                            # which fails validation exactly as the drop did.
+                            # Reported as a drop, because that is what it is.
+                            binder.warnings.append(
+                                f'{c.get("id")}.{k}: the contract wants a '
+                                f"literal here, but no row's pointer resolved "
+                                f"to a source on this page — dropped.")
+                            continue
+                        props[k] = rows
+                        continue
                     # Not a pointer at all — a literal rows/data array is the
                     # same fiction wearing a different prop name, and `resolve`
                     # would hand it straight through.

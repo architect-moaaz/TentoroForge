@@ -128,7 +128,7 @@ async def run_ir_frontend_pipeline(
             )
 
             try:
-                styles_data = json.loads(styles_path.read_text())
+                styles_data = json.loads(styles_path.read_text(encoding="utf-8"))
 
                 # Parse frames from styles.json
                 frames: list[tuple[str, str, dict]] = []  # (frame_name, node_id, data)
@@ -412,7 +412,7 @@ async def run_ir_frontend_pipeline(
 
                 styles_path = _P(output_dir) / "styles.json"
                 if styles_path.exists():
-                    styles_data = json.loads(styles_path.read_text())
+                    styles_data = json.loads(styles_path.read_text(encoding="utf-8"))
                     frames: list[tuple[str, dict]] = []
                     if isinstance(styles_data, dict) and "children" in styles_data:
                         frames = [(styles_data.get("name", "main"), styles_data)]
@@ -523,7 +523,7 @@ async def _fetch_figma_context(
         for f in figma_dir.iterdir():
             if f.suffix == ".json":
                 try:
-                    context[f.stem] = json.loads(f.read_text())
+                    context[f.stem] = json.loads(f.read_text(encoding="utf-8"))
                 except Exception:
                     pass
 

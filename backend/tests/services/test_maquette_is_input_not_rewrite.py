@@ -30,12 +30,12 @@ def _app(tmp_path: Path, route: str, slug: str) -> Path:
         "root": {"type": "Stack", "children": [
             {"type": "Kanban", "props": {"groupBy": "status"}},
         ]},
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
 def _untouched(tmp_path: Path, slug: str) -> bool:
-    d = json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text())
+    d = json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text(encoding="utf-8"))
     kinds = [c.get("type") for c in d["root"]["children"]]
     return kinds == ["Kanban"]
 
@@ -88,6 +88,6 @@ def test_all_three_authors_go_through_the_shared_resolver():
     """Guards the wiring: a future edit that reverts one author back to
     load_vocabulary would silently un-fix the inversion for that layer."""
     for mod in ("dashboard_maquette", "collection_maquette", "record_maquette"):
-        src = Path(f"services/{mod}.py").read_text()
+        src = Path(f"services/{mod}.py").read_text(encoding="utf-8")
         assert "vocabulary_for_plan" in src, mod
         assert "load_vocabulary(plan.get(\"archetype\"))" not in src, mod

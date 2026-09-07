@@ -50,7 +50,7 @@ def guard_auth_gate(output_dir: str) -> dict:
     if not nav.exists():
         return {"patched": 0}
     try:
-        gated = bool(json.loads(nav.read_text()).get("authGated"))
+        gated = bool(json.loads(nav.read_text(encoding="utf-8")).get("authGated"))
     except (json.JSONDecodeError, OSError):
         return {"patched": 0}
     if gated:
@@ -61,9 +61,9 @@ def guard_auth_gate(output_dir: str) -> dict:
     # 1. Layout-level gate (LLM-authored page-level check)
     layout = root / "src" / "app" / "(dashboard)" / "layout.tsx"
     if layout.exists():
-        text = layout.read_text()
+        text = layout.read_text(encoding="utf-8")
         if _GATE in text:
-            layout.write_text(text.replace(_GATE, _REPLACEMENT))
+            layout.write_text(text.replace(_GATE, _REPLACEMENT), encoding="utf-8")
             patched += 1
 
     # 2. Middleware-level gate (framework-level intercept, template file)
@@ -71,9 +71,9 @@ def guard_auth_gate(output_dir: str) -> dict:
     #    withAuth — otherwise assume it's already public or hand-edited.
     middleware = root / "src" / "middleware.ts"
     if middleware.exists():
-        mw_text = middleware.read_text()
+        mw_text = middleware.read_text(encoding="utf-8")
         if "withAuth" in mw_text or "next-auth/middleware" in mw_text:
-            middleware.write_text(_PUBLIC_MIDDLEWARE)
+            middleware.write_text(_PUBLIC_MIDDLEWARE, encoding="utf-8")
             patched += 1
 
     if patched:

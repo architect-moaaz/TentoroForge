@@ -31,10 +31,10 @@ def test_registry_exists_with_expected_members():
 @pytest.mark.parametrize("name", FIXTURES)
 def test_fixture_well_formed(name):
     d = FLEET / name
-    desc = (d / "description.txt").read_text().strip()
+    desc = (d / "description.txt").read_text(encoding="utf-8").strip()
     assert len(desc) > 40, "description too short to drive a generation"
 
-    meta = json.loads((d / "meta.json").read_text())
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
     assert meta.get("archetype")
     assert isinstance(meta.get("stresses"), list) and meta["stresses"]
     assert meta.get("profile") in ("fast", "complete")
@@ -45,7 +45,7 @@ def test_fixture_well_formed(name):
         assert "replan" in str(meta.get("plan", "")), \
             f"{name} has no plan.json and meta.plan doesn't mention --replan"
         return
-    plan = json.loads(plan_p.read_text())
+    plan = json.loads(plan_p.read_text(encoding="utf-8"))
     assert plan.get("data_models"), f"{name} plan has no data_models"
     assert plan.get("pages"), f"{name} plan has no pages"
 
@@ -58,6 +58,6 @@ def test_fixture_plan_is_canonical(name):
     plan_p = FLEET / name / "plan.json"
     if not plan_p.is_file():
         pytest.skip("plan seeded via --replan")
-    plan = json.loads(plan_p.read_text())
+    plan = json.loads(plan_p.read_text(encoding="utf-8"))
     canonical, _report = canonicalize_plan(plan)
     assert canonical == plan, f"{name} plan.json is not canonical"

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "a2ui-generate": {
+      "command": "/ABSOLUTE/PATH/TO/agent2ui/.venv/Scripts/python.exe",
+      "args": ["/ABSOLUTE/PATH/TO/TentoroForge/scripts/a2ui_mcp_launch.py"],
+      "env": {
+        "A2UI_SERVER": "/ABSOLUTE/PATH/TO/agent2ui/tools/a2ui-mcp/server.py",
+        "A2UI_REPO": "/ABSOLUTE/PATH/TO/agent2ui",
+        "A2UI_PROVIDER": "anthropic",
+        "A2UI_LOG": "info",
+        "A2UI_LOG_FILE": "/ABSOLUTE/PATH/TO/agent2ui/tools/a2ui-mcp/mcp.jsonl",
+        "A2UI_MONTAGE": "forge_montage.png",
+        "A2UI_MONTAGE_DIR": "/ABSOLUTE/PATH/TO/agent2ui/montage"
+      }
+    }
+  }
+}

@@ -43,6 +43,7 @@ from services.figma.credentials import (
     SecretResolver,
     redact,
 )
+from services.mcp_client import tool_result_is_error
 
 log = logging.getLogger(__name__)
 
@@ -230,7 +231,11 @@ class FigmaGateway:
         except Exception as exc:  # noqa: BLE001 — mapped, not swallowed
             raise FigmaGatewayError("unreachable", f"{type(exc).__name__}: {exc}") from exc
 
-        if getattr(result, "isError", False):
+        # `is_error`, not `isError` — under mcp 2.0 the camelCase name survives
+        # only as a serialisation alias, so this raise had never fired and every
+        # Figma tool error fell through to `_blocks_of` and was parsed as design
+        # data. See `mcp_client.tool_result_is_error`.
+        if tool_result_is_error(result):
             raise FigmaGatewayError("tool_error", _text_of(result)[:400] or tool)
 
         return _blocks_of(result)

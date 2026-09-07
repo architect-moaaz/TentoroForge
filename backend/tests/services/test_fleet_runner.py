@@ -71,7 +71,7 @@ def test_load_baselines_missing_is_empty(tmp_path, monkeypatch):
 def test_load_baselines_reads_file(tmp_path, monkeypatch):
     import scripts.fleet as fleet
     p = tmp_path / "baselines.json"
-    p.write_text(json.dumps({"doc-intel": {"composite": 80.0}}))
+    p.write_text(json.dumps({"doc-intel": {"composite": 80.0}}), encoding="utf-8")
     monkeypatch.setattr(fleet, "BASELINES_PATH", p)
     assert fleet.load_baselines()["doc-intel"]["composite"] == 80.0
 
@@ -164,6 +164,6 @@ def test_latest_run_dir_picks_newest(tmp_path, monkeypatch):
     for ts in ("20260101T000000Z", "20260817T120000Z"):
         d = tmp_path / ts
         d.mkdir()
-        (d / "summary.json").write_text("{}")
+        (d / "summary.json").write_text("{}", encoding="utf-8")
     (tmp_path / "20269999T000000Z").mkdir()   # no summary — ignored
     assert fleet.latest_run_dir().name == "20260817T120000Z"

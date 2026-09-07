@@ -25,7 +25,7 @@ def inject_bridge(output_dir: str) -> None:
     if not layout:
         return
 
-    source = layout.read_text()
+    source = layout.read_text(encoding="utf-8")
 
     # Already injected?
     if "__bridge.js" in source:
@@ -56,7 +56,7 @@ def inject_bridge(output_dir: str) -> None:
             count=1,
         )
 
-    layout.write_text(source)
+    layout.write_text(source, encoding="utf-8")
 
 
 def remove_bridge(output_dir: str) -> None:
@@ -73,14 +73,14 @@ def remove_bridge(output_dir: str) -> None:
     if not layout:
         return
 
-    source = layout.read_text()
+    source = layout.read_text(encoding="utf-8")
     # Remove the Script tag line
     source = re.sub(r"\s*<Script\s+src=\"/__bridge\.js\"[^/]*/>\s*\n?", "\n", source)
     # Remove the Script import if no other Script usage remains
     if "<Script " not in source:
         source = source.replace(SCRIPT_IMPORT + "\n", "")
         source = source.replace(SCRIPT_IMPORT, "")
-    layout.write_text(source)
+    layout.write_text(source, encoding="utf-8")
 
 
 def _find_layout(out: Path) -> Path | None:

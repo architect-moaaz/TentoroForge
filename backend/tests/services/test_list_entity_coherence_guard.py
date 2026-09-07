@@ -14,12 +14,12 @@ from services.list_entity_coherence_guard import reconcile_list_entities
 
 def _fixture_project(tmp_path: Path, entities: dict, schemas: dict[str, dict]) -> Path:
     (tmp_path / "src" / "schemas").mkdir(parents=True)
-    (tmp_path / "registry.json").write_text(json.dumps({"entities": entities}))
-    (tmp_path / "plan.json").write_text(json.dumps({"entities": entities}))
+    (tmp_path / "registry.json").write_text(json.dumps({"entities": entities}), encoding="utf-8")
+    (tmp_path / "plan.json").write_text(json.dumps({"entities": entities}), encoding="utf-8")
     for rel, content in schemas.items():
         path = tmp_path / "src" / "schemas" / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(content))
+        path.write_text(json.dumps(content), encoding="utf-8")
     return tmp_path
 
 
@@ -56,7 +56,7 @@ def test_rebinds_persona_list_page_bound_to_wrong_entity(tmp_path):
     _fixture_project(tmp_path, entities, schemas)
     r = reconcile_list_entities(str(tmp_path))
 
-    page = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text())
+    page = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text(encoding="utf-8"))
     assert page["dataSources"][0]["entity"] == "Carer"
     assert page["dataSources"][0]["name"] == "carers"
     assert r["pages_rebound"] == 1
@@ -77,7 +77,7 @@ def test_rebinds_kebab_named_page(tmp_path):
     _fixture_project(tmp_path, entities, schemas)
     reconcile_list_entities(str(tmp_path))
 
-    page = json.loads((tmp_path / "src" / "schemas" / "elderly-users.json").read_text())
+    page = json.loads((tmp_path / "src" / "schemas" / "elderly-users.json").read_text(encoding="utf-8"))
     assert page["dataSources"][0]["entity"] == "ElderlyUser"
 
 
@@ -100,7 +100,7 @@ def test_skips_page_when_no_matching_entity(tmp_path):
     _fixture_project(tmp_path, entities, schemas)
     r = reconcile_list_entities(str(tmp_path))
     assert r["pages_rebound"] == 0
-    page = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text())
+    page = json.loads((tmp_path / "src" / "schemas" / "dashboard.json").read_text(encoding="utf-8"))
     assert page["dataSources"][0]["entity"] == "User"
 
 
@@ -143,7 +143,7 @@ def test_matches_singular_plural(tmp_path):
     }
     _fixture_project(tmp_path, entities, schemas)
     reconcile_list_entities(str(tmp_path))
-    page = json.loads((tmp_path / "src" / "schemas" / "carer.json").read_text())
+    page = json.loads((tmp_path / "src" / "schemas" / "carer.json").read_text(encoding="utf-8"))
     assert page["dataSources"][0]["entity"] == "Carer"
 
 
@@ -159,7 +159,7 @@ def test_prefers_existing_dataSource_name_convention(tmp_path):
     }
     _fixture_project(tmp_path, entities, schemas)
     reconcile_list_entities(str(tmp_path))
-    page = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text())
+    page = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text(encoding="utf-8"))
     assert page["dataSources"][0]["name"] == "carers"
 
 
@@ -218,7 +218,7 @@ def test_preserves_extra_data_sources_and_shape(tmp_path):
     schemas = {"carers.json": page}
     _fixture_project(tmp_path, entities, schemas)
     reconcile_list_entities(str(tmp_path))
-    written = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text())
+    written = json.loads((tmp_path / "src" / "schemas" / "carers.json").read_text(encoding="utf-8"))
     assert len(written["dataSources"]) == 2
     assert written["dataSources"][0]["entity"] == "Carer"
     assert written["dataSources"][1]["entity"] == "Statistic"  # untouched

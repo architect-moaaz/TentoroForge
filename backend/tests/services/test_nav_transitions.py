@@ -7,15 +7,15 @@ from services.nav_transitions import build_transitions
 def _seed(tmp_path, pages, schemas, **navtop):
     c = tmp_path / "src" / "contracts"
     c.mkdir(parents=True, exist_ok=True)
-    (c / "nav-flow.json").write_text(json.dumps({"pages": pages, **navtop}))
+    (c / "nav-flow.json").write_text(json.dumps({"pages": pages, **navtop}), encoding="utf-8")
     for rel, obj in schemas.items():
         p = tmp_path / "src" / "schemas" / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(obj))
+        p.write_text(json.dumps(obj), encoding="utf-8")
 
 
 def _read(tmp_path):
-    return json.loads((tmp_path / "src/contracts/nav-flow.json").read_text())["transitions"]
+    return json.loads((tmp_path / "src/contracts/nav-flow.json").read_text(encoding="utf-8"))["transitions"]
 
 
 def test_button_navigate_becomes_transition(tmp_path):

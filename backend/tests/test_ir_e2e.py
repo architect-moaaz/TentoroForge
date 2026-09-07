@@ -142,7 +142,7 @@ class TestIREndToEnd:
         for rel_path in written:
             full_path = os.path.join(output_dir, rel_path)
             assert os.path.exists(full_path), f"Expected file: {full_path}"
-            content = Path(full_path).read_text()
+            content = Path(full_path).read_text(encoding="utf-8")
             assert len(content) > 50
 
         # Step 5: Save IR

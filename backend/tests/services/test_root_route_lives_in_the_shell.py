@@ -28,7 +28,7 @@ def _app(tmp_path) -> pathlib.Path:
     app = tmp_path / "app"
     (app / "src" / "app" / "(dashboard)").mkdir(parents=True)
     (app / "src" / "app" / "(dashboard)" / "page.tsx").write_text(
-        "// scaffold: renders / from the registry, inside the shell\n")
+        "// scaffold: renders / from the registry, inside the shell\n", encoding="utf-8")
     return app
 
 
@@ -43,7 +43,7 @@ def test_the_scaffold_page_is_left_to_do_its_job(tmp_path):
     app = _app(tmp_path)
     result = project_root_route(_claims_root(), app)
     assert result["files"] == []
-    kept = (app / "src" / "app" / "(dashboard)" / "page.tsx").read_text()
+    kept = (app / "src" / "app" / "(dashboard)" / "page.tsx").read_text(encoding="utf-8")
     assert "scaffold" in kept
 
 
@@ -59,7 +59,7 @@ def test_a_root_page_from_an_older_build_is_removed(tmp_path):
     """While it exists it shadows the in-group page, so an application built
     before this fix keeps losing its sidebar until the file goes."""
     app = _app(tmp_path)
-    (app / "src" / "app" / "page.tsx").write_text("// stale\n")
+    (app / "src" / "app" / "page.tsx").write_text("// stale\n", encoding="utf-8")
     result = project_root_route(_claims_root(), app)
     assert result["removedStaleRoot"] is True
     assert not (app / "src" / "app" / "page.tsx").exists()
@@ -74,7 +74,7 @@ def test_an_unclaimed_root_redirects_from_inside_the_group(tmp_path):
     result = project_root_route(doc, app)
     assert result["files"] == ["src/app/(dashboard)/page.tsx"]
     assert result["redirectsTo"] == "/sittings"
-    body = (app / "src" / "app" / "(dashboard)" / "page.tsx").read_text()
+    body = (app / "src" / "app" / "(dashboard)" / "page.tsx").read_text(encoding="utf-8")
     assert 'redirect("/sittings")' in body
     assert not (app / "src" / "app" / "page.tsx").exists()
 

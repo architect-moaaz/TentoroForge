@@ -39,8 +39,8 @@ def app(tmp_path: Path) -> Path:
     (tmp_path / "src" / "schemas" / "referrals" / "new.json").write_text(
         json.dumps(REFERRAL_SCHEMA, indent=2)
     )
-    (tmp_path / "README.md").write_text("Vet clinic app.")
-    (tmp_path / "package-lock.json").write_text("{}")  # allowed ext, big file class
+    (tmp_path / "README.md").write_text("Vet clinic app.", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text("{}", encoding="utf-8")  # allowed ext, big file class
     return tmp_path
 
 
@@ -58,7 +58,7 @@ def test_read_rejects_absolute_path(app: Path):
 
 def test_read_rejects_disallowed_extension(app: Path):
     # A .sqlite file isn't in the allow list.
-    (app / "data.sqlite").write_text("BLOB")
+    (app / "data.sqlite").write_text("BLOB", encoding="utf-8")
     assert "error" in read_file(str(app), {"path": "data.sqlite"})
 
 
@@ -79,7 +79,7 @@ def test_read_returns_content_for_allowed_file(app: Path):
 
 
 def test_read_truncates_very_long_files(app: Path):
-    (app / "big.md").write_text("line\n" * 5000)
+    (app / "big.md").write_text("line\n" * 5000, encoding="utf-8")
     r = read_file(str(app), {"path": "big.md"})
     assert r["truncated"] is True
     assert r["lines"] == 5000
@@ -129,7 +129,7 @@ def test_edit_relabels_password_field(app: Path):
         "new_string": '"label": "Passphrase"',
     })
     assert r["edited"] is True
-    disk = (app / path).read_text()
+    disk = (app / path).read_text(encoding="utf-8")
     assert '"Passphrase"' in disk
     assert '"label": "Password"' not in disk
     # File must still parse as JSON.
@@ -143,7 +143,7 @@ def test_edit_delete_is_allowed_when_new_string_is_empty(app: Path):
         "new_string": "",
     })
     assert r["edited"] is True
-    assert (app / "README.md").read_text() == ""
+    assert (app / "README.md").read_text(encoding="utf-8") == ""
 
 
 def test_edit_rejects_path_escape(app: Path):
@@ -158,7 +158,7 @@ def test_edit_rejects_path_escape(app: Path):
 # =========================================================================
 
 def _write(app: Path, path: str, obj: dict) -> None:
-    (app / path).write_text(json.dumps(obj, indent=2))
+    (app / path).write_text(json.dumps(obj, indent=2), encoding="utf-8")
 
 
 def test_verify_remove_kept_when_field_absent(app: Path):

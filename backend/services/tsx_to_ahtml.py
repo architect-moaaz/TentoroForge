@@ -131,7 +131,7 @@ def reverse_compile_project(output_dir: str) -> list[dict[str, Any]]:
             continue
 
         try:
-            tsx = page_file.read_text()
+            tsx = page_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 

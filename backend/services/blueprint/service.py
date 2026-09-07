@@ -347,7 +347,7 @@ class BlueprintService:
     def save(self) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp = self.current_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.doc, indent=2, sort_keys=True), "utf-8")
+        tmp.write_text(json.dumps(self.doc, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.current_path)
         return self.current_path
 

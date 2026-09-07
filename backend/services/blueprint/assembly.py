@@ -167,23 +167,40 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
-                    and str(dst_rel) not in SCAFFOLD_OWNED
-                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
+            # `.as_posix()`, NOT `str()`. PROJECTED_PATHS, SCAFFOLD_OWNED and
+            # SCAFFOLD_DEFAULTS are all spelled with forward slashes, and
+            # `str(PurePath)` renders the OS separator — so on Windows this
+            # guard matched NOTHING with a directory in it and the scaffold
+            # copied straight over the projection's output. Proven against
+            # output/gh0mlpbp: its shipped `src/middleware.ts` is byte-identical
+            # to the scaffold template, i.e. the hardcoded withAuth gate this
+            # entry was added to PROJECTED_PATHS to stop restoring was restored
+            # again, closing every page the projection had declared public. The
+            # other seven casualties were `src/schemas/{registry.ts,load.ts,
+            # products/*.json}`, `src/app/(dashboard)/page.tsx` and
+            # `src/db/schema/index.ts` — the scaffold's demo product pages
+            # landed in every generated app. Same separator bug as
+            # `runtime_injector._remove_except` and projection.py's stale sweep.
+            key = dst_rel.as_posix()
+            if (any(key.startswith(p) for p in PROJECTED_PATHS)
+                    and key not in SCAFFOLD_OWNED
+                    and key not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
             # A default only fills a hole. The projection ran first and its
             # output is the application's; this is what stands in when it did
             # not run at all.
-            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+            if key in SCAFFOLD_DEFAULTS and dst.exists():
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
-                dst.write_text(_interpolate(src.read_text(),
-                                            project_short_id=project_short_id))
+                dst.write_text(_interpolate(src.read_text(encoding="utf-8"),
+                                            project_short_id=project_short_id), encoding="utf-8")
             else:
                 shutil.copyfile(src, dst)
-            written.append(str(dst_rel))
+            # Posix here too: this list is recorded in the Blueprint's runtime
+            # description and compared against forward-slash paths by callers.
+            written.append(key)
     return written
 
 
@@ -266,7 +283,7 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
         for token, value in values.items():
             text = text.replace(token, value)
         if text != original:
-            path.write_text(text, "utf-8")
+            path.write_text(text, encoding="utf-8")
             touched.append(rel)
     return touched
 
@@ -399,7 +416,7 @@ def assemble(doc: dict, app_root: str | Path, *,
     vendored = vendor_engines(out)
     loose = copy_loose_libs(out)
 
-    (out / "drizzle.config.ts").write_text(DRIZZLE_CONFIG, "utf-8")
+    (out / "drizzle.config.ts").write_text(DRIZZLE_CONFIG, encoding="utf-8")
 
     # Next caches compiled output under `.next`, and a running dev server keeps
     # serving it. Re-assembling rewrites scaffold sources underneath that cache,
@@ -428,7 +445,7 @@ def assemble(doc: dict, app_root: str | Path, *,
         # the request, which is correct for any port a preview lands on.
         f"AUTH_TRUST_HOST=true\n"
     )
-    (out / ".env.example").write_text(env_body, "utf-8")
+    (out / ".env.example").write_text(env_body, encoding="utf-8")
 
     # Next.js gives `.env.local` precedence over `.env`, and the scaffold ships
     # one pointing at a shared development database. Copied verbatim, every
@@ -439,7 +456,7 @@ def assemble(doc: dict, app_root: str | Path, *,
     #
     # So the app's own connection is written to the file that actually wins.
     for name in (".env", ".env.local"):
-        (out / name).write_text(env_body, "utf-8")
+        (out / name).write_text(env_body, encoding="utf-8")
 
     # Last, after every writer above. A `{{token}}` surviving into a .tsx is a
     # JSX expression, so it compiles, passes both gates, and dies at prerender
@@ -593,11 +610,18 @@ def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
     Slow — install and build are minutes, not seconds — and that is the cost of
     the claim. A generated app that has not been compiled has not been checked.
     """
+    import shutil
     import subprocess
 
     root = Path(app_root)
-    steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
-             ("build", ["npm", "run", "build"]))
+    # RESOLVED, NOT BARE. On Windows npm is `npm.cmd`, and CreateProcess does
+    # no PATHEXT lookup — a bare "npm" raises FileNotFoundError [WinError 2],
+    # which the node reported as "The system cannot find the file specified"
+    # with nothing saying which file. `which` returns the .cmd there and the
+    # plain binary everywhere else, so this is the same call on every platform.
+    npm = shutil.which("npm") or "npm"
+    steps = (("install", [npm, "install", "--no-audit", "--no-fund"]),
+             ("build", [npm, "run", "build"]))
     out: dict[str, Any] = {}
     for name, cmd in steps:
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,

@@ -6,7 +6,10 @@ mock literals copied from the dashboard exemplar:
 
   * Stat / KPI / progress / gauge tiles carrying a literal NUMBER in `value`
     (e.g. `"value": 128`) that really wants a live entity count → rebound to a
-    generated op:"aggregate" count dataSource.
+    generated op:"aggregate" count dataSource. A tile whose `value` is a
+    `{{…}}` binding whose ROOT names no declared dataSource counts as unbound
+    too: it fetches nothing and renders blank, which is the same defect wearing
+    a binding's clothes (see `_is_dangling`).
   * Plain collection widgets (List / DataList / a Table whose `rows` is a
     literal array) carrying a hardcoded array of rows → rebound to an
     op:"list" dataSource for the mapped entity.
@@ -165,7 +168,40 @@ def _uniq_name(base: str, taken: set[str]) -> str:
     return name
 
 
-def _try_stat(node: dict, page_ents, all_ents) -> tuple[str, dict, str] | None:
+# A whole-string binding, root identifier captured: "{{metrics.total}}" -> "metrics".
+_BINDING_ROOT_RE = re.compile(r"^\{\{\s*([A-Za-z_][\w]*)\s*(?:\.[\w.]+)?\s*\}\}$")
+
+# Binding roots the renderer supplies without a page fetch. A tile bound to one
+# of these is legitimately bound and must never be rewritten.
+_SCOPE_ROOTS = frozenset({
+    "user", "actor", "session", "route", "params", "param", "query",
+    "search", "form", "state", "theme", "now", "today",
+    "item", "row", "index", "i",
+})
+
+
+def _is_dangling(value, declared: set) -> bool:
+    """True when `value` is a `{{…}}` binding whose ROOT names nothing.
+
+    This guard treated ANY `{{…}}` string as "already bound" and skipped it —
+    which stepped over exactly the case it exists to fix. `/items` shipped
+    three Stat tiles bound to `{{metrics.list_total_inventory_value}}` on a page
+    whose dataSources were named `items`, `totalInventoryValue` and
+    `lowStockCount`: no `metrics` source, no fetch, three blank tiles, and the
+    guard walked past all three because they carried a binding-shaped string.
+    A binding that resolves to nothing is not bound.
+    """
+    if not isinstance(value, str):
+        return False
+    m = _BINDING_ROOT_RE.match(value.strip())
+    if not m:
+        return False
+    root = m.group(1)
+    return root not in declared and root not in _SCOPE_ROOTS
+
+
+def _try_stat(node: dict, page_ents, all_ents,
+              declared: set | None = None) -> tuple[str, dict, str] | None:
     """(value_prop, aggregate_dataSource, binding) for a stat tile, or None."""
     props = node.get("props")
     if not isinstance(props, dict):
@@ -174,9 +210,12 @@ def _try_stat(node: dict, page_ents, all_ents) -> tuple[str, dict, str] | None:
     value_props = _STAT_WIDGETS.get(tkey)
     if not value_props:
         return None
+    declared = declared or set()
     prop = next(
         (p for p in value_props
-         if isinstance(props.get(p), (int, float)) and not isinstance(props.get(p), bool)),
+         if (isinstance(props.get(p), (int, float))
+             and not isinstance(props.get(p), bool))
+         or _is_dangling(props.get(p), declared)),
         None,
     )
     if prop is None:
@@ -278,7 +317,8 @@ def bind_static_widgets(output_dir: str) -> dict:
             if tkey not in _STAT_WIDGETS and tkey not in _LIST_WIDGETS:
                 continue
 
-            plan = _try_stat(node, page_ents, all_ents) or _try_list(node, page_ents, all_ents)
+            plan = (_try_stat(node, page_ents, all_ents, names)
+                    or _try_list(node, page_ents, all_ents))
             if not plan:
                 # A widget we know how to bind but couldn't map with confidence.
                 props = node.get("props")

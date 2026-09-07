@@ -54,7 +54,7 @@ def test_is_disabled_without_flag(tmp_path, monkeypatch):
     assert report["enabled"] is False
     assert report["schema_files_patched"] == []
     # Schema untouched
-    assert "sortOrder" not in (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    assert "sortOrder" not in (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
 
 
 def test_patches_schema_when_reorderable(tmp_path, monkeypatch):
@@ -64,7 +64,7 @@ def test_patches_schema_when_reorderable(tmp_path, monkeypatch):
     assert report["enabled"] is True
     assert "Order" in report["entities"]
     assert report["schema_files_patched"], "expected orders.ts to be patched"
-    patched = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    patched = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
     assert "sortOrder" in patched
     assert "integer(" in patched
     # Idempotent — second run does not re-inject
@@ -87,5 +87,5 @@ def test_copies_reorder_route(tmp_path, monkeypatch):
     rcp.run(str(tmp_path))
     route = tmp_path / "src" / "app" / "api" / "data" / "[...path]" / "reorder" / "route.ts"
     assert route.exists()
-    body = route.read_text()
+    body = route.read_text(encoding="utf-8")
     assert "PATCH" in body and "sortOrder" in body

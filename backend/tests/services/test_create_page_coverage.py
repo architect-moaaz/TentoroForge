@@ -31,9 +31,9 @@ def _app(tmp_path):
     (sch / "owners.json").write_text(json.dumps({
         "schemaVersion": "2", "route": "/owners",
         "root": {"type": "Button", "props": {"onClick": {"action": "navigate", "to": "/owners/new"}}},
-    }))
+    }), encoding="utf-8")
     (tmp_path / "workflows").mkdir()
-    (tmp_path / "workflows" / "CreateOwner.json").write_text("{}")
+    (tmp_path / "workflows" / "CreateOwner.json").write_text("{}", encoding="utf-8")
     return tmp_path
 
 
@@ -42,7 +42,7 @@ def test_generates_missing_create_page(tmp_path):
     reg = {"entities": {"Owner": {"fields": {"firstName": {}, "email": {}, "createdAt": {}}}}}
     made = ensure_create_pages(app, reg)
     assert "/owners/new" in made
-    out = json.loads((app / "src" / "schemas" / "owners" / "new.json").read_text())
+    out = json.loads((app / "src" / "schemas" / "owners" / "new.json").read_text(encoding="utf-8"))
     assert out["route"] == "/owners/new"
     # idempotent: a second run creates nothing
     assert ensure_create_pages(app, reg) == []
@@ -62,7 +62,7 @@ def test_segment_map_bridges_friendly_route_via_datasource(tmp_path):
         "route": "/bookings",
         "dataSources": [{"name": "bookings", "entity": "ClassBooking", "op": "list"}],
         "root": {"type": "Stack", "children": []},
-    }))
+    }), encoding="utf-8")
     reg = {"entities": {"ClassBooking": {"fields": {"id": {}}}}}
     seg_map = _segment_entity_map(sch.parent.parent, reg)
     assert seg_map.get("bookings") == "ClassBooking"
@@ -106,8 +106,8 @@ async def test_llm_coverage_upgrades_husks_concurrently(tmp_path, monkeypatch):
             "route": f"/{seg}",
             "dataSources": [{"name": seg, "entity": ent, "op": "list"}],
             "root": {"type": "Button", "props": {"label": "New", "navigate": f"/{seg}/new"}},
-        }))
-        (sch / seg / "new.json").write_text(json.dumps(_husk(f"/{seg}/new", f"Create{ent}")))
+        }), encoding="utf-8")
+        (sch / seg / "new.json").write_text(json.dumps(_husk(f"/{seg}/new", f"Create{ent}")), encoding="utf-8")
 
     inflight = {"cur": 0, "max": 0}
     async def _fake_agent(out, plan, page, domain_context=None):
@@ -117,7 +117,7 @@ async def test_llm_coverage_upgrades_husks_concurrently(tmp_path, monkeypatch):
         seg = page["route"].strip("/").split("/")[0]
         (_P(out) / "src" / "schemas" / seg / "new.json").write_text(json.dumps(
             {"route": page["route"], "root": {"type": "Form", "children": [
-                {"type": "Input", "props": {"name": "title"}}]}}))
+                {"type": "Input", "props": {"name": "title"}}]}}), encoding="utf-8")
         inflight["cur"] -= 1
     monkeypatch.setattr("agents.page_schema_agent.run_page_schema_agent", _fake_agent)
     async def _noop(*a, **k):
@@ -130,7 +130,7 @@ async def test_llm_coverage_upgrades_husks_concurrently(tmp_path, monkeypatch):
     assert set(made) == {"/bookings/new", "/plans/new"}
     assert inflight["max"] >= 2                          # the two agent calls overlapped
     for seg in ("bookings", "plans"):
-        assert _cpc._page_has_fields(json.loads((sch / seg / "new.json").read_text())) is True
+        assert _cpc._page_has_fields(json.loads((sch / seg / "new.json").read_text(encoding="utf-8"))) is True
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_deterministic_first_builds_create_form_without_llm(tmp_path, monk
         "route": "/inbox",
         "dataSources": [{"name": "inbox", "entity": "Notification", "op": "list"}],
         "root": {"type": "Button", "props": {"label": "New", "navigate": "/inbox/new"}},
-    }))
+    }), encoding="utf-8")
 
     called = {"n": 0}
     async def _agent_should_not_run(*a, **k):
@@ -155,7 +155,7 @@ async def test_deterministic_first_builds_create_form_without_llm(tmp_path, monk
     made = await _cpc.ensure_create_pages_llm(tmp_path, reg, {"pages": []})
     assert "/inbox/new" in made
     assert called["n"] == 0                                        # no LLM turn
-    built = json.loads((sch / "inbox" / "new.json").read_text())
+    built = json.loads((sch / "inbox" / "new.json").read_text(encoding="utf-8"))
     assert _cpc._page_has_fields(built) is True
     s = json.dumps(built)
     assert '"title"' in s and '"body"' in s and '"CreateNotification"' in s
@@ -173,9 +173,9 @@ async def test_llm_failure_leaves_husk_for_form_scaffold(tmp_path, monkeypatch):
         "route": "/bookings",
         "dataSources": [{"name": "bookings", "entity": "ClassBooking", "op": "list"}],
         "root": {"type": "Button", "props": {"label": "New", "navigate": "/bookings/new"}},
-    }))
+    }), encoding="utf-8")
     husk = _husk("/bookings/new", "CreateClassBooking")
-    (sch / "bookings" / "new.json").write_text(json.dumps(husk))
+    (sch / "bookings" / "new.json").write_text(json.dumps(husk), encoding="utf-8")
 
     async def _boom(*a, **k):
         raise RuntimeError("agent down")
@@ -185,7 +185,7 @@ async def test_llm_failure_leaves_husk_for_form_scaffold(tmp_path, monkeypatch):
     reg = {"entities": {"ClassBooking": {"fields": {"memberId": {}}}}}
     made = await _cpc.ensure_create_pages_llm(tmp_path, reg, {"pages": []})
     assert made == []                                              # husk not counted as done
-    assert json.loads((sch / "bookings" / "new.json").read_text()) == husk  # untouched
+    assert json.loads((sch / "bookings" / "new.json").read_text(encoding="utf-8")) == husk  # untouched
 
 
 # --- B-5a: a /{slug}/new page bound to the WRONG entity is rebuilt from the ROUTE entity ---
@@ -244,27 +244,27 @@ async def test_wrong_entity_create_page_is_rebuilt_from_route_entity(tmp_path):
     # list pages so the /new routes are discoverable
     (sch / "interview-feedback.json").write_text(json.dumps({
         "route": "/interview-feedback",
-        "root": {"type": "Button", "props": {"navigate": "/interview-feedback/new"}}}))
+        "root": {"type": "Button", "props": {"navigate": "/interview-feedback/new"}}}), encoding="utf-8")
     (sch / "candidates.json").write_text(json.dumps({
         "route": "/candidates",
-        "root": {"type": "Button", "props": {"navigate": "/candidates/new"}}}))
+        "root": {"type": "Button", "props": {"navigate": "/candidates/new"}}}), encoding="utf-8")
     # WRONG-entity create page (bound to CreateAssessment / Assessment fields)
     (sch / "interview-feedback" / "new.json").write_text(json.dumps(_wrong_entity_page(
         "/interview-feedback/new", "CreateAssessment",
-        ["applicationId", "candidateId", "assessmentType", "scheduledAt", "location", "status"])))
+        ["applicationId", "candidateId", "assessmentType", "scheduledAt", "location", "status"])), encoding="utf-8")
     # correctly-bound create page (CreateCandidate)
     cand = _wrong_entity_page("/candidates/new", "CreateCandidate", ["fullName", "email"])
-    (sch / "candidates" / "new.json").write_text(json.dumps(cand, indent=2))
-    cand_before = (sch / "candidates" / "new.json").read_text()
+    (sch / "candidates" / "new.json").write_text(json.dumps(cand, indent=2), encoding="utf-8")
+    cand_before = (sch / "candidates" / "new.json").read_text(encoding="utf-8")
 
     made = await _cpc.ensure_create_pages_llm(tmp_path, _B5A_REG, {"pages": []})
 
     assert "/interview-feedback/new" in made
     assert "/candidates/new" not in made
-    rebuilt = json.loads((sch / "interview-feedback" / "new.json").read_text())
+    rebuilt = json.loads((sch / "interview-feedback" / "new.json").read_text(encoding="utf-8"))
     wfs, fields = _form_workflow_and_fields(rebuilt)
     assert wfs == ["CreateInterviewFeedback"]
     assert "rating" in fields and "recommendation" in fields          # InterviewFeedback cols
     assert "assessmentType" not in fields and "scheduledAt" not in fields  # Assessment cols gone
     # correctly-bound page untouched
-    assert (sch / "candidates" / "new.json").read_text() == cand_before
+    assert (sch / "candidates" / "new.json").read_text(encoding="utf-8") == cand_before

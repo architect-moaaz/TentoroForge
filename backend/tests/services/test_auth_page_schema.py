@@ -176,7 +176,7 @@ class TestEmitAuthPageSchemas:
     def test_login_json_has_password_field(self, tmp_path):
         from services.auth_page_schema import emit_auth_page_schemas
         emit_auth_page_schemas(str(tmp_path), SAMPLE_PLAN)
-        data = json.loads((tmp_path / "src" / "schemas" / "login.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "login.json").read_text(encoding="utf-8"))
         fields = _find_form_fields(data)
         names = [f.get("name") for f in fields]
         assert "password" in names
@@ -184,7 +184,7 @@ class TestEmitAuthPageSchemas:
     def test_signup_json_has_password_field(self, tmp_path):
         from services.auth_page_schema import emit_auth_page_schemas
         emit_auth_page_schemas(str(tmp_path), SAMPLE_PLAN)
-        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text(encoding="utf-8"))
         fields = _find_form_fields(data)
         names = [f.get("name") for f in fields]
         assert "password" in names
@@ -193,7 +193,7 @@ class TestEmitAuthPageSchemas:
         """Regression guard: login.json must declare route '/login', not something else."""
         from services.auth_page_schema import emit_auth_page_schemas
         emit_auth_page_schemas(str(tmp_path), SAMPLE_PLAN)
-        data = json.loads((tmp_path / "src" / "schemas" / "login.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "login.json").read_text(encoding="utf-8"))
         assert data.get("route") == "/login", (
             f"login.json declared wrong route: {data.get('route')!r}"
         )
@@ -201,7 +201,7 @@ class TestEmitAuthPageSchemas:
     def test_signup_json_declared_route_is_signup(self, tmp_path):
         from services.auth_page_schema import emit_auth_page_schemas
         emit_auth_page_schemas(str(tmp_path), SAMPLE_PLAN)
-        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text())
+        data = json.loads((tmp_path / "src" / "schemas" / "signup.json").read_text(encoding="utf-8"))
         assert data.get("route") == "/signup"
 
     def test_defensive_bad_plan_does_not_raise(self, tmp_path):

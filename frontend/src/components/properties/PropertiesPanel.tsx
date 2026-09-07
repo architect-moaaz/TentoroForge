@@ -8,7 +8,11 @@ import { CONTROL_BY_TYPE, TextControl } from "./PropControls";
 import { BindingControl } from "./PropControls/BindingControl";
 import { DataKeyControl } from "./PropControls/DataKeyControl";
 import { BindToggle } from "./BindToggle";
+import { isRequiredProp } from "./required-props";
+import { isBinding, bindingExpression } from "@forge/patches";
+import { normalizeSeed } from "@/components/canvas/hooks/useDrop";
 import { BreakpointSwitcher, type EditorBreakpoint } from "./BreakpointSwitcher";
+import { gridStructureActions } from "@/lib/grid-actions";
 
 const BP_KEYS = new Set(["default", "sm", "md", "lg", "xl"]);
 
@@ -39,7 +43,13 @@ function readPropAtBp(
   return undefined;
 }
 
-function writePropAtBp(currentRaw: any, bp: EditorBreakpoint, newValue: any): any {
+function writePropAtBp(
+  currentRaw: any,
+  bp: EditorBreakpoint,
+  newValue: any,
+  /** The registry descriptor's default — the base to seed when the prop is unset. */
+  descriptorDefault?: any,
+): any {
   if (bp === "default") {
     if (isResponsiveShape(currentRaw)) {
       return { ...(currentRaw as object), default: newValue };
@@ -50,8 +60,22 @@ function writePropAtBp(currentRaw: any, bp: EditorBreakpoint, newValue: any): an
   if (isResponsiveShape(currentRaw)) {
     return { ...(currentRaw as object), [bp]: newValue };
   }
-  // Plain literal → wrap it
-  return { default: currentRaw, [bp]: newValue };
+  // Plain literal → wrap it. The base MUST be a real value: when the prop had
+  // never been set, `currentRaw` is undefined, `{ default: undefined, lg: x }`
+  // loses the `default` key on JSON.stringify, and the schema is left holding
+  // the base-less envelope `{ lg: x }`. pickResponsiveValue used to hand that
+  // whole object back below lg, so the page printed {"lg":"ONLYLGHEADING"} to
+  // the end user (audit probe probe_props_4). The resolver now returns
+  // undefined instead of the envelope, and this side stops emitting a base-less
+  // envelope at all: fall back to the registry default, and failing that to the
+  // value being written, so the prop always has a mobile-first base.
+  const base =
+    currentRaw !== undefined
+      ? currentRaw
+      : descriptorDefault !== undefined && descriptorDefault !== null
+        ? descriptorDefault
+        : newValue;
+  return { default: base, [bp]: newValue };
 }
 
 /** Re-parse an edited JSON string back to its typed value (number/array/object/
@@ -112,35 +136,57 @@ function findNodeInArtifacts(artifacts: any, nodeId: string):
   return null;
 }
 
-const MUSTACHE_RE = /\{\{[\s\S]+?\}\}/;
-
-/** A prop is "bound" if it's the editor's {$binding} object OR a generated
- *  {{expr}} interpolation string (which is what the pipeline emits). */
-function isBindingValue(v: unknown): boolean {
-  if (v && typeof v === "object" && "$binding" in (v as any)) return true;
-  return typeof v === "string" && MUSTACHE_RE.test(v);
-}
-
-/** True when the bound value is the {{expr}} string form (vs the {$binding} object). */
-function isMustacheBinding(v: unknown): boolean {
-  return typeof v === "string" && MUSTACHE_RE.test(v);
-}
-
-/** Extract the inner expression from either binding form for the BindingControl. */
-function bindingExpr(v: unknown): string {
-  if (v && typeof v === "object" && "$binding" in (v as any)) return String((v as any).$binding ?? "");
-  if (typeof v === "string") {
-    const m = v.match(/\{\{\s*([\s\S]*?)\s*\}\}/);
-    return m ? m[1] : v;
-  }
-  return "";
-}
+/**
+ * Binding predicates come from @forge/patches, which is also what the reducer
+ * and the commit guard use. They were duplicated here, which is how the editor
+ * ended up able to WRITE a format it could also READ but nothing could RENDER.
+ * One owner for the format now.
+ *
+ * `isBindingValue` still recognises the legacy {$binding} object as bound, so a
+ * page that has not yet been through the load-time migration displays correctly
+ * rather than showing the user a raw object in a text field.
+ */
+const isBindingValue = isBinding;
+const bindingExpr = bindingExpression;
 
 /** Props that hold row/record DATA and are almost always bound to a data source
  *  (Chart.data, Table.rows, list options/items, ActivityFeed.entries). For these
  *  we show the binding dropdown DIRECTLY — no "bind" toggle to hunt for — so a
  *  freshly-dropped component offers its data-source picker on sight. */
 const DATA_SOURCE_PROPS = new Set(["data", "rows", "options", "items", "entries", "records"]);
+/**
+ * Prop types the panel can AUTHOR in place. Compared as strings on purpose:
+ * "object" is being added to PropDescriptor["type"] in the registry package and
+ * a literal comparison would not compile until that lands.
+ */
+const AUTHORABLE_TYPES = new Set<string>(["array", "object"]);
+/**
+ * `rows` is overloaded across the registry: Table/DataGrid mean "the array of
+ * row objects" (bind it), while Textarea and Grid mean "how many rows" (type a
+ * number into it). Matching on the NAME alone put a data-source dropdown on
+ * Textarea.rows — and would have put one on Grid.rows, hiding the row-count
+ * field this feature is built around. The registry already says which is which,
+ * so ask it: a numeric prop is never a data source.
+ *
+ * The same question decides the array/object case, and it is not cosmetic. The
+ * data-source branch below is an EITHER/OR: it renders BindingControl *instead
+ * of* the registry's control and suppresses the bind toggle. So converting
+ * `Select.options` / `RadioGroup.options` to `type:"array", control:"json"` was
+ * correct in the registry and completely invisible in the editor — the user
+ * still could not edit an option list (docs/editor-audit/input-components-2.md
+ * D1), and the ~26 array props being converted alongside them would have been
+ * shadowed the same way. A prop the panel can author gets its control AND the
+ * bind toggle, like every other prop; only props with no authoring UI
+ * (Chart.data and the rest still typed `action`/`binding`) surface the data
+ * picker directly, so those keep exactly the affordance they had.
+ */
+function isDataSourcePropFor(propName: string, descriptor: PropDescriptor): boolean {
+  return (
+    DATA_SOURCE_PROPS.has(propName) &&
+    descriptor.type !== "number" &&
+    !AUTHORABLE_TYPES.has(descriptor.type)
+  );
+}
 // Props that name a FIELD KEY in the bound data (chart axis / series keys). These
 // get a data-aware dropdown of the source's keys instead of a free-text field.
 const DATA_KEY_PROPS = new Set(["xKey", "yKey", "dataKey", "categoryKey", "nameKey", "valueKey", "angleKey"]);
@@ -154,7 +200,30 @@ export function PropertiesPanelInner() {
   const artifacts = useEditorStore(s => s.artifacts);
   const selectedIds = useEditorStore(s => s.selectedNodeIds);
   const dispatch = useEditorStore(s => s.dispatch);
+  const dispatchBatch = useEditorStore(s => s.dispatchBatch);
+  const projectId = useEditorStore(s => s.projectId);
   const [activeBp, setActiveBp] = useState<EditorBreakpoint>("default");
+  /**
+   * Props the user has switched into BIND MODE but not yet given an expression.
+   *
+   * Bound-ness used to be readable straight off the value, because an empty bind
+   * was the object `{ $binding: "" }`. That object is exactly what broke the
+   * node, so an empty bind is now `""` — and `""` is indistinguishable from an
+   * ordinary empty literal. Without this set, clicking "bind" and pausing before
+   * typing dropped you back to a plain text box.
+   *
+   * Bind-mode is an editor affordance, not document data, so it lives here and
+   * never reaches the schema. Keyed by `nodeId::propName` so selecting a
+   * different node does not inherit the previous one's pending binds.
+   */
+  const [pendingBinds, setPendingBinds] = useState<ReadonlySet<string>>(new Set());
+  const bindKey = (propName: string) => `${selectedNodeId}::${propName}`;
+  const markBinding = (propName: string, on: boolean) =>
+    setPendingBinds((prev) => {
+      const nextSet = new Set(prev);
+      if (on) nextSet.add(bindKey(propName)); else nextSet.delete(bindKey(propName));
+      return nextSet;
+    });
 
   if (selectedIds.length === 0) {
     return (
@@ -227,20 +296,34 @@ export function PropertiesPanelInner() {
                 const rawValue = (node.props ?? {})[propName];
                 const currentValue = readPropAtBp(node, propName, activeBp, descriptor.default);
                 // For bind checks, inspect the raw value (not the bp-resolved one)
-                const isBound = isBindingValue(rawValue);
+                const isBound = isBindingValue(rawValue) || pendingBinds.has(bindKey(propName));
                 // Data-source props always surface the binding dropdown (bound or not),
                 // so a just-dropped Chart/Table shows its picker without hunting a toggle.
-                const isDataSourceProp = DATA_SOURCE_PROPS.has(propName);
+                const isDataSourceProp = isDataSourcePropFor(propName, descriptor);
                 const showBinding = isBound || isDataSourceProp;
                 const Control = (CONTROL_BY_TYPE as any)[descriptor.control] ?? TextControl;
+                const required = isRequiredProp(node.type, propName);
                 return (
                   <div key={propName} className="space-y-1">
-                    {!isDataSourceProp && (
-                      <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1">
+                      {required && (
+                        // Visible text, not a coloured asterisk: the failure this
+                        // fixes is a node that renders BLANK with no explanation,
+                        // and a glyph the user has to decode is barely better.
+                        <span
+                          className="mr-auto text-[10px] font-medium uppercase tracking-wide text-destructive"
+                          title={`${propName} is required — the component renders blank without it`}
+                        >
+                          required
+                        </span>
+                      )}
+                      {!isDataSourceProp && (
                         <BindToggle
+                          propName={propName}
                           isBound={isBound}
                           onToggle={() => {
                             if (isBound) {
+                              markBinding(propName, false);
                               dispatch({
                                 type: "unbindProp",
                                 pageId,
@@ -249,6 +332,11 @@ export function PropertiesPanelInner() {
                                 literalValue: descriptor.default ?? "",
                               });
                             } else {
+                              // Remember the INTENT. The dispatch writes "" (an
+                              // empty bind must not become the template "{{}}"),
+                              // which is indistinguishable from an empty literal,
+                              // so the panel has to hold the mode itself.
+                              markBinding(propName, true);
                               dispatch({
                                 type: "bindProp",
                                 pageId,
@@ -259,27 +347,24 @@ export function PropertiesPanelInner() {
                             }
                           }}
                         />
-                      </div>
-                    )}
+                      )}
+                    </div>
                     {showBinding ? (
                       <BindingControl
                         label={propName}
                         pageId={pageId}
                         value={isBound ? bindingExpr(rawValue) : (typeof rawValue === "string" ? rawValue : "")}
                         onChange={(v) => {
-                          // Data-source props + generated {{expr}} strings write a
-                          // {{…}} string; the editor's {$binding} object stays an object.
-                          if (isDataSourceProp || isMustacheBinding(rawValue)) {
-                            dispatch({
-                              type: "updateProp", pageId, nodeId: selectedNodeId,
-                              propName, value: v ? `{{${v}}}` : "",
-                            });
-                          } else {
-                            dispatch({
-                              type: "bindProp", pageId, nodeId: selectedNodeId,
-                              propName, binding: v,
-                            });
-                          }
+                          // ONE FORMAT. This used to fork: data-source props and
+                          // already-mustache values wrote a "{{…}}" string, while
+                          // everything else went through bindProp and got the
+                          // {$binding} object that no renderer understands. Both
+                          // paths now produce the same string, so bindProp is the
+                          // single entry point and the fork is gone.
+                          dispatch({
+                            type: "bindProp", pageId, nodeId: selectedNodeId,
+                            propName, binding: v,
+                          });
                           // Binding a Chart's `data` to a series source is useless
                           // without an axis + series mapping. A series resolves to
                           // [{label,value}], so auto-set xKey/series/chartType (only
@@ -316,7 +401,19 @@ export function PropertiesPanelInner() {
                         onChange={(v: any) => dispatch({
                           type: "updateProp", pageId, nodeId: selectedNodeId,
                           propName,
-                          value: writePropAtBp(rawValue, activeBp, v),
+                          // NORMALISE AT THIS BOUNDARY TOO.
+                          //
+                          // `buildDroppedNode` already runs `normalizeSeed` so a
+                          // freshly dropped node is schema-valid, but this panel is
+                          // the OTHER prop-write boundary and passed the control's
+                          // raw output straight through. A `<select>` yields a
+                          // string, so choosing LEVEL 3 on a Heading wrote
+                          // `level: "3"` against `z.number()` — the drop was valid
+                          // and the first edit invalidated it. Same descriptor-keyed
+                          // rule, one shared function, both boundaries.
+                          value: writePropAtBp(
+                            rawValue, activeBp, normalizeSeed(descriptor, v), descriptor.default,
+                          ),
                         })}
                       />
                     ) : (
@@ -324,11 +421,31 @@ export function PropertiesPanelInner() {
                         label={propName}
                         value={currentValue}
                         options={descriptor.options}
-                        onChange={(v: any) => dispatch({
-                          type: "updateProp", pageId, nodeId: selectedNodeId,
-                          propName,
-                          value: writePropAtBp(rawValue, activeBp, v),
-                        })}
+                        // Context for controls that need to know what they are
+                        // editing, not just its value. ImageControl uses all
+                        // four; every other control ignores them.
+                        imageShape={descriptor.imageShape}
+                        nodeType={node.type}
+                        nodeProps={node.props ?? {}}
+                        projectId={projectId}
+                        onChange={(v: any) => {
+                          const next = writePropAtBp(rawValue, activeBp, v, descriptor.default);
+                          // Changing a Grid's rows/columns has to move CELLS,
+                          // not just write a number — otherwise the prop says
+                          // 3x3 and the canvas still shows four boxes. Only at
+                          // the default breakpoint: a per-breakpoint override
+                          // writes a { default, lg } object, and there is one
+                          // set of cells in the schema, not one per viewport.
+                          const batch =
+                            activeBp === "default"
+                              ? gridStructureActions(pageId, node, propName, next, artifacts)
+                              : null;
+                          if (batch) dispatchBatch(batch);
+                          else dispatch({
+                            type: "updateProp", pageId, nodeId: selectedNodeId,
+                            propName, value: next,
+                          });
+                        }}
                       />
                     )}
                   </div>

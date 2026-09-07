@@ -9,7 +9,7 @@ from services.surface_wrap_guard import wrap_bare_data_displays
 def _write(tmp_path, root):
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True, exist_ok=True)
-    (sdir / "home.json").write_text(json.dumps({"id": "home", "route": "/", "root": root}))
+    (sdir / "home.json").write_text(json.dumps({"id": "home", "route": "/", "root": root}), encoding="utf-8")
     return str(tmp_path)
 
 

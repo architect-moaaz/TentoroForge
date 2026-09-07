@@ -10,7 +10,7 @@ import json
 
 def _write(path, doc):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _find(schema, name):
@@ -66,7 +66,7 @@ def test_plan_fk_target_wins_over_convention(tmp_path):
     })
 
     repair_fk_dropdowns(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "tasks" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "tasks" / "new.json").read_text(encoding="utf-8"))
     node = _find(schema, "categoryId")
     assert node["type"] == "Select", (
         "plan-declared fk should upgrade the Input to a Select"
@@ -109,7 +109,7 @@ def test_plan_silent_falls_through_to_convention(tmp_path):
     })
 
     repair_fk_dropdowns(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "tasks" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "tasks" / "new.json").read_text(encoding="utf-8"))
     node = _find(schema, "candidateId")
     # Convention resolved via relations → Candidate.
     assert node["type"] == "Select"

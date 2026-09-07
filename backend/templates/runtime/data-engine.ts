@@ -1005,6 +1005,12 @@ export async function stats(
 type SimpleMetric = {
   fn: "count" | "sum" | "avg" | "min" | "max";
   field?: string;
+  /** Arithmetic over columns, when no single column holds the value: the page
+   *  composer writes `sum(quantity * price)` and there is no `totalValue`
+   *  column to point `field` at. Compiled by `compileMetricExpr`; a `field`
+   *  naming that product would have been `cols["quantity * price"]` —
+   *  `undefined` — and `sum(undefined)` throws into the catch-all 0. */
+  expr?: string;
   entity?: string;
   window?: "today" | "week" | "month";
   dateField?: string;
@@ -1028,6 +1034,7 @@ type DeltaMetric = {
   kind: "delta";
   fn: "count" | "sum" | "avg" | "min" | "max";
   field?: string;
+  expr?: string;
   entity?: string;
   window: "today" | "week" | "month";   // required — a delta needs a period
   dateField?: string;
@@ -1052,6 +1059,40 @@ type AggregateSource = {
 let _testDb: any = null;
 export function __setTestDb(d: any) { _testDb = d; }
 
+/**
+ * Compile a metric's `expr` into a SQL fragment over this entity's real columns.
+ *
+ * Returns null — never a partial fragment — for anything it cannot vouch for:
+ * an identifier that is not a column of this table, a character outside the
+ * closed alphabet below, unbalanced parens, or an implausibly long string. The
+ * caller then falls back to `field`, and failing that to 0. Nothing from the
+ * expression is ever interpolated as text: identifiers become real column
+ * references and only the fixed operator/number tokens are emitted raw, so a
+ * page schema cannot smuggle SQL through a metric.
+ */
+function compileMetricExpr(expr: string, cols: Record<string, unknown>): SQL | null {
+  if (typeof expr !== "string" || !expr.trim() || expr.length > 200) return null;
+  const tokens = expr.match(/[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|[()+\-*/]/g);
+  // Every character must have been consumed by a token — otherwise something
+  // in the string (a quote, a semicolon, a function call) was skipped over.
+  if (!tokens || tokens.join("") !== expr.replace(/\s+/g, "")) return null;
+  const parts: SQL[] = [];
+  let depth = 0;
+  for (const t of tokens) {
+    if (/^[A-Za-z_]/.test(t)) {
+      const col = cols[t];
+      if (col === undefined) return null;
+      parts.push(sql`${col}`);
+    } else {
+      if (t === "(") depth++;
+      else if (t === ")" && --depth < 0) return null;
+      parts.push(sql.raw(t));
+    }
+  }
+  if (depth !== 0) return null;
+  return sql.join(parts, sql` `);
+}
+
 /** Run a single plain aggregate and return a number (0 on missing entity / error).
  *  `range` overrides the metric's own `window` with an explicit half-open
  *  [start, end) — used by period-delta to query the prior window. */
@@ -1065,19 +1106,28 @@ async function computeSimple(
   const entity = getEntity(entityName);
   if (!entity) return 0;
 
-  // sum/avg/min/max need a real column; a misconfigured metric without one
-  // degrades to 0 rather than building an invalid query.
-  if (m.fn !== "count" && !m.field) return 0;
-
   const cols = entity.table as any;
 
-  // Build the aggregate expression — count() needs no column; others need m.field.
+  // `expr` before `field`: a metric may aggregate arithmetic over columns
+  // ("quantity * price") that no single column holds. compileMetricExpr
+  // returns null for anything it cannot vouch for, which falls back to the
+  // `field` path — and, with neither, to the honest 0 below.
+  const exprSql = m.fn !== "count" && m.expr ? compileMetricExpr(m.expr, cols) : null;
+
+  // sum/avg/min/max need a real column or a compiled expression; a
+  // misconfigured metric with neither degrades to 0 rather than building an
+  // invalid query.
+  if (m.fn !== "count" && !exprSql && (!m.field || cols[m.field] === undefined)) return 0;
+
+  const target: any = exprSql ?? cols[m.field!];
+
+  // Build the aggregate expression — count() needs no column; others need a target.
   const agg =
     m.fn === "count" ? count() :
-    m.fn === "sum"   ? sum(cols[m.field!]) :
-    m.fn === "avg"   ? avg(cols[m.field!]) :
-    m.fn === "min"   ? min(cols[m.field!]) :
-                       max(cols[m.field!]);
+    m.fn === "sum"   ? sum(target) :
+    m.fn === "avg"   ? avg(target) :
+    m.fn === "min"   ? min(target) :
+                       max(target);
 
   // Accumulate WHERE conditions (ownership + window / explicit range + filters).
   // A KPI tile is a read like any other: "12 open invoices" computed over every
@@ -1123,7 +1173,7 @@ async function computeMetric(
     const d = m as DeltaMetric;
     const ent = d.entity || defaultEntity;
     const base: SimpleMetric = {
-      fn: d.fn, field: d.field, entity: ent, dateField: d.dateField, filter: d.filter,
+      fn: d.fn, field: d.field, expr: d.expr, entity: ent, dateField: d.dateField, filter: d.filter,
     };
     const prior = priorWindow(d.window);
     const [cur, prev] = await Promise.all([

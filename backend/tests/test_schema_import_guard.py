@@ -19,7 +19,7 @@ def _schema_dir(root):
     d = root / "src" / "db" / "schema"
     d.mkdir(parents=True)
     for name in ("customer", "equipment", "user", "_forge_files", "index", "relations"):
-        (d / f"{name}.ts").write_text(f"// {name}\n")
+        (d / f"{name}.ts").write_text(f"// {name}\n", encoding="utf-8")
     return d
 
 
@@ -48,7 +48,7 @@ def _write_data_init(root, stems, indent="      "):
     p = root / "src" / "lib"
     p.mkdir(parents=True, exist_ok=True)
     f = p / "data-init.ts"
-    f.write_text(_DATA_INIT_TEMPLATE.format(imports=imports))
+    f.write_text(_DATA_INIT_TEMPLATE.format(imports=imports), encoding="utf-8")
     return f
 
 
@@ -69,7 +69,7 @@ def _write_data_api(root, stems, indent="    "):
     p = root / "src" / "app" / "api" / "data" / "[...path]"
     p.mkdir(parents=True, exist_ok=True)
     f = p / "route.ts"
-    f.write_text(_DATA_API_TEMPLATE.format(imports=imports))
+    f.write_text(_DATA_API_TEMPLATE.format(imports=imports), encoding="utf-8")
     return f
 
 
@@ -91,7 +91,7 @@ def test_data_init_prunes_stale(tmp_path):
 
     res = reconcile_schema_imports(str(tmp_path))
 
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     # customers + notifications pruned; _forge_files is a real module but ADD mirrors
     # runtime_injector's glob, which excludes `_`-prefixed framework tables — so it is
     # NOT introduced. index/relations are never importable modules.
@@ -110,7 +110,7 @@ def test_forge_import_kept_when_already_present(tmp_path):
     _schema_dir(tmp_path)
     f = _write_data_init(tmp_path, ["customer", "_forge_files", "customers"])
     reconcile_schema_imports(str(tmp_path))
-    stems = _imported_stems(f.read_text())
+    stems = _imported_stems(f.read_text(encoding="utf-8"))
     assert "_forge_files" in stems  # kept (real, already present)
     assert "customers" not in stems  # pruned (no file)
 
@@ -123,7 +123,7 @@ def test_data_api_route_prunes_stale(tmp_path):
 
     reconcile_schema_imports(str(tmp_path))
 
-    text = f.read_text()
+    text = f.read_text(encoding="utf-8")
     assert _imported_stems(text) == ["customer", "equipment", "user"]
     assert "customers" not in _imported_stems(text)
     assert "notifications" not in text
@@ -138,13 +138,13 @@ def test_idempotent_second_run_byte_identical(tmp_path):
     fa = _write_data_api(tmp_path, ["customer", "customers", "equipment", "notifications", "user"])
 
     reconcile_schema_imports(str(tmp_path))
-    init_after_first = fi.read_text()
-    api_after_first = fa.read_text()
+    init_after_first = fi.read_text(encoding="utf-8")
+    api_after_first = fa.read_text(encoding="utf-8")
 
     res2 = reconcile_schema_imports(str(tmp_path))
 
-    assert fi.read_text() == init_after_first
-    assert fa.read_text() == api_after_first
+    assert fi.read_text(encoding="utf-8") == init_after_first
+    assert fa.read_text(encoding="utf-8") == api_after_first
     assert res2["removed"] == 0
     assert res2["added"] == 0
     assert res2["files_changed"] == 0
@@ -184,6 +184,6 @@ def test_apply_post_generate_fixes_prunes_dead_import(tmp_path):
 
     apply_post_generate_fixes(str(tmp_path))
 
-    text = (tmp_path / "src" / "lib" / "data-init.ts").read_text()
+    text = (tmp_path / "src" / "lib" / "data-init.ts").read_text(encoding="utf-8")
     assert 'import("@/db/schema/customers")' not in text
     assert 'import("@/db/schema/customer")' in text

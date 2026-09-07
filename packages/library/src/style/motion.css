@@ -5,7 +5,20 @@
  * Per-component overrides via inline custom properties (--fadein-delay,
  * --fadein-duration, --stagger-interval, --stagger-delay).
  *
- * Honors prefers-reduced-motion: reduce by disabling animations entirely.
+ * `--motion-duration` is the per-NODE duration written by a schema's
+ * `style.motionDuration` (see the renderer's applyStyleSlot). It applies to all
+ * four motions: previously only fade-in had any per-element duration hook
+ * (--fadein-duration), so "slide in over 1s" was simply unexpressible and every
+ * node animated at the global token duration. --fadein-duration still wins for
+ * fade-in so the FadeIn component's existing prop keeps its behaviour.
+ *
+ * For stagger, --motion-duration is the per-ITEM animation duration; the gap
+ * between successive items stays --stagger-interval. Conflating them would make
+ * a slow fade also spread the sequence out, which is not what "over 1s" means.
+ *
+ * Honors prefers-reduced-motion: reduce by disabling animations entirely — the
+ * reduce block sets `animation: none`, which drops the duration along with the
+ * rest of the shorthand, so a per-node duration cannot resurrect motion there.
  */
 
 @keyframes fade-in {
@@ -25,7 +38,7 @@
 
 [data-motion="fade-in"] {
   animation: fade-in
-    var(--fadein-duration, var(--token-motion-duration-normal, 300ms))
+    var(--fadein-duration, var(--motion-duration, var(--token-motion-duration-normal, 300ms)))
     var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
     var(--fadein-delay, 0ms)
     both;
@@ -33,21 +46,21 @@
 
 [data-motion="fade-up"] {
   animation: fade-up
-    var(--token-motion-duration-normal, 300ms)
+    var(--motion-duration, var(--token-motion-duration-normal, 300ms))
     var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
     both;
 }
 
 [data-motion="slide-in"] {
   animation: slide-in
-    var(--token-motion-duration-normal, 300ms)
+    var(--motion-duration, var(--token-motion-duration-normal, 300ms))
     var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
     both;
 }
 
 [data-motion="stagger"] > .motion-stagger-item {
   animation: fade-up
-    var(--token-motion-duration-normal, 300ms)
+    var(--motion-duration, var(--token-motion-duration-normal, 300ms))
     var(--token-motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1))
     calc(var(--stagger-delay, 0ms) + var(--motion-stagger-i, 0) * var(--stagger-interval, 80ms))
     both;

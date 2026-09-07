@@ -74,7 +74,7 @@ def test_injects_wizard_when_page_declares_it(tmp_path, monkeypatch):
     })
     report = run(str(tmp_path))
     assert len(report["pages_touched"]) == 1
-    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text(encoding="utf-8"))
     # Wizard is now in the root children.
     root = schema["root"]
     types = [c.get("type") for c in root.get("children", [])]
@@ -114,7 +114,7 @@ def test_reuses_existing_field_kinds(tmp_path, monkeypatch):
         },
     })
     run(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text(encoding="utf-8"))
     # When the root is a Form (no children), the wizard replaces it entirely.
     root = schema["root"]
     wiz = root if root.get("type") == "Wizard" else next(
@@ -133,7 +133,7 @@ def test_infers_workflow_from_entity_when_missing(tmp_path, monkeypatch):
         "root": {"type": "Stack", "children": []},
     })
     run(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "new.json").read_text(encoding="utf-8"))
     wiz = next(c for c in schema["root"]["children"] if c["type"] == "Wizard")
     assert wiz["props"].get("onComplete") == "createCandidate"
 
@@ -148,6 +148,6 @@ def test_wizard_step_declaring_nextif_is_carried_through(tmp_path, monkeypatch):
         "root": {"type": "Stack", "children": []},
     })
     run(str(tmp_path))
-    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "apply.json").read_text(encoding="utf-8"))
     wiz = next(c for c in schema["root"]["children"] if c["type"] == "Wizard")
     assert wiz["props"]["steps"][0]["nextIf"] == "accept"

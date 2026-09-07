@@ -83,12 +83,12 @@ def test_emits_config_and_helper(tmp_path, monkeypatch):
     assert r["steps"] == 2
     assert r["config_written"] is True
     assert r["helper_written"] is True
-    cfg = json.loads((tmp_path / "src" / "config" / "onboarding-tour.json").read_text())
+    cfg = json.loads((tmp_path / "src" / "config" / "onboarding-tour.json").read_text(encoding="utf-8"))
     assert cfg["storageKey"] == "forge-onboarding-tour"
     assert cfg["steps"][0]["target"] == "#nav-new"
     assert cfg["steps"][0]["body"] == "Start here"
     assert cfg["steps"][1]["target"] == "#nav-invite"
-    helper = (tmp_path / "src" / "lib" / "useTour.ts").read_text()
+    helper = (tmp_path / "src" / "lib" / "useTour.ts").read_text(encoding="utf-8")
     assert "useTour" in helper
 
 
@@ -102,7 +102,7 @@ def test_shell_injection_adds_import_and_mount(tmp_path, monkeypatch):
     _write_shell(tmp_path)
     r = run(str(tmp_path))
     assert r["shells_patched"] == ["src/app/layout.tsx"]
-    src = (tmp_path / "src" / "app" / "layout.tsx").read_text()
+    src = (tmp_path / "src" / "app" / "layout.tsx").read_text(encoding="utf-8")
     assert "TourOverlay" in src
     assert "useTour" in src
 

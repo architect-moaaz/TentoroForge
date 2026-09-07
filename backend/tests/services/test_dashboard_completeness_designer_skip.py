@@ -21,7 +21,7 @@ from services.dashboard_completeness import apply_dashboard_completeness
 def _write(root: Path, rel: str, obj) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj))
+    p.write_text(json.dumps(obj), encoding="utf-8")
 
 
 def _plan(pages, entities=None):
@@ -67,7 +67,7 @@ def test_designer_authored_schema_is_left_alone(tmp_path):
 
     # Schema on disk is identical (marker intact, still zero nodes).
     schema_after = json.loads(
-        (tmp_path / "src/schemas/dashboard.json").read_text(),
+        (tmp_path / "src/schemas/dashboard.json").read_text(encoding="utf-8"),
     )
     assert schema_after == schema_before
     assert schema_after.get("_designer_authored") is True
@@ -91,7 +91,7 @@ def test_non_designer_authored_schema_still_gets_topped_up(tmp_path):
     )
     # Marker was never present on this schema — nothing to preserve.
     schema_after = json.loads(
-        (tmp_path / "src/schemas/dashboard.json").read_text(),
+        (tmp_path / "src/schemas/dashboard.json").read_text(encoding="utf-8"),
     )
     assert "_designer_authored" not in schema_after
 

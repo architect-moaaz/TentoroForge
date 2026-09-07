@@ -50,7 +50,7 @@ def _mk_app(tmp_path: Path) -> Path:
              ]},
         ]},
     }
-    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page))
+    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page), encoding="utf-8")
 
     wf = {
         "name": "ProcessDocumentWorkflow",
@@ -74,13 +74,13 @@ def _mk_app(tmp_path: Path) -> Path:
         ], "edges": []},
     }
     (root / "workflows" / "ProcessDocumentWorkflow.json").write_text(
-        json.dumps(wf))
+        json.dumps(wf), encoding="utf-8")
     return root
 
 
 def _form_children(root: Path) -> list[dict]:
     doc = json.loads(
-        (root / "src" / "schemas" / "upload.json").read_text())
+        (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     return doc["root"]["children"][0]["children"]
 
 
@@ -90,7 +90,7 @@ def _names(root: Path) -> list[str]:
 
 def _insert_values(root: Path) -> dict:
     wf = json.loads(
-        (root / "workflows" / "ProcessDocumentWorkflow.json").read_text())
+        (root / "workflows" / "ProcessDocumentWorkflow.json").read_text(encoding="utf-8"))
     for n in wf["definition"]["nodes"]:
         cfg = (n.get("data") or {}).get("config") or {}
         if cfg.get("actionType") == "db_insert":
@@ -157,23 +157,23 @@ def test_metadata_bindings_survive_in_workflow(tmp_path):
 def test_idempotent(tmp_path):
     root = _mk_app(tmp_path)
     apply_file_first_forms(root)
-    once_page = (root / "src" / "schemas" / "upload.json").read_text()
-    once_wf = (root / "workflows" / "ProcessDocumentWorkflow.json").read_text()
+    once_page = (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8")
+    once_wf = (root / "workflows" / "ProcessDocumentWorkflow.json").read_text(encoding="utf-8")
     rep2 = apply_file_first_forms(root)
-    assert (root / "src" / "schemas" / "upload.json").read_text() == once_page
+    assert (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8") == once_page
     assert (root / "workflows" /
-            "ProcessDocumentWorkflow.json").read_text() == once_wf
+            "ProcessDocumentWorkflow.json").read_text(encoding="utf-8") == once_wf
     assert rep2["summary"]["forms_rewritten"] == 0
 
 
 def test_form_without_fileupload_untouched(tmp_path):
     root = _mk_app(tmp_path)
     page = json.loads(
-        (root / "src" / "schemas" / "upload.json").read_text())
+        (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     kids = page["root"]["children"][0]["children"]
     page["root"]["children"][0]["children"] = [
         c for c in kids if c["type"] != "FileUpload"]
-    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page))
+    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page), encoding="utf-8")
     rep = apply_file_first_forms(root)
     assert rep["summary"]["forms_rewritten"] == 0
     assert "originalFilename" in _names(root)
@@ -184,11 +184,11 @@ def test_derived_column_fileupload_removed(tmp_path):
     FileUpload; the pass drops it and keeps the real file control."""
     root = _mk_app(tmp_path)
     page = json.loads(
-        (root / "src" / "schemas" / "upload.json").read_text())
+        (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     page["root"]["children"][0]["children"].insert(3, {
         "type": "FileUpload", "id": "c9",
         "props": {"name": "fileMimeType", "label": "File Mime Type"}})
-    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page))
+    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
     uploads = [c for c in _form_children(root) if c["type"] == "FileUpload"]
     assert [u["props"]["name"] for u in uploads] == ["filePath"]
@@ -200,7 +200,7 @@ def test_emptied_card_shells_removed(tmp_path):
     decorative 'Processing'/'Record Meta' boxes left behind."""
     root = _mk_app(tmp_path)
     page = json.loads(
-        (root / "src" / "schemas" / "upload.json").read_text())
+        (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     form = page["root"]["children"][0]
     kids = {(c.get("props") or {}).get("name"): c for c in form["children"]
             if isinstance(c, dict)}
@@ -218,10 +218,10 @@ def test_emptied_card_shells_removed(tmp_path):
                        "props": {"content": "Record Meta", "level": 2}},
                       kids["id"]]},
     ]
-    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page))
+    (root / "src" / "schemas" / "upload.json").write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
     doc = json.loads(
-        (root / "src" / "schemas" / "upload.json").read_text())
+        (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     form = doc["root"]["children"][0]
     card_ids = [c.get("id") for c in form["children"]
                 if isinstance(c, dict) and c.get("type") == "Card"]
@@ -246,7 +246,7 @@ def _add_output_steps_and_controls(root: Path) -> None:
     a persist step consumes the AI output via {{bindings}}, and the form
     renders editable controls for all three."""
     wf_path = root / "workflows" / "ProcessDocumentWorkflow.json"
-    wf = json.loads(wf_path.read_text())
+    wf = json.loads(wf_path.read_text(encoding="utf-8"))
     wf["definition"]["nodes"] += [
         {"id": "ocr_sidecar", "type": "action",
          "data": {"nodeType": "action",
@@ -268,10 +268,10 @@ def _add_output_steps_and_controls(root: Path) -> None:
                                  "confidenceScore": "{{confidenceScore}}"},
                              "where": {"id": "{{insert_document.id}}"}}}},
     ]
-    wf_path.write_text(json.dumps(wf))
+    wf_path.write_text(json.dumps(wf), encoding="utf-8")
 
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     page["root"]["children"][0]["children"] += [
         {"type": "RichTextEditor", "id": "o1",
          "props": {"name": "ocrText", "label": "Ocr Text"}},
@@ -280,7 +280,7 @@ def _add_output_steps_and_controls(root: Path) -> None:
         {"type": "Slider", "id": "o3",
          "props": {"name": "confidenceScore", "label": "Confidence Score"}},
     ]
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
 
 
 def test_workflow_produced_outputs_removed(tmp_path):
@@ -303,7 +303,7 @@ def test_output_card_shell_removed(tmp_path):
     root = _mk_app(tmp_path)
     _add_output_steps_and_controls(root)
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     form = page["root"]["children"][0]
     outputs = [c for c in form["children"]
                if c.get("id") in ("o1", "o2", "o3")]
@@ -316,9 +316,9 @@ def test_output_card_shell_removed(tmp_path):
              {"type": "Text", "props": {"content":
                                         "Populated after OCR completes"}},
          ] + outputs})
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
-    text = (root / "src" / "schemas" / "upload.json").read_text()
+    text = (root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8")
     assert "Extraction Results" not in text
 
 
@@ -329,11 +329,11 @@ def test_column_named_upload_label_humanized(tmp_path):
     an upload label — replace with 'Upload document'."""
     root = _mk_app(tmp_path)
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     fu = next(c for c in page["root"]["children"][0]["children"]
               if c["type"] == "FileUpload")
     fu["props"]["label"] = "File Path"
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
     fu = next(c for c in _form_children(root) if c["type"] == "FileUpload")
     assert fu["props"]["label"] == "Upload document"
@@ -342,11 +342,11 @@ def test_column_named_upload_label_humanized(tmp_path):
 def test_meaningful_upload_label_kept(tmp_path):
     root = _mk_app(tmp_path)
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     fu = next(c for c in page["root"]["children"][0]["children"]
               if c["type"] == "FileUpload")
     fu["props"]["label"] = "Invoice PDF"
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
     fu = next(c for c in _form_children(root) if c["type"] == "FileUpload")
     assert fu["props"]["label"] == "Invoice PDF"
@@ -357,15 +357,15 @@ def test_workflow_form_submit_coherence(tmp_path):
     onSubmit or its generic 'Save' label."""
     root = _mk_app(tmp_path)
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     form = page["root"]["children"][0]
     form["props"]["onSubmit"] = {"kind": "data", "op": "insert",
                                  "entity": "Document",
                                  "navigate": "/document"}
     form["props"]["submitLabel"] = "Save"
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
-    doc = json.loads((root / "src" / "schemas" / "upload.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     props = doc["root"]["children"][0]["props"]
     assert "onSubmit" not in props
     assert props["submitLabel"] == "Process Document"
@@ -374,10 +374,10 @@ def test_workflow_form_submit_coherence(tmp_path):
 def test_custom_submit_label_kept(tmp_path):
     root = _mk_app(tmp_path)
     page_path = root / "src" / "schemas" / "upload.json"
-    page = json.loads(page_path.read_text())
+    page = json.loads(page_path.read_text(encoding="utf-8"))
     page["root"]["children"][0]["props"]["submitLabel"] = "Upload & Extract"
-    page_path.write_text(json.dumps(page))
+    page_path.write_text(json.dumps(page), encoding="utf-8")
     apply_file_first_forms(root)
-    doc = json.loads((root / "src" / "schemas" / "upload.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "upload.json").read_text(encoding="utf-8"))
     assert doc["root"]["children"][0]["props"]["submitLabel"] == \
         "Upload & Extract"

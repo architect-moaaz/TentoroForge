@@ -76,7 +76,7 @@ async def run_rules_agent(
     registry_path = Path(output_dir) / "registry.json"
     if registry_path.exists():
         try:
-            registry = json.loads(registry_path.read_text())
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
         except Exception:
             registry = {}
         rules_section = registry.get("rules") or {}
@@ -89,7 +89,7 @@ async def run_rules_agent(
         for r in valid:
             existing[r["name"]] = r
         registry["rules"] = list(existing.values())  # injector expects a list
-        registry_path.write_text(json.dumps(registry, indent=2))
+        registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
 
     if project_id is not None and valid:
         await _sync_rules_to_db(project_id, valid)

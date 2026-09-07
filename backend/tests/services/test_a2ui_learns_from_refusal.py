@@ -98,3 +98,77 @@ def test_the_orchestrator_still_records_the_validator_message():
     # It goes round again, and it is told why.
     assert retry == ["PAGE-009"]
     assert "bulkActions" in state.feedback["PAGE-009"]
+
+
+# ─────────────────── the other half: a refusal the composer cannot act on
+#
+# Everything above routes the validator's message back to the A2UI composer,
+# which is right when the composer is at fault. It was not, here. gh0mlpbp's
+# PAGE-003 was refused twice for `'items' is a required property` against two
+# saved surfaces that BOTH carry a well-formed `KeyValueList.items` — the
+# binder dropped the prop, downstream of the composer, and the composer was
+# told it had omitted what it had supplied. It rewrote the screen (the two
+# surfaces differ) and could not possibly have fixed it. The page was
+# abandoned, `/items/[id]` got no layout, and the shipped app 404s on it.
+#
+# The checks that refuse the tree at commit now also run at compose time, so a
+# binder fault declines the composition instead of being attributed to the
+# model — and the decline reason reaches `spec.feedback`, i.e. the LLM page
+# author, which writes the Forge tree itself and CAN act on a missing prop.
+
+
+def test_a_tree_the_commit_will_reject_is_refused_at_compose_time(tmp_path,
+                                                                  monkeypatch):
+    """`Tabs` without `tabs` fails `validate_props` — the same function, the
+    same catalog, one round earlier."""
+    monkeypatch.setenv("FORGE_A2UI", "1")
+    from tests.services.test_a2ui_authority import _app, _surface
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    surface = _surface(
+        [{"id": "root", "component": "Stack", "children": ["t", "tabs"]},
+         {"id": "t", "component": "Table", "rows": {"path": "/bills/rows"}},
+         {"id": "tabs", "component": "Tabs", "value": "overview"}],
+        {"bills": {"rows": []}})
+    res = compose_page_via_a2ui(str(root), "/bills", "list",
+                                surface_provider=surface)
+    assert res["applied"] is False
+    assert "'tabs' is a required property" in res["reason"]
+
+
+def test_the_refusal_names_the_drop_that_caused_it(tmp_path, monkeypatch):
+    """"'data' is a required property" is a true statement about the tree and
+    a useless one about the failure: the prop was in the payload and the
+    translation removed it. Whoever is asked next has to be told which."""
+    monkeypatch.setenv("FORGE_A2UI", "1")
+    from tests.services.test_a2ui_authority import _app, _surface
+    from services.a2ui_authority import compose_page_via_a2ui
+
+    root = _app(tmp_path)
+    surface = _surface(
+        [{"id": "root", "component": "Stack", "children": ["t", "s"]},
+         {"id": "t", "component": "Table", "rows": {"path": "/bills/rows"}},
+         # A fabricated sparkline: `data` is required AND is measurement, so
+         # the binder drops it and the tree then fails its own contract.
+         {"id": "s", "component": "Sparkline", "data": [8, 9, 10, 11, 12]}],
+        {"bills": {"rows": []}})
+    res = compose_page_via_a2ui(str(root), "/bills", "list",
+                                surface_provider=surface)
+    assert res["applied"] is False
+    assert "'data' is a required property" in res["reason"]
+    assert "dropped a literal on a data prop" in res["reason"]
+    assert "reproduces this exactly" in res["reason"]
+
+
+def test_the_compose_seam_uses_the_commit_gates_own_checks():
+    """Not a second opinion about what renders. Two implementations of that
+    question are how the gate and the composer come to disagree about a page
+    that is already on disk."""
+    import inspect
+
+    from services import a2ui_authority
+
+    src = inspect.getsource(a2ui_authority._contract_errors)
+    assert "validate_template" in src and "validate_props" in src
+    assert "from services.blueprint.page_planner import" in src

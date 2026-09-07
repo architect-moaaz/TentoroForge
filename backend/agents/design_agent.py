@@ -666,7 +666,7 @@ def _inject_font_import_from_typography(globals_path: Path, typography: dict | N
     import_line = _build_google_fonts_import_from_typography(typography)
     if not import_line:
         return
-    css = globals_path.read_text()
+    css = globals_path.read_text(encoding="utf-8")
     # Strip any prior Google Fonts @import — leaves other @imports alone.
     css = _re.sub(
         r"@import url\(['\"]https://fonts\.googleapis\.com/css2[^)]+['\"]\);\n?",
@@ -703,7 +703,7 @@ def _inject_font_import_from_typography(globals_path: Path, typography: dict | N
     # Prepend @import at the very top and append the block at the end.
     css = f"{import_line}\n{css}"
     css = css.rstrip("\n") + "\n\n" + block + "\n"
-    globals_path.write_text(css)
+    globals_path.write_text(css, encoding="utf-8")
 
 
 def _rewrite_globals_root(globals_path: Path, palette: dict,
@@ -723,7 +723,7 @@ def _rewrite_globals_root(globals_path: Path, palette: dict,
 
     if not globals_path.exists():
         return
-    text = globals_path.read_text()
+    text = globals_path.read_text(encoding="utf-8")
 
     # Build the new :root body deterministically from the palette. Values pass
     # through extract_hex so an annotated color ("#C4611F — terracotta") still
@@ -816,7 +816,7 @@ def _rewrite_globals_root(globals_path: Path, palette: dict,
     for _ph, _default in _placeholder_fallbacks.items():
         new_text = new_text.replace(_ph, _placeholder_values.get(_ph, _default))
 
-    globals_path.write_text(new_text)
+    globals_path.write_text(new_text, encoding="utf-8")
 
     # 2026-08-13 — visual-lock typography backstop: if a design-spec
     # ``typography`` block was passed (post-hoc rebuild path, or any call
@@ -977,7 +977,7 @@ def _inject_typography_into_globals(css_path: Path, register: dict) -> None:
     The @import line is placed at the very top of the file (before
     ``@tailwind base;``). The CSS variable block is appended at the end.
     """
-    css = css_path.read_text()
+    css = css_path.read_text(encoding="utf-8")
     import_line = _build_google_fonts_url(register)
     block = _build_typography_block(register)
 
@@ -1003,7 +1003,7 @@ def _inject_typography_into_globals(css_path: Path, register: dict) -> None:
     css = css.rstrip("\n") + "\n"
     css += f"\n{block}\n"
 
-    css_path.write_text(css)
+    css_path.write_text(css, encoding="utf-8")
 
 
 def _populate_entity_photos(
@@ -1118,7 +1118,7 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
     contracts_dir = Path(output_dir) / "src" / "contracts"
     contracts_dir.mkdir(parents=True, exist_ok=True)
     path = contracts_dir / "design-spec.json"
-    path.write_text(json.dumps(spec, indent=2))
+    path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
 
     # Rewrite globals.css :root from the (trusted) colorPalette so CSS vars
     # match the spec, regardless of what hex→HSL math the LLM produced.
@@ -1179,16 +1179,16 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
             )
             import re as _re
             _brief_tone = get_tone_intensity(load_brief_from(output_dir))
-            dna = json.loads(dna_path.read_text())
-            css = globals_css_path.read_text()
+            dna = json.loads(dna_path.read_text(encoding="utf-8"))
+            css = globals_css_path.read_text(encoding="utf-8")
             css = _re.sub(r"\n*/\* tentoro:personality \*/.*?/\* /tentoro:personality \*/\n?",
                           "", css, flags=_re.DOTALL)
             if _brief_tone == 0.0:
                 # Explicit brief-authored quiet mode — do not re-inject.
-                globals_css_path.write_text(css.rstrip("\n") + "\n")
+                globals_css_path.write_text(css.rstrip("\n") + "\n", encoding="utf-8")
             else:
                 block = to_personality_css(dna)
-                globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n")
+                globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n", encoding="utf-8")
     except Exception:  # noqa: BLE001 — personality is enhancement, never fatal
         logger.warning("personality CSS injection skipped", exc_info=True)
 
@@ -1201,13 +1201,13 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
         if dna_path.exists() and globals_css_path.exists():
             from services.design_dna import to_component_css
             import re as _re
-            dna = json.loads(dna_path.read_text())
+            dna = json.loads(dna_path.read_text(encoding="utf-8"))
             if dna.get("skin"):
                 block = to_component_css(dna)
-                css = globals_css_path.read_text()
+                css = globals_css_path.read_text(encoding="utf-8")
                 css = _re.sub(r"\n*/\* tentoro:skin \*/.*?/\* /tentoro:skin \*/\n?",
                               "", css, flags=_re.DOTALL)
-                globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n")
+                globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n", encoding="utf-8")
     except Exception:  # noqa: BLE001 — skin is enhancement, never fatal
         logger.warning("component skin CSS injection skipped", exc_info=True)
 
@@ -1231,16 +1231,16 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
             )
             import re as _re
             _brief_nav = get_nav_language(load_brief_from(output_dir))
-            dna = json.loads(dna_path.read_text())
+            dna = json.loads(dna_path.read_text(encoding="utf-8"))
             if dna.get("skin"):
-                css = globals_css_path.read_text()
+                css = globals_css_path.read_text(encoding="utf-8")
                 css = _re.sub(r"\n*/\* tentoro:nav \*/.*?/\* /tentoro:nav \*/\n?",
                               "", css, flags=_re.DOTALL)
                 if _brief_nav == "invisible":
-                    globals_css_path.write_text(css.rstrip("\n") + "\n")
+                    globals_css_path.write_text(css.rstrip("\n") + "\n", encoding="utf-8")
                 else:
                     block = to_nav_css(dna)
-                    globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n")
+                    globals_css_path.write_text(css.rstrip("\n") + "\n\n" + block + "\n", encoding="utf-8")
     except Exception:  # noqa: BLE001
         logger.warning("nav identity CSS injection skipped", exc_info=True)
 
@@ -1263,7 +1263,7 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
             load_brief_from,
         )
         if globals_css_path.exists():
-            css = globals_css_path.read_text()
+            css = globals_css_path.read_text(encoding="utf-8")
             _brief_for_fg = load_brief_from(output_dir)
             _fg_hint_hex = get_foreground_hint(_brief_for_fg)
 
@@ -1313,7 +1313,7 @@ def save_design_spec(output_dir: str, spec: dict, plan: dict | None = None) -> s
                                       css, count=1)
                 changed = changed or bool(n)
             if changed:
-                globals_css_path.write_text(css)
+                globals_css_path.write_text(css, encoding="utf-8")
     except Exception:  # noqa: BLE001
         logger.warning("foreground contrast guardrail skipped", exc_info=True)
 
@@ -1326,6 +1326,6 @@ def load_design_spec(output_dir: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None

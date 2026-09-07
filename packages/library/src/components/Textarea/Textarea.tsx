@@ -4,6 +4,7 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { TextareaPropsType } from "./Textarea.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { useFieldValue } from "../../util/useFieldValue";
 import { useDensity, useRadiusScale } from "../../theme/tokens-context";
 
 /**
@@ -45,8 +46,11 @@ const TEXTAREA_STATIC =
   "resize-y";
 
 export function Textarea({ name, label, rows = 4, placeholder, validators, bind: _bind,
-                          style, value, onChange }: TextareaProps) {
+                          style, value, defaultValue, onChange }: TextareaProps) {
   const id = useTextareaId(name);
+  const [current, commit] = useFieldValue<string>(
+    value, onChange, defaultValue as string | undefined, "",
+  );
   const required = validators?.required === true;
   const radiusScale = useRadiusScale();
   const density = useDensity();
@@ -69,8 +73,8 @@ export function Textarea({ name, label, rows = 4, placeholder, validators, bind:
         rows={rows}
         placeholder={placeholder}
         required={required}
-        value={value}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        value={current}
+        onChange={(e) => commit(e.target.value)}
       />
     </div>
   );

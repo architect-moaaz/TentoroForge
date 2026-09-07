@@ -76,7 +76,7 @@ def check_contract_completeness(output_dir: str, plan: dict) -> dict:
         issues.append("MISSING: src/contracts/api-client.ts")
     else:
         try:
-            api_content = api_client.read_text()
+            api_content = api_client.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             issues.append("UNREADABLE: src/contracts/api-client.ts")
 
@@ -101,7 +101,7 @@ def check_contract_completeness(output_dir: str, plan: dict) -> dict:
     else:
         try:
             import json
-            model_data = json.loads(app_model.read_text())
+            model_data = json.loads(app_model.read_text(encoding="utf-8"))
             model_pages = model_data.get("pages", [])
             if isinstance(model_pages, list):
                 page_routes = {p.get("route", p.get("path", "")) for p in model_pages if isinstance(p, dict)}
@@ -211,7 +211,7 @@ def check_auth_completeness(output_dir: str) -> dict:
         )
     else:
         try:
-            content = auth_config.read_text()
+            content = auth_config.read_text(encoding="utf-8")
             if "providers" not in content or len(content) < 100:
                 issues.append(
                     "BROKEN: src/auth.ts exists but has no providers configured. "
@@ -310,8 +310,13 @@ def check_cross_references(output_dir: str, plan: dict) -> dict:
         for route_file in api_dir.rglob("route.ts"):
             rel = route_file.parent.relative_to(api_dir)
             # Convert [id] to dynamic segment marker
-            route_path = "/api/" + str(rel).replace("[", ":").replace("]", "")
-            existing_routes.add(str(rel))
+            route_path = "/api/" + rel.as_posix().replace("[", ":").replace("]", "")
+            # `.as_posix()`: the probe keys below are built as
+            # `entity + "/" + sub`, so a set holding `users\[id]` never
+            # matched `users/[id]` and every NESTED api route was reported
+            # MISSING while sitting on disk — the gate then emitted a retry
+            # prompt telling the model to create a file it had already made.
+            existing_routes.add(rel.as_posix())
 
     # Scan pages for fetch("/api/...") calls
     missing_apis: dict[str, list[str]] = {}  # api_path → [pages that call it]
@@ -320,7 +325,7 @@ def check_cross_references(output_dir: str, plan: dict) -> dict:
         if "node_modules" in str(page_file) or "api" in str(page_file):
             continue
         try:
-            content = page_file.read_text()
+            content = page_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -341,7 +346,7 @@ def check_cross_references(output_dir: str, plan: dict) -> dict:
                 route_dir = entity
 
             if route_dir not in existing_routes and entity not in existing_routes:
-                page_rel = str(page_file.relative_to(app_dir))
+                page_rel = page_file.relative_to(app_dir).as_posix()
                 if route_dir not in missing_apis:
                     missing_apis[route_dir] = []
                 if page_rel not in missing_apis[route_dir]:
@@ -506,11 +511,14 @@ def check_page_completeness(output_dir: str, plan: dict) -> dict:
     for page in app_dir.rglob("page.tsx"):
         if "node_modules" in str(page):
             continue
-        rel = str(page.relative_to(app_dir))
+        # `.as_posix()`: `str()` made this check dead on Windows, and the
+        # `rel.split("/")[0]` entity derivation below would have yielded
+        # the whole path rather than the entity segment.
+        rel = page.relative_to(app_dir).as_posix()
         if not rel.endswith("new/page.tsx"):
             continue
         try:
-            content = page.read_text()
+            content = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         if re.search(r'//\s*TODO|//\s*Handle\s+form|//\s*Handle\s+submit', content):
@@ -534,7 +542,7 @@ def check_page_completeness(output_dir: str, plan: dict) -> dict:
         if entity_dir.startswith("(") or entity_dir.startswith("["):
             continue
         try:
-            content = page.read_text()
+            content = page.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         if not re.search(r'href=["\'].*?/new["\']|Create|New\s|\+\s*New', content):
@@ -550,7 +558,7 @@ def check_page_completeness(output_dir: str, plan: dict) -> dict:
         if not sf.is_file() or sf.suffix != ".tsx":
             continue
         try:
-            content = sf.read_text()
+            content = sf.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         for m in re.finditer(r'href=["\'](/[^"\']*)["\']', content):
@@ -720,7 +728,7 @@ def check_workflow_integration(output_dir: str, plan: dict) -> dict:
     if api_dir.exists():
         for route_file in api_dir.rglob("route.ts"):
             try:
-                content = route_file.read_text()
+                content = route_file.read_text(encoding="utf-8")
                 if "triggerWorkflowEvent" in content or "triggerWorkflow" in content:
                     runtime_integrated = True
                     break
@@ -741,7 +749,7 @@ def check_workflow_integration(output_dir: str, plan: dict) -> dict:
         for wf_file in workflow_dir.glob("*.json"):
             try:
                 import json
-                wf = json.loads(wf_file.read_text())
+                wf = json.loads(wf_file.read_text(encoding="utf-8"))
                 steps = wf.get("steps", [])
                 name = wf.get("name", wf_file.stem)
                 if len(steps) == 0:
@@ -804,7 +812,7 @@ def check_workflow_integration(output_dir: str, plan: dict) -> dict:
             if "node_modules" in str(page):
                 continue
             try:
-                all_page_content += page.read_text().lower()
+                all_page_content += page.read_text(encoding="utf-8").lower()
             except (OSError, UnicodeDecodeError):
                 continue
 
@@ -880,7 +888,7 @@ def check_ux_compliance(output_dir: str, plan: dict, domain: str) -> dict:
 
     if dashboard_files and dash_spec:
         try:
-            dash_content = dashboard_files[0].read_text().lower()
+            dash_content = dashboard_files[0].read_text(encoding="utf-8").lower()
         except (OSError, UnicodeDecodeError):
             dash_content = ""
 
@@ -910,7 +918,7 @@ def check_ux_compliance(output_dir: str, plan: dict, domain: str) -> dict:
             if "node_modules" in str(page):
                 continue
             try:
-                all_page_content += page.read_text().lower() + "\n"
+                all_page_content += page.read_text(encoding="utf-8").lower() + "\n"
             except (OSError, UnicodeDecodeError):
                 continue
 
@@ -940,7 +948,7 @@ def check_ux_compliance(output_dir: str, plan: dict, domain: str) -> dict:
             for sf in sidebar_files:
                 if sf.is_file() and sf.suffix == ".tsx":
                     try:
-                        sidebar_content += sf.read_text().lower()
+                        sidebar_content += sf.read_text(encoding="utf-8").lower()
                     except (OSError, UnicodeDecodeError):
                         continue
 
@@ -967,7 +975,7 @@ def check_ux_compliance(output_dir: str, plan: dict, domain: str) -> dict:
             if "node_modules" in str(dp):
                 continue
             try:
-                content = dp.read_text().lower()
+                content = dp.read_text(encoding="utf-8").lower()
             except (OSError, UnicodeDecodeError):
                 continue
             if "tab" in content or "tabs" in content:
@@ -1008,7 +1016,7 @@ def check_ux_compliance(output_dir: str, plan: dict, domain: str) -> dict:
             if "node_modules" in str(f):
                 continue
             try:
-                all_code += f.read_text().lower() + "\n"
+                all_code += f.read_text(encoding="utf-8").lower() + "\n"
             except (OSError, UnicodeDecodeError):
                 continue
 
@@ -1098,7 +1106,7 @@ def check_cta_hierarchy(output_dir: str, plan: dict) -> dict:
     if not spec_path.exists():
         return {"passed": True, "issues": [], "retry_prompt": ""}
     try:
-        spec = json.loads(spec_path.read_text())
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"passed": True, "issues": [], "retry_prompt": ""}
     cta = spec.get("cta_hierarchy")
@@ -1115,7 +1123,7 @@ def check_cta_hierarchy(output_dir: str, plan: dict) -> dict:
         if path.name in ("registry.json", "load.json"):
             continue
         try:
-            page = json.loads(path.read_text())
+            page = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         # page_type — read from the schema if present, else infer from path stem
@@ -1165,7 +1173,7 @@ def check_progressive_disclosure(output_dir: str, plan: dict) -> dict:
         if path.name in ("registry.json", "load.json"):
             continue
         try:
-            page = json.loads(path.read_text())
+            page = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         # page_type — read from the schema if present, else infer from path stem

@@ -45,7 +45,7 @@ def test_list_pages_returns_route_and_workflow_refs(tmp_path):
     (schemas / "home.json").write_text(_json.dumps({
         "route": "/",
         "content": [{"type": "Text", "props": {"content": "hi"}}],
-    }))
+    }), encoding="utf-8")
     (schemas / "assessments.json").write_text(_json.dumps({
         "route": "/assessments",
         # Real page schemas carry the workflow-ref on props.action.workflow
@@ -72,8 +72,8 @@ def test_list_pages_returns_none_when_dir_missing(tmp_path):
 def test_list_pages_skips_unreadable_files_gracefully(tmp_path):
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "ok.json").write_text('{"route": "/ok"}')
-    (schemas / "broken.json").write_text("this is not json")
+    (schemas / "ok.json").write_text('{"route": "/ok"}', encoding="utf-8")
+    (schemas / "broken.json").write_text("this is not json", encoding="utf-8")
     result = smith_tools.list_pages_tool(str(tmp_path))
     assert result["available"] is True
     assert [p["route"] for p in result["pages"]] == ["/ok"]
@@ -223,7 +223,7 @@ def test_list_components_respects_env_override(monkeypatch, tmp_path):
             "count":  {"type": "number", "optional": True},
             "variant": {"type": "enum", "enum": ["a", "b"], "optional": True},
         },
-    }))
+    }), encoding="utf-8")
     monkeypatch.setenv("FORGE_LIBRARY_CATALOG", str(fake))
     result = smith_tools.list_components_tool()
     assert result["available"] is True
@@ -250,7 +250,7 @@ def test_list_components_drops_internal_and_layout_props(monkeypatch, tmp_path):
             "style":     {"type": "object", "optional": True},
             "children":  {"type": "node",   "optional": True},
         },
-    }))
+    }), encoding="utf-8")
     monkeypatch.setenv("FORGE_LIBRARY_CATALOG", str(fake))
     result = smith_tools.list_components_tool()
     panel = result["components"][0]
@@ -279,7 +279,7 @@ def test_list_components_caps_component_and_prop_counts(monkeypatch, tmp_path):
         for i in range(300)  # over the component cap
     }
     fake = tmp_path / "big.json"
-    fake.write_text(json.dumps(fake_catalog))
+    fake.write_text(json.dumps(fake_catalog), encoding="utf-8")
     monkeypatch.setenv("FORGE_LIBRARY_CATALOG", str(fake))
     result = smith_tools.list_components_tool()
     assert result["available"] is True
@@ -329,7 +329,7 @@ def test_read_page_augments_with_outline_for_root_key(tmp_path):
                 {"type": "Table", "props": {"dataSource": "widgets"}},
             ],
         },
-    }))
+    }), encoding="utf-8")
     result = smith_tools.read_page(str(tmp_path), "src/schemas/app.json")
     assert result["route"] == "/app"
     outline = result["outline"]
@@ -354,7 +354,7 @@ def test_read_page_falls_back_to_content_key_for_older_schemas(tmp_path):
     (schemas / "old.json").write_text(_json.dumps({
         "route": "/old",
         "content": [{"type": "Text", "props": {"content": "hi"}}],
-    }))
+    }), encoding="utf-8")
     result = smith_tools.read_page(str(tmp_path), "src/schemas/old.json")
     outline = result["outline"]
     assert outline and outline[0]["path"].startswith("/content")

@@ -271,7 +271,7 @@ class TestComposerHonorsNewSlots:
             "empty_state": {"illustration": "empty-inbox", "headline": "No data yet"},
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         node = _find_by_data_slot(out, "dashboard-empty-state")
         assert node is not None
         assert node["props"]["headline"] == "No data yet"
@@ -282,7 +282,7 @@ class TestComposerHonorsNewSlots:
             "footer": {"kind": "insight", "content": "Peak: Tuesday"},
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         node = _find_by_data_slot(out, "dashboard-footer")
         assert node is not None
         assert node["props"]["data-footer-kind"] == "insight"
@@ -293,7 +293,7 @@ class TestComposerHonorsNewSlots:
             "ornament": {"kind": "eyebrow-line", "placement": "before-hero"},
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # First child of the root Stack must be the ornament (before-hero).
         first = out["root"]["children"][0]
         assert first.get("type") == "Divider"
@@ -308,7 +308,7 @@ class TestComposerHonorsNewSlots:
             "ornament": {"kind": "section-divider", "placement": "after-kpis"},
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         children = out["root"]["children"]
         kpi_row_idx = None
         for i, c in enumerate(children):
@@ -330,7 +330,7 @@ class TestComposerHonorsNewSlots:
             "ornament": {"kind": "accent-badge", "placement": "before-footer"},
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # First child is the hero, not a Badge.
         first = out["root"]["children"][0]
         assert first.get("type") != "Badge"
@@ -343,7 +343,7 @@ class TestComposerHonorsNewSlots:
             "kpis": [{"label": "U", "entity": "users", "op": "count"}],
         })
         apply_maquette_to_dashboard(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert _find(out, "Hero") is not None
         assert _find(out, "MetricTile") is not None
         # And no empty-state / footer / ornament sneaked in.

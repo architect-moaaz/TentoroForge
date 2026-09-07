@@ -52,7 +52,7 @@ def test_iter_entities_reads_registry(tmp_path):
     (tmp_path / "registry.json").write_text(json.dumps({"entities": {
         "Appointment": {"fields": [{"name": "id"}, {"name": "patientId"}]},
         "Patient": {"fields": [{"name": "id"}]},
-    }}))
+    }}), encoding="utf-8")
     evs = list(iter_entities(str(tmp_path)))
     assert [e["name"] for e in evs] == ["Appointment", "Patient"]
     assert evs[0]["total"] == 2 and evs[0]["index"] == 1
@@ -66,9 +66,9 @@ def test_iter_workflows_splits_domain_and_crud(tmp_path):
         "name": "AppointmentStatusWorkflow",
         "definition": {"trigger": {"type": "api_event", "event": "x"},
                        "nodes": [{"type": "action"}]},
-    }))
-    (wdir / "CreatePatient.json").write_text(json.dumps({"name": "CreatePatient"}))
-    (wdir / "DeletePatient.json").write_text(json.dumps({"name": "DeletePatient"}))
+    }), encoding="utf-8")
+    (wdir / "CreatePatient.json").write_text(json.dumps({"name": "CreatePatient"}), encoding="utf-8")
+    (wdir / "DeletePatient.json").write_text(json.dumps({"name": "DeletePatient"}), encoding="utf-8")
     evs = list(iter_workflows(str(tmp_path)))
     assert evs[0]["name"] == "AppointmentStatusWorkflow"
     assert evs[-1]["name"] == "2 CRUD workflows"     # rollup, not enumerated
@@ -78,10 +78,10 @@ def test_iter_workflows_splits_domain_and_crud(tmp_path):
 def test_iter_pages_skips_shell_and_navflow(tmp_path):
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
-    (sdir / "shell.json").write_text("{}")
-    (sdir / "nav-flow.json").write_text("{}")
+    (sdir / "shell.json").write_text("{}", encoding="utf-8")
+    (sdir / "nav-flow.json").write_text("{}", encoding="utf-8")
     (sdir / "appointments.json").write_text(json.dumps(
-        {"route": "/appointments", "root": {"type": "Stack", "children": [{"type": "Table"}]}}))
+        {"route": "/appointments", "root": {"type": "Stack", "children": [{"type": "Table"}]}}), encoding="utf-8")
     evs = list(iter_pages(str(tmp_path)))
     assert len(evs) == 1
     assert evs[0]["name"] == "/appointments"

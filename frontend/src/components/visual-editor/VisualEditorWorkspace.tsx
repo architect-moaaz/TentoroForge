@@ -111,6 +111,10 @@ export function VisualEditorWorkspace({
   // mutates but nothing is written, and the Save button's flushPersister()
   // no-ops. Detaches on unmount / project change.
   useEffect(() => {
+    // Publish the short id alongside the persister so panels mounted deep in
+    // the tree (the properties panel's image control uploads against it) can
+    // read it without a prop chain none of the three mount points provides.
+    useEditorStore.getState().setProjectId(projectId);
     const detach = attachPersister(projectId);
     return () => {
       // Flush any pending debounced save before detaching so an edit made just

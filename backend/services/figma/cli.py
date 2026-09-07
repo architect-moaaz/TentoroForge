@@ -107,7 +107,7 @@ async def _run(args) -> int:
     print(render(ref))
 
     if args.json:
-        args.json.write_text(json.dumps(_as_dict(ref), indent=2), "utf-8")
+        args.json.write_text(json.dumps(_as_dict(ref), indent=2), encoding="utf-8")
         print(f"\nwrote {args.json}")
 
     calls = gateway.calls

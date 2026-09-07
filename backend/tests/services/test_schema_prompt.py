@@ -101,7 +101,7 @@ class TestBuildSchemaPrompt:
         contracts_dir = tmp_path / "src" / "contracts"
         contracts_dir.mkdir(parents=True)
         spec = {"designRationale": "Trustworthy fintech with deep blue + crisp typography."}
-        (contracts_dir / "design-spec.json").write_text(json.dumps(spec))
+        (contracts_dir / "design-spec.json").write_text(json.dumps(spec), encoding="utf-8")
 
         plan = {
             "description": "x",

@@ -119,7 +119,7 @@ def test_an_unparseable_frame_costs_the_page_its_design_not_its_existence(tmp_pa
 @pytest.mark.skipif(not FIXTURE.is_file(), reason="Figma fixture not present")
 def test_a_drawn_page_is_built_from_the_drawing(tmp_path):
     """Real `get_design_context` output, through the whole seam."""
-    svc = _stored(tmp_path, code=FIXTURE.read_text())
+    svc = _stored(tmp_path, code=FIXTURE.read_text(encoding="utf-8"))
     out = F.compose(svc, {"id": "PAGE-001", "route": "/login", "name": "Login",
                           "figmaFrame": "1:2"}, app_root=tmp_path / "app")
     assert out is not None, "the fixture frame should compose"
@@ -133,11 +133,11 @@ def test_the_tree_uses_components_the_engine_can_render(tmp_path):
     one engine, so the vocabularies must agree — otherwise the page composes,
     validates, projects, and fails in the browser."""
     registry = json.loads((pathlib.Path(__file__).resolve().parents[2]
-                           / "contracts" / "component-catalog.json").read_text())
+                           / "contracts" / "component-catalog.json").read_text(encoding="utf-8"))
     raw = registry["components"]
     names = set(raw) if isinstance(raw, dict) else {c["name"] for c in raw}
 
-    svc = _stored(tmp_path, code=FIXTURE.read_text())
+    svc = _stored(tmp_path, code=FIXTURE.read_text(encoding="utf-8"))
     out = F.compose(svc, {"id": "PAGE-001", "route": "/login",
                           "figmaFrame": "1:2"}, app_root=tmp_path / "app")
     seen = set()

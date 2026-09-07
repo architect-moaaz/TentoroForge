@@ -735,7 +735,7 @@ async def generate_shell_to_file(
             from pathlib import Path as _Path
             _brief_path = _Path(output_dir) / "contracts" / "brief.json"
             if _brief_path.exists():
-                _brief_dict = _json.loads(_brief_path.read_text())
+                _brief_dict = _json.loads(_brief_path.read_text(encoding="utf-8"))
         except Exception:  # pragma: no cover - defensive read
             _brief_dict = None
 
@@ -840,7 +840,7 @@ async def generate_shell_to_file(
 
     schemas_dir = Path(output_dir) / "src" / "schemas"
     schemas_dir.mkdir(parents=True, exist_ok=True)
-    (schemas_dir / "shell.json").write_text(json.dumps(shell, indent=2))
+    (schemas_dir / "shell.json").write_text(json.dumps(shell, indent=2), encoding="utf-8")
     logger.info("[shell] wrote %s", schemas_dir / "shell.json")
 
     # When the page-shell heuristic fired, the schema now references
@@ -912,7 +912,7 @@ def _ensure_scrollbar_styles(project_root: Path) -> None:
     existing = ""
     if globals_css.exists():
         try:
-            existing = globals_css.read_text()
+            existing = globals_css.read_text(encoding="utf-8")
         except OSError:
             return
     if _SCROLLBAR_CSS_SENTINEL in existing:

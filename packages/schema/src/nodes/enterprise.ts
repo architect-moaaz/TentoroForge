@@ -125,6 +125,10 @@ export const FilterBarNode = z.object({
   id: z.string().optional(),
   type: z.literal("FilterBar"),
   props: z.object({
+    // Data binding. The editor exposes a `bind` control for this node, and
+    // without the slot here `validateProps` strips the value before the
+    // component ever sees it — the control would write into a void.
+    bind: z.string().optional(),
     chips: z.array(FilterChip).min(1),
     savedViews: z.array(SavedView).optional(),
     showSearch: z.boolean().optional(),
@@ -198,6 +202,10 @@ export const DateRangePickerNode = z.object({
   id: z.string().optional(),
   type: z.literal("DateRangePicker"),
   props: z.object({
+    // Data binding. The editor exposes a `bind` control for this node, and
+    // without the slot here `validateProps` strips the value before the
+    // component ever sees it — the control would write into a void.
+    bind: z.string().optional(),
     name: z.string(),                    // form field name; URL key when standalone
     label: z.string().optional(),
     startDate: z.string().optional(),    // ISO date YYYY-MM-DD
@@ -215,6 +223,10 @@ export const MultiSelectNode = z.object({
   id: z.string().optional(),
   type: z.literal("MultiSelect"),
   props: z.object({
+    // Data binding. The editor exposes a `bind` control for this node, and
+    // without the slot here `validateProps` strips the value before the
+    // component ever sees it — the control would write into a void.
+    bind: z.string().optional(),
     name: z.string(),                    // URL key / form field
     label: z.string().optional(),
     placeholder: z.string().optional(),
@@ -245,6 +257,11 @@ export const AppShellNode: any = z.object({
     topbar: NodeV2Ref.optional(),        // schema sub-tree for breadcrumb + user menu
     actions: NodeV2Ref.optional(),       // schema sub-tree for page actions toolbar
     rightRail: NodeV2Ref.optional(),     // schema sub-tree for context sidebar
+    // Viewport below which the nav rail and right rail collapse away. Was
+    // hard-coded at 768px / 1024px inside AppShell.tsx, so the three-column
+    // app a user arranged became a single column on every tablet with no way
+    // to say otherwise. "none" keeps every rail visible at all widths.
+    breakpoint: z.enum(["sm", "md", "lg", "none"]).optional(),
   }),
   children: z.array(NodeV2Ref).default([]),  // main page content
 });
@@ -256,6 +273,10 @@ export const InspectorPanelNode: any = z.object({
     paramKey: z.string().default("inspector"),  // URL key for active selection
     title: z.string().optional(),
     width: z.enum(["narrow", "default", "wide"]).optional(),  // 320 / 480 / 640
+    // Renders the panel with no selection so it can be composed in the editor,
+    // which never puts `?inspector=` on the preview URL. Without it the node
+    // returns null and silently swallows everything dropped inside it.
+    defaultOpen: z.boolean().optional(),
   }),
   children: z.array(NodeV2Ref).default([]),
 });
@@ -270,7 +291,10 @@ export const TabPanelWithDeepLinkNode: any = z.object({
   type: z.literal("TabPanelWithDeepLink"),
   props: z.object({
     paramKey: z.string().default("tab"),
-    tabs: z.array(TabSpec).min(1),
+    // No longer `.min(1)`: the component derives one tab per child, so an
+    // empty (or absent) array is the normal state for a node built by
+    // dragging panels in. Declared entries still override the derived id/label.
+    tabs: z.array(TabSpec).default([]),
     defaultTab: z.string().optional(),
   }),
   children: z.array(NodeV2Ref).default([]),  // one child per tab, in order

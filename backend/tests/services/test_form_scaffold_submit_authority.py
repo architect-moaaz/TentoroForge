@@ -17,8 +17,8 @@ def _scaffold(tmp_path: Path, page: dict, plan: dict) -> Path:
     (outdir / "src" / "schemas").mkdir(parents=True)
     (outdir / "src" / "contracts").mkdir(parents=True)
     schema_path = outdir / "src" / "schemas" / f"{page['route'].strip('/').replace('/', '__')}.json"
-    schema_path.write_text(json.dumps(page, indent=2))
-    (outdir / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    schema_path.write_text(json.dumps(page, indent=2), encoding="utf-8")
+    (outdir / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return outdir
 
 
@@ -67,7 +67,7 @@ def test_missing_workflow_field_is_added(tmp_path):
     result = scaffold_forms_from_workflow_inputs(str(outdir))
     assert result["added"] == 1     # `notes` was missing
     schema_path = outdir / "src" / "schemas" / "feedback__new.json"
-    doc = json.loads(schema_path.read_text())
+    doc = json.loads(schema_path.read_text(encoding="utf-8"))
     field_names = {c["props"]["name"]
                    for c in doc["root"]["children"][0]["children"]
                    if isinstance(c, dict) and "props" in c}
@@ -95,11 +95,11 @@ def test_complete_form_leaves_schema_alone(tmp_path):
         }],
     }
     outdir = _scaffold(tmp_path, page, plan)
-    before = (outdir / "src" / "schemas" / "f__new.json").read_text()
+    before = (outdir / "src" / "schemas" / "f__new.json").read_text(encoding="utf-8")
 
     result = scaffold_forms_from_workflow_inputs(str(outdir))
     assert result["added"] == 0
-    assert (outdir / "src" / "schemas" / "f__new.json").read_text() == before
+    assert (outdir / "src" / "schemas" / "f__new.json").read_text(encoding="utf-8") == before
 
 
 # --------------------------------------------------------------------------- #

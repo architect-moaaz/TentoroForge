@@ -1087,7 +1087,7 @@ def test_a_file_that_is_not_an_image_is_refused_here(tmp_path):
     from services.blueprint.executors import image_block
 
     p = tmp_path / "notes.txt"
-    p.write_text("hello")
+    p.write_text("hello", encoding="utf-8")
     with pytest.raises(ValueError, match="not an image"):
         image_block(p)
 

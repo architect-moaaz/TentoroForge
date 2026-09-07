@@ -64,7 +64,7 @@ def _write_app(tmp_path: Path) -> Path:
         "components": {},
         "workflow_bindings": {},
         "rules": {},
-    }))
+    }), encoding="utf-8")
 
     # Create page — writes latestCvAttachmentId via a Select node.
     (tmp_path / "src" / "schemas" / "candidates" / "new.json").write_text(json.dumps({
@@ -84,7 +84,7 @@ def _write_app(tmp_path: Path) -> Path:
                 ]},
             ],
         },
-    }))
+    }), encoding="utf-8")
 
     # Detail page — reads {{candidates[0].latestCvAttachmentId}}
     (tmp_path / "src" / "schemas" / "candidates" / "[id].json").write_text(json.dumps({
@@ -104,7 +104,7 @@ def _write_app(tmp_path: Path) -> Path:
                 }},
             ],
         },
-    }))
+    }), encoding="utf-8")
 
     # Workflow — reads {{input.latestCvAttachmentId}} in a db_update.
     (tmp_path / "workflows" / "process_cv.json").write_text(json.dumps({
@@ -119,11 +119,11 @@ def _write_app(tmp_path: Path) -> Path:
                                  "values": {"cvProcessedAt": "{{now}}",
                                             "attachment": "{{input.latestCvAttachmentId}}"}}}},
         ],
-    }))
+    }), encoding="utf-8")
 
     (tmp_path / "contracts" / "action-contract.json").write_text(json.dumps({
         "actions": [{"entity": "Candidate", "action": "create"}],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 

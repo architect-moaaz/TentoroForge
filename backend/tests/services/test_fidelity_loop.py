@@ -41,7 +41,7 @@ def _make_runner(tmp_path: Path) -> FidelityLoopRunner:
         "meta": {"title": "Users"}, "dataSources": [],
         "root": {"id": "root", "type": "Stack", "props": {}, "children": []},
     }
-    (output_dir / "src" / "schemas" / "users" / "list.json").write_text(json.dumps(schema))
+    (output_dir / "src" / "schemas" / "users" / "list.json").write_text(json.dumps(schema), encoding="utf-8")
     return FidelityLoopRunner(
         output_dir=output_dir,
         project_ctx=ProjectContext(domain="general", app_name="Test", description="t", tone="neutral"),

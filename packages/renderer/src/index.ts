@@ -36,6 +36,7 @@ export type {
 } from "./runtime/computeAction";
 export type { SchemaRendererProps, DataEngine } from "./SchemaRenderer";
 export { compileTokens, tokenToCssVar, resolveStyle } from "./runtime/tokens";
+export { applyStyleSlot, isColorTokenRef, isScaleTokenRef } from "./runtime/style-slot";
 export { applyLayout } from "./runtime/layouts";
 export { validatePage } from "./runtime/validate";
 export { renderToObject } from "./test-harness/renderToObject";

@@ -166,6 +166,18 @@ export function BindingControl({ label, value, onChange, placeholder, pageId: pa
   }, [sources, entities, wantsCollection]);
 
   const val = typeof value === "string" ? value : value ?? "";
+
+  // The hand-written-expression box is edited locally and committed on blur /
+  // Enter. Wiring it straight to `onChange` dispatched an updateProp/bindProp
+  // PER KEYSTROKE, and editor-store pushes one undo entry per dispatch and
+  // re-arms the 500 ms autosave each time — typing `form.email` cost nine undo
+  // entries and nine save arms, and every intermediate prefix (`f`, `fo`, …)
+  // was written into the schema as a real binding. Commit-on-blur matches
+  // SizeField in StylePanel.tsx. The dropdown and "create data source" paths
+  // are discrete choices and still commit immediately; the effect re-syncs the
+  // draft whenever they (or an external edit) change the committed value.
+  const [draft, setDraft] = React.useState<string>(String(val));
+  React.useEffect(() => { setDraft(String(val)); }, [val]);
   const known = React.useMemo(() => {
     const set = new Set<string>();
     for (const g of groups) for (const o of g.options) set.add(o.value);
@@ -346,9 +358,17 @@ export function BindingControl({ label, value, onChange, placeholder, pageId: pa
         ref={inputRef}
         type="text"
         className="border rounded px-2 py-1 text-xs bg-background font-mono text-muted-foreground"
-        value={val}
+        value={draft}
         placeholder={placeholder ?? "expression — e.g. form.name · drivers[0].label · row.status"}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft !== String(val)) onChange(draft); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          else if (e.key === "Escape") {
+            setDraft(String(val));
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
       />
     </label>
   );

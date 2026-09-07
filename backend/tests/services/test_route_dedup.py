@@ -45,7 +45,7 @@ def _list_page() -> dict:
 
 
 def _read(root: Path, rel: str) -> dict:
-    return json.loads((root / "src/schemas" / rel).read_text())
+    return json.loads((root / "src/schemas" / rel).read_text(encoding="utf-8"))
 
 
 # ── signatures ───────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ def test_landing_page_never_becomes_an_alias(tmp_path: Path):
         {"entity": "documents", "job": "create",
          "routes": ["/", "/documents/upload"]}]
     for rel in ("index.json", "documents/upload.json"):
-        assert "Redirect" not in (root / "src" / "schemas" / rel).read_text()
+        assert "Redirect" not in (root / "src" / "schemas" / rel).read_text(encoding="utf-8")
 
 
 def test_landing_page_wins_over_undeclared_twin(tmp_path: Path):
@@ -202,7 +202,7 @@ def test_report_written(tmp_path: Path):
                  "documents/new.json": _form_page()},
     )
     dedupe_routes(root)
-    rep = json.loads((root / "contracts" / "route-dedup.json").read_text())
+    rep = json.loads((root / "contracts" / "route-dedup.json").read_text(encoding="utf-8"))
     assert len(rep["collapsed"]) == 1
 
 
@@ -241,7 +241,7 @@ def test_plan_declared_peers_never_collapse(tmp_path):
     report = dedupe_routes(root)
     assert report["collapsed"] == []
     for rel in ("admins.json", "staffs.json", "viewers.json"):
-        doc = json.loads((root / "src" / "schemas" / rel).read_text())
+        doc = json.loads((root / "src" / "schemas" / rel).read_text(encoding="utf-8"))
         assert "Redirect" not in json.dumps(doc), f"{rel} was collapsed"
 
 
@@ -258,7 +258,7 @@ def test_undeclared_duplicate_still_collapses_into_plan_route(tmp_path):
     report = dedupe_routes(root)
     assert [(c["loser"], c["winner"]) for c in report["collapsed"]] == \
         [("/users-list", "/admins")]
-    kept = json.loads((root / "src" / "schemas" / "admins.json").read_text())
+    kept = json.loads((root / "src" / "schemas" / "admins.json").read_text(encoding="utf-8"))
     assert "Redirect" not in json.dumps(kept)
 
 
@@ -278,7 +278,7 @@ def test_create_page_entity_is_its_own_subject_not_dropdown_feeds(tmp_path):
                 {"type": "Form", "props": {"entity": "Product", "fields": []}}]}}},
     )
     sig = page_signature("/products/new", json.loads(
-        (root / "src" / "schemas" / "products" / "new.json").read_text()), _resolver(root))
+        (root / "src" / "schemas" / "products" / "new.json").read_text(encoding="utf-8")), _resolver(root))
     assert sig is not None and sig[1] == "create"
     assert sig[0] == "products", f"create page attributed to {sig[0]!r}"
 
@@ -299,5 +299,5 @@ def test_distinct_entity_create_pages_never_group(tmp_path):
                    plan={"pages": []})
     report = dedupe_routes(root)
     assert report["collapsed"] == []
-    doc = json.loads((root / "src" / "schemas" / "products" / "new.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "products" / "new.json").read_text(encoding="utf-8"))
     assert "Redirect" not in json.dumps(doc)

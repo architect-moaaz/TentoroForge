@@ -17,7 +17,7 @@ def _app(tmp_path):
             {"from_entity": "Member", "to_entity": "MembershipPlan", "type": "many-to-one"},
             {"from_entity": "Member", "to_entity": "Trainer", "type": "many-to-one"},
         ],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "members"
     sdir.mkdir(parents=True)
     return sdir
@@ -37,12 +37,12 @@ def test_resolves_wrong_entity_and_label_to_reality(tmp_path):
             {"type": "Select", "props": {"name": "trainerId", "label": "Trainer",
                                          "optionsFrom": {"source": "trainers", "value": "id", "label": "fullName"}}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = resolve_schema_references(str(tmp_path))
     assert res["derived"] >= 2
 
-    d = json.loads((sdir / "new.json").read_text())
+    d = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     ds = {x["name"]: x for x in d["dataSources"]}
     # "Plan" → MembershipPlan; dataSource renamed to the resolvable slug
     assert "membershipPlans" in ds and ds["membershipPlans"]["entity"] == "MembershipPlan"
@@ -69,9 +69,9 @@ def test_report_written_with_methods(tmp_path):
         "root": {"type": "Form", "children": [
             {"type": "Select", "props": {"name": "planId", "optionsFrom": {"source": "plans", "label": "x"}}},
         ]},
-    }))
+    }), encoding="utf-8")
     resolve_schema_references(str(tmp_path))
-    rep = json.loads((tmp_path / "contracts" / "references-report.json").read_text())
+    rep = json.loads((tmp_path / "contracts" / "references-report.json").read_text(encoding="utf-8"))
     kinds = {r["kind"] for r in rep["references"]}
     assert "dataSource.entity" in kinds
     assert any(r["resolved"] == "MembershipPlan" for r in rep["references"])
@@ -86,7 +86,7 @@ def test_idempotent(tmp_path):
             {"type": "Select", "props": {"name": "planId",
                                          "optionsFrom": {"source": "membershipPlans", "value": "id", "label": "name"}}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = resolve_schema_references(str(tmp_path))
     assert res["derived"] == 0 and res["fuzzy"] == 0     # already reality → nothing to do
 
@@ -101,16 +101,16 @@ def test_unresolvable_dropdown_is_neutralized_not_shipped_broken(tmp_path):
             {"type": "Select", "props": {"name": "widgetRef", "label": "Widget",
                                          "optionsFrom": {"source": "widgets", "value": "id", "label": "name"}}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = resolve_schema_references(str(tmp_path))
     assert res.get("neutralized", 0) >= 1
 
-    d = json.loads((sdir / "new.json").read_text())
+    d = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     node = d["root"]["children"][0]
     # No dead empty dropdown ships — degraded to a plain Input, optionsFrom stripped.
     assert node["type"] == "Input"
     assert "optionsFrom" not in node["props"]
-    rep = json.loads((tmp_path / "contracts" / "references-report.json").read_text())
+    rep = json.loads((tmp_path / "contracts" / "references-report.json").read_text(encoding="utf-8"))
     assert any(r["method"] == "neutralized" for r in rep["references"])
 
 
@@ -125,16 +125,16 @@ def test_resolver_canonicalizes_button_workflow_ref(tmp_path):
     wf = tmp_path / "workflows"
     wf.mkdir()
     (wf / "CreateMember.json").write_text(json.dumps(
-        {"id": "wf_create_member", "name": "CreateMember", "definition": {"nodes": []}}))
+        {"id": "wf_create_member", "name": "CreateMember", "definition": {"nodes": []}}), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     (sdir / "members.json").write_text(json.dumps({
         "route": "/members",
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Save", "workflow": "createMember"}},
         ]},
-    }))
+    }), encoding="utf-8")
     resolve_schema_references(str(tmp_path))
-    listing = json.loads((sdir / "members.json").read_text())
+    listing = json.loads((sdir / "members.json").read_text(encoding="utf-8"))
     assert listing["root"]["children"][0]["props"]["workflow"] == "CreateMember"
 
 
@@ -144,16 +144,16 @@ def test_resolver_neutralizes_phantom_button_workflow(tmp_path):
     _app(tmp_path)
     (tmp_path / "workflows").mkdir()
     (tmp_path / "workflows" / "CreateMember.json").write_text(json.dumps(
-        {"id": "wf_create_member", "name": "CreateMember", "definition": {"nodes": []}}))
+        {"id": "wf_create_member", "name": "CreateMember", "definition": {"nodes": []}}), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     (sdir / "members.json").write_text(json.dumps({
         "route": "/members",
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Frobnicate", "workflow": "doesNotExist"}},
         ]},
-    }))
+    }), encoding="utf-8")
     resolve_schema_references(str(tmp_path))
-    listing = json.loads((sdir / "members.json").read_text())
+    listing = json.loads((sdir / "members.json").read_text(encoding="utf-8"))
     assert listing["root"]["children"][0]["props"].get("workflow") != "doesNotExist"
 
 
@@ -171,7 +171,7 @@ def _helpdesk_app(tmp_path):
             {"from_entity": "Ticket", "to_entity": "User", "type": "many-to-one", "foreignKey": ""},
             {"from_entity": "Ticket", "to_entity": "Asset", "type": "many-to-one", "foreignKey": ""},
         ],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "tickets"
     sdir.mkdir(parents=True)
     return sdir
@@ -195,10 +195,10 @@ def test_person_role_datasource_and_select_repoint_to_users(tmp_path):
             {"type": "Select", "props": {"name": "assetId", "label": "Asset",
                                          "optionsFrom": {"source": "assets", "value": "id", "label": "name"}}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     resolve_schema_references(str(tmp_path))
-    d = json.loads((sdir / "new.json").read_text())
+    d = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
 
     ds = {x["name"]: x for x in d.get("dataSources", [])}
     assert "requesters" not in ds                       # phantom name gone
@@ -230,7 +230,7 @@ def _recruit_app(tmp_path):
             "RecruitmentDrive": {"fields": {"id": {"type": "uuid"}, "title": {"type": "varchar"}}},
         },
         "relations": [],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     return sdir
@@ -268,10 +268,10 @@ def test_renamed_list_source_repoints_table_rows_binding(tmp_path):
             {"type": "Table", "props": {"rows": "{{applicantsRecent}}", "columns": []}},
             {"type": "Table", "props": {"rows": "{{recruitmentDrivesRecent}}", "columns": []}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     resolve_schema_references(str(tmp_path))
-    d = json.loads((sdir / "home.json").read_text())
+    d = json.loads((sdir / "home.json").read_text(encoding="utf-8"))
 
     list_names = {x["name"] for x in d["dataSources"] if x.get("op") == "list"}
     assert list_names == {"applicants", "recruitmentDrives"}     # canonicalized
@@ -304,7 +304,7 @@ def test_kebab_case_binding_repoints_on_rename(tmp_path):
             },
         }},
         "relations": [],
-    }))
+    }), encoding="utf-8")
 
     (tmp_path / "src" / "schemas" / "assessment-days.json").write_text(json.dumps({
         "route": "/assessment-days",
@@ -318,10 +318,10 @@ def test_kebab_case_binding_repoints_on_rename(tmp_path):
                 "columns": [{"key": "title", "label": "Title"}],
             }},
         ]},
-    }))
+    }), encoding="utf-8")
 
     resolve_schema_references(str(tmp_path))
-    d = json.loads((tmp_path / "src" / "schemas" / "assessment-days.json").read_text())
+    d = json.loads((tmp_path / "src" / "schemas" / "assessment-days.json").read_text(encoding="utf-8"))
 
     ds_name = d["dataSources"][0]["name"]
     binding = d["root"]["children"][0]["props"]["rows"]
@@ -347,10 +347,10 @@ def test_colliding_list_sources_fold_to_one_survivor(tmp_path):
             {"type": "Table", "props": {"rows": "{{applicants}}", "columns": []}},
             {"type": "Table", "props": {"rows": "{{applicantsRecent}}", "columns": []}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     resolve_schema_references(str(tmp_path))
-    d = json.loads((sdir / "home.json").read_text())
+    d = json.loads((sdir / "home.json").read_text(encoding="utf-8"))
 
     names = [x["name"] for x in d["dataSources"]]
     assert names.count("applicants") == 1       # deduped to a single survivor
@@ -375,10 +375,10 @@ def test_phantom_non_role_datasource_is_pruned(tmp_path):
         "root": {"type": "Form", "children": [
             {"type": "Input", "props": {"name": "title", "label": "Title"}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     resolve_schema_references(str(tmp_path))
-    d = json.loads((sdir / "new.json").read_text())
+    d = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     names = {x["name"] for x in d.get("dataSources", [])}
     assert "categories" not in names
     assert "assets" in names

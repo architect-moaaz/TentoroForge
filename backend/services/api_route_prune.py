@@ -202,7 +202,14 @@ def prune_entity_crud_routes(output_dir: str | Path) -> dict:
     for route_file in sorted(api_root.rglob("route.ts")):
         parts = route_file.relative_to(api_root).parts
         rel = "/".join(parts)
-        rel_from_root = str(route_file.relative_to(output_dir))
+        # `.as_posix()`: every entry in the injection manifest — and in
+        # `_LEGACY_MANIFEST_FALLBACK` — is a forward-slash literal written by
+        # `runtime_injector`'s `append("src/app/api/...")` calls, so `str()`
+        # here made the "keep injected infra" escape hatch unreachable on
+        # Windows and this pass mowed down the runtime's own API surface
+        # (src/app/api/{tasks,cart,events/stream,workflow-runs}/route.ts …)
+        # immediately after the injector installed it.
+        rel_from_root = route_file.relative_to(output_dir).as_posix()
         # Injected infra route: keep, no matter what pattern matches.
         if rel_from_root in injected_paths:
             continue

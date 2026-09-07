@@ -87,7 +87,7 @@ def smart_edit_page(
         return _fail("no LLM boundary wired (query_fn=None)", model=None)
 
     try:
-        current_schema = json.loads(schema_file.read_text())
+        current_schema = json.loads(schema_file.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return _fail(f"target page has invalid JSON: {exc}", model=None)
 
@@ -145,7 +145,7 @@ def smart_edit_page(
     # Atomic write — same-file replace via a temp file so a crashed
     # process can't leave a half-written schema on disk.
     tmp = schema_file.with_suffix(schema_file.suffix + ".tmp")
-    tmp.write_text(json.dumps(parsed, indent=2))
+    tmp.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
     os.replace(tmp, schema_file)
 
     # Concrete change-list — Smith's answer terminal reads this to know
@@ -512,7 +512,7 @@ def _component_registry_block() -> str:
     caching amortizes it, and giving the LLM the FULL prop schema is the
     only way to avoid it inventing props that don't exist."""
     try:
-        return _REGISTRY_CONTRACTS_PATH.read_text()
+        return _REGISTRY_CONTRACTS_PATH.read_text(encoding="utf-8")
     except Exception:  # noqa: BLE001
         logger.exception("llm_edit: registry contracts missing at %s",
                          _REGISTRY_CONTRACTS_PATH)
@@ -682,7 +682,7 @@ def _load_registry_names() -> set[str]:
     renderer built-in layout primitives."""
     names: set[str] = set(_RENDERER_PRIMITIVES)
     try:
-        d = json.loads(_REGISTRY_CONTRACTS_PATH.read_text())
+        d = json.loads(_REGISTRY_CONTRACTS_PATH.read_text(encoding="utf-8"))
         if isinstance(d, dict):
             names |= set(d.keys())
     except Exception:  # noqa: BLE001

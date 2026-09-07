@@ -23,13 +23,13 @@ def _app(tmp_path: Path, *, plan: dict, schemas: dict[str, dict],
     root = tmp_path / "app"
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True, exist_ok=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     for slug, doc in schemas.items():
         p = root / "src" / "schemas" / f"{slug}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(doc))
+        p.write_text(json.dumps(doc), encoding="utf-8")
     if shell is not None:
-        (root / "src" / "schemas" / "shell.json").write_text(json.dumps(shell))
+        (root / "src" / "schemas" / "shell.json").write_text(json.dumps(shell), encoding="utf-8")
     return root
 
 
@@ -158,14 +158,14 @@ class TestTolerance:
     def test_corrupt_plan_is_treated_as_missing(self, tmp_path):
         root = tmp_path / "app"
         (root / "src" / "contracts").mkdir(parents=True)
-        (root / "src" / "contracts" / "plan.json").write_text("{not json")
+        (root / "src" / "contracts" / "plan.json").write_text("{not json", encoding="utf-8")
         s = sb.score_app(root)
         assert s.composite is None
 
     def test_plan_with_no_schemas_is_noted(self, tmp_path):
         root = tmp_path / "app"
         (root / "src" / "contracts").mkdir(parents=True)
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}), encoding="utf-8")
         s = sb.score_app(root)
         assert "no page schemas" in s.note
 

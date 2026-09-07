@@ -63,7 +63,7 @@ def admin_credentials(output_dir: str | Path | None = None) -> dict:
             if not f.exists():
                 continue
             try:
-                text = f.read_text()
+                text = f.read_text(encoding="utf-8")
             except OSError:
                 continue
             for key, rx in _ENV_RE.items():

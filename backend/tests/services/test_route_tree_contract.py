@@ -46,7 +46,7 @@ def _mk(tmp_path: Path, *, routes: list[str], schemas: dict[str, dict] | None = 
 
 
 def _contract(root: Path) -> dict:
-    return json.loads((root / "src/contracts/route-tree.json").read_text())
+    return json.loads((root / "src/contracts/route-tree.json").read_text(encoding="utf-8"))
 
 
 def _page(children: list | None = None) -> dict:
@@ -115,6 +115,6 @@ class TestDegenerate:
     def test_rerun_is_stable(self, tmp_path):
         root = _mk(tmp_path, routes=["/products", "/products/[id]"])
         write_route_tree_contract(root)
-        first = (root / "src/contracts/route-tree.json").read_text()
+        first = (root / "src/contracts/route-tree.json").read_text(encoding="utf-8")
         write_route_tree_contract(root)
-        assert (root / "src/contracts/route-tree.json").read_text() == first
+        assert (root / "src/contracts/route-tree.json").read_text(encoding="utf-8") == first

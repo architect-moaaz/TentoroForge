@@ -108,6 +108,6 @@ async def test_rebuild_records_manual_source(tmp_path, _patched_auth):
     )
     log_path = tmp_path / ".blueprint-log.jsonl"
     assert log_path.is_file()
-    entry = _json.loads(log_path.read_text().strip().splitlines()[-1])
+    entry = _json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert entry["source"] == "manual"
     assert "test@example.com" in entry["summary"]

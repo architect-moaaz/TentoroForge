@@ -92,7 +92,7 @@ def load_plan(output_dir: str | Path) -> Optional[dict]:
         p = root.joinpath(*parts)
         if p.is_file():
             try:
-                return json.loads(p.read_text())
+                return json.loads(p.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 logger.warning("next_steps: unreadable plan at %s: %s", p, exc)
                 return None

@@ -174,7 +174,7 @@ def test_only_cards_carry_density():
 def _write(tmp_path, name, root):
     d = tmp_path / "src" / "schemas"
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(json.dumps({"schemaVersion": "2", "root": root}))
+    (d / name).write_text(json.dumps({"schemaVersion": "2", "root": root}), encoding="utf-8")
     return d / name
 
 
@@ -182,7 +182,7 @@ def test_it_reshapes_a_page_no_matter_who_composed_it(tmp_path):
     f = _write(tmp_path, "home.json", _row(_card("a"), _card("b"), _card("c")))
     res = normalize_section_layout(str(tmp_path))
     assert res["changed"] == 1
-    root = json.loads(f.read_text())["root"]
+    root = json.loads(f.read_text(encoding="utf-8"))["root"]
     assert root["type"] == "Grid" and root["props"]["columns"] == 3
     assert root["children"][0]["props"]["density"] == "tight"
 
@@ -193,7 +193,7 @@ def test_nested_schema_directories_are_reached(tmp_path):
     d = tmp_path / "src" / "schemas" / "reports"
     d.mkdir(parents=True)
     (d / "spend.json").write_text(json.dumps(
-        {"schemaVersion": "2", "root": _row(_card("a"), _card("b"))}))
+        {"schemaVersion": "2", "root": _row(_card("a"), _card("b"))}), encoding="utf-8")
     assert normalize_section_layout(str(tmp_path))["changed"] == 1
 
 
@@ -214,9 +214,9 @@ def test_a_page_needing_nothing_is_not_rewritten(tmp_path):
 def test_an_unreadable_page_never_fails_the_build(tmp_path):
     d = tmp_path / "src" / "schemas"
     d.mkdir(parents=True)
-    (d / "broken.json").write_text("{not json")
+    (d / "broken.json").write_text("{not json", encoding="utf-8")
     (d / "ok.json").write_text(json.dumps(
-        {"schemaVersion": "2", "root": _row(_card("a"), _card("b"))}))
+        {"schemaVersion": "2", "root": _row(_card("a"), _card("b"))}), encoding="utf-8")
     assert normalize_section_layout(str(tmp_path))["changed"] == 1
 
 

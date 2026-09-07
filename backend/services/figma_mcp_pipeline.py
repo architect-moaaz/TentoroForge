@@ -59,7 +59,7 @@ def _upsert_nav_flow(output_dir: str, route: str, title: str, schema_file: str) 
 
     if nav_path.exists():
         try:
-            nav = json.loads(nav_path.read_text())
+            nav = json.loads(nav_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             nav = {}
     else:
@@ -106,7 +106,7 @@ def _upsert_nav_flow(output_dir: str, route: str, title: str, schema_file: str) 
     if nav["auth_routes"] and "post_logout_redirect" not in nav:
         nav["post_logout_redirect"] = nav["auth_routes"][0]
 
-    nav_path.write_text(json.dumps(nav, indent=2) + "\n")
+    nav_path.write_text(json.dumps(nav, indent=2) + "\n", encoding="utf-8")
 
 
 async def build_schema_from_jsx(
@@ -172,7 +172,7 @@ async def build_schema_from_jsx(
         reg_path = Path(output_dir) / "registry.json"
         if reg_path.is_file():
             try:
-                registry = json.loads(reg_path.read_text())
+                registry = json.loads(reg_path.read_text(encoding="utf-8"))
             except Exception:
                 registry = {}
             if registry:

@@ -420,7 +420,7 @@ def test_persist_discovery_writes_to_contracts_dir(tmp_path):
     path = persist_discovery(str(tmp_path), payload)
     assert "src/contracts/discovery.json" in path
 
-    written = (tmp_path / "src" / "contracts" / "discovery.json").read_text()
+    written = (tmp_path / "src" / "contracts" / "discovery.json").read_text(encoding="utf-8")
     assert '"domain": "Hospitality"' in written
     assert '"confidence": 0.9' in written
     # Sorted keys make diffs deterministic across regens

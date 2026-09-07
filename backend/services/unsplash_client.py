@@ -53,7 +53,7 @@ class UnsplashClient:
     def photo_url_for_query(self, query: str, size: str = "1600x900") -> str:
         cache = self._cache_path(query, size)
         if cache.exists():
-            return cache.read_text().strip()
+            return cache.read_text(encoding="utf-8").strip()
 
         try:
             w, h = _parse_size(size)
@@ -65,7 +65,7 @@ class UnsplashClient:
         # download the bytes. Consumers (Avatar.photoUrl, Hero.backgroundImage)
         # already handle load failures via onError fallback to initials /
         # solid background. Emit the URL and trust the cdn.
-        cache.write_text(url)
+        cache.write_text(url, encoding="utf-8")
         return url
 
     def clear_cache(self) -> None:

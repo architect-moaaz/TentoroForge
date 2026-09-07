@@ -48,7 +48,7 @@ def _basic_plan():
 # (a) varchar / integer / boolean / timestamp map to the right column builders
 def test_column_builders(tmp_path):
     build_schema_files(_basic_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
     assert 'pgTable("orders"' in src
     assert 'varchar("title"' in src
     assert 'integer("account_id"' in src
@@ -62,26 +62,26 @@ def test_column_builders(tmp_path):
 # (b) PK id -> .primaryKey(); non-nullable -> .notNull()
 def test_primary_key_and_not_null(tmp_path):
     build_schema_files(_basic_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
     assert 'serial("id").primaryKey()' in src
     # title is nullable:false -> notNull
     assert 'varchar("title", { length: 255 }).notNull()' in src
     # accountId is nullable:false -> notNull
     assert ".notNull()" in src
-    accounts = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    accounts = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     assert ".unique()" in accounts  # email unique
 
 
 # (c) FK field present in relations -> .references(...) + a relations() block
 def test_foreign_key_references_and_relations(tmp_path):
     build_schema_files(_basic_plan(), str(tmp_path))
-    orders = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    orders = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
     assert ".references(() => accounts.id)" in orders
     assert 'import { accounts } from "./accounts"' in orders
     assert "relations(orders" in orders
     assert "one(accounts" in orders
     # the referenced side gets a many() back-reference
-    accounts = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    accounts = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     assert "relations(accounts" in accounts
     assert "many(orders)" in accounts
 
@@ -89,7 +89,7 @@ def test_foreign_key_references_and_relations(tmp_path):
 # (d) index.ts barrel exports every entity
 def test_schema_barrel(tmp_path):
     build_schema_files(_basic_plan(), str(tmp_path))
-    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text()
+    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text(encoding="utf-8")
     assert './accounts"' in barrel
     assert './orders"' in barrel
 
@@ -97,11 +97,11 @@ def test_schema_barrel(tmp_path):
 # (e) src/types/<slug>.ts has $inferSelect / $inferInsert
 def test_types_infer(tmp_path):
     build_schema_files(_basic_plan(), str(tmp_path))
-    t = (tmp_path / "src" / "types" / "orders.ts").read_text()
+    t = (tmp_path / "src" / "types" / "orders.ts").read_text(encoding="utf-8")
     assert 'import { orders } from "@/db/schema/orders"' in t
     assert "export type Order = typeof orders.$inferSelect;" in t
     assert "export type NewOrder = typeof orders.$inferInsert;" in t
-    types_barrel = (tmp_path / "src" / "types" / "index.ts").read_text()
+    types_barrel = (tmp_path / "src" / "types" / "index.ts").read_text(encoding="utf-8")
     assert './orders"' in types_barrel
 
 
@@ -129,7 +129,7 @@ def test_legacy_dict_data_models(tmp_path):
     out = build_schema_files(plan, str(tmp_path))
     assert out["errors"] == []
     assert (tmp_path / "src" / "db" / "schema" / "accounts.ts").exists()
-    orders = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text()
+    orders = (tmp_path / "src" / "db" / "schema" / "orders.ts").read_text(encoding="utf-8")
     assert ".references(() => accounts.id)" in orders
 
 
@@ -182,7 +182,7 @@ def _required_plan():
 # required-by-nullable:false, notNull:true, and required:true all -> .notNull()
 def test_required_fields_emit_not_null(tmp_path):
     build_schema_files(_required_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text(encoding="utf-8")
     assert 'varchar("title", { length: 255 }).notNull()' in src
     assert 'varchar("code", { length: 255 }).notNull()' in src
     assert 'varchar("owner", { length: 255 }).notNull()' in src
@@ -191,7 +191,7 @@ def test_required_fields_emit_not_null(tmp_path):
 # an optional field (no required flag) must NOT be notNull
 def test_optional_field_not_not_null(tmp_path):
     build_schema_files(_required_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text(encoding="utf-8")
     # find the `notes:` line and assert it lacks .notNull()
     notes_line = next(l for l in src.splitlines() if l.strip().startswith("notes:"))
     assert ".notNull()" not in notes_line
@@ -200,7 +200,7 @@ def test_optional_field_not_not_null(tmp_path):
 # a PK stays .primaryKey() and does not get a spurious .notNull() from this pass
 def test_primary_key_unaffected_by_required(tmp_path):
     build_schema_files(_required_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text(encoding="utf-8")
     id_line = next(l for l in src.splitlines() if l.strip().startswith("id:"))
     assert ".primaryKey()" in id_line
     assert ".notNull()" not in id_line
@@ -209,7 +209,7 @@ def test_primary_key_unaffected_by_required(tmp_path):
 # a declared lifecycle *At column with no required flag is NOT forced notNull
 def test_lifecycle_at_not_forced_not_null(tmp_path):
     build_schema_files(_required_plan(), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text(encoding="utf-8")
     closed_line = next(l for l in src.splitlines() if l.strip().startswith("closedAt:"))
     assert ".notNull()" not in closed_line
 
@@ -228,7 +228,7 @@ def test_legacy_dict_required_honored(tmp_path):
         },
     }
     build_schema_files(plan, str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "drives.ts").read_text(encoding="utf-8")
     assert 'varchar("title", { length: 255 }).notNull()' in src
     notes_line = next(l for l in src.splitlines() if l.strip().startswith("notes:"))
     assert ".notNull()" not in notes_line
@@ -268,15 +268,15 @@ def test_table_hint_flows_through_registry(tmp_path):
     out = build_schema_files(plan, str(tmp_path))
     assert out["errors"] == []
     # the hint wins verbatim for the table const + pgTable name (NOT "equipments")
-    eq = (tmp_path / "src" / "db" / "schema" / "equipment.ts").read_text()
+    eq = (tmp_path / "src" / "db" / "schema" / "equipment.ts").read_text(encoding="utf-8")
     assert 'export const equipment = pgTable("equipment"' in eq
     assert "equipments" not in eq
     # the child entity's FK targets the hinted table name
-    log = (tmp_path / "src" / "db" / "schema" / "maintenance-logs.ts").read_text()
+    log = (tmp_path / "src" / "db" / "schema" / "maintenance-logs.ts").read_text(encoding="utf-8")
     assert ".references(() => equipment.id)" in log
     assert 'import { equipment } from "./equipment"' in log
     # barrels + types reference the hinted slug, not "equipments"
-    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text()
+    barrel = (tmp_path / "src" / "db" / "schema" / "index.ts").read_text(encoding="utf-8")
     assert './equipment"' in barrel and "equipments" not in barrel
     assert (tmp_path / "src" / "types" / "equipment.ts").exists()
 
@@ -312,10 +312,10 @@ def test_reserved_users_table_skipped(tmp_path):
     # the non-reserved entity is still emitted
     assert (schema_dir / "tickets.ts").exists()
     # and the barrel must not export a builder-owned users module...
-    barrel = (schema_dir / "index.ts").read_text()
+    barrel = (schema_dir / "index.ts").read_text(encoding="utf-8")
     assert "./users" not in barrel
     # ...nor should Ticket try to import the (non-existent) builder users file
-    tickets = (schema_dir / "tickets.ts").read_text()
+    tickets = (schema_dir / "tickets.ts").read_text(encoding="utf-8")
     assert 'from "./users"' not in tickets
 
 
@@ -356,7 +356,7 @@ def _inferred_fk_plan():
 def test_inferred_fk_references_emitted(tmp_path):
     out = build_schema_files(_inferred_fk_plan(), str(tmp_path))
     assert out["errors"] == []
-    src = (tmp_path / "src" / "db" / "schema" / "appointments.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "appointments.ts").read_text(encoding="utf-8")
     assert 'petId: uuid("pet_id").references(() => pets.id)' in src
     assert 'vetId: uuid("vet_id").references(() => staff.id)' in src
     assert 'import { pets } from "./pets";' in src
@@ -374,7 +374,7 @@ def test_explicit_foreign_key_still_wins(tmp_path):
     ]
     out = build_schema_files(plan, str(tmp_path))
     assert out["errors"] == []
-    src = (tmp_path / "src" / "db" / "schema" / "appointments.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "appointments.ts").read_text(encoding="utf-8")
     assert 'petId: uuid("pet_id").references(() => pets.id)' in src
     assert 'vetId: uuid("vet_id").references(() => staff.id)' in src
 
@@ -394,7 +394,7 @@ def test_standalone_uuid_id_column_stays_plain(tmp_path):
     }
     out = build_schema_files(plan, str(tmp_path))
     assert out["errors"] == []
-    src = (tmp_path / "src" / "db" / "schema" / "widgets.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "widgets.ts").read_text(encoding="utf-8")
     ext_line = next(l for l in src.splitlines() if l.strip().startswith("externalRefId:"))
     assert ".references(" not in ext_line
     # no invented target import (no sibling schema-module import at all)
@@ -430,7 +430,7 @@ def _rbac_schema_plan():
 def test_users_schema_carries_role_column(tmp_path):
     out = build_schema_files(_rbac_schema_plan(), str(tmp_path))
     assert out["errors"] == []
-    user_ts = (tmp_path / "src" / "db" / "schema" / "user.ts").read_text()
+    user_ts = (tmp_path / "src" / "db" / "schema" / "user.ts").read_text(encoding="utf-8")
     # a SINGLE users table (merged, not a second pgTable), auth base preserved,
     # domain role column added.
     assert user_ts.count('pgTable("users"') == 1
@@ -444,7 +444,7 @@ def test_users_schema_carries_role_column(tmp_path):
 def test_assessor_fk_references_users(tmp_path):
     out = build_schema_files(_rbac_schema_plan(), str(tmp_path))
     assert out["errors"] == []
-    src = (tmp_path / "src" / "db" / "schema" / "assessments.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "assessments.ts").read_text(encoding="utf-8")
     assert 'assignedAssessorId: uuid("assigned_assessor_id").references(() => users.id)' in src
     assert 'import { users } from "./user";' in src
 
@@ -471,7 +471,7 @@ def test_reserved_users_fk_target_imports_correctly(tmp_path):
     }
     out = build_schema_files(plan, str(tmp_path))
     assert out["errors"] == []
-    tickets = (tmp_path / "src" / "db" / "schema" / "tickets.ts").read_text()
+    tickets = (tmp_path / "src" / "db" / "schema" / "tickets.ts").read_text(encoding="utf-8")
     assert 'assigneeId: uuid("assignee_id").references(() => users.id)' in tickets
     # imports the template's const from ./user (const is `users`, file is user.ts)
     assert 'import { users } from "./user";' in tickets

@@ -70,7 +70,7 @@ def cascade(output_dir: str | Path) -> dict:
         return {"recompiled": False, "reason": "no brief.json"}
 
     try:
-        brief = DesignBrief.model_validate_json(brief_path.read_text())
+        brief = DesignBrief.model_validate_json(brief_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[brief-cascade] brief.json unreadable: %s", exc)
         return {"recompiled": False, "reason": f"brief unreadable: {exc}"}
@@ -83,14 +83,22 @@ def cascade(output_dir: str | Path) -> dict:
     design_spec: dict = {}
     if spec_path.exists():
         try:
-            design_spec = json.loads(spec_path.read_text())
+            design_spec = json.loads(spec_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[brief-cascade] design-spec.json unreadable: %s", exc)
 
     # Brief WINS on overlap — this is the Phase 3 contract.
     _deep_merge(design_spec, overlay)
 
-    tokens_path = out_dir / "src" / "app" / "tokens.custom.json"
+    # `src/theme/`, not `src/app/`. This was the only writer in the platform
+    # aiming at `src/app/tokens.custom.json`; every other writer
+    # (generate.py, output_projects.py, _debug_schema.py, pipeline_graph.py)
+    # and every reader (render-scaffold's loadTokens.ts, the built app's
+    # load-custom.ts, feature_slice_schema_agent) uses `src/theme/`. So the
+    # cascade compiled the brief, wrote the file, returned
+    # `{"recompiled": true}` — and nothing on the platform ever opened it.
+    # A brief that changed the palette appeared to apply and applied nothing.
+    tokens_path = out_dir / "src" / "theme" / "tokens.custom.json"
     tokens_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:

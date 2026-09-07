@@ -185,3 +185,68 @@ def test_datasource_name_deduped(tmp_path):
     schema = _load(os.path.join(root, "src", "schemas", "dashboard.json"))
     tile = schema["root"]["children"][0]
     assert tile["props"]["value"] == "{{driveTotal2.value}}"
+
+
+# ── B12 — a binding whose root names no declared dataSource ─────────────────
+
+def test_a_dangling_binding_counts_as_unbound(tmp_path):
+    """The guard treated ANY `{{…}}` string as "already bound" and skipped it,
+    which stepped over exactly the case it exists to fix: `/items` shipped
+    three Stat tiles bound to `{{metrics.…}}` on a page with no `metrics`
+    source. Nothing fetched, the tiles rendered blank, and the guard walked
+    past all three because they carried a binding-shaped string."""
+    root = _make_app(tmp_path, {
+        "id": "root", "type": "Stack", "children": [
+            {"id": "kpi", "type": "MetricTile",
+             "props": {"label": "Total Drives",
+                       "value": "{{metrics.list_total_drives}}"}},
+        ],
+    })
+    res = bind_static_widgets(root)
+    assert res["bound"] == 1
+
+    schema = _load(os.path.join(root, "src", "schemas", "dashboard.json"))
+    assert schema["root"]["children"][0]["props"]["value"] == "{{driveTotal.value}}"
+    agg = [d for d in schema["dataSources"] if d["name"] == "driveTotal"]
+    assert agg and agg[0]["op"] == "aggregate"
+
+
+def test_a_binding_that_names_a_declared_source_is_left_alone(tmp_path):
+    """The binding resolves. Rewriting it would replace a metric the page
+    designed with a generic row count."""
+    root = _make_app(
+        tmp_path,
+        {"id": "root", "type": "Stack", "children": [
+            {"id": "kpi", "type": "MetricTile",
+             "props": {"label": "Total Drives", "value": "{{stats.open}}"}},
+        ]},
+        data_sources=[{"name": "stats", "entity": "Drive", "op": "aggregate",
+                       "metrics": {"open": {"fn": "count"}}}],
+    )
+    assert bind_static_widgets(root)["bound"] == 0
+    schema = _load(os.path.join(root, "src", "schemas", "dashboard.json"))
+    assert schema["root"]["children"][0]["props"]["value"] == "{{stats.open}}"
+
+
+def test_a_scope_root_is_not_a_dangling_binding(tmp_path):
+    """`{{user.…}}` is supplied by the renderer, not by a page fetch."""
+    root = _make_app(tmp_path, {
+        "id": "root", "type": "Stack", "children": [
+            {"id": "kpi", "type": "MetricTile",
+             "props": {"label": "Total Drives", "value": "{{user.driveQuota}}"}},
+        ],
+    })
+    assert bind_static_widgets(root)["bound"] == 0
+
+
+def test_an_interpolated_sentence_is_not_treated_as_a_stat_binding(tmp_path):
+    """Only a whole-string binding is a value binding; prose with a `{{…}}` in
+    it is not something to rewrite into an aggregate."""
+    root = _make_app(tmp_path, {
+        "id": "root", "type": "Stack", "children": [
+            {"id": "kpi", "type": "MetricTile",
+             "props": {"label": "Total Drives",
+                       "value": "about {{metrics.n}} drives"}},
+        ],
+    })
+    assert bind_static_widgets(root)["bound"] == 0

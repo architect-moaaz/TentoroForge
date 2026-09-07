@@ -95,7 +95,7 @@ def save(ref: DesignReference, output_dir: str | Path) -> Path:
     directory = store_dir(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{ref.source_id}.json"
-    path.write_text(json.dumps(_as_dict(ref), indent=2), "utf-8")
+    path.write_text(json.dumps(_as_dict(ref), indent=2), encoding="utf-8")
     return path
 
 

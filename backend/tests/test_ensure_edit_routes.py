@@ -113,7 +113,7 @@ def test_existing_edit_without_submit_gets_row_injected(tmp_path):
             {"type": "Stack", "children": [
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]}]},
-    }))
+    }), encoding="utf-8")
     # An existing edit page (LLM) with fields but NO submit/cancel button at all.
     (sdir / "[id]" / "edit.json").write_text(json.dumps({
         "route": "/applications/:id/edit",
@@ -121,10 +121,10 @@ def test_existing_edit_without_submit_gets_row_injected(tmp_path):
             {"type": "Stack", "children": [
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]}]},
-    }))
+    }), encoding="utf-8")
 
     ensure_edit_routes(str(tmp_path))
-    edit = json.loads((sdir / "[id]" / "edit.json").read_text())
+    edit = json.loads((sdir / "[id]" / "edit.json").read_text(encoding="utf-8"))
     btns = _buttons(edit)
     assert any(b.get("submit") is True for b in btns)
     assert any(b.get("label") == "Cancel" for b in btns)
@@ -138,7 +138,7 @@ def test_non_entity_route_gets_no_edit_page(tmp_path):
             "Rental": {"fields": {"id": {"type": "uuid"}, "customerId": {"type": "uuid"}}},
         },
         "relations": [],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "home"
     sdir.mkdir(parents=True)
     # A spurious create form for a non-entity "home" route (CreateHome).
@@ -146,11 +146,11 @@ def test_non_entity_route_gets_no_edit_page(tmp_path):
         "route": "/home/new",
         "root": {"type": "Form", "props": {"workflow": "CreateHome"}, "children": [
             {"type": "Stack", "children": []}]},
-    }))
+    }), encoding="utf-8")
     # And a real entity to prove the pass still runs for real ones.
     rdir = tmp_path / "src" / "schemas" / "rentals"
     rdir.mkdir(parents=True)
-    (rdir / "new.json").write_text(json.dumps(NEW_WITH_SUBMIT))
+    (rdir / "new.json").write_text(json.dumps(NEW_WITH_SUBMIT), encoding="utf-8")
 
     res = ensure_edit_routes(str(tmp_path))
     # No edit stub for the non-entity route.
@@ -248,15 +248,15 @@ def test_ensure_edit_routes_backfills_existing_edit_file(tmp_path):
             {"type": "Stack", "children": [
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]}]},
-    }))
+    }), encoding="utf-8")
     # An EXISTING (LLM) edit schema with no prefill wiring.
-    (sdir / "[id]" / "edit.json").write_text(json.dumps(LLM_EDIT))
+    (sdir / "[id]" / "edit.json").write_text(json.dumps(LLM_EDIT), encoding="utf-8")
 
     res = ensure_edit_routes(str(tmp_path))
     # It was not (re)created from scratch, it was backfilled in place.
     assert res["created"] == 0
     assert res.get("backfilled", 0) == 1
-    edit = json.loads((sdir / "[id]" / "edit.json").read_text())
+    edit = json.loads((sdir / "[id]" / "edit.json").read_text(encoding="utf-8"))
     fields = _fields_by_name(edit)
     assert fields["candidateId"]["props"]["defaultValue"] == "{{application.candidateId}}"
     assert any(d.get("name") == "application" and d.get("op") == "get"
@@ -270,8 +270,8 @@ def test_ensure_edit_routes_backfills_existing_edit_file(tmp_path):
 def test_ensure_creates_edit_file_and_registers(tmp_path):
     sdir = tmp_path / "src" / "schemas" / "appointments"
     sdir.mkdir(parents=True)
-    (sdir / "new.json").write_text(json.dumps(NEW))
-    (sdir / "[id].json").write_text(json.dumps({"route": "/appointments/:id"}))
+    (sdir / "new.json").write_text(json.dumps(NEW), encoding="utf-8")
+    (sdir / "[id].json").write_text(json.dumps({"route": "/appointments/:id"}), encoding="utf-8")
 
     res = ensure_edit_routes(str(tmp_path))
     assert res["created"] == 1
@@ -279,23 +279,23 @@ def test_ensure_creates_edit_file_and_registers(tmp_path):
     assert edit_fp.exists()
 
     # registry.ts regenerated with the edit route.
-    reg = (tmp_path / "src" / "schemas" / "registry.ts").read_text()
+    reg = (tmp_path / "src" / "schemas" / "registry.ts").read_text(encoding="utf-8")
     assert '"/appointments/[id]/edit"' in reg
 
 
 def test_rewrites_edit_button_to_navigate(tmp_path):
     sdir = tmp_path / "src" / "schemas" / "appointments"
     sdir.mkdir(parents=True)
-    (sdir / "new.json").write_text(json.dumps(NEW))
+    (sdir / "new.json").write_text(json.dumps(NEW), encoding="utf-8")
     # A list page with an Edit button wired to a PHANTOM workflow.
     (tmp_path / "src" / "schemas" / "appointments.json").write_text(json.dumps(
         {"route": "/appointments", "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Edit", "workflow": "editEntity"}},
-        ]}}))
+        ]}}), encoding="utf-8")
 
     res = ensure_edit_routes(str(tmp_path))
     assert res["buttons"] >= 1
-    listing = json.loads((tmp_path / "src" / "schemas" / "appointments.json").read_text())
+    listing = json.loads((tmp_path / "src" / "schemas" / "appointments.json").read_text(encoding="utf-8"))
     btn = listing["root"]["children"][0]["props"]
     assert "workflow" not in btn
     assert btn["navigate"] == "/appointments/{{item.id}}/edit"
@@ -316,7 +316,7 @@ def _reg(tmp_path):
             "Member": {"fields": {"id": {"type": "uuid"}, "fullName": {"type": "varchar"}}},
         },
         "relations": [],
-    }))
+    }), encoding="utf-8")
 
 
 def test_ensure_create_routes_synthesizes_missing_new(tmp_path):
@@ -330,17 +330,17 @@ def test_ensure_create_routes_synthesizes_missing_new(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "New", "navigate": "/plans"}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = ensure_create_routes(str(tmp_path))
     assert res["created"] == 1
     assert (sdir / "plans" / "new.json").exists()
     # The synthesized form targets the real entity's Create workflow.
-    created = json.loads((sdir / "plans" / "new.json").read_text())
+    created = json.loads((sdir / "plans" / "new.json").read_text(encoding="utf-8"))
     assert created["root"]["props"]["workflow"] == "CreateMembershipPlan"
     # And the New button now points at the create route.
     assert res["buttons"] >= 1
-    listing = json.loads((sdir / "plans.json").read_text())
+    listing = json.loads((sdir / "plans.json").read_text(encoding="utf-8"))
     assert listing["root"]["children"][0]["props"]["navigate"] == "/plans/new"
 
 
@@ -352,11 +352,11 @@ def test_ensure_create_routes_skips_existing(tmp_path):
         "route": "/plans",
         "dataSources": [{"name": "plans", "entity": "MembershipPlan", "op": "list"}],
         "root": {"type": "Stack", "children": []},
-    }))
+    }), encoding="utf-8")
     (sdir / "plans" / "new.json").write_text(json.dumps({
         "route": "/plans/new",
         "root": {"type": "Form", "props": {"workflow": "CreateMembershipPlan"}, "children": []},
-    }))
+    }), encoding="utf-8")
     res = ensure_create_routes(str(tmp_path))
     assert res["created"] == 0
 
@@ -372,13 +372,13 @@ def test_repoint_only_when_create_route_exists(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Add Member", "navigate": "/members"}},
         ]},
-    }))
+    }), encoding="utf-8")
     # Make members a non-list-resolvable page by removing entity? No — keep it,
     # but delete the synthesized new to simulate an un-synthesizable case is hard;
     # instead assert that after synthesis the button IS repointed.
     res = ensure_create_routes(str(tmp_path))
     assert (sdir / "members" / "new.json").exists()
-    listing = json.loads((sdir / "members.json").read_text())
+    listing = json.loads((sdir / "members.json").read_text(encoding="utf-8"))
     assert listing["root"]["children"][0]["props"]["navigate"] == "/members/new"
 
 
@@ -400,7 +400,7 @@ def test_create_route_guarantee_bridges_friendly_route(tmp_path):
             "Member": {"fields": {"id": {"type": "uuid"}, "fullName": {"type": "varchar"}}},
         },
         "relations": [],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     (sdir / "bookings.json").write_text(json.dumps({
@@ -409,12 +409,12 @@ def test_create_route_guarantee_bridges_friendly_route(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "New Booking", "navigate": "/bookings"}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = ensure_create_routes(str(tmp_path))
     assert res["created"] == 1
-    created = json.loads((sdir / "bookings" / "new.json").read_text())
+    created = json.loads((sdir / "bookings" / "new.json").read_text(encoding="utf-8"))
     assert created["root"]["props"]["workflow"] == "CreateClassBooking"
     assert res["buttons"] >= 1
-    listing = json.loads((sdir / "bookings.json").read_text())
+    listing = json.loads((sdir / "bookings.json").read_text(encoding="utf-8"))
     assert listing["root"]["children"][0]["props"]["navigate"] == "/bookings/new"

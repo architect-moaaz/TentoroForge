@@ -31,7 +31,7 @@ _CONTRACT = (pathlib.Path(__file__).resolve().parents[2]
 
 
 def _step_config_schema() -> dict:
-    c = json.loads(_CONTRACT.read_text())
+    c = json.loads(_CONTRACT.read_text(encoding="utf-8"))
     return c["properties"]["workflows"]["items"]["properties"]["steps"]["items"]["properties"]["config"]
 
 
@@ -89,7 +89,7 @@ def test_a_well_formed_sets_still_reaches_the_projection(tmp_path):
     not-null insert failure this exists to prevent."""
     result = project_workflows(_doc({"status": "Open"}), tmp_path)
     assert len(result["files"]) == 1
-    written = json.loads((tmp_path / result["files"][0]).read_text()) \
+    written = json.loads((tmp_path / result["files"][0]).read_text(encoding="utf-8")) \
         if (tmp_path / result["files"][0]).exists() else {}
     assert "Open" in json.dumps(written), "the declared value never reached the artifact"
 

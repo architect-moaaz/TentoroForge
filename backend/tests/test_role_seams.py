@@ -143,7 +143,7 @@ class TestRestrictPageToRole:
 def _prep_plan_file(tmp_path: Path, plan: dict) -> str:
     d = tmp_path / "src" / "contracts"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "plan.json").write_text(json.dumps(plan))
+    (d / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return str(tmp_path)
 
 
@@ -154,7 +154,7 @@ class TestFileWrappers:
         assert r["ok"] and r["added"]
         # Read back.
         p = tmp_path / "src" / "contracts" / "plan.json"
-        assert json.loads(p.read_text())["actors"] == ["Admin", "Editor"]
+        assert json.loads(p.read_text(encoding="utf-8"))["actors"] == ["Admin", "Editor"]
 
     def test_remove_role_in_file_persists(self, tmp_path: Path):
         out = _prep_plan_file(tmp_path, {
@@ -165,14 +165,14 @@ class TestFileWrappers:
         assert r["ok"] and r["removed"]
         assert r["affected_pages"] == ["/admin"]
         p = tmp_path / "src" / "contracts" / "plan.json"
-        assert json.loads(p.read_text())["actors"] == ["Admin"]
+        assert json.loads(p.read_text(encoding="utf-8"))["actors"] == ["Admin"]
 
     def test_restrict_page_in_file_persists(self, tmp_path: Path):
         out = _prep_plan_file(tmp_path, {"pages": [{"route": "/admin"}]})
         r = restrict_page_to_role_in_file(out, "/admin", "Admin")
         assert r["ok"]
         p = tmp_path / "src" / "contracts" / "plan.json"
-        loaded = json.loads(p.read_text())
+        loaded = json.loads(p.read_text(encoding="utf-8"))
         assert loaded["pages"][0]["access"]["roles"] == ["Admin"]
 
     def test_missing_plan_reports_error(self, tmp_path: Path):

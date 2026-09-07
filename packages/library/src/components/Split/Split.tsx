@@ -43,11 +43,24 @@ export interface SplitProps extends SplitPropsType {
 
 export function Split({ ratio, breakpoint, style, children }: SplitProps) {
   const density = useDensity();
-  const bp = (breakpoint ?? "md") as "sm" | "md" | "lg";
+  const bp = breakpoint ?? "md";
   const template = TEMPLATE[ratio] ?? "1fr 1fr";
   // Stable id so the inline @media rule is scoped to this instance.
   const id = React.useId().replace(/:/g, "-");
   const gapClass = DENSITY_GAP[density];
+
+  // The 2-pane contract is enforced here, not only by the editor's
+  // `slots.maxChildren: 2`. Split fed `{children}` straight into a 2-track
+  // grid, so a third child written by a JSON edit, an LLM patch or a
+  // projection wrapped silently onto an implicit second row and produced a
+  // 3-pane "two-pane" layout (docs/editor-audit/containment.md, probe
+  // zzprobe-panes: `Split3 + _k0,_k1,_k2`). Extras now join the second pane —
+  // visible, in a place their author can recognise, and never a phantom row.
+  const kids = React.Children.toArray(children);
+  const panes = kids.length > 2
+    ? [kids[0], <div key="__split-pane-2" data-split-pane="2">{kids.slice(1)}</div>]
+    : kids;
+
   return (
     <>
       <style>{`
@@ -56,11 +69,12 @@ export function Split({ ratio, breakpoint, style, children }: SplitProps) {
            past its track and forces the whole page horizontal. This is the
            classic CSS-grid overflow trap; the min-width:auto default lets
            children establish an intrinsic minimum equal to their content. */
-        [data-split-id="${id}"] { grid-template-columns: 1fr; min-width: 0; }
+        [data-split-id="${id}"] { grid-template-columns: ${bp === "none" ? template : "1fr"}; min-width: 0; }
         [data-split-id="${id}"] > * { min-width: 0; }
-        @media (min-width: ${BP_MIN_PX[bp]}px) {
+        ${bp === "none" ? "" : `
+        @media (min-width: ${BP_MIN_PX[bp as "sm" | "md" | "lg"] ?? 768}px) {
           [data-split-id="${id}"] { grid-template-columns: ${template}; }
-        }
+        }`}
       `}</style>
       <div
         data-split-id={id}
@@ -70,7 +84,7 @@ export function Split({ ratio, breakpoint, style, children }: SplitProps) {
         style={resolveStyle(style)}
         {...useMotion(style?.motion)}
       >
-        {children}
+        {panes}
       </div>
     </>
   );

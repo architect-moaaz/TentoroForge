@@ -185,7 +185,12 @@ def _load_schemas(root: Path) -> dict[str, dict]:
             continue
         if not isinstance(data, dict):
             continue
-        rel = str(p.relative_to(base))
+        # `.as_posix()`: `out` is keyed by schema path and looked up with
+        # the forward-slash `schemaFile` nav-flow.json records
+        # (`nav_flow_from_schemas.py:73`). With `str()` no nested page ever
+        # matched, so BLUEPRINT.md showed "—" for Entity/Type on all of
+        # them and routes were emitted as `/notes\list`.
+        rel = p.relative_to(base).as_posix()
         out[rel] = data
     return out
 

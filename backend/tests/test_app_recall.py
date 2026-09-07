@@ -26,7 +26,7 @@ def _write_contracts(tmp_path, *, dossier=True, registry=True):
             "prompt": "Build an applicant tracking system for recruiters.",
             "plan": {"description": "ATS", "workflows": [{"id": "CreateCandidate"}]},
             "generatedAt": "2026-07-15T00:00:00Z",
-        }))
+        }), encoding="utf-8")
     if registry:
         (contracts / "resource-registry.json").write_text(json.dumps({
             "entities": {
@@ -55,12 +55,12 @@ def _write_contracts(tmp_path, *, dossier=True, registry=True):
                 {"id": "schedule", "label": "Schedule Assessment", "sourcePage": "/assessments",
                  "workflowId": "assessmentschedulingworkflow", "targetEntityId": "assessment"},
             ],
-        }))
+        }), encoding="utf-8")
         # a couple of the other contracts so the summary has counts
-        (contracts / "fk-semantics.json").write_text(json.dumps({"Assessment": {}, "Candidate": {}}))
+        (contracts / "fk-semantics.json").write_text(json.dumps({"Assessment": {}, "Candidate": {}}), encoding="utf-8")
         (contracts / "action-contract.json").write_text(json.dumps(
-            {"version": 1, "actions": [{"id": "a1"}, {"id": "a2"}]}))
-        (contracts / "binding-contract.json").write_text(json.dumps({"Candidate": {}, "Assessment": {}}))
+            {"version": 1, "actions": [{"id": "a1"}, {"id": "a2"}]}), encoding="utf-8")
+        (contracts / "binding-contract.json").write_text(json.dumps({"Candidate": {}, "Assessment": {}}), encoding="utf-8")
     return tmp_path
 
 
@@ -72,7 +72,7 @@ def test_emit_generation_dossier_writes_file(tmp_path):
     plan = {"description": "ATS", "workflows": []}
     path = emit_generation_dossier(str(tmp_path), plan, prompt="Track applicants",
                                    generated_at="2026-07-15T12:00:00Z")
-    on_disk = json.loads((tmp_path / "contracts" / "generation-dossier.json").read_text())
+    on_disk = json.loads((tmp_path / "contracts" / "generation-dossier.json").read_text(encoding="utf-8"))
     assert on_disk["prompt"] == "Track applicants"
     assert on_disk["plan"] == plan
     assert on_disk["generatedAt"] == "2026-07-15T12:00:00Z"
@@ -81,7 +81,7 @@ def test_emit_generation_dossier_writes_file(tmp_path):
 
 def test_emit_generation_dossier_no_timestamp_is_null(tmp_path):
     emit_generation_dossier(str(tmp_path), {"x": 1})
-    on_disk = json.loads((tmp_path / "contracts" / "generation-dossier.json").read_text())
+    on_disk = json.loads((tmp_path / "contracts" / "generation-dossier.json").read_text(encoding="utf-8"))
     assert on_disk["generatedAt"] is None
     assert on_disk["prompt"] is None
 

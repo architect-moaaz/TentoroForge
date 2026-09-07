@@ -26,16 +26,16 @@ def _seed_project(tmp_path):
         "entities": {"Candidate": {"table": "candidates"}},
         "pages":    [{"route": "/candidates/new"}],
         "workflows": [], "dataSources": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps({
         "entities": [{"name": "Candidate", "table": "candidates"}],
         "pages":    [{"route": "/candidates/new"}], "workflows": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "plan.json").write_text(json.dumps({
         "data_models": [{"name": "Candidate", "fields": []}],
         "pages":       [{"route": "/candidates/new", "type": "form"}],
         "workflows":   [],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -121,7 +121,7 @@ def test_edit_then_answer_marks_applied(tmp_path, monkeypatch):
     tools_called = [s["tool"] for s in result["trace"]]
     assert tools_called == ["Read", "Edit", "answer"]
     # File was actually edited
-    content = (tmp_path / "src" / "schemas" / "candidates" / "new.json").read_text()
+    content = (tmp_path / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8")
     assert "FileUpload" in content
     assert "Select" not in content
 
@@ -159,9 +159,9 @@ def test_registry_patch_add_entity_updates_both(tmp_path, monkeypatch):
     assert any("registry.json" in p for p in paths)
     assert any("plan.json" in p for p in paths)
     # Actual disk state
-    plan = json.loads((tmp_path / "plan.json").read_text())
+    plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
     assert any(m["name"] == "Recruiter" for m in plan["data_models"])
-    reg = json.loads((tmp_path / "registry.json").read_text())
+    reg = json.loads((tmp_path / "registry.json").read_text(encoding="utf-8"))
     assert "Recruiter" in reg["entities"]
 
 

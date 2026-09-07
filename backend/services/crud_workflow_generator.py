@@ -448,7 +448,7 @@ def _parse_schema_columns(output_dir: str) -> dict[str, list[dict]]:
     tables: dict[str, list[dict]] = {}
     for f in files:
         try:
-            src = f.read_text()
+            src = f.read_text(encoding="utf-8")
         except Exception:
             continue
         for m in _PGTABLE_OPEN_RE.finditer(src):
@@ -517,7 +517,7 @@ def parse_child_references(output_dir: str) -> dict[str, list[dict]]:
     bodies: list[tuple[str, str]] = []  # (sql_table, body)
     for f in files:
         try:
-            src = f.read_text()
+            src = f.read_text(encoding="utf-8")
         except Exception:
             continue
         for m in _PGTABLE_VAR_RE.finditer(src):
@@ -764,7 +764,7 @@ def _generate_for_entity(
             dest = safe_workflow_path(wdir, wf["name"])
             if dest.exists():
                 try:
-                    prev = json.loads(dest.read_text())
+                    prev = json.loads(dest.read_text(encoding="utf-8"))
                 except Exception as e:  # noqa: BLE001
                     logger.error(
                         "crud_workflow_generator: %s exists but is unreadable (%s) — "
@@ -774,7 +774,7 @@ def _generate_for_entity(
                 else:
                     if _has_authored_content(prev):
                         continue  # real content already — never clobber it
-            dest.write_text(json.dumps(wf, indent=2))
+            dest.write_text(json.dumps(wf, indent=2), encoding="utf-8")
             written.append(wf["name"])
     return written
 

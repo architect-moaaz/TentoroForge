@@ -100,11 +100,11 @@ def app_dir(tmp_path: Path) -> Path:
     out = tmp_path / "app"
     (out / "workflows").mkdir(parents=True)
     (out / "src" / "schemas").mkdir(parents=True)
-    (out / "registry.json").write_text(json.dumps(_registry(), indent=2))
+    (out / "registry.json").write_text(json.dumps(_registry(), indent=2), encoding="utf-8")
     (out / "workflows" / "interviewschedulingworkflow.json").write_text(
-        json.dumps(_workflow(), indent=2))
+        json.dumps(_workflow(), indent=2), encoding="utf-8")
     (out / "src" / "schemas" / "interviews.json").write_text(
-        json.dumps(_list_page(), indent=2))
+        json.dumps(_list_page(), indent=2), encoding="utf-8")
     return out
 
 
@@ -134,7 +134,7 @@ def test_launch_route_is_single_segment(app_dir):
     assert created == [RUN_ROUTE]
     # exactly one path segment after the leading slash — no second `/`
     assert re.match(r"^/[^/]+$", created[0])
-    lp = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text())
+    lp = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text(encoding="utf-8"))
     btn = next(b for b in _find_nodes(lp["root"], "Button", [])
                if "Schedule" in str(b["props"].get("label", "")))
     assert btn["props"].get("navigate") == created[0]
@@ -147,7 +147,7 @@ def test_run_page_and_form_workflow(app_dir):
 
     run_page = app_dir / "src" / "schemas" / f"{RUN_SLUG}.json"
     assert run_page.exists(), "run-page schema file should be created"
-    sc = json.loads(run_page.read_text())
+    sc = json.loads(run_page.read_text(encoding="utf-8"))
     forms = _find_nodes(sc["root"], "Form", [])
     assert len(forms) == 1
     assert forms[0]["props"]["workflow"] == "interviewschedulingworkflow"
@@ -160,7 +160,7 @@ def test_run_page_form_has_default_success_and_error_ux(app_dir):
     generated app. Fix belongs in the emitter (belt) + library runtime
     (suspenders), both of which land in the same slice."""
     ensure_workflow_launch_forms(str(app_dir), _registry())
-    sc = json.loads((app_dir / "src" / "schemas" / f"{RUN_SLUG}.json").read_text())
+    sc = json.loads((app_dir / "src" / "schemas" / f"{RUN_SLUG}.json").read_text(encoding="utf-8"))
     forms = _find_nodes(sc["root"], "Form", [])
     assert len(forms) == 1
     props = forms[0]["props"]
@@ -188,7 +188,7 @@ def test_run_page_form_has_default_success_and_error_ux(app_dir):
 
 def test_run_page_fields(app_dir):
     ensure_workflow_launch_forms(str(app_dir), _registry())
-    sc = json.loads((app_dir / "src" / "schemas" / f"{RUN_SLUG}.json").read_text())
+    sc = json.loads((app_dir / "src" / "schemas" / f"{RUN_SLUG}.json").read_text(encoding="utf-8"))
 
     selects = {n["props"].get("name"): n for n in _find_nodes(sc["root"], "Select", [])}
     dates = {n["props"].get("name"): n for n in _find_nodes(sc["root"], "DatePicker", [])}
@@ -215,7 +215,7 @@ def test_run_page_fields(app_dir):
 
 def test_launcher_button_repointed(app_dir):
     ensure_workflow_launch_forms(str(app_dir), _registry())
-    sc = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text())
+    sc = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text(encoding="utf-8"))
     buttons = _find_nodes(sc["root"], "Button", [])
     launcher = next(b for b in buttons if "Schedule" in str(b["props"].get("label", "")))
     assert launcher["props"].get("navigate") == RUN_ROUTE
@@ -224,17 +224,17 @@ def test_launcher_button_repointed(app_dir):
 
 def test_registry_ts_has_route(app_dir):
     ensure_workflow_launch_forms(str(app_dir), _registry())
-    registry_ts = (app_dir / "src" / "schemas" / "registry.ts").read_text()
+    registry_ts = (app_dir / "src" / "schemas" / "registry.ts").read_text(encoding="utf-8")
     assert f'"{RUN_ROUTE}"' in registry_ts
 
 
 def test_idempotent(app_dir):
     first = ensure_workflow_launch_forms(str(app_dir), _registry())
     assert first == [RUN_ROUTE]
-    before = (app_dir / "src" / "schemas" / "interviews.json").read_text()
+    before = (app_dir / "src" / "schemas" / "interviews.json").read_text(encoding="utf-8")
     second = ensure_workflow_launch_forms(str(app_dir), _registry())
     assert second == []
-    after = (app_dir / "src" / "schemas" / "interviews.json").read_text()
+    after = (app_dir / "src" / "schemas" / "interviews.json").read_text(encoding="utf-8")
     assert before == after
 
 
@@ -293,14 +293,14 @@ def test_entry_db_update_workflow_not_repointed(tmp_path):
         "id": {"type": "uuid", "primaryKey": True},
         "orderId": {"type": "uuid", "nullable": False},
         "action": {"type": "varchar", "nullable": False}}}
-    (out / "workflows" / "orderapprovalworkflow.json").write_text(json.dumps(_approval_workflow()))
-    (out / "src" / "schemas" / "orders.json").write_text(json.dumps(_approval_page()))
+    (out / "workflows" / "orderapprovalworkflow.json").write_text(json.dumps(_approval_workflow()), encoding="utf-8")
+    (out / "src" / "schemas" / "orders.json").write_text(json.dumps(_approval_page()), encoding="utf-8")
 
     created = ensure_workflow_launch_forms(str(out), reg)
 
     assert created == []
     # button is left completely alone
-    sc = json.loads((out / "src" / "schemas" / "orders.json").read_text())
+    sc = json.loads((out / "src" / "schemas" / "orders.json").read_text(encoding="utf-8"))
     btn = _find_nodes(sc["root"], "Button", [])[0]
     assert btn["props"].get("workflow") == "orderapprovalworkflow"
     assert "navigate" not in btn["props"]
@@ -318,20 +318,20 @@ def test_collision_with_existing_real_page(app_dir):
     real_content = json.dumps({
         "schemaVersion": "2", "id": "hand-authored", "route": RUN_ROUTE,
         "layout": "main", "root": {"type": "Heading", "props": {"content": "MINE"}}}, indent=2)
-    real.write_text(real_content)
+    real.write_text(real_content, encoding="utf-8")
 
     created = ensure_workflow_launch_forms(str(app_dir), _registry())
 
     # the real page is untouched
-    assert real.read_text() == real_content
+    assert real.read_text(encoding="utf-8") == real_content
     # the generated form landed at a suffixed route instead
     assert created == [f"{RUN_ROUTE}-2"]
     suffixed = app_dir / "src" / "schemas" / f"{RUN_SLUG}-2.json"
     assert suffixed.exists()
-    sc = json.loads(suffixed.read_text())
+    sc = json.loads(suffixed.read_text(encoding="utf-8"))
     assert _find_nodes(sc["root"], "Form", [])[0]["props"]["workflow"] == "interviewschedulingworkflow"
     # the launcher points at the suffixed route
-    lp = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text())
+    lp = json.loads((app_dir / "src" / "schemas" / "interviews.json").read_text(encoding="utf-8"))
     btn = next(b for b in _find_nodes(lp["root"], "Button", [])
                if "Schedule" in str(b["props"].get("label", "")))
     assert btn["props"].get("navigate") == f"{RUN_ROUTE}-2"

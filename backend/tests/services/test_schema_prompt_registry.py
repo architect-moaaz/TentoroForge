@@ -25,7 +25,7 @@ def test_control_flow_is_taught_by_the_prompt_not_the_registry():
 
     import services.schema_prompt as sp
     from pathlib import Path as _P
-    body = _P(sp.__file__).read_text()
+    body = _P(sp.__file__).read_text(encoding="utf-8")
     assert '"type": "Repeat"' in body
     assert "bind" in body
 

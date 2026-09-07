@@ -18,6 +18,8 @@ export const InputProps = z.object({
   type:        z.enum(["text", "email", "password", "number", "url", "tel"]).default("text"),
   placeholder: z.string().optional(),
   bind:        z.string().optional(),
+  /** Declarative prefill from the schema — a SEED, not ownership. See util/useFieldValue.ts. */
+  defaultValue: z.string().optional(),
   validators:  z.object({
     required: z.boolean().optional(),
     min:      z.number().optional(),

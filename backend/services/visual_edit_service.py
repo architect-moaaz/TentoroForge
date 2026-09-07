@@ -60,7 +60,7 @@ def apply_tailwind_edit(
     if not file_path.exists():
         return False
 
-    lines = file_path.read_text().split("\n")
+    lines = file_path.read_text(encoding="utf-8").split("\n")
     if line < 1 or line > len(lines):
         return False
 
@@ -89,7 +89,7 @@ def apply_tailwind_edit(
         + target_line[class_match.end(1) :]
     )
     lines[line_idx] = new_line
-    file_path.write_text("\n".join(lines))
+    file_path.write_text("\n".join(lines), encoding="utf-8")
     return True
 
 
@@ -111,7 +111,7 @@ def apply_text_edit(
     if not file_path.exists():
         return False
 
-    lines = file_path.read_text().split("\n")
+    lines = file_path.read_text(encoding="utf-8").split("\n")
     if line < 1 or line > len(lines):
         return False
 
@@ -131,7 +131,7 @@ def apply_text_edit(
     for i in search_order:
         if old_text in lines[i]:
             lines[i] = lines[i].replace(old_text, new_text, 1)
-            file_path.write_text("\n".join(lines))
+            file_path.write_text("\n".join(lines), encoding="utf-8")
             return True
 
     return False
@@ -156,7 +156,7 @@ def apply_prop_edit(
     if not file_path.exists():
         return False
 
-    lines = file_path.read_text().split("\n")
+    lines = file_path.read_text(encoding="utf-8").split("\n")
     if line < 1 or line > len(lines):
         return False
 
@@ -177,7 +177,7 @@ def apply_prop_edit(
                 target,
                 count=1,
             )
-            file_path.write_text("\n".join(lines))
+            file_path.write_text("\n".join(lines), encoding="utf-8")
             return True
 
         # Try expression prop: prop={value}
@@ -189,7 +189,7 @@ def apply_prop_edit(
                 target,
                 count=1,
             )
-            file_path.write_text("\n".join(lines))
+            file_path.write_text("\n".join(lines), encoding="utf-8")
             return True
 
     return False

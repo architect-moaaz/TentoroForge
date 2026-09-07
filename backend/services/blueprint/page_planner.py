@@ -34,6 +34,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.metric_dialect import normalize_sources
+
 #: Emitted by ``npm run emit:catalog --workspace=packages/library``.
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "contracts" / "component-catalog.json"
 
@@ -60,6 +62,20 @@ INTERNAL_FIELDS = frozenset({"id", "createdAt", "updatedAt", "deletedAt"})
 #: The dataSource name a template binds the primary collection / record to.
 ROWS = "rows"
 RECORD = "record"
+
+#: The namespace `page_widgets` binds every KPI tile into: `{{metrics.<key>}}`.
+METRICS = "metrics"
+
+#: Binding roots that are NOT data sources and must never be reported as
+#: dangling. The renderer supplies each of these from somewhere other than a
+#: page fetch — the signed-in actor, the route, the form being edited, the
+#: current repeat item. A `$`-prefixed placeholder never reaches here at all:
+#: `_bindings_used` only matches roots starting `[A-Za-z_]`.
+SCOPE_ROOTS = frozenset({
+    "user", "actor", "session", "route", "params", "param", "query",
+    "search", "form", "state", "theme", "now", "today",
+    "item", "row", "index", "i",
+})
 
 
 class PlanError(RuntimeError):
@@ -348,6 +364,55 @@ def _metric_key(widget: dict) -> str:
     parts = [str(src.get("op") or "value"), str(src.get("aggregation") or "")]
     label = re.sub(r"[^a-zA-Z0-9]+", "_", (widget.get("label") or "")).strip("_")
     return "_".join(p for p in parts + [label.lower()] if p)
+
+
+def _is_equality_value(v: Any) -> bool:
+    """True when `v` is a scalar the runtime can compare with `eq`."""
+    if isinstance(v, bool) or isinstance(v, (int, float)):
+        return True
+    return isinstance(v, str) and bool(v) and v[0] not in "<>!=~"
+
+
+def widget_metrics(doc: dict, page_id: str) -> dict[str, dict]:
+    """The `metrics` map for the aggregate source `{{metrics.<key>}}` binds to.
+
+    `page_widgets` has always emitted `{{metrics.<key>}}`, and the source that
+    was supposed to satisfy it was emitted as a bare
+    ``{"name": "metrics", "entity": …, "op": "aggregate"}`` with NO `metrics`
+    map at all. `resolveAggregate` iterates `source.metrics` — an empty map
+    yields an empty object, so every one of those tiles resolved to `undefined`
+    and rendered blank. The binding named a declared source, so no validator
+    caught it.
+
+    Each metric is derived from the widget's OWN Blueprint dataSource, never
+    from its prose label: `aggregation` when the widget declares one, else a
+    row count, which is the only thing that is true of any entity. An
+    equality-shaped `filter` is carried through so "Low Stock Items" counts the
+    rows it says it counts rather than all of them.
+    """
+    out: dict[str, dict] = {}
+    for w in _live(doc.get("widgets")):
+        if w.get("page") != page_id:
+            continue
+        src = w.get("dataSource") if isinstance(w.get("dataSource"), dict) else {}
+        agg = str(src.get("aggregation") or "").strip().lower()
+        field = src.get("field") or src.get("aggregateField")
+        metric: dict[str, Any] = {"fn": "count"}
+        # sum/avg/min/max over a column the widget actually names. Without a
+        # field the runtime returns 0 by its own rule, so a count is the honest
+        # answer instead.
+        if agg in {"sum", "avg", "min", "max"} and isinstance(field, str) and field:
+            metric = {"fn": agg, "field": field}
+        # Only a plain equality filter. The runtime compiles `filter` to
+        # `eq(col, value)`, so carrying a comparison the Blueprint wrote as
+        # prose — `{"quantity": "<5"}` — would compare the column to the
+        # literal string "<5", match no rows, and report a confident 0.
+        flt = src.get("filter")
+        if isinstance(flt, dict) and flt and all(
+                _is_equality_value(v) for v in flt.values()):
+            metric["filter"] = dict(flt)
+        out[_metric_key(w)] = metric
+    return out
 
 
 def repeat_items(doc: dict, page: dict, entity: dict | None, over: str) -> list[dict]:
@@ -801,8 +866,46 @@ def gate_states(node: dict, source: str | None) -> dict:
     return node
 
 
-def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list[dict]:
+def repeat_aliases(node: Any, found: set[str] | None = None) -> set[str]:
+    """Every per-row alias a Repeat introduces into its subtree.
+
+    A composed tree may bind `{{order.total}}` inside a `Repeat` whose `as` is
+    `order`. That root names no dataSource and never will — it is a scope, and
+    reporting it as a dangling binding would fail a page that is correct.
+    """
+    found = set() if found is None else found
+    if isinstance(node, dict):
+        if _norm_type(node.get("type")) == "repeat" or node.get("repeat"):
+            props = node.get("props") if isinstance(node.get("props"), dict) else {}
+            for key in ("as", "alias", "itemName", "var"):
+                v = node.get(key) or props.get(key)
+                if isinstance(v, str) and v.strip():
+                    found.add(v.strip().lstrip("$"))
+        for v in node.values():
+            repeat_aliases(v, found)
+    elif isinstance(node, list):
+        for v in node:
+            repeat_aliases(v, found)
+    return found
+
+
+def _norm_type(t: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(t or "").lower())
+
+
+def known_scopes(root: dict) -> set[str]:
+    """Binding roots this page supplies without a fetch."""
+    return set(SCOPE_ROOTS) | repeat_aliases(root)
+
+
+def data_sources(doc: dict, page: dict, entity: dict | None, root: dict,
+                 declared: frozenset[str] | set[str] = frozenset()) -> list[dict]:
     """The fetches this page needs, keyed to the bindings its tree actually uses.
+
+    `declared` names the sources the caller already has (a composer-authored
+    layout carries its own). Those roots are satisfied, so they are skipped and
+    only the GAPS come back — see `plan_page` for why a carried set is not the
+    same as a complete one.
 
     Emitted empty on every generated page, for three compounding reasons.
 
@@ -822,7 +925,7 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
     The binding name *is* the source name. That is what the renderer looks up,
     so it is derived from the tree rather than assumed.
     """
-    used = _bindings_used(root)
+    used = _bindings_used(root) - set(declared) - known_scopes(root)
     if not used:
         return []
 
@@ -837,7 +940,7 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
         # back to the page's own entity, which is what `rows`/`record` mean.
         target = by_name.get(_lower_first(name)) or by_name.get(
             _lower_first(name.rstrip("s"))) or (
-            entity if name in {ROWS, RECORD, "metrics"} else None)
+            entity if name in {ROWS, RECORD, METRICS} else None)
         if not target:
             # NOT `continue`. Skipping in silence is what put the literal text
             # "{{overdue.value}}" on a shipped page: the tree kept the binding
@@ -847,9 +950,14 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
             # binder, all six discarded here for not being entity names.
             unresolved.append(name)
             continue
-        if name == "metrics":
+        if name == METRICS:
+            # WITH its metric map. An aggregate source whose `metrics` is empty
+            # resolves to `{}`, so every `{{metrics.<key>}}` on the page came
+            # back undefined and the KPI tile rendered blank — a dangling
+            # binding wearing a declared source's name.
             out.append({"name": name, "entity": target.get("name"),
-                        "op": "aggregate"})
+                        "op": "aggregate",
+                        "metrics": widget_metrics(doc, page.get("id"))})
             continue
         singular = name == RECORD or (detail and target is entity
                                       and name != ROWS)
@@ -878,6 +986,111 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
                 for n in unresolved)
         )
     return out
+
+
+_AGG_OPS = ("aggregate", "stats")
+#: Split `totalInventoryValue` / `total_inventory_value` / `Total Inventory
+#: Value` into the same word list.
+_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+")
+
+
+def _words(text: Any) -> set[str]:
+    """Comparable word set for a label, a source name or a metric key.
+
+    Trailing plurals are folded so a tile labelled "Items" meets a metric
+    called `itemCount`. Crude on purpose: this only ever decides which of a
+    page's own declared metrics a tile meant, and an ambiguous answer is
+    discarded rather than guessed.
+    """
+    out = set()
+    for w in _WORD_RE.findall(str(text or "")):
+        w = w.lower()
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        out.add(w)
+    return out
+
+
+def bind_widget_metrics(doc: dict, page: dict, root: dict,
+                        sources: list[dict]) -> int:
+    """Point `{{metrics.<key>}}` at a metric the page actually declares.
+
+    `page_widgets` binds every KPI tile into a `metrics` namespace that only
+    `data_sources` ever declared. A composer-authored layout carries its own
+    dataSources, `plan_page` prefers those, and the `metrics` source was then
+    never emitted: `/items` shipped three Stat tiles bound to
+    `{{metrics.list_total_inventory_value}}` beside sources named `items`,
+    `totalInventoryValue` and `lowStockCount`. The root named nothing, so the
+    tiles rendered blank.
+
+    Declaring a `metrics` source would resolve the binding, but to a row count
+    the composer never asked for — a tile reading "Total Inventory Value" over
+    a count is worse than a blank one. So a tile is first rebound onto the
+    metric the composer DID design for it, matched on the words of the metric
+    key (the source name only breaks ties). A match must be unique and strictly
+    better than the runner-up; anything less is left alone for the gap-fill in
+    `plan_page` to declare honestly. Returns how many tiles were rebound.
+    """
+    widgets = {_metric_key(w): w for w in _live(doc.get("widgets"))
+               if w.get("page") == page.get("id")}
+    if not widgets:
+        return 0
+    candidates: list[tuple[str, str, set[str], set[str]]] = []
+    for s in sources:
+        if not isinstance(s, dict) or s.get("op") not in _AGG_OPS:
+            continue
+        name = s.get("name")
+        metrics = s.get("metrics")
+        if not isinstance(name, str) or not isinstance(metrics, dict):
+            continue
+        for key in metrics:
+            candidates.append((name, key, _words(key), _words(name)))
+    if not candidates:
+        return 0
+
+    resolved: dict[str, str] = {}
+    for mkey, widget in widgets.items():
+        label = _words(widget.get("label"))
+        if not label:
+            continue
+        scored = sorted(
+            ((len(kw & label), len(sw & label), sname, key)
+             for sname, key, kw, sw in candidates),
+            reverse=True,
+        )
+        best = scored[0]
+        if best[0] < 1:
+            continue
+        if len(scored) > 1 and scored[1][:2] == best[:2]:
+            continue  # two declared metrics fit equally well — do not guess
+        resolved[mkey] = "{{%s.%s}}" % (best[2], best[3])
+
+    if not resolved:
+        return 0
+
+    rebound = 0
+
+    def walk(node: Any) -> None:
+        nonlocal rebound
+        if isinstance(node, dict):
+            props = node.get("props")
+            if isinstance(props, dict):
+                for prop, val in list(props.items()):
+                    if not isinstance(val, str):
+                        continue
+                    for mkey, binding in resolved.items():
+                        if val.strip() == "{{%s.%s}}" % (METRICS, mkey):
+                            props[prop] = binding
+                            rebound += 1
+                            break
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(root)
+    return rebound
 
 
 #: Placeholders and repeat sources that only mean anything with a primary
@@ -1037,6 +1250,25 @@ def plan_page(doc: dict, page: dict, template: dict,
         x["entity"] = by_id.get(x.get("entity"), x.get("entity"))
         carried.append(x)
     sources = carried or (data_sources(doc, page, entity, root) if root else [])
+    if root is not None:
+        # ONE METRIC DIALECT. The composer writes
+        # `{"expression": "sum(quantity * price)"}`; every resolver — the data
+        # engine's computeSimple, the editor's preview-resolve — reads
+        # `{"fn", "field"}` and nothing parses the other. Translate here, once,
+        # so no dialect reaches a resolver that would silently answer 0.
+        normalize_sources(sources)
+        # A CARRIED SET IS NOT A COMPLETE ONE. It is what the composer thought
+        # of; the tree is what this planner actually emitted, and the planner
+        # binds every KPI tile into a `metrics` namespace of its own. Rebind
+        # those onto the metrics the composer declared where one clearly fits,
+        # then derive whatever is STILL unbacked. `data_sources` raises on a
+        # root that names no fetchable data, which is what makes this loud —
+        # `/items` shipped three blank Stat tiles because that check only ever
+        # ran on the derived path, and carried sources are now the default.
+        bind_widget_metrics(doc, page, root, sources)
+        sources = sources + data_sources(
+            doc, page, entity, root,
+            declared={s.get("name") for s in sources if isinstance(s, dict)})
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
     root = gate_states(root, primary) if root else root
     if root is not None:

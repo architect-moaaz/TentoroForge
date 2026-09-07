@@ -15,7 +15,7 @@ from services.page_visibility_derivation import derive_visible_to
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _write_plan(root: Path, actors: list) -> None:
@@ -27,7 +27,7 @@ def _write_nav(root: Path, pages: list, rel: str = "src/contracts/nav-flow.json"
 
 
 def _read_nav(root: Path, rel: str = "src/contracts/nav-flow.json") -> dict:
-    return json.loads((root / rel).read_text())
+    return json.loads((root / rel).read_text(encoding="utf-8"))
 
 
 # ────────────────────────────────────────────────────────────

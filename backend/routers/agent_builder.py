@@ -53,7 +53,7 @@ async def list_agent_definitions(
     items = []
     for f in sorted(defs_dir.glob("*.json")):
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             items.append(AgentListItem(
                 id=data.get("id", f.stem),
                 name=data.get("name", f.stem),
@@ -81,7 +81,7 @@ async def get_agent_definition(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
-    return json.loads(agent_file.read_text())
+    return json.loads(agent_file.read_text(encoding="utf-8"))
 
 
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
@@ -97,7 +97,7 @@ async def save_agent_definition(
         raise HTTPException(status_code=400, detail="No output directory")
 
     agent_file = _agent_defs_path(project.output_dir) / f"{req.id}.json"
-    agent_file.write_text(json.dumps(req.model_dump(), indent=2))
+    agent_file.write_text(json.dumps(req.model_dump(), indent=2), encoding="utf-8")
     return {"id": req.id, "saved": True}
 
 
@@ -120,7 +120,7 @@ async def update_agent_definition(
 
     data = req.model_dump()
     data["id"] = agent_id
-    agent_file.write_text(json.dumps(data, indent=2))
+    agent_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return {"id": agent_id, "saved": True}
 
 
@@ -161,7 +161,7 @@ async def apply_agent_definition(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
-    agent_data = json.loads(agent_file.read_text())
+    agent_data = json.loads(agent_file.read_text(encoding="utf-8"))
     instruction = _build_agent_instruction(agent_data)
 
     async def event_stream():
@@ -292,7 +292,7 @@ async def test_agent(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
-    agent_data = json.loads(agent_file.read_text())
+    agent_data = json.loads(agent_file.read_text(encoding="utf-8"))
     nodes = agent_data.get("nodes", [])
     edges = agent_data.get("edges", [])
 

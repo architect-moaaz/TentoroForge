@@ -23,18 +23,18 @@ def test_writes_all_three_when_missing(tmp_path):
 
 def test_preserves_existing_dockerignore(tmp_path):
     marker = "USER_AUTHORED — do not clobber\n"
-    (tmp_path / ".dockerignore").write_text(marker)
+    (tmp_path / ".dockerignore").write_text(marker, encoding="utf-8")
     res = evc.emit_verify_container_artifacts(str(tmp_path))
     assert ".dockerignore" not in (res.get("written") or [])
-    assert (tmp_path / ".dockerignore").read_text() == marker
+    assert (tmp_path / ".dockerignore").read_text(encoding="utf-8") == marker
 
 
 def test_dockerfile_and_compose_overwrite_on_reemit(tmp_path):
     """Regenerated per build so template improvements propagate."""
-    (tmp_path / "Dockerfile.verify").write_text("STALE\n")
+    (tmp_path / "Dockerfile.verify").write_text("STALE\n", encoding="utf-8")
     res = evc.emit_verify_container_artifacts(str(tmp_path))
     assert "Dockerfile.verify" in res["written"]
-    assert (tmp_path / "Dockerfile.verify").read_text() != "STALE\n"
+    assert (tmp_path / "Dockerfile.verify").read_text(encoding="utf-8") != "STALE\n"
 
 
 def test_skips_when_output_dir_missing(tmp_path):

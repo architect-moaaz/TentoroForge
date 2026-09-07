@@ -14,7 +14,7 @@ def audit(short_id: str) -> None:
     paths: set[str] = set()
     for f in base.rglob("*.json"):
         try:
-            text = f.read_text()
+            text = f.read_text(encoding="utf-8")
         except OSError:
             continue
         # Match {{anything that isn't a closing brace or pipe}} — strip pipe

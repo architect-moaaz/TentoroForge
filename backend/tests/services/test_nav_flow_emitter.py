@@ -10,7 +10,7 @@ from services.nav_flow_emitter import emit_nav_flow
 def _seed_schema(dir_: Path, slug: str, content: dict) -> None:
     p = dir_ / "src" / "schemas" / f"{slug}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(content))
+    p.write_text(json.dumps(content), encoding="utf-8")
 
 
 def test_emit_with_two_pages_one_transition():
@@ -35,7 +35,7 @@ def test_emit_with_two_pages_one_transition():
             ]
         }
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         assert nav["initialPage"] == "home"
         assert len(nav["pages"]) == 2
         assert len(nav["transitions"]) == 1
@@ -50,7 +50,7 @@ def test_emit_handles_auth_guard_from_plan():
         plan = {"pages": [{"name": "Dashboard", "route": "/dashboard",
                           "type": "dashboard", "requires_auth": True}]}
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         page = next(p for p in nav["pages"] if p["id"] == "dashboard")
         assert page["guard"] == "requiresAuth"
         assert "requiresAuth" in nav["guards"]
@@ -68,7 +68,7 @@ def test_emit_picks_root_route_as_initial():
             {"name": "Home",  "route": "/",      "type": "dashboard"},
         ]}
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         assert nav["initialPage"] == "home"
 
 
@@ -81,7 +81,7 @@ def test_emit_extracts_route_params():
             {"name": "User Detail", "route": "/users/[id]", "type": "detail"},
         ]}
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         page = next(p for p in nav["pages"] if "[id]" in p["route"])
         assert page["params"] == ["id"]
 
@@ -92,9 +92,9 @@ def test_emit_is_idempotent():
         _seed_schema(out, "home", {"schemaVersion": "2", "id": "home"})
         plan = {"pages": [{"name": "Home", "route": "/", "type": "dashboard"}]}
         emit_nav_flow(str(out), plan)
-        first = (out / "src" / "contracts" / "nav-flow.json").read_text()
+        first = (out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8")
         emit_nav_flow(str(out), plan)
-        second = (out / "src" / "contracts" / "nav-flow.json").read_text()
+        second = (out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8")
         assert first == second
 
 
@@ -109,7 +109,7 @@ def test_emit_skips_transitions_referencing_unknown_pages():
         })
         plan = {"pages": [{"name":"Home","route":"/","type":"dashboard"}]}
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
         assert nav["transitions"] == []
 
 
@@ -128,7 +128,7 @@ def test_emit_auth_page_has_shell_false_and_populates_auth_routes():
             {"route": "/items", "name": "Items", "type": "list"},
         ]}
         emit_nav_flow(str(out), plan)
-        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+        nav = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
 
         pages_by_route = {p["route"]: p for p in nav["pages"]}
 

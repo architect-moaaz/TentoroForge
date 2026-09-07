@@ -25,13 +25,13 @@ def _make_app(root: Path, *,
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
     if plan is not None:
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     for name, doc in (schemas or {}).items():
-        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc))
+        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _read(root: Path, name: str) -> dict:
-    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text())
+    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 # ---------- empty state replacement ---------------------------------------
@@ -187,6 +187,6 @@ class TestNoOp:
         (tmp_path / "src" / "schemas" / "home.json").write_text(json.dumps({
             "route": "/",
             "nodes": [{"type": "Heading", "props": {"text": "Welcome"}}],
-        }))
+        }), encoding="utf-8")
         r = apply_text_template_backstop(str(tmp_path))
         assert r["files_scanned"] == 1

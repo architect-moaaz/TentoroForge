@@ -116,9 +116,9 @@ def _seed_app(root: Path, *, with_groups_anchor: bool) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
     (root / "src" / "app" / "tasks").mkdir(parents=True)
-    (root / "src" / "app" / "tasks" / "page.tsx").write_text("export default 1")
-    (root / "src" / "contracts" / "nav-flow.json").write_text(json.dumps(NAV_FLOW))
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN))
+    (root / "src" / "app" / "tasks" / "page.tsx").write_text("export default 1", encoding="utf-8")
+    (root / "src" / "contracts" / "nav-flow.json").write_text(json.dumps(NAV_FLOW), encoding="utf-8")
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(PLAN), encoding="utf-8")
     if with_groups_anchor:
         shell = {"root": {"type": "Stack", "props": {"groups": []}, "children": []}}
     else:
@@ -135,7 +135,7 @@ def _seed_app(root: Path, *, with_groups_anchor: bool) -> None:
                 btn("Organizers", "/staffs"),  # mis-wired, like qeqorfii
             ]},
         ]}}
-    (root / "src" / "schemas" / "shell.json").write_text(json.dumps(shell))
+    (root / "src" / "schemas" / "shell.json").write_text(json.dumps(shell), encoding="utf-8")
 
 
 class TestSyncShellMenu:
@@ -153,7 +153,7 @@ class TestSyncShellMenu:
         _seed_app(tmp_path, with_groups_anchor=False)
         res = sync_shell_menu(str(tmp_path))
         assert res["synced"] is True
-        shell = json.loads((tmp_path / "src" / "schemas" / "shell.json").read_text())
+        shell = json.loads((tmp_path / "src" / "schemas" / "shell.json").read_text(encoding="utf-8"))
         navs = []
         def walk(n):
             if isinstance(n, dict):
@@ -174,22 +174,22 @@ class TestJunkCreatePages:
     def test_home_new_removed_and_navflow_cleaned(self, tmp_path):
         sdir = tmp_path / "src" / "schemas" / "home"
         sdir.mkdir(parents=True)
-        (sdir / "new.json").write_text(json.dumps({"route": "/home/new"}))
+        (sdir / "new.json").write_text(json.dumps({"route": "/home/new"}), encoding="utf-8")
         cdir = tmp_path / "src" / "contracts"
         cdir.mkdir(parents=True)
         (cdir / "nav-flow.json").write_text(json.dumps({
             "pages": [{"route": "/home/new", "title": "Home New"},
-                      {"route": "/events", "title": "Events"}]}))
+                      {"route": "/events", "title": "Events"}]}), encoding="utf-8")
         res = remove_junk_create_pages(str(tmp_path))
         assert res["removed"] == ["/home/new"]
         assert not (sdir / "new.json").exists()
-        nav = json.loads((cdir / "nav-flow.json").read_text())
+        nav = json.loads((cdir / "nav-flow.json").read_text(encoding="utf-8"))
         assert [p["route"] for p in nav["pages"]] == ["/events"]
 
     def test_entity_create_pages_untouched(self, tmp_path):
         sdir = tmp_path / "src" / "schemas" / "events"
         sdir.mkdir(parents=True)
-        (sdir / "new.json").write_text(json.dumps({"route": "/events/new"}))
+        (sdir / "new.json").write_text(json.dumps({"route": "/events/new"}), encoding="utf-8")
         res = remove_junk_create_pages(str(tmp_path))
         assert res["removed"] == []
         assert (sdir / "new.json").exists()
@@ -206,7 +206,7 @@ class TestSubresourceTabs:
             {"route": "/events/[id]/check-in"},
             {"route": "/events/[id]/edit"},
             {"route": "/venues/[id]"},  # no children → untouched
-        ]}))
+        ]}), encoding="utf-8")
         ddir = root / "src" / "schemas" / "events"
         ddir.mkdir(parents=True)
         detail = {
@@ -219,14 +219,14 @@ class TestSubresourceTabs:
             ]},
         }
         fp = ddir / "[id].json"
-        fp.write_text(json.dumps(detail))
+        fp.write_text(json.dumps(detail), encoding="utf-8")
         return fp
 
     def test_tabs_injected_with_record_interpolation(self, tmp_path):
         fp = self._seed(tmp_path)
         res = inject_subresource_tabs(str(tmp_path))
         assert res["pages"] == ["/events/[id]"]
-        schema = json.loads(fp.read_text())
+        schema = json.loads(fp.read_text(encoding="utf-8"))
         rows = [c for c in schema["root"]["children"]
                 if isinstance(c, dict) and (c.get("props") or {}).get("data-subresource-tabs")]
         assert len(rows) == 1
@@ -241,7 +241,7 @@ class TestSubresourceTabs:
         fp = self._seed(tmp_path)
         inject_subresource_tabs(str(tmp_path))
         inject_subresource_tabs(str(tmp_path))
-        schema = json.loads(fp.read_text())
+        schema = json.loads(fp.read_text(encoding="utf-8"))
         rows = [c for c in schema["root"]["children"]
                 if isinstance(c, dict) and (c.get("props") or {}).get("data-subresource-tabs")]
         assert len(rows) == 1

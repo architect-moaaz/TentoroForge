@@ -171,7 +171,7 @@ class TestTableLayout:
         _write_maquettes(tmp_path, [_base_maquette("/sessions", "table")])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         table = _find(out, "Table")
         assert table is not None
         assert [c["key"] for c in table["props"]["columns"]] == ["title", "startAt", "capacity"]
@@ -184,7 +184,7 @@ class TestTableLayout:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         table = _find(out, "Table")
         assert table["props"]["data-row-treatment"] == "photo-forward"
 
@@ -195,7 +195,7 @@ class TestKanbanLayout:
         _write_maquettes(tmp_path, [_base_maquette("/sessions", "kanban")])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         kanban = _find(out, "Kanban")
         assert kanban is not None
         assert kanban["props"]["groupBy"] == "status"
@@ -214,7 +214,7 @@ class TestKanbanLayout:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "notes", {"id": "x", "route": "/notes", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert _find(out, "Kanban") is None
         assert _find(out, "Table") is not None
         assert out["root"]["props"]["data-layout"] == "table"
@@ -226,7 +226,7 @@ class TestCalendarLayout:
         _write_maquettes(tmp_path, [_base_maquette("/sessions", "calendar")])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         cal = _find(out, "Calendar")
         assert cal is not None
         # Prefer startAt over createdAt.
@@ -243,7 +243,7 @@ class TestCalendarLayout:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "todos", {"id": "x", "route": "/todos", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert _find(out, "Calendar") is None
         assert _find(out, "Table") is not None
 
@@ -258,7 +258,7 @@ class TestCardsLayout:
         _write_maquettes(tmp_path, [_base_maquette("/sessions", "cards")])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # No more CardGrid phantom.
         assert _find(out, "CardGrid") is None
         # Grid wraps the collection.
@@ -293,7 +293,7 @@ class TestTimelineLayout:
         _write_maquettes(tmp_path, [_base_maquette("/sessions", "timeline")])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         tl = _find(out, "TimelineList")
         assert tl is not None
         assert tl["props"]["dateField"] == "startAt"
@@ -310,7 +310,7 @@ class TestHeroSlot:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # First child is the hero row.
         first = out["root"]["children"][0]
         assert first["type"] == "Row"
@@ -336,7 +336,7 @@ class TestFilterPresets:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         chip_row = None
         for child in out["root"]["children"]:
             if child.get("type") == "Cluster" and child.get("data-slot") == "collection-filters":
@@ -355,7 +355,7 @@ class TestFilterPresets:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         for child in out["root"]["children"]:
             # Chip strip is a Cluster with data-slot at NODE level (not props).
             assert child.get("data-slot") != "collection-filters"
@@ -375,7 +375,7 @@ class TestEmptyStateSlot:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         table = _find(out, "Table")
         assert table["props"]["emptyText"] == "No sessions yet"
         assert table["props"]["emptyDescription"] == "Book your first"
@@ -389,7 +389,7 @@ class TestEmptyStateSlot:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         table = _find(out, "Table")
         assert table["props"]["emptyText"] == "Nothing yet"
         # CTA missing action: should not emit an action button.
@@ -404,7 +404,7 @@ class TestFooterSlot:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         footer = None
         for child in out["root"]["children"]:
             if child.get("props", {}).get("data-slot") == "collection-footer":
@@ -420,7 +420,7 @@ class TestFooterSlot:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         for child in out["root"]["children"]:
             assert child.get("props", {}).get("data-slot") != "collection-footer"
 
@@ -433,7 +433,7 @@ class TestSignatureMovesAttribute:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert out["root"]["props"]["data-signature-move"] == "sparkline-preview photo-forward-row"
 
     def test_empty_moves_do_not_emit_attr(self, tmp_path: Path):
@@ -443,7 +443,7 @@ class TestSignatureMovesAttribute:
         _write_maquettes(tmp_path, [maq])
         p = _write_schema(tmp_path, "sessions", {"id": "x", "route": "/sessions", "root": {}})
         apply_maquettes_to_collections(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert "data-signature-move" not in out["root"]["props"]
 
 

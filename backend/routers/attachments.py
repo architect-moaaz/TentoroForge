@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
-from services import chat_attachments, design_reference
+from services import chat_attachments, design_reference, project_assets
 from services.chat_attachments import AttachmentError
 from services.project_service import get_project_with_auth
 
@@ -84,6 +84,87 @@ async def get_attachment(
         raise HTTPException(status_code=404, detail="Attachment not found")
     data, media_type = blob
     return Response(content=data, media_type=media_type)
+
+
+async def _project_for_ref(ref: str, user: PlatformUser, db: AsyncSession):
+    """Resolve a project by DB UUID *or* by short id, then authorise.
+
+    The visual editor addresses projects by SHORT id — `VisualEditorWorkspace`
+    is handed `project.short_id` and `persistence.ts` saves through
+    `/api/_debug/project-file/{short_id}/…`. Everything under `/api/projects`
+    is keyed by the DB UUID. Accepting both here is what lets the editor's
+    image control call this route without first doing a UUID lookup it has no
+    reason to know about. Authorisation is `get_project_with_auth` either way,
+    so the short-id door is not a weaker one.
+    """
+    from sqlalchemy import select
+
+    from models.project import Project
+
+    try:
+        pid = uuid.UUID(str(ref))
+    except (ValueError, AttributeError, TypeError):
+        row = (await db.execute(
+            select(Project).where(Project.short_id == str(ref))
+        )).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        pid = row.id
+    return await get_project_with_auth(pid, user, db)
+
+
+@router.post("/{project_ref}/images")
+async def upload_project_image(
+    project_ref: str,
+    file: UploadFile = File(...),
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store an image for the editor and return the URL to put in the schema.
+
+    Separate from `/attachments` because the two have opposite reachability
+    requirements: an attachment is fetched by our own authenticated client, so
+    it may sit behind `HTTPBearer`; an image referenced by a schema is fetched
+    by an `<img>` tag in two different Next.js apps that send no Authorization
+    header at all. See services/project_assets.py for the full reasoning and
+    for why the bytes are written to more than one directory.
+    """
+    project = await _project_for_ref(project_ref, user, db)
+
+    from pathlib import Path as _Path
+
+    from services.project_service import OUTPUT_BASE
+
+    base = _Path(project.output_dir) if project.output_dir else None
+    if base is None or not base.is_dir():
+        base = OUTPUT_BASE / project.short_id
+    if not base.is_dir():
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no output directory yet — generate the app "
+                   "once before uploading images into it.")
+
+    data = await file.read()
+    try:
+        rec = project_assets.save_project_image(
+            base,
+            # The URL segment is the DIRECTORY NAME, because both copies of
+            # resolveProject() join it straight onto OUTPUT_ROOT. `short_id` is
+            # normally the same string, but a project whose output_dir was
+            # renamed would emit a URL that resolves to nothing if we trusted
+            # the column instead of the path we actually wrote to.
+            base.name,
+            file.filename or "image",
+            file.content_type or "",
+            data,
+        )
+    except AttachmentError as exc:
+        # 400, not 500 — wrong type or too big is user-correctable and the
+        # message is written to be shown verbatim in the control.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"url": rec["url"], "file": rec["file"],
+            "media_type": rec["media_type"], "bytes": rec["bytes"]}
 
 
 class DesignReferenceRequest(BaseModel):

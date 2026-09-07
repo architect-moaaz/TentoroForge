@@ -93,7 +93,7 @@ def test_report_written(tmp_path: Path):
     _sweep(tmp_path, "index.png")
     _baseline(tmp_path, "index.png")
     compare_to_baseline(tmp_path)
-    rep = json.loads((tmp_path / "contracts/visual-regression.json").read_text())
+    rep = json.loads((tmp_path / "contracts/visual-regression.json").read_text(encoding="utf-8"))
     assert rep["summary"]["ok"] == 1
 
 

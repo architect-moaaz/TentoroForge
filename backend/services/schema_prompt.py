@@ -254,7 +254,7 @@ def _registered_components() -> list[str]:
         names = []
     if not names:
         try:
-            data = json.loads(_REGISTRY_JSON.read_text())
+            data = json.loads(_REGISTRY_JSON.read_text(encoding="utf-8"))
             names = sorted(data.keys())
         except (OSError, json.JSONDecodeError):
             names = list(_FALLBACK_COMPONENTS)
@@ -423,7 +423,7 @@ def _load_exemplar(name: str) -> str:
     """Read an exemplar JSON file's text contents, or return "" if missing."""
     p = _EXEMPLARS_DIR / f"{name}.json"
     try:
-        return p.read_text() if p.exists() else ""
+        return p.read_text(encoding="utf-8") if p.exists() else ""
     except OSError:
         return ""
 
@@ -779,7 +779,7 @@ def load_enterprise_pattern(archetype_or_role: str) -> dict | None:
             path = PATTERNS_DIR / f"{pattern_name}.json"
             if path.exists():
                 try:
-                    return json.loads(path.read_text())
+                    return json.loads(path.read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     continue
     return None
@@ -801,7 +801,7 @@ def load_gold_example(page_type: str, archetype: str | None) -> dict | None:
         archetype_path = page_dir / f"{archetype}.json"
         if archetype_path.exists():
             try:
-                return json.loads(archetype_path.read_text())
+                return json.loads(archetype_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.warning("schema_prompt: failed to parse %s: %s", archetype_path, e)
 
@@ -816,7 +816,7 @@ def load_gold_example(page_type: str, archetype: str | None) -> dict | None:
             archetype, page_type, candidates[0].stem,
         )
     try:
-        return json.loads(candidates[0].read_text())
+        return json.loads(candidates[0].read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("schema_prompt: failed to parse fallback %s: %s", candidates[0], e)
         return None
@@ -845,7 +845,7 @@ def _merge_dna_composition(spec: dict, output_dir: str | Path) -> dict:
         needs_voice = not isinstance(spec.get("voice"), dict) or not spec.get("voice")
         if not missing and not needs_voice:
             return spec
-        dna = json.loads(dna_path.read_text())
+        dna = json.loads(dna_path.read_text(encoding="utf-8"))
         dna_layout = dna.get("layout") or {}
         for k in missing:
             if dna_layout.get(k):
@@ -874,7 +874,7 @@ def _load_design_spec(output_dir: str | Path | None) -> dict:
     if not spec_path.exists():
         return _merge_dna_composition({}, output_dir)
     try:
-        spec = json.loads(spec_path.read_text())
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("schema_prompt: failed to read design-spec.json: %s", e)
         return _merge_dna_composition({}, output_dir)

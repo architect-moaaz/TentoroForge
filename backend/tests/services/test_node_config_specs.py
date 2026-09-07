@@ -392,11 +392,11 @@ def test_providers_used_by_app_reads_capabilities_from_file_system(tmp_path):
 
     # Minimal app: plan with no workflows but a schema that uses FileUpload.
     (tmp_path / "src" / "contracts").mkdir(parents=True)
-    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps({}))
+    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps({}), encoding="utf-8")
     (tmp_path / "src" / "schemas").mkdir()
     (tmp_path / "src" / "schemas" / "signup.json").write_text(json.dumps({
         "root": {"children": [{"type": "FileUpload"}]},
-    }))
+    }), encoding="utf-8")
 
     provs = providers_used_by_app(str(tmp_path))
     assert "s3" in provs
@@ -409,9 +409,9 @@ def test_providers_used_by_app_unions_plan_and_capabilities(tmp_path):
     (tmp_path / "src" / "contracts").mkdir(parents=True)
     (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps({
         "workflows": [{"nodes": [{"config": {"actionType": "send_email"}}]}],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "src" / "schemas").mkdir()
-    (tmp_path / "src" / "schemas" / "signup.json").write_text('{"root":{"children":[{"type":"FileUpload"}]}}')
+    (tmp_path / "src" / "schemas" / "signup.json").write_text('{"root":{"children":[{"type":"FileUpload"}]}}', encoding="utf-8")
 
     provs = providers_used_by_app(str(tmp_path))
     assert "resend" in provs, "workflow signal preserved"
@@ -423,5 +423,5 @@ def test_providers_used_by_app_empty_when_nothing_used(tmp_path):
     from services.node_config_specs import providers_used_by_app
 
     (tmp_path / "src" / "contracts").mkdir(parents=True)
-    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps({}))
+    (tmp_path / "src" / "contracts" / "plan.json").write_text(json.dumps({}), encoding="utf-8")
     assert providers_used_by_app(str(tmp_path)) == []

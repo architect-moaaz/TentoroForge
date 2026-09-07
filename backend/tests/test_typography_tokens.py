@@ -53,9 +53,9 @@ def test_spec_fonts_drive_register_and_globals(tmp_path):
 
     # End-to-end into a real globals.css.
     css_path = tmp_path / "globals.css"
-    css_path.write_text("@tailwind base;\n:root { --x: 1; }\n")
+    css_path.write_text("@tailwind base;\n:root { --x: 1; }\n", encoding="utf-8")
     _inject_typography_into_globals(css_path, register)
-    css = css_path.read_text()
+    css = css_path.read_text(encoding="utf-8")
     assert "Fraunces" in css  # in the @import line
     assert "--font-heading: 'Fraunces'" in css
     assert "--font-body: 'Manrope'" in css
@@ -81,7 +81,7 @@ def _write_spec(output_dir: Path, scale: dict, heading_weight="600"):
             "headingWeight": heading_weight,
             "scale": scale,
         }
-    }))
+    }), encoding="utf-8")
 
 
 def test_tailwind_config_carries_spec_type_scale(tmp_path):
@@ -96,7 +96,7 @@ def test_tailwind_config_carries_spec_type_scale(tmp_path):
     })
     _fix_tailwind_config(tmp_path)
 
-    out = (tmp_path / "tailwind.config.ts").read_text()
+    out = (tmp_path / "tailwind.config.ts").read_text(encoding="utf-8")
     assert "fontSize:" in out
     # Exact keys the Heading component references.
     for key in ("page-title", "section-title", "card-title", "body", "caption", "micro"):
@@ -120,7 +120,7 @@ def test_tailwind_config_baseline_scale_without_spec(tmp_path):
     from services.runtime_injector import _fix_tailwind_config
 
     _fix_tailwind_config(tmp_path)
-    out = (tmp_path / "tailwind.config.ts").read_text()
+    out = (tmp_path / "tailwind.config.ts").read_text(encoding="utf-8")
     assert "fontSize:" in out
     for key in ("page-title", "section-title", "card-title", "body", "caption", "micro"):
         assert f'"{key}"' in out

@@ -11,17 +11,17 @@ def test_export_excludes_node_modules_and_next(tmp_path):
     """Direct unit test of the tarball builder logic via _EXPORT_EXCLUDE_DIRS."""
     project_dir = tmp_path / "x"
     project_dir.mkdir()
-    (project_dir / "package.json").write_text('{"name":"x"}')
+    (project_dir / "package.json").write_text('{"name":"x"}', encoding="utf-8")
     (project_dir / "src").mkdir()
     (project_dir / "src" / "app").mkdir()
-    (project_dir / "src" / "app" / "page.tsx").write_text("export default function P() {}")
+    (project_dir / "src" / "app" / "page.tsx").write_text("export default function P() {}", encoding="utf-8")
     # Directories that must be excluded
     (project_dir / "node_modules").mkdir()
-    (project_dir / "node_modules" / "junk.js").write_text("excluded")
+    (project_dir / "node_modules" / "junk.js").write_text("excluded", encoding="utf-8")
     (project_dir / ".next").mkdir()
-    (project_dir / ".next" / "build.json").write_text("excluded")
+    (project_dir / ".next" / "build.json").write_text("excluded", encoding="utf-8")
     (project_dir / ".git").mkdir()
-    (project_dir / ".git" / "config").write_text("excluded")
+    (project_dir / ".git" / "config").write_text("excluded", encoding="utf-8")
     (project_dir / "__pycache__").mkdir()
     (project_dir / "__pycache__" / "foo.pyc").write_bytes(b"excluded")
 
@@ -62,7 +62,7 @@ def test_export_arcname_relative_to_parent(tmp_path):
     so extraction produces <short_id>/… at the user's cwd."""
     project_dir = tmp_path / "myproject"
     project_dir.mkdir()
-    (project_dir / "package.json").write_text('{"name":"myproject"}')
+    (project_dir / "package.json").write_text('{"name":"myproject"}', encoding="utf-8")
 
     from routers._debug_schema import _EXPORT_EXCLUDE_DIRS
 

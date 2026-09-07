@@ -80,7 +80,7 @@ def build_remove_page_bundle(
     nav_flow_path = out / nav_flow_rel
     if nav_flow_path.exists():
         try:
-            nav = json.loads(nav_flow_path.read_text())
+            nav = json.loads(nav_flow_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             raise RemovePageError(f"nav-flow parse failed: {exc}") from exc
         dead_routes = {m.route for m in matched}

@@ -51,7 +51,7 @@ def test_load_returns_none_on_corrupt_json(tmp_path):
     pending discovery' which triggers a fresh discovery run."""
     p = _pending_discovery_path(str(tmp_path))
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{not json at all]")
+    p.write_text("{not json at all]", encoding="utf-8")
     assert _load_pending_discovery(str(tmp_path)) is None
 
 

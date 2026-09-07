@@ -24,21 +24,21 @@ def _app(tmp_path):
             "ClassBooking": {"fields": {"id": {"type": "uuid"}}},
         },
         "relations": [],
-    }))
+    }), encoding="utf-8")
     wf = tmp_path / "workflows"
     wf.mkdir()
     for n in ("DeleteMember", "UpdateMember", "UpdateClassBooking"):
-        (wf / f"{n}.json").write_text(json.dumps({"name": n}))
+        (wf / f"{n}.json").write_text(json.dumps({"name": n}), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     (sdir / "members" / "[id]").mkdir(parents=True)
     (sdir / "bookings" / "[id]").mkdir(parents=True)
     # edit schemas so the edit routes exist + resolve to their entities
     (sdir / "members" / "[id]" / "edit.json").write_text(json.dumps({
         "route": "/members/:id/edit",
-        "root": {"type": "Form", "props": {"workflow": "UpdateMember"}, "children": []}}))
+        "root": {"type": "Form", "props": {"workflow": "UpdateMember"}, "children": []}}), encoding="utf-8")
     (sdir / "bookings" / "[id]" / "edit.json").write_text(json.dumps({
         "route": "/bookings/:id/edit",
-        "root": {"type": "Form", "props": {"workflow": "UpdateClassBooking"}, "children": []}}))
+        "root": {"type": "Form", "props": {"workflow": "UpdateClassBooking"}, "children": []}}), encoding="utf-8")
     return sdir
 
 
@@ -67,10 +67,10 @@ def test_wires_edit_to_own_entity_and_delete_to_workflow(tmp_path):
             {"type": "Button", "props": {"label": "Edit", "navigate": "/bookings/{{item.id}}/edit"}},
             {"type": "Button", "props": {"label": "Delete", "variant": "danger"}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = wire_detail_actions(str(tmp_path))
     assert res["edits"] == 1 and res["deletes"] == 1
-    b = _buttons(json.loads((sdir / "members" / "[id].json").read_text()))
+    b = _buttons(json.loads((sdir / "members" / "[id].json").read_text(encoding="utf-8")))
     assert b["Edit"]["navigate"] == "/members/{{member.id}}/edit"
     assert "workflow" not in b["Edit"]
     assert b["Delete"]["workflow"] == "DeleteMember"
@@ -88,7 +88,7 @@ def test_idempotent_and_leaves_correct_alone(tmp_path):
             {"type": "Button", "props": {"label": "Delete", "workflow": "DeleteMember",
                                          "args": {"id": "{{member.id}}"}}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = wire_detail_actions(str(tmp_path))
     assert res["edits"] == 0 and res["deletes"] == 0   # already correct
 
@@ -102,10 +102,10 @@ def test_skips_delete_without_workflow(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Delete", "variant": "danger"}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = wire_detail_actions(str(tmp_path))
     assert res["deletes"] == 0   # no DeleteClassBooking workflow exists
-    b = _buttons(json.loads((sdir / "bookings" / "[id].json").read_text()))
+    b = _buttons(json.loads((sdir / "bookings" / "[id].json").read_text(encoding="utf-8")))
     assert "workflow" not in b["Delete"]
 
 
@@ -118,7 +118,7 @@ def test_ignores_pages_without_get_source(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Button", "props": {"label": "Delete", "variant": "danger"}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = wire_detail_actions(str(tmp_path))
     assert res["deletes"] == 0
 

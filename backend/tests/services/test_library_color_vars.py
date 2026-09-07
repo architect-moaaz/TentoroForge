@@ -14,16 +14,16 @@ def test_color_scale_shape():
 
 def _app(tmp_path, primary="#2A9D8F"):
     (tmp_path / "src" / "app").mkdir(parents=True)
-    (tmp_path / "src" / "app" / "globals.css").write_text(":root { --primary: 0 0% 0%; }\n")
+    (tmp_path / "src" / "app" / "globals.css").write_text(":root { --primary: 0 0% 0%; }\n", encoding="utf-8")
     (tmp_path / "src" / "contracts").mkdir(parents=True)
     (tmp_path / "src" / "contracts" / "design-spec.json").write_text(
-        json.dumps({"colorPalette": {"primary": primary, "accent": "#E9C46A", "border": "#D8ECEA"}}))
+        json.dumps({"colorPalette": {"primary": primary, "accent": "#E9C46A", "border": "#D8ECEA"}}), encoding="utf-8")
     return tmp_path
 
 
 def test_emits_color_vars_from_palette(tmp_path):
     assert _emit_library_color_vars(_app(tmp_path)) is True
-    css = (tmp_path / "src" / "app" / "globals.css").read_text()
+    css = (tmp_path / "src" / "app" / "globals.css").read_text(encoding="utf-8")
     assert "--color-primary-500: #2A9D8F;" in css
     assert "--color-accent-500: #E9C46A;" in css
     assert "--color-text-tertiary:" in css and "--color-border-default:" in css
@@ -37,6 +37,6 @@ def test_idempotent(tmp_path):
 
 def test_falls_back_without_design_spec(tmp_path):
     (tmp_path / "src" / "app").mkdir(parents=True)
-    (tmp_path / "src" / "app" / "globals.css").write_text(":root {}\n")
+    (tmp_path / "src" / "app" / "globals.css").write_text(":root {}\n", encoding="utf-8")
     assert _emit_library_color_vars(tmp_path) is True  # uses defaults
-    assert "--color-primary-500:" in (tmp_path / "src" / "app" / "globals.css").read_text()
+    assert "--color-primary-500:" in (tmp_path / "src" / "app" / "globals.css").read_text(encoding="utf-8")

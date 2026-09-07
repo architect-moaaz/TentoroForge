@@ -61,8 +61,8 @@ def test_writing_a_contract_invalidates(app_root):
     m1 = am.get_app_map(str(app_root))
     # Real write path — simulates a seam like edit_page persisting a change.
     contract = app_root / "contracts" / "action-contract.json"
-    data = json.loads(contract.read_text())
-    contract.write_text(json.dumps(data, indent=2))
+    data = json.loads(contract.read_text(encoding="utf-8"))
+    contract.write_text(json.dumps(data, indent=2), encoding="utf-8")
     # Give the fs a nudge on file systems with second-resolution mtimes.
     future = os.stat(contract).st_mtime + 2
     os.utime(contract, (future, future))

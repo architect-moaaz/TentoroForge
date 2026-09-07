@@ -180,7 +180,7 @@ def _write_temp_project(schema: dict, register: str = "default") -> tuple[str, P
     for d in (schemas_dir, contracts_dir, theme_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    (schemas_dir / "candidate.json").write_text(json.dumps(schema))
+    (schemas_dir / "candidate.json").write_text(json.dumps(schema), encoding="utf-8")
 
     # Minimal design-spec — the only field the scaffold reads is `register`,
     # but we include a couple of extras so any future probe doesn't crash.
@@ -188,18 +188,18 @@ def _write_temp_project(schema: dict, register: str = "default") -> tuple[str, P
         "register": register,
         "domain": "general",
         "colorPalette": {"primary": "#1e40af"},
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     # Empty token-overrides — the renderer's `compileTokens` falls back to
     # defaults when no overrides are present, which is exactly what we want
     # for an exemplar (use the design system's stock register tokens).
-    (theme_dir / "tokens.custom.json").write_text("{}")
+    (theme_dir / "tokens.custom.json").write_text("{}", encoding="utf-8")
 
     # Stub app-model so any registry-aware loader doesn't 404.
     (contracts_dir / "app-model.json").write_text(json.dumps({
         "entities": {},
         "domain": "general",
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     return short_id, proj_dir
 
@@ -280,13 +280,13 @@ def _persist_exemplar(*, register: str, domain: str, page_type: str, idx: int, s
     cell = _BANK_ROOT / register / domain / page_type
     cell.mkdir(parents=True, exist_ok=True)
     stem = f"exemplar_{idx:02d}"
-    (cell / f"{stem}.json").write_text(json.dumps(schema, indent=2))
+    (cell / f"{stem}.json").write_text(json.dumps(schema, indent=2), encoding="utf-8")
     (cell / f"{stem}.meta.json").write_text(json.dumps({
         "score": score, "scored_at": datetime.now(timezone.utc).isoformat(),
         "model_used": _SEEDER_MODEL, "seeder_version": seeder_version,
         "critique_summary": {"strengths": critique.get("strengths", []),
                              "topIssues": critique.get("topIssues", [])},
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     (cell / f"{stem}.png").write_bytes(png)
 
 

@@ -21,15 +21,15 @@ def _make_app(root: Path, *,
               shell: dict | None = None) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     if shell is not None:
-        (root / "src" / "contracts" / "shell.json").write_text(json.dumps(shell))
+        (root / "src" / "contracts" / "shell.json").write_text(json.dumps(shell), encoding="utf-8")
     for name, doc in (schemas or {}).items():
-        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc))
+        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _read(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

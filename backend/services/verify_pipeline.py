@@ -169,7 +169,7 @@ def _check_page_completeness(output_dir: str, plan: dict) -> dict:
                     # Check create page has form fields
                     if page_type == "create":
                         try:
-                            content = page_file.read_text()
+                            content = page_file.read_text(encoding="utf-8")
                             # Count form inputs
                             input_count = content.count("<Input") + content.count("<Select") + content.count("<Textarea")
                             required_fields = [f for f in model.get("fields", [])
@@ -200,7 +200,7 @@ def _check_css(output_dir: str) -> dict:
         return {"passed": False, "issues": ["globals.css not found"]}
 
     try:
-        content = css_file.read_text()
+        content = css_file.read_text(encoding="utf-8")
 
         # Check for the border bug
         if "* {\n" in content or "* {" in content:
@@ -278,7 +278,7 @@ def _generate_app_model(output_dir: str):
 
     # Write
     output = root / "app-model.json"
-    output.write_text(json.dumps(model, indent=2))
+    output.write_text(json.dumps(model, indent=2), encoding="utf-8")
 
 
 def _build_fix_prompt(result: dict) -> str:

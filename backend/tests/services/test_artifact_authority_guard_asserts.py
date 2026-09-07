@@ -65,11 +65,11 @@ class TestSurfaceWrapCrossArtifact:
             ]},
         })
         p = _write_schema(tmp_path, "list", schema)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = wrap_bare_data_displays(str(tmp_path))
         assert result["wrapped"] == 0
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_record_marker_and_flag_asserts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -116,11 +116,11 @@ class TestListDataSourceGuard:
             ]},
         })
         p = _write_schema(tmp_path, "list", schema)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = reconcile_list_sources(str(tmp_path))
         assert result["asserts_logged"] == 1
         # No mutation.
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_off_marker_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_COLLECTION_AUTHORITY", "0")  # explicit opt-out: absent now means ON
@@ -142,10 +142,10 @@ class TestTableRowNavGuard:
             ]},
         })
         p = _write_schema(tmp_path, "sessions", schema)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = guard_table_row_nav(str(tmp_path))
         assert result["asserts_logged"] == 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_off_still_wires(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_COLLECTION_AUTHORITY", "0")  # explicit opt-out: absent now means ON
@@ -235,10 +235,10 @@ class TestWorkflowTriggerButtonGuard:
             "root": {"type": "Button", "props": {"workflow": "sample"}},
         })
         p = _write_schema(tmp_path, "bookings/[id]", schema)
-        before = p.read_text()
+        before = p.read_text(encoding="utf-8")
         result = neutralize_event_only_buttons(str(tmp_path))
         assert result["asserts_logged"] >= 1
-        assert p.read_text() == before
+        assert p.read_text(encoding="utf-8") == before
 
     def test_flag_off_marker_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("FORGE_RECORD_AUTHORITY", "0")  # explicit opt-out: absent now means ON

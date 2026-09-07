@@ -245,7 +245,7 @@ def vocabulary_for_output_dir(root: Any) -> Any:
             load_compose_and_modify_vocab_sync,
         )
         plan_path = Path(root) / "src" / "contracts" / "plan.json"
-        plan = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+        plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
         vocab, _preset, _ = load_compose_and_modify_vocab_sync(
             plan=plan, brief=_load_brief(root), output_dir=root)
         return vocab

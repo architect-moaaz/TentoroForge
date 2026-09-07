@@ -98,7 +98,7 @@ async def run_feature_slice_schema_agent(
         page_plan = {**plan, "page_type": page_type}
         schema_json = await _generate_page_schema(page_plan, entity_slug, domain_context)
         out_file = output_path / f"{page_type}.json"
-        out_file.write_text(json.dumps(schema_json, indent=2))
+        out_file.write_text(json.dumps(schema_json, indent=2), encoding="utf-8")
 
     # Update/create the registry.ts in src/schemas/
     _update_schema_registry(output_dir, entity_slug, pages)
@@ -282,7 +282,7 @@ def _validate_token_paths(schema_dict: dict, output_dir: str | None) -> tuple[in
         custom_path = Path(output_dir) / "src" / "theme" / "tokens.custom.json"
         if custom_path.exists():
             try:
-                custom = json.loads(custom_path.read_text())
+                custom = json.loads(custom_path.read_text(encoding="utf-8"))
                 tokens = _merge_dicts(tokens, custom)
             except Exception as e:
                 logger.warning("validator: failed to load tokens.custom.json: %s", e)
@@ -362,7 +362,8 @@ def _update_schema_registry(
         '  if (!loader) throw new Error(`unknown schema \'${String(name)}\'`);\n'
         '  const raw = await loader();\n'
         '  return loadSchema(name as string, (raw as any).default ?? raw);\n'
-        '}\n'
+        '}\n',
+        encoding="utf-8",
     )
 
 

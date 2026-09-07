@@ -20,7 +20,7 @@ def load_domain_bank(domain: str, entity_name: str) -> list[dict[str, Any]] | No
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
     if not isinstance(data, list):

@@ -125,7 +125,7 @@ def _mk_app(tmp_path: Path) -> Path:
                                  "where": {"id": "{{documentId}}"},
                                  "values": {"status": "queued"}}}},
         ], "edges": []},
-    }))
+    }), encoding="utf-8")
 
     (root / "src" / "schemas" / "documents" / "[id].json").write_text(json.dumps({
         "id": "documents-id", "route": "/documents/[id]",
@@ -138,13 +138,13 @@ def _mk_app(tmp_path: Path) -> Path:
             {"type": "Button",
              "props": {"label": "Back", "navigate": "/documents"}},
         ]},
-    }))
+    }), encoding="utf-8")
     return root
 
 
 def _button(root: Path, label: str) -> dict:
     doc = json.loads(
-        (root / "src" / "schemas" / "documents" / "[id].json").read_text())
+        (root / "src" / "schemas" / "documents" / "[id].json").read_text(encoding="utf-8"))
     for c in doc["root"]["children"]:
         if c.get("props", {}).get("label") == label:
             return c
@@ -171,9 +171,9 @@ def test_existing_args_not_overwritten(tmp_path):
     from services.action_contract_guard import backfill_record_button_args
     root = _mk_app(tmp_path)
     p = root / "src" / "schemas" / "documents" / "[id].json"
-    doc = json.loads(p.read_text())
+    doc = json.loads(p.read_text(encoding="utf-8"))
     doc["root"]["children"][0]["props"]["args"] = {"documentId": "{{custom}}"}
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     rep = backfill_record_button_args(str(root))
     assert rep["summary"]["buttons_patched"] == 0
     assert _button(root, "Reprocess Document")["props"]["args"] == \
@@ -192,12 +192,12 @@ def test_list_page_without_get_source_skipped(tmp_path):
              "props": {"label": "Reprocess All",
                        "workflow": "ReprocessDocumentWorkflow"}},
         ]},
-    }))
+    }), encoding="utf-8")
     rep = backfill_record_button_args(str(root))
     # only the detail-page button patched; the list-page one has no
     # record context to bind
     assert rep["summary"]["buttons_patched"] == 1
-    lst = json.loads((root / "src" / "schemas" / "documents.json").read_text())
+    lst = json.loads((root / "src" / "schemas" / "documents.json").read_text(encoding="utf-8"))
     assert "args" not in lst["root"]["children"][0]["props"]
 
 

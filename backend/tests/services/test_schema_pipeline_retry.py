@@ -57,7 +57,7 @@ async def test_two_pass_retry_recovers_transient_failures(tmp_path):
         slug = route.strip("/") or "home"
         f = Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({"id": slug}))
+        f.write_text(json.dumps({"id": slug}), encoding="utf-8")
 
     plan = {
         "pages": [
@@ -113,7 +113,7 @@ async def test_permanent_failures_become_stubs_with_correct_summary(tmp_path):
         slug = route.strip("/") or "home"
         f = Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({"id": slug}))
+        f.write_text(json.dumps({"id": slug}), encoding="utf-8")
 
     plan = {
         "pages": [
@@ -146,7 +146,7 @@ async def test_permanent_failures_become_stubs_with_correct_summary(tmp_path):
     for slug in ["login", "signup"]:
         stub_path = tmp_path / "src" / "schemas" / f"{slug}.json"
         assert stub_path.exists(), f"Expected stub file for {slug}"
-        stub_data = json.loads(stub_path.read_text())
+        stub_data = json.loads(stub_path.read_text(encoding="utf-8"))
         assert stub_data.get("schemaVersion") == "2", \
             "Stub should have schemaVersion=2"
 
@@ -169,7 +169,7 @@ async def test_malformed_page_entries_skipped_without_crash(tmp_path):
         slug = route.strip("/") or "home"
         f = Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({"id": slug}))
+        f.write_text(json.dumps({"id": slug}), encoding="utf-8")
 
     plan = {
         "pages": [

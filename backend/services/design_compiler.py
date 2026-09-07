@@ -686,7 +686,7 @@ def compile_to_file(design_spec: dict, output_path: str, dna: dict | None = None
         tokens = compile(design_spec, dna=dna)
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(tokens, indent=2))
+        path.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
         logger.info("design_compiler: wrote %s (%d bytes)",
                     output_path, len(json.dumps(tokens)))
     except Exception as e:

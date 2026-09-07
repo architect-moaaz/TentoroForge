@@ -21,6 +21,7 @@ export function KeyboardShortcuts({
   shortcuts, triggerKey = "?", style,
 }: Props): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const anchorRef = React.useRef<HTMLSpanElement | null>(null);
   const motion = useMotion(style?.motion);
   const styleProps = resolveStyle(style);
 
@@ -32,6 +33,13 @@ export function KeyboardShortcuts({
         target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
                    target.isContentEditable);
       if (isTyping) return;
+      // Bail when the keystroke came from outside this component's page. In the
+      // editor the designed page lives inside [data-canvas-root] and everything
+      // else is editor chrome, so a stray "?" typed while designing no longer
+      // drops a full-canvas scrim over the design surface. A generated app has
+      // no canvas root, `scope` is null, and "?" still works from anywhere.
+      const scope = anchorRef.current?.closest("[data-canvas-root]");
+      if (scope && !scope.contains(target as Node)) return;
       if (e.key === triggerKey) { e.preventDefault(); setOpen((v) => !v); }
       if (e.key === "Escape") setOpen(false);
     };
@@ -39,7 +47,13 @@ export function KeyboardShortcuts({
     return () => document.removeEventListener("keydown", handler);
   }, [triggerKey]);
 
-  if (!open) return <></>;
+  // The anchor is always mounted, even while closed: it is what tells the
+  // listener above which document region this instance belongs to.
+  const anchor = (
+    <span ref={anchorRef} hidden aria-hidden="true" data-forge-keyboard-shortcuts-anchor />
+  );
+
+  if (!open) return anchor;
 
   // Group shortcuts.
   const grouped: Record<string, Shortcut[]> = {};
@@ -49,6 +63,8 @@ export function KeyboardShortcuts({
   }
 
   return (
+    <>
+    {anchor}
     <div
       role="dialog"
       aria-modal="true"
@@ -115,5 +131,6 @@ export function KeyboardShortcuts({
         ))}
       </div>
     </div>
+    </>
   );
 }

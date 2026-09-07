@@ -34,8 +34,13 @@ export function Timeline({ entries, orientation = "vertical" }: Props) {
   if (orientation === "horizontal") {
     return (
       <ol className="flex items-start gap-3 overflow-x-auto pb-2">
-        {list.map((e) => (
-          <li key={e.id} className="flex-shrink-0 w-48 border-s-2 border-border ps-3">
+        {/* `id` is OPTIONAL on a Timeline entry, so keying on it alone gave every
+            row `key={undefined}` and React warned about duplicate keys — latent
+            until the registry seeded default entries and the list stopped being
+            empty. Index is a safe fallback here: entries are positional and the
+            list is not reordered in place. */}
+        {list.map((e, i) => (
+          <li key={e.id ?? i} className="flex-shrink-0 w-48 border-s-2 border-border ps-3">
             <div className={`h-2 w-2 rounded-full ${STATUS_DOT[e.status ?? "info"] ?? STATUS_DOT.info} -ms-4 mb-1`} />
             <p className="text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleString("en-US")}</p>
             <p className="text-sm font-medium">{e.title}</p>
@@ -48,8 +53,8 @@ export function Timeline({ entries, orientation = "vertical" }: Props) {
   }
   return (
     <ol className="space-y-3">
-      {list.map((e) => (
-        <li key={e.id} className="flex gap-3">
+      {list.map((e, i) => (
+        <li key={e.id ?? i} className="flex gap-3">
           <div className="flex flex-col items-center">
             <div className={`h-3 w-3 rounded-full ${STATUS_DOT[e.status ?? "info"] ?? STATUS_DOT.info} mt-1.5`} />
             <div className="flex-1 w-px bg-border mt-1" />

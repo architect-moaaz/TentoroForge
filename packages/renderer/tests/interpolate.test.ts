@@ -57,11 +57,23 @@ describe("interpolate", () => {
     expect(interpolate("{{o}}", { o: obj })).toBe(obj);
   });
 
-  it("falls back to the literal template when a whole-string template can't resolve", () => {
-    // Required schema fields would crash if the key were dropped; keep the
-    // literal so validation sees a non-empty string and the user sees the
-    // unresolved placeholder text.
-    expect(interpolate("{{missing}}", {})).toBe("{{missing}}");
+  it("renders EMPTY, never the raw template, when a whole-string template can't resolve", () => {
+    // B5: `/items` shipped `{{metrics.list_total_inventory_value}}` as visible
+    // text because the page's `metrics` source didn't exist. An unresolved
+    // binding must never reach an end user. "" still keeps the key present and
+    // string-typed, which is all the old literal fallback was protecting.
+    expect(interpolate("{{missing}}", {})).toBe("");
+    expect(interpolate("{{metrics.total}}", {})).toBe("");
+    expect(interpolate("{{metrics.total}}", { metrics: {} })).toBe("");
+  });
+
+  it("keeps the placeholder visible only when the surface opts in via __authoring", () => {
+    // The editor canvas wants to SEE what a node is bound to. It asks for that
+    // explicitly; every other surface (preview, generated app, export) gets "".
+    expect(interpolate("{{missing}}", { __authoring: true })).toBe("{{missing}}");
+    expect(interpolate("{{a.b}}", { __authoring: true, a: {} })).toBe("{{a.b}}");
+    // Resolvable bindings are unaffected by the flag.
+    expect(interpolate("{{n}}", { __authoring: true, n: 7 })).toBe(7);
   });
 });
 
@@ -108,9 +120,17 @@ describe("interpolate | formatters (M6-T7)", () => {
     expect(out).toMatch(/€|EUR/);
   });
 
-  it("number formats with thousand separators", () => {
+  it("number formats with group separators", () => {
+    // LOCALE-AGNOSTIC ON PURPOSE. `applyFormatter` calls
+    // `Intl.NumberFormat(undefined, …)`, i.e. the runtime's own locale — which is
+    // the desired behaviour. The old assertion demanded Western 3-digit grouping
+    // (/1[,.\s]234[,.\s]567/), so on any machine with e.g. an en-IN default it
+    // failed against the perfectly correct "12,34,567" and had been red for
+    // months. Assert that grouping HAPPENED, not which convention was used.
     const out = interpolate("{{count | number}}", { count: 1234567 }) as string;
-    expect(out).toMatch(/1[,.\s]234[,.\s]567/);
+    expect(out.replace(/\D/g, "")).toBe("1234567");
+    expect(out).not.toBe("1234567");
+    expect(out).toMatch(/\d[,.\s  ]\d/);
   });
 
   it("relative produces a phrase for past times", () => {
@@ -136,5 +156,37 @@ describe("interpolate | formatters (M6-T7)", () => {
     // spec says at-least-one-word after `|` is required; unknown formatter
     // just passes through. `{{n | }}` is malformed — treat as no formatter.
     expect(interpolate("{{n}}", { n: "hi" })).toBe("hi");
+  });
+});
+
+describe("interpolateDeep — legacy {$binding} objects are forgiven", () => {
+  it("resolves a legacy binding object as if it were {{expr}}", () => {
+    // The editor briefly wrote bound props in this shape. It is not a string, so
+    // it slipped past every branch and reached React as an object — "Objects are
+    // not valid as a React child (found: object with keys {$binding})".
+    expect(interpolateDeep({ label: { $binding: "user.name" } }, { user: { name: "Sarah" } }))
+      .toEqual({ label: "Sarah" });
+  });
+
+  it("renders empty for an unresolvable legacy binding, never the object", () => {
+    const out = interpolateDeep({ label: { $binding: "missing.thing" } }, {}) as any;
+    expect(out.label).toBe("");
+    expect(typeof out.label).toBe("string");
+  });
+
+  it("renders empty for a legacy binding that was never filled in", () => {
+    expect(interpolateDeep({ label: { $binding: "" } }, {})).toEqual({ label: "" });
+  });
+
+  it("handles one nested inside an array or a breakpoint envelope", () => {
+    expect(interpolateDeep({ cols: [{ t: { $binding: "a" } }] }, { a: "X" }))
+      .toEqual({ cols: [{ t: "X" }] });
+    expect(interpolateDeep({ w: { default: { $binding: "a" }, lg: "8rem" } }, { a: "4rem" }))
+      .toEqual({ w: { default: "4rem", lg: "8rem" } });
+  });
+
+  it("leaves ordinary objects alone", () => {
+    const props = { style: { width: "100%" }, count: 3 };
+    expect(interpolateDeep(props, {})).toEqual(props);
   });
 });

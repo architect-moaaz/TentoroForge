@@ -8,7 +8,7 @@ from services.context_assembler import workflow_catalog_block
 def _wf(tmp_path, obj, fname):
     wdir = tmp_path / "workflows"
     wdir.mkdir(exist_ok=True)
-    (wdir / fname).write_text(json.dumps(obj))
+    (wdir / fname).write_text(json.dumps(obj), encoding="utf-8")
 
 
 def test_no_workflows_dir_is_empty(tmp_path):

@@ -13,13 +13,13 @@ def _mk(tmp_path: Path, wf: dict, plan: dict | None = None,
     (root / "workflows").mkdir(parents=True)
     (root / "src" / "contracts").mkdir(parents=True)
     if plan is not None:
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
-    (root / "workflows" / name).write_text(json.dumps(wf))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    (root / "workflows" / name).write_text(json.dumps(wf), encoding="utf-8")
     return root
 
 
 def _read(root: Path, name: str = "wf.json") -> dict:
-    return json.loads((root / "workflows" / name).read_text())
+    return json.loads((root / "workflows" / name).read_text(encoding="utf-8"))
 
 
 _PLAN = {"data_models": [

@@ -9,7 +9,7 @@ from typing import Optional
 
 def _load_json_safe(p: Path) -> Optional[dict]:
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -27,7 +27,7 @@ def load_current_artifacts(output_dir: str) -> Optional[dict]:
     page_schemas: dict[str, dict] = {}
     for f in schemas_dir.rglob("*.json"):
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             continue
         pid = data.get("id") or f.stem
@@ -55,17 +55,20 @@ def commit_artifacts(output_dir: str, artifacts: dict) -> None:
     # Page schemas — one file per id
     for pid, page in (artifacts.get("pageSchemas") or {}).items():
         (base / "src" / "schemas" / f"{pid}.json").write_text(
-            json.dumps(page, indent=2) + "\n"
+            json.dumps(page, indent=2) + "\n",
+            encoding="utf-8",
         )
 
     nav = artifacts.get("navFlow") or {}
     (base / "src" / "contracts" / "nav-flow.json").write_text(
-        json.dumps(nav, indent=2) + "\n"
+        json.dumps(nav, indent=2) + "\n",
+        encoding="utf-8",
     )
 
     tokens = artifacts.get("tokens") or {}
     (base / "src" / "contracts" / "tokens.json").write_text(
-        json.dumps(tokens, indent=2) + "\n"
+        json.dumps(tokens, indent=2) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -95,7 +98,7 @@ _FALLBACK_REGISTRY: dict = {
 @lru_cache(maxsize=1)
 def _load_registry_from_json() -> dict:
     if _REGISTRY_JSON_PATH.exists():
-        return json.loads(_REGISTRY_JSON_PATH.read_text())
+        return json.loads(_REGISTRY_JSON_PATH.read_text(encoding="utf-8"))
     return _FALLBACK_REGISTRY
 
 

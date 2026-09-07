@@ -213,19 +213,19 @@ def test_results_page_emitter(tmp_path):
     (out / "workflows").mkdir()
     (out / "contracts").mkdir()
     (out / "contracts" / "plan.json").write_text(json.dumps(
-        {"archetype": "visual-product-search"}))
+        {"archetype": "visual-product-search"}), encoding="utf-8")
     (out / "registry.json").write_text(json.dumps({"entities": {
         "ScanSession": {"id": "scan_sessions", "table": "scan_sessions",
                         "name": "ScanSession"},
         "PriceResult": {"id": "price_results", "table": "price_results",
                         "name": "PriceResult"},
-    }}))
+    }}), encoding="utf-8")
     (out / "workflows" / "DeleteScanSession.json").write_text(json.dumps(
-        {"name": "DeleteScanSession", "definition": {"nodes": [], "edges": []}}))
+        {"name": "DeleteScanSession", "definition": {"nodes": [], "edges": []}}), encoding="utf-8")
 
     assert ensure_results_page_for_visual_product_search(str(out)) == 1
     page = json.loads(
-        (out / "src" / "schemas" / "scans" / "[id]" / "results.json").read_text())
+        (out / "src" / "schemas" / "scans" / "[id]" / "results.json").read_text(encoding="utf-8"))
     assert page["route"] == "/scans/[id]/results"
     s = json.dumps(page)
     # proven anatomy: session-filtered offers, card grid, store link, nav
@@ -241,5 +241,5 @@ def test_results_page_emitter(tmp_path):
     # idempotent re-run rewrites our page; foreign results.json is untouched
     assert ensure_results_page_for_visual_product_search(str(out)) == 1
     (out / "src" / "schemas" / "scans" / "[id]" / "results.json").write_text(
-        json.dumps({"id": "custom", "route": "/scans/[id]/results"}))
+        json.dumps({"id": "custom", "route": "/scans/[id]/results"}), encoding="utf-8")
     assert ensure_results_page_for_visual_product_search(str(out)) == 0

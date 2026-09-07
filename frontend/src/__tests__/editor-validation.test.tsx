@@ -8,7 +8,7 @@
  *     renders with a selectable data-node-id (not a ⚠ orphan / unknown type).
  *   • Reorder (moveNode), duplicate (Cmd+D), delete (removeNode) behave.
  *   • All four inspector tabs write the right action and undo restores it:
- *       Props→updateProp, Style→updateStyle, Bindings→bindProp, Tokens→updateToken.
+ *       Props→updateProp, Style→updateStyle, Bindings→bindProp ({{expr}}), Tokens→updateToken.
  *
  * It imports the actual helpers from useDrop (validateDrop / buildDroppedNode)
  * and dispatches through the actual editor-store, so a regression in the real
@@ -25,6 +25,7 @@ import {
   buildDroppedNode,
 } from "@/components/canvas/hooks/useDrop";
 import { useEditorStore } from "@/lib/editor-store";
+import { PageV2 } from "@tentoroforge/schema";
 
 // ---- jsdom polyfills the renderer/react need --------------------------------
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -53,9 +54,17 @@ const NAV_FLOW = {
   transitions: [], guards: {},
 };
 
-const ALL_ENTRIES = Object.values(starterRegistry) as Array<{
-  name: string; category: string; slots: { type: string; accepts?: string[] };
-}>;
+/**
+ * Everything the PALETTE offers — which is every registry entry except the
+ * `hidden` ones. Hidden entries (GridCell) are structure the editor creates on
+ * the user's behalf: real registry components, so validateForCommit's type
+ * closure accepts them, but deliberately not draggable. Filtering here mirrors
+ * Palette.tsx exactly, so "every component is reachable" keeps meaning what it
+ * says instead of failing every time a structural helper is added.
+ */
+const ALL_ENTRIES = (Object.values(starterRegistry) as Array<{
+  name: string; category: string; hidden?: boolean; slots: { type: string; accepts?: string[] };
+}>).filter((e) => !e.hidden);
 
 const EMPTY_TOKENS = {
   color: {}, typography: {}, spacing: {}, radius: {}, shadow: {}, motion: {}, breakpoints: {},
@@ -103,12 +112,32 @@ async function renderPage(page: any) {
 
 // =============================================================================
 describe("palette coverage — every component is reachable", () => {
-  it("exposes exactly 106 components across the 6 real categories", () => {
-    expect(ALL_ENTRIES.length).toBe(106);
+  it("exposes exactly 133 components across the 6 real categories", () => {
+    // A DRIFT ALARM, not a spec. The numbers are whatever the registry
+    // currently holds; the test exists so a component silently DISAPPEARING
+    // from the palette — dropped in a refactor, or given a category the
+    // palette does not render — fails here instead of being noticed by a user
+    // who can no longer find Switch. When you legitimately add or remove a
+    // component, update these counts in the same commit.
+    //
+    // Previously frozen at 106 while the registry grew to 133, so it had been
+    // failing for 27 components' worth of change and was no longer guarding
+    // anything.
+    expect(ALL_ENTRIES.length).toBe(133);
     const byCat = ALL_ENTRIES.reduce<Record<string, number>>((m, e) => {
       m[e.category] = (m[e.category] ?? 0) + 1; return m;
     }, {});
-    expect(byCat).toEqual({ layout: 18, input: 30, display: 29, data: 11, feedback: 11, navigation: 7 });
+    expect(byCat).toEqual({ layout: 18, input: 41, display: 31, data: 12, feedback: 21, navigation: 10 });
+  });
+
+  it("hides GridCell from the palette but keeps it in the registry", () => {
+    // Both halves matter. Off the palette, because a cell is created by setting
+    // a Grid's row count, not by dragging. In the registry, because
+    // validateForCommit enforces registry-type closure and SILENTLY rejects a
+    // page containing an unknown type — a cell that was only an editor fiction
+    // would make every fixed-grid edit vanish on commit with no error.
+    expect(ALL_ENTRIES.map((e) => e.name)).not.toContain("GridCell");
+    expect((starterRegistry as any).GridCell).toBeDefined();
   });
 
   it("no component has a category the palette can't render (undroppable)", () => {
@@ -153,6 +182,14 @@ describe("drop → render — every component renders selectably", () => {
   beforeEach(mount);
   afterEach(unmount);
 
+  // 30s, not the 5s default. This is a WHOLE-CATALOGUE sweep: it drops every
+  // registry component, renders it through the real Engine and asserts none of
+  // them produce an orphan or invalid props. Its cost scales with the catalogue,
+  // which has grown 106 → 133 components, and it crossed the default budget at
+  // ~6.3s — turning the entire frontend suite red for a pure timing reason while
+  // the sweep itself reported selectable=129, invalidProps=0, unknownType=0.
+  // The coverage is worth more than the budget; the explicit number is here so
+  // the next person sees a deliberate choice rather than a flaky test.
   it("every dropped component renders with a data-node-id (no ⚠ orphan, no unknown type)", async () => {
     seed(makePage([]));
     const store = useEditorStore.getState();
@@ -197,9 +234,9 @@ describe("drop → render — every component renders selectably", () => {
     const CONFIG_DRIVEN = new Set(["Repeat", "Conditional", "DataBoundary", "Slot"]);
     const unexpectedBlank = notRendered.filter((n) => !CONFIG_DRIVEN.has(n));
     expect(unexpectedBlank).toEqual([]);
-    // 106 total − 4 config-driven = 102 must be directly selectable on drop.
-    expect(selectable.length).toBeGreaterThanOrEqual(102);
-  });
+    // 133 total − 4 config-driven = 129 must be directly selectable on drop.
+    expect(selectable.length).toBeGreaterThanOrEqual(129);
+  }, 30_000);
 });
 
 // =============================================================================
@@ -293,9 +330,11 @@ describe("inspector tabs — each writes the right action and undo restores", ()
     expect(currentHome().root.children[0].style).toBeUndefined();
   });
 
-  it("BINDINGS tab: bindProp wraps the prop in {$binding} and undo restores the literal", () => {
+  it("BINDINGS tab: bindProp writes a {{expr}} string and undo restores the literal", () => {
     useEditorStore.getState().dispatch({ type: "bindProp", pageId: "home", nodeId: "btn", propName: "label", binding: "user.name" });
-    expect(currentHome().root.children[0].props.label).toEqual({ $binding: "user.name" });
+    // A STRING, not the {$binding} object — the object reached React in child
+    // position and rendered "⚠ render error" the moment you asked to bind.
+    expect(currentHome().root.children[0].props.label).toBe("{{user.name}}");
     useEditorStore.getState().undo();
     expect(currentHome().root.children[0].props.label).toBe("Old");
   });
@@ -357,5 +396,63 @@ describe("component sizing (Phase B) — width/height render RAW across node kin
     const candidates = [wrapper, ...Array.from(wrapper.querySelectorAll<HTMLElement>("*"))];
     const sized = candidates.some((n) => n.style?.width === "300px");
     expect(sized).toBe(true);
+  });
+});
+
+// =============================================================================
+// C3 — the editor must not be able to write page JSON its own schema rejects.
+//
+// Both failures below were found on a REAL autosaved page, not a synthetic one:
+// `PageV2.safeParse` reported `too_small` on Avatar's `photoUrl`/`src` (seeded
+// `""` against `z.string().min(1).optional()`) and a strict-shape failure on a
+// palette Heading (seeded `level: "2"` — a string — against `z.number()`).
+// Both are fixed in `defaultPropsFor`, so this asserts against the real drop
+// factory rather than a paraphrase of it.
+describe("drop → page schema — a fresh drop must satisfy PageV2", () => {
+  function pageWith(node: any) {
+    return {
+      schemaVersion: "2", id: "home", route: "/", meta: {}, dataSources: [],
+      root: { id: "root", type: "Container", props: {}, children: [node] },
+    };
+  }
+  function issuesFor(node: any) {
+    const parsed = PageV2.safeParse(pageWith(node));
+    return parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+  }
+
+  it("Avatar: no empty photoUrl/src, and the page validates", () => {
+    const node = buildDroppedNode("Avatar");
+    // `.min(1).optional()` — absent is valid, "" is not. Omitted, not blanked.
+    expect(node.props.photoUrl).toBeUndefined();
+    expect(node.props.src).toBeUndefined();
+    expect(issuesFor(node)).toEqual([]);
+  });
+
+  it("Heading: level is a NUMBER, and the page validates", () => {
+    const node = buildDroppedNode("Heading");
+    expect(node.props.level).toBe(2);
+    expect(typeof node.props.level).toBe("number");
+    expect(issuesFor(node)).toEqual([]);
+  });
+
+  it("no registry seed reaches a node as a string in a numeric domain", () => {
+    // The general rule, not the two instances: any descriptor whose option set
+    // is numeric (or `type: "number"`) must produce a number on drop.
+    const offenders: string[] = [];
+    for (const entry of ALL_ENTRIES) {
+      const props = buildDroppedNode(entry.name).props;
+      const descriptors = ((starterRegistry as any)[entry.name]?.props ?? {}) as Record<string, any>;
+      for (const [name, d] of Object.entries(descriptors)) {
+        const numericDomain =
+          d?.type === "number" ||
+          (d?.type === "enum" && Array.isArray(d.options) && d.options.length > 0 &&
+            d.options.every((o: unknown) => typeof o === "number" ||
+              (typeof o === "string" && /^-?\d+(?:\.\d+)?$/.test(o))));
+        if (numericDomain && typeof props[name] === "string") {
+          offenders.push(`${entry.name}.${name} = ${JSON.stringify(props[name])}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

@@ -42,7 +42,7 @@ def _iter_report_files(reports_dir: Path):
 
 def _load_report(path: Path) -> dict | None:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
     except Exception:  # noqa: BLE001
         logger.warning("[critic-summary] skipping unreadable %s", path)
@@ -145,7 +145,7 @@ def persist_summary(output_dir: str) -> Path | None:
         reports_dir = Path(output_dir) / _REPORTS_DIRNAME
         reports_dir.mkdir(parents=True, exist_ok=True)
         path = reports_dir / _SUMMARY_NAME
-        path.write_text(json.dumps(summary, indent=2))
+        path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return path
     except Exception:  # noqa: BLE001
         logger.exception(

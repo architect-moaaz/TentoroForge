@@ -19,6 +19,9 @@ export const MaskedInputProps = z.object({
   mask:        z.string().default("###"),
   placeholder: z.string().optional(),
   disabled:    z.boolean().optional(),
+  /** Declarative prefill from the schema. `value` alone is an INITIAL value,
+   *  never a demand to be controlled — see util/useFieldValue.ts. */
+  defaultValue: z.string().optional(),
   bind:        z.string().optional(),
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),

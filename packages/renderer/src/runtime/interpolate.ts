@@ -26,6 +26,15 @@ import { evalExpression } from "./bindings";
  *   - Calls evalExpression — the same function used by visibleIf — so the
  *     expression syntax is identical to what node.visibleIf already accepts.
  */
+/**
+ * The editor's abandoned bound-prop shape. Recognised here only so it can be
+ * converted; nothing should ever produce it again.
+ */
+function isLegacyBindingObject(v: unknown): boolean {
+  return !!v && typeof v === "object" && !Array.isArray(v)
+    && "$binding" in (v as object);
+}
+
 const TEMPLATE_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const WHOLE_TEMPLATE_RE = /^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/;
 
@@ -125,11 +134,11 @@ function applyFormatter(value: unknown, formatter: string, arg?: string): unknow
 export function interpolate(text: string, data: Record<string, unknown>): unknown {
   if (typeof text !== "string" || text.indexOf("{{") === -1) return text;
   // Whole-string template — preserve the value's native type when it
-  // resolves. When it doesn't (no data context, e.g. editor preview), keep
-  // the literal template string so required string fields still validate
-  // (the user sees the placeholder text, layout doesn't break). The previous
-  // undefined-on-unresolved behaviour drops the key from the parent and
-  // crashes validation for required fields.
+  // resolves. When it doesn't, the result is "" — NOT the literal template.
+  // An empty string still satisfies "the key is present and is a string", which
+  // is all the original literal-fallback was protecting (validateProps is
+  // best-effort and coerces the rest), and it cannot leak `{{…}}` at users.
+  // The editor opts back into visible placeholders with `data.__authoring`.
   const whole = text.match(WHOLE_TEMPLATE_RE);
   if (whole) {
     const rawExpr = whole[1].trim();
@@ -139,24 +148,39 @@ export function interpolate(text: string, data: Record<string, unknown>): unknow
     const rawValue = evalExpression(expr, data);
     const v = formatter ? applyFormatter(rawValue, formatter, arg) : rawValue;
     if (v === undefined || v === null || v === false) {
-      // Live render: when the binding's ROOT source is present in the data
-      // context (e.g. a Repeat row `item`, or a resolved dataSource) but the
-      // path didn't resolve — typically a field that doesn't exist on the row —
-      // render empty rather than leaking the raw `{{…}}` placeholder to users.
-      // Only the editor/preview canvas (no data context at all) keeps the
-      // placeholder visible so authors can see what's bound.
-      const root = expr.match(/^([A-Za-z_$][\w$]*)/)?.[1];
-      if (root && Object.prototype.hasOwnProperty.call(data, root)) return "";
-      return text;
+      // NEVER LEAK `{{…}}` TO AN END USER.
+      //
+      // This used to keep the raw placeholder whenever the binding's ROOT was
+      // absent from the data context, on the reasoning that "no data context"
+      // means the editor canvas and an author wants to see what is bound. But
+      // "root absent" is ALSO exactly what a missing dataSource looks like in a
+      // real, running application — so the heuristic could not tell an authoring
+      // surface from a shipped page. Live consequence: `/items` rendered
+      // `{{metrics.list_total_inventory_value}}` as visible text to the end
+      // user, because the `metrics` namespace and the page's `dataSources` are
+      // generated independently and never agreed.
+      //
+      // The signal is now EXPLICIT rather than inferred: the editor opts in by
+      // putting `__authoring` in the data bag, and everything else — preview,
+      // generated app, export — renders empty. Safe by default; a surface that
+      // wants placeholders has to ask.
+      if (data && (data as Record<string, unknown>).__authoring === true) return text;
+      return "";
     }
     return v;
   }
-  // Mixed text + templates — string substitution as before.
-  return text.replace(TEMPLATE_RE, (_match, rawExpr: string) => {
+  // Mixed text + templates — string substitution.
+  const authoring = !!data && (data as Record<string, unknown>).__authoring === true;
+  return text.replace(TEMPLATE_RE, (match, rawExpr: string) => {
     const { source, formatter, arg } = splitFormatter(rawExpr.trim());
     const raw = evalExpression(source, data);
     const v = formatter ? applyFormatter(raw, formatter, arg) : raw;
-    if (v === undefined || v === null || v === false) return "";
+    // Same contract as the whole-string branch: end users get nothing, the
+    // authoring canvas gets the placeholder it asked for. Keeping the two
+    // branches in step matters — "Total: {{x}}" and "{{x}}" are the same
+    // binding to the author, and they should not disagree about whether it
+    // is visible.
+    if (v === undefined || v === null || v === false) return authoring ? match : "";
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
     try { return JSON.stringify(v); } catch { return ""; }
   });
@@ -174,6 +198,22 @@ export function interpolate(text: string, data: Record<string, unknown>): unknow
  */
 export function interpolateDeep(value: unknown, data: Record<string, unknown>): unknown {
   if (typeof value === "string") return interpolate(value, data);
+  // LEGACY `{ $binding: "expr" }` — resolve it like the template it meant to be.
+  //
+  // The visual editor briefly wrote bound props as this object. Nothing here
+  // understood it: it is not a string, so the branch above never saw it, and it
+  // walked out of the object branch below intact and straight into React child
+  // position — "Objects are not valid as a React child (found: object with keys
+  // {$binding})". The editor now writes "{{expr}}" and heals pages as it loads
+  // them, but a project generated before that still has the object ON DISK and
+  // may never be opened in the editor again.
+  //
+  // So the renderer forgives it. One shape, converted to the format it should
+  // always have been, at the single point every prop already passes through.
+  if (isLegacyBindingObject(value)) {
+    const expr = String((value as { $binding?: unknown }).$binding ?? "");
+    return expr ? interpolate(`{{${expr}}}`, data) : "";
+  }
   if (Array.isArray(value)) {
     // Drop array elements that interpolate to undefined.
     const out: unknown[] = [];

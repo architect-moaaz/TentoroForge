@@ -137,7 +137,7 @@ def reconcile_nav_flow(nav_flow_path: str) -> dict[str, Any]:
     if not p.exists():
         return {"dropped": 0, "renamed": 0, "notes": []}
     try:
-        nf = json.loads(p.read_text())
+        nf = json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 — a malformed contract is not our business
         return {"dropped": 0, "renamed": 0, "notes": []}
 
@@ -156,7 +156,7 @@ def reconcile_nav_flow(nav_flow_path: str) -> dict[str, Any]:
             p_["shell"] = False          # out of the menu, still routable
 
     if report["dropped"] or report["renamed"]:
-        p.write_text(json.dumps(nf, indent=2))
+        p.write_text(json.dumps(nf, indent=2), encoding="utf-8")
     # `renamed` counts titles rewritten in place; before/after kept for clarity
     _ = before
     return report

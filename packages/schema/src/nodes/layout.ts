@@ -58,6 +58,13 @@ export const GridNode = z
     props: z
       .object({
         columns: z.number().int().min(1).max(12),
+        // rows — fixed row count picked in the visual editor. 0/absent keeps the
+        // original implicit-row behaviour (children flow and wrap); above 0 the
+        // grid holds exactly rows x columns GridCell children. Must be declared
+        // because this props object is .strict() — an undeclared prop makes the
+        // whole page fail to parse, which in the editor means the save is
+        // rejected with no visible cause.
+        rows: z.number().int().min(0).max(12).optional(),
         gap: TokenRef.optional(),
         // Codifies the iteration-3 v4 spike CSS fix: optional layout-evenness
         // booleans so schemas can declare intent and the renderer guarantees

@@ -171,9 +171,13 @@ async def fetch_jsx_via_mcp(figma_url: str) -> str | None:
                     FIGMA_MCP_TOOL_NAME,
                     arguments={"fileKey": file_key, "nodeId": node_id},
                 )
-        # `isError` is a boolean on the CallToolResult; treat it as a
-        # failure so upstream falls back to the deterministic schema.
-        if getattr(result, "isError", False):
+        # `is_error` on the object, `isError` only as a wire alias under
+        # mcp 2.0 — reading the camelCase name returned the `False` default
+        # for every real failure, so this fallback (and the warning below)
+        # was unreachable. See `mcp_client.tool_result_is_error`.
+        from services.mcp_client import tool_result_is_error
+
+        if tool_result_is_error(result):
             logger.warning(
                 "[figma_mcp] tool returned isError for %s/%s", file_key, node_id,
             )

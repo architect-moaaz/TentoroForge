@@ -1,5 +1,6 @@
 // packages/patches/src/apply.ts
 import type { Artifacts, EditorAction, ApplyResult, SchemaNode, PageId } from "./types";
+import { isBinding, bindingExpression, toBindingValue } from "./binding";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -315,10 +316,17 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const node = loc.node;
       if (!node.props) node.props = {};
       const prev = node.props[action.propName];
-      node.props[action.propName] = { $binding: action.binding };
+      // THE MUSTACHE STRING, NOT `{ $binding: … }` — see binding.ts for the full
+      // account. The object form was implemented by nothing outside this editor:
+      // it survived interpolation, survived validateProps, and reached React in
+      // child position, so binding a prop broke the node on the spot and then
+      // persisted the breakage into the generated app.
+      node.props[action.propName] = toBindingValue(action.binding);
 
-      // Inverse: if previous value was a literal, unbind back to it
-      if (prev !== undefined && (typeof prev !== "object" || !(prev as any).$binding)) {
+      // Inverse: if previous value was a literal, unbind back to it.
+      // `isBinding` covers BOTH forms, so undo still works on a page that has
+      // not been migrated off the legacy object yet.
+      if (prev !== undefined && !isBinding(prev)) {
         return {
           next,
           inverse: {
@@ -354,8 +362,13 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const prev = node.props[action.propName];
       node.props[action.propName] = action.literalValue;
 
-      // Inverse: re-bind if previous was a $binding
-      if (prev && typeof prev === "object" && (prev as any).$binding) {
+      // Inverse: re-bind if the previous value was a binding, in either form.
+      //
+      // This used to test the TRUTHINESS of `prev.$binding`, so a freshly
+      // toggled-but-never-filled bind (`{ $binding: "" }`) took the updateProp
+      // branch instead and undo was silently asymmetric. `isBinding` tests the
+      // shape, so an empty bind round-trips like any other.
+      if (isBinding(prev)) {
         return {
           next,
           inverse: {
@@ -363,7 +376,7 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
             pageId: action.pageId,
             nodeId: action.nodeId,
             propName: action.propName,
-            binding: (prev as any).$binding as string,
+            binding: bindingExpression(prev),
           },
         };
       }
@@ -381,6 +394,39 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
 
     // -----------------------------------------------------------------------
     case "addPage": {
+      // Refuse to land on top of an existing page. Without this check
+      // `pageSchemas[id] = {...}` REPLACED the user's page (its whole node
+      // tree gone), pushed a SECOND navFlow entry for the same id, and handed
+      // back `inverse: removePage` — so Ctrl-Z then deleted the page the user
+      // had before the collision. validateForCommit could not catch it either:
+      // it only checks id uniqueness inside the surviving trees, and the
+      // overwritten tree is already gone by then.
+      //
+      // The dialog does de-duplicate titles, but only against the `nav-flow`
+      // react-query, which returns `{ pages: [] }` on any non-ok response and
+      // is undefined while loading — open "New page" before that settles (or
+      // with the backend down) and it de-duplicates against nothing. This is
+      // the only guard that sees the artifacts the write actually lands in.
+      if (next.pageSchemas[action.pageId]) {
+        throw new Error(
+          `applyAction: page "${action.pageId}" already exists — ` +
+          `choose a different title, or open the existing page instead`,
+        );
+      }
+      const routeTaken = next.navFlow.pages.find(p => p.route === action.route);
+      if (routeTaken) {
+        throw new Error(
+          `applyAction: route "${action.route}" is already served by page ` +
+          `"${(routeTaken as { id?: string }).id}" — choose a different title`,
+        );
+      }
+      // A stale navFlow entry with no pageSchema would also make the inverse
+      // removePage destroy something addPage did not create.
+      if (next.navFlow.pages.some(p => (p as { id?: string }).id === action.pageId)) {
+        throw new Error(
+          `applyAction: navFlow already has an entry for page "${action.pageId}"`,
+        );
+      }
       next.pageSchemas[action.pageId] = {
         schemaVersion: "2",
         id: action.pageId,

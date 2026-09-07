@@ -195,10 +195,10 @@ def enrich_schema_file(
     if not p.exists():
         return 0
     try:
-        schema = json.loads(p.read_text())
+        schema = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return 0
     n = enrich_schema_visuals(schema, design_spec=design_spec, route=route)
     if n > 0:
-        p.write_text(json.dumps(schema, indent=2))
+        p.write_text(json.dumps(schema, indent=2), encoding="utf-8")
     return n

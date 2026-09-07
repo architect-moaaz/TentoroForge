@@ -27,7 +27,7 @@ from services.tool_app_modifier_tools import (
 
 def test_read_returns_numbered_content(tmp_path):
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.json").write_text('{"hello": 1}\n{"world": 2}\n')
+    (tmp_path / "src" / "a.json").write_text('{"hello": 1}\n{"world": 2}\n', encoding="utf-8")
     r = read_tool(str(tmp_path), "src/a.json")
     assert r["ok"] is True
     assert "1  " in r["content"]  # first line numbered
@@ -56,7 +56,7 @@ def test_read_missing_file_returns_error(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_bash_allows_grep(tmp_path):
-    (tmp_path / "a.txt").write_text("hello world\n")
+    (tmp_path / "a.txt").write_text("hello world\n", encoding="utf-8")
     r = bash_tool(str(tmp_path), "grep hello a.txt")
     assert r["ok"] is True
     assert "hello world" in r["stdout"]
@@ -64,7 +64,7 @@ def test_bash_allows_grep(tmp_path):
 
 
 def test_bash_refuses_rm(tmp_path):
-    (tmp_path / "victim.txt").write_text("x")
+    (tmp_path / "victim.txt").write_text("x", encoding="utf-8")
     r = bash_tool(str(tmp_path), "rm victim.txt")
     assert r["ok"] is False
     assert "allowlist" in r["error"]
@@ -87,7 +87,7 @@ def test_bash_git_only_read_subcommands(tmp_path):
 
 
 def test_bash_python_one_liner_ok(tmp_path):
-    (tmp_path / "x.json").write_text('{"a": 1}')
+    (tmp_path / "x.json").write_text('{"a": 1}', encoding="utf-8")
     r = bash_tool(str(tmp_path), 'python3 -c "import json; print(json.load(open(\'x.json\'))[\'a\'])"')
     assert r["ok"] is True
     assert "1" in r["stdout"]
@@ -98,32 +98,32 @@ def test_bash_python_one_liner_ok(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_edit_replaces_unique_match(tmp_path):
-    (tmp_path / "x.json").write_text('{"kind": "Select"}\n')
+    (tmp_path / "x.json").write_text('{"kind": "Select"}\n', encoding="utf-8")
     r = edit_tool(str(tmp_path), "x.json", '"Select"', '"FileUpload"')
     assert r["ok"] is True
     assert r["matches_replaced"] == 1
-    assert (tmp_path / "x.json").read_text() == '{"kind": "FileUpload"}\n'
+    assert (tmp_path / "x.json").read_text(encoding="utf-8") == '{"kind": "FileUpload"}\n'
 
 
 def test_edit_refuses_ambiguous_match(tmp_path):
-    (tmp_path / "x.json").write_text('{"a": "Select"}\n{"b": "Select"}\n')
+    (tmp_path / "x.json").write_text('{"a": "Select"}\n{"b": "Select"}\n', encoding="utf-8")
     r = edit_tool(str(tmp_path), "x.json", '"Select"', '"FileUpload"')
     assert r["ok"] is False
     assert "ambiguous" in r["error"]
-    assert "Select" in (tmp_path / "x.json").read_text()  # untouched
+    assert "Select" in (tmp_path / "x.json").read_text(encoding="utf-8")  # untouched
 
 
 def test_edit_replace_all(tmp_path):
-    (tmp_path / "x.json").write_text('{"a": "Select"}\n{"b": "Select"}\n')
+    (tmp_path / "x.json").write_text('{"a": "Select"}\n{"b": "Select"}\n', encoding="utf-8")
     r = edit_tool(str(tmp_path), "x.json", '"Select"', '"FileUpload"',
                   replace_all=True)
     assert r["ok"] is True
     assert r["matches_replaced"] == 2
-    assert "Select" not in (tmp_path / "x.json").read_text()
+    assert "Select" not in (tmp_path / "x.json").read_text(encoding="utf-8")
 
 
 def test_edit_missing_anchor_reports_error(tmp_path):
-    (tmp_path / "x.json").write_text('{"kind": "Select"}\n')
+    (tmp_path / "x.json").write_text('{"kind": "Select"}\n', encoding="utf-8")
     r = edit_tool(str(tmp_path), "x.json", '"Kanban"', '"FileUpload"')
     assert r["ok"] is False
     assert "not found" in r["error"]
@@ -141,15 +141,15 @@ def test_edit_rejects_outside_sandbox(tmp_path):
 def test_write_creates_new_file(tmp_path):
     r = write_tool(str(tmp_path), "new/a.json", '{"a": 1}')
     assert r["ok"] is True
-    assert (tmp_path / "new" / "a.json").read_text() == '{"a": 1}'
+    assert (tmp_path / "new" / "a.json").read_text(encoding="utf-8") == '{"a": 1}'
 
 
 def test_write_refuses_existing_file(tmp_path):
-    (tmp_path / "x.json").write_text("old")
+    (tmp_path / "x.json").write_text("old", encoding="utf-8")
     r = write_tool(str(tmp_path), "x.json", "new")
     assert r["ok"] is False
     assert "exists" in r["error"]
-    assert (tmp_path / "x.json").read_text() == "old"
+    assert (tmp_path / "x.json").read_text(encoding="utf-8") == "old"
 
 
 def test_write_rejects_outside_sandbox(tmp_path):
@@ -170,17 +170,17 @@ def _seed_project(tmp_path):
         "pages":    [{"route": "/candidates"}],
         "workflows": [],
         "dataSources": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps({
         "entities": [{"name": "Candidate", "table": "candidates"}],
         "pages":    [{"route": "/candidates"}],
         "workflows": [],
-    }))
+    }), encoding="utf-8")
     (tmp_path / "plan.json").write_text(json.dumps({
         "data_models": [{"name": "Candidate", "fields": [{"name": "email"}]}],
         "pages":       [{"route": "/candidates", "type": "list"}],
         "workflows":   [],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -193,14 +193,14 @@ def test_registry_patch_add_entity_updates_all(tmp_path):
     assert r["ok"] is True
     assert len(r["files_touched"]) >= 2  # registry.json + resource-registry.json + plan.json
 
-    reg = json.loads((tmp_path / "registry.json").read_text())
+    reg = json.loads((tmp_path / "registry.json").read_text(encoding="utf-8"))
     assert "Recruiter" in reg["entities"]
 
-    rr = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text())
+    rr = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text(encoding="utf-8"))
     names = {e["name"] for e in rr["entities"]}
     assert "Recruiter" in names
 
-    plan = json.loads((tmp_path / "plan.json").read_text())
+    plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
     plan_names = {m["name"] for m in plan["data_models"]}
     assert "Recruiter" in plan_names
 
@@ -211,10 +211,10 @@ def test_registry_patch_add_page_updates_registry_and_plan(tmp_path):
         "route": "/recruiters", "type": "list", "entity": "Recruiter",
     })
     assert r["ok"] is True
-    reg = json.loads((tmp_path / "registry.json").read_text())
+    reg = json.loads((tmp_path / "registry.json").read_text(encoding="utf-8"))
     routes = {p["route"] for p in reg["pages"]}
     assert "/recruiters" in routes
-    plan = json.loads((tmp_path / "plan.json").read_text())
+    plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
     plan_routes = {p["route"] for p in plan["pages"]}
     assert "/recruiters" in plan_routes
 
@@ -225,11 +225,11 @@ def test_registry_patch_remove_entity(tmp_path):
         "name": "Candidate",
     })
     assert r["ok"] is True
-    reg = json.loads((tmp_path / "registry.json").read_text())
+    reg = json.loads((tmp_path / "registry.json").read_text(encoding="utf-8"))
     assert "Candidate" not in reg["entities"]
-    rr = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text())
+    rr = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text(encoding="utf-8"))
     assert {e["name"] for e in rr["entities"]} == set()
-    plan = json.loads((tmp_path / "plan.json").read_text())
+    plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
     assert plan["data_models"] == []
 
 
@@ -240,7 +240,7 @@ def test_registry_patch_add_workflow(tmp_path):
         "trigger": "form_submit",
     })
     assert r["ok"] is True
-    plan = json.loads((tmp_path / "plan.json").read_text())
+    plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
     wf_names = {w["name"] for w in plan["workflows"]}
     assert "CreateRecruiter" in wf_names
 
@@ -248,12 +248,12 @@ def test_registry_patch_add_workflow(tmp_path):
 def test_registry_patch_add_datasource_no_plan_change(tmp_path):
     """dataSource is a registry-only concept — plan.json unchanged."""
     _seed_project(tmp_path)
-    plan_before = (tmp_path / "plan.json").read_text()
+    plan_before = (tmp_path / "plan.json").read_text(encoding="utf-8")
     r = registry_patch_tool(str(tmp_path), "dataSource", "add", {
         "name": "recruiters", "entity": "Recruiter", "op": "list",
     })
     assert r["ok"] is True
-    assert (tmp_path / "plan.json").read_text() == plan_before
+    assert (tmp_path / "plan.json").read_text(encoding="utf-8") == plan_before
 
 
 def test_registry_patch_missing_key_rejected(tmp_path):
@@ -280,7 +280,7 @@ def test_handlers_cover_every_catalog_tool():
 
 
 def test_handler_dispatches_read(tmp_path):
-    (tmp_path / "a.txt").write_text("hello")
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
     out = HANDLERS["Read"](str(tmp_path), {"path": "a.txt"})
     assert out["ok"] is True
     assert "hello" in out["content"]

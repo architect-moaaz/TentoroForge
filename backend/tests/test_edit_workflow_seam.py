@@ -29,7 +29,7 @@ def _write_wf(tmp_path: Path, wf_id: str = "process_cv", trigger_inputs=None) ->
                                  "values": {"status": "'done'"}}}},
             {"id": "end", "type": "end"},
         ],
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     return tmp_path / "workflows" / f"{wf_id}.json"
 
 
@@ -180,14 +180,14 @@ def test_broken_connectivity_rollbacks_file(tmp_path):
     path = _write_wf(tmp_path, trigger_inputs=[
         {"name": "candidateId", "type": "uuid", "required": True},
     ])
-    before = path.read_text()
+    before = path.read_text(encoding="utf-8")
     r = edit_workflow(str(tmp_path), "process_cv", {
         # Point act at a non-existent id → workflow_dangling_target violation.
         "rewire": {"step_id": "act", "next": "no_such_step"},
     })
     assert r.success is False
     assert r.violations
-    assert path.read_text() == before, "file must be untouched on validation failure"
+    assert path.read_text(encoding="utf-8") == before, "file must be untouched on validation failure"
 
 
 def test_multiple_changes_applied_in_order(tmp_path):

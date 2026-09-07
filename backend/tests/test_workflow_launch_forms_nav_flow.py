@@ -71,7 +71,7 @@ def test_launch_form_registers_page_and_edge_in_nav_flow(tmp_path):
     assert (out / "src" / "schemas" / f"{form_slug}.json").exists()
 
     # (b) The source button was repointed to navigate to that route.
-    src = json.loads((out / "src" / "schemas" / "assessments.json").read_text())
+    src = json.loads((out / "src" / "schemas" / "assessments.json").read_text(encoding="utf-8"))
     btn = src["root"]["children"][0]
     assert btn["props"].get("navigate") == form_route
     assert "workflow" not in btn["props"]
@@ -79,7 +79,7 @@ def test_launch_form_registers_page_and_edge_in_nav_flow(tmp_path):
     # (c) nav-flow.json exists and now has a node for the new route + an incoming edge.
     nav_path = out / "src" / "contracts" / "nav-flow.json"
     assert nav_path.exists(), "nav-flow.json should have been synthesized"
-    nav = json.loads(nav_path.read_text())
+    nav = json.loads(nav_path.read_text(encoding="utf-8"))
     pages = nav["pages"]
     routes = [p.get("route") for p in pages]
     assert form_route in routes, f"expected {form_route} node in nav-flow pages; got {routes}"
@@ -101,10 +101,10 @@ def test_launch_form_registers_page_and_edge_in_nav_flow(tmp_path):
 def test_launch_form_nav_flow_registration_is_idempotent(tmp_path):
     registry, out = _mc_shaped_app(tmp_path)
     ensure_workflow_launch_forms(str(out), registry)
-    nav1 = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+    nav1 = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     # Second run: no new nodes/edges added.
     ensure_workflow_launch_forms(str(out), registry)
-    nav2 = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+    nav2 = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     assert len(nav2["pages"]) == len(nav1["pages"])
     assert len(nav2["transitions"]) == len(nav1["transitions"])
 

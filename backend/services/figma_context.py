@@ -27,7 +27,7 @@ def extract_figma_context(output_dir: str, figma_url: str) -> dict:
         logger.warning("[figma_context] styles.json not found in %s", output_dir)
         return {}
 
-    raw = styles_path.read_text()
+    raw = styles_path.read_text(encoding="utf-8")
     styles_hash = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
 
     try:
@@ -126,7 +126,7 @@ def extract_figma_context(output_dir: str, figma_url: str) -> dict:
     # Write to src/contracts/figma-context.json
     ctx_path = Path(output_dir) / _CONTEXT_PATH
     ctx_path.parent.mkdir(parents=True, exist_ok=True)
-    ctx_path.write_text(json.dumps(context, indent=2))
+    ctx_path.write_text(json.dumps(context, indent=2), encoding="utf-8")
     logger.info("[figma_context] Wrote %s with %d colors, %d fonts",
                 ctx_path, len(colors), len(fonts))
 
@@ -152,7 +152,7 @@ def should_refetch_figma(output_dir: str, new_figma_url: str | None) -> bool:
 
     # Compare URLs
     try:
-        existing = json.loads(ctx_path.read_text())
+        existing = json.loads(ctx_path.read_text(encoding="utf-8"))
         existing_url = existing.get("figma_url", "")
         if existing_url != new_figma_url:
             logger.info("[figma_context] URL changed: %s → %s", existing_url, new_figma_url)
@@ -173,7 +173,7 @@ def get_figma_context_for_prompt(output_dir: str) -> str:
         return ""
 
     try:
-        ctx = json.loads(ctx_path.read_text())
+        ctx = json.loads(ctx_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return ""
 

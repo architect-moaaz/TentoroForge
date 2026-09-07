@@ -55,14 +55,14 @@ def _fix_component_import(root: Path, err: RegistryError) -> str | None:
         if "node_modules" in str(page_file):
             continue
         try:
-            content = page_file.read_text()
+            content = page_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
         if wrong_name in content:
             new_content = content.replace(wrong_name, right_name)
             if new_content != content:
-                page_file.write_text(new_content)
+                page_file.write_text(new_content, encoding="utf-8")
                 logger.info("Fixed import %s -> %s in %s", wrong_name, right_name, page_file)
                 return str(page_file.relative_to(root))
 
@@ -88,7 +88,7 @@ def _fix_field_reference(root: Path, err: RegistryError) -> str | None:
         if "node_modules" in str(tsx_file):
             continue
         try:
-            content = tsx_file.read_text()
+            content = tsx_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -108,7 +108,7 @@ def _fix_field_reference(root: Path, err: RegistryError) -> str | None:
             new_content = new_content.replace(old, new)
 
         if new_content != content:
-            tsx_file.write_text(new_content)
+            tsx_file.write_text(new_content, encoding="utf-8")
             logger.info("Fixed field ref %s -> %s in %s", wrong_field, right_field, tsx_file)
             return str(tsx_file.relative_to(root))
 

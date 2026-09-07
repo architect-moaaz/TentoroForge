@@ -57,7 +57,7 @@ def build_nav_flow_from_schemas(base_dir: str | Path) -> dict[str, Any] | None:
         if f.name in _SKIP_NAMES:
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             data = {}
         if not isinstance(data, dict):
@@ -118,5 +118,5 @@ def ensure_nav_flow(base_dir: str | Path) -> Path | None:
     if not nav:
         return None
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(nav, indent=2))
+    target.write_text(json.dumps(nav, indent=2), encoding="utf-8")
     return target

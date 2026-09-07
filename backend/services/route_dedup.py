@@ -254,7 +254,7 @@ def dedupe_routes(output_dir: str | Path) -> dict:
     plan = _load_plan(root)
     nav_flow = _load_nav_flow(root)
     try:
-        shell = json.loads((root / "src" / "schemas" / "shell.json").read_text())
+        shell = json.loads((root / "src" / "schemas" / "shell.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         shell = {}
     plan_routes = {
@@ -443,7 +443,12 @@ def dedupe_schema_files(output_dir: str | Path) -> dict:
         winner = None
         if reg_rel:
             for f in files:
-                if str(f.relative_to(sdir)) == reg_rel:
+                # `reg_rel` is scraped out of registry.ts's `import("./…")`
+                # specifiers, which are always forward-slash. With `str()` the
+                # "the file registry.ts actually imports wins" rule never fired
+                # for a nested schema on Windows, and the fallback heuristic
+                # below could unlink the very file registry.ts imports.
+                if f.relative_to(sdir).as_posix() == reg_rel:
                     winner = f
                     break
         if winner is None:

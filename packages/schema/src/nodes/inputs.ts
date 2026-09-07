@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { StyleSlot } from "../style-slot";
 
-const Validators = z.object({
+/**
+ * The one validation vocabulary every input node speaks. Exported because the
+ * library's per-component prop schemas (Slider, TimePicker, ColorPicker,
+ * Rating, InputOTP — the ones that do NOT derive from `…Node.shape.props`)
+ * need the identical shape: they had each grown their own field list or, more
+ * often, no `validators` at all, so an author could mark a text Input required
+ * but had no way to mark a Rating or a TimePicker required. Re-declaring the
+ * object per component is how that divergence started; import this instead.
+ */
+export const Validators = z.object({
   required: z.boolean().optional(),
   min:      z.number().optional(),
   max:      z.number().optional(),
@@ -16,6 +25,16 @@ const baseField = {
   label:      z.string().min(1),
   bind:       z.string().optional(),
   validators: Validators.optional(),
+  // DECLARATIVE PREFILL — and the reason half the input library used to be dead.
+  //
+  // These node schemas are `.strict()` and had no way to express a field's value
+  // at all, so a component that took `value` as a prop could never receive one
+  // from a page schema. Components that were fully controlled therefore sat on
+  // their parameter default forever: a Slider that snapped back to 0, a
+  // ColorPicker frozen on #000000. `defaultValue` gives the schema something to
+  // say, and `util/useFieldValue.ts` treats it as a SEED rather than as
+  // ownership — the field stays editable.
+  defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
 };
 
 export const InputNode = z.object({
@@ -163,6 +182,13 @@ export const SliderNode = z.object({
     range:     z.boolean().optional(),
     showValue: z.boolean().optional(),
     bind:      z.string().optional(),
+    // Slider/ColorPicker/Rating/InputOTP declare their props inline rather than
+    // via `baseField`, and every one of them simply forgot `validators` — so
+    // "this field is required" was expressible on an Input and not on any of
+    // them. The rules themselves are the same rules.
+    validators: Validators.optional(),
+    // A pair when `range` is true; see baseField for why this exists.
+    defaultValue: z.union([z.number(), z.tuple([z.number(), z.number()])]).optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -223,6 +249,8 @@ export const ColorPickerNode = z.object({
     label:    z.string().optional(),
     disabled: z.boolean().optional(),
     bind:     z.string().optional(),
+    validators: Validators.optional(),
+    defaultValue: z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -237,6 +265,7 @@ export const InputOTPNode = z.object({
     length:   z.number().int().positive().optional(),
     disabled: z.boolean().optional(),
     bind:     z.string().optional(),
+    validators: Validators.optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -251,6 +280,8 @@ export const RatingNode = z.object({
     max:      z.number().int().positive().optional(),
     disabled: z.boolean().optional(),
     bind:     z.string().optional(),
+    validators: Validators.optional(),
+    defaultValue: z.number().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -266,6 +297,7 @@ export const MaskedInputNode = z.object({
     placeholder: z.string().optional(),
     disabled:    z.boolean().optional(),
     bind:        z.string().optional(),
+    defaultValue: z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

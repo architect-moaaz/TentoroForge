@@ -255,7 +255,7 @@ class FidelityLoopRunner:
         cost_at_start = self.cost_tracker.total
         iterations: list[IterationOutcome] = []
         schema_path = self.output_dir / "src" / "schemas" / f"{page.page_path}.json"
-        schema = json.loads(schema_path.read_text())
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
         evaluator_ctx = EvaluatorContext(
             domain=self.project_ctx.domain,
@@ -381,14 +381,14 @@ class FidelityLoopRunner:
                 continue
 
             # Persist new schema
-            schema_path.write_text(json.dumps(new_schema, indent=2))
+            schema_path.write_text(json.dumps(new_schema, indent=2), encoding="utf-8")
             try:
                 png, a11y = await _render_page(
                     scaffold_url="", project_id=page.short_id, page_route=page.page_route,
                 )
             except Exception as e:
                 # Restore prior schema on render failure
-                schema_path.write_text(json.dumps(schema, indent=2))
+                schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
                 iterations.append(IterationOutcome(
                     iter=i, score=prev_score, score_delta=0.0,
                     issues_input=len(critique.topIssues),
@@ -416,7 +416,7 @@ class FidelityLoopRunner:
 
             if regressed:
                 # Restore prior schema
-                schema_path.write_text(json.dumps(schema, indent=2))
+                schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
                 iterations.append(IterationOutcome(
                     iter=i, score=new_score, score_delta=score_delta,
                     issues_input=len(critique.topIssues),
@@ -472,7 +472,7 @@ class FidelityLoopRunner:
                 page=page, critique=critique, schema=schema, project_ctx=self.project_ctx,
             )
             if fallback_schema is not None:
-                schema_path.write_text(json.dumps(fallback_schema, indent=2))
+                schema_path.write_text(json.dumps(fallback_schema, indent=2), encoding="utf-8")
                 # Render + score the fallback once
                 try:
                     png, a11y = await _render_page(
@@ -494,7 +494,7 @@ class FidelityLoopRunner:
                             started_at=page_start, cost_at_start=cost_at_start,
                         )
                 except Exception:
-                    schema_path.write_text(json.dumps(schema, indent=2))
+                    schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
         return self._finalize(
             page, iterations, "failed", failed=True,

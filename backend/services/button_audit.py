@@ -107,14 +107,14 @@ def audit_app_buttons(app_dir) -> dict:
     wired = dead = 0
     for p in sroot.rglob("*.json"):
         try:
-            sc = json.loads(p.read_text())
+            sc = json.loads(p.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         route = route_from_slug(str(p.relative_to(sroot).with_suffix("")).replace("\\", "/"))
         before = json.dumps(sc)
         sc, findings = audit_button_actions(sc, routes, idx, route=route)
         if json.dumps(sc) != before:
-            p.write_text(json.dumps(sc, indent=2))
+            p.write_text(json.dumps(sc, indent=2), encoding="utf-8")
             wired += 1
         dead += len(findings)
     return {"wired": wired, "dead": dead}

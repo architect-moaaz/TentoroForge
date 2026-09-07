@@ -21,14 +21,14 @@ def _make_project(root: Path, project_id: str, register: str, domain: str,
             "final_score": score,
             "iterations": [{"score": score, "issues": issues, "pass": score >= 8.5}],
         }
-    }))
+    }), encoding="utf-8")
     schema_dir = proj / "src" / "schemas"
     schema_dir.mkdir(parents=True)
     (schema_dir / f"{page_path}.json").parent.mkdir(parents=True, exist_ok=True)
     (schema_dir / f"{page_path}.json").write_text(json.dumps({
         "schemaVersion": "2", "id": page_path, "route": f"/{page_path}",
         "meta": {}, "dataSources": [], "root": {"id": "r", "type": "Stack", "props": {}, "children": []}
-    }))
+    }), encoding="utf-8")
 
 
 def test_find_candidates_above_threshold(tmp_path):
@@ -57,6 +57,6 @@ def test_promote_candidate_writes_to_bank(tmp_path):
     assert promoted.parent.parent.name == "hr"
     assert promoted.parent.parent.parent.name == "workday"
 
-    meta = json.loads((promoted.parent / promoted.name.replace(".json", ".meta.json")).read_text())
+    meta = json.loads((promoted.parent / promoted.name.replace(".json", ".meta.json")).read_text(encoding="utf-8"))
     assert meta["score"] == 8.7
     assert meta["auto_promoted"] is True

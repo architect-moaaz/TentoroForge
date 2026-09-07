@@ -15,7 +15,7 @@ def test_default_admin_credentials():
     assert c == {"email": "admin@example.com", "password": "admin1234"}
 
 def test_env_override_wins(tmp_path):
-    (tmp_path/".env").write_text('DATABASE_URL=x\nSEED_ADMIN_EMAIL=boss@acme.co\nSEED_ADMIN_PASSWORD="s3cret!"\n')
+    (tmp_path/".env").write_text('DATABASE_URL=x\nSEED_ADMIN_EMAIL=boss@acme.co\nSEED_ADMIN_PASSWORD="s3cret!"\n', encoding="utf-8")
     c = admin_credentials(tmp_path)
     assert c == {"email": "boss@acme.co", "password": "s3cret!"}
 

@@ -12,7 +12,7 @@ from services.fixtures.enum_enrich import (
 def _write_schema(tmp_path, schema):
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True, exist_ok=True)
-    (sdir / "home.json").write_text(json.dumps(schema))
+    (sdir / "home.json").write_text(json.dumps(schema), encoding="utf-8")
     return str(sdir)
 
 

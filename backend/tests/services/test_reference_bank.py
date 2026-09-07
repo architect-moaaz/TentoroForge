@@ -17,11 +17,11 @@ def temp_bank(tmp_path: Path, monkeypatch):
     cell.mkdir(parents=True)
     schema = {"schemaVersion": "2", "id": "x", "route": "/x", "meta": {"title": "Patients"},
               "dataSources": [], "root": {"id": "r", "type": "Stack", "props": {}, "children": []}}
-    (cell / "exemplar_01.json").write_text(json.dumps(schema))
+    (cell / "exemplar_01.json").write_text(json.dumps(schema), encoding="utf-8")
     (cell / "exemplar_01.meta.json").write_text(json.dumps({
         "score": 8.4, "scored_at": "2026-05-06T10:00:00Z",
         "model_used": "sonnet-4-5", "seeder_version": "v1",
-    }))
+    }), encoding="utf-8")
     (cell / "exemplar_01.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.setattr("services.reference_bank._BANK_ROOT", bank)
     return bank
@@ -45,8 +45,8 @@ def test_load_exemplars_respects_limit(tmp_path: Path, monkeypatch):
     cell = bank / "general" / "detail"
     cell.mkdir(parents=True)
     for i in range(5):
-        (cell / f"exemplar_{i:02d}.json").write_text(json.dumps({"id": f"e{i}"}))
-        (cell / f"exemplar_{i:02d}.meta.json").write_text(json.dumps({"score": 8.0 + i * 0.1}))
+        (cell / f"exemplar_{i:02d}.json").write_text(json.dumps({"id": f"e{i}"}), encoding="utf-8")
+        (cell / f"exemplar_{i:02d}.meta.json").write_text(json.dumps({"score": 8.0 + i * 0.1}), encoding="utf-8")
     monkeypatch.setattr("services.reference_bank._BANK_ROOT", bank)
     assert len(load_exemplars("general", "detail", limit=2)) == 2
 
@@ -56,8 +56,8 @@ def test_load_exemplars_sorted_by_score_desc(tmp_path: Path, monkeypatch):
     cell = bank / "general" / "list"
     cell.mkdir(parents=True)
     for i, score in enumerate([8.1, 8.5, 8.3]):
-        (cell / f"exemplar_{i}.json").write_text(json.dumps({"id": f"e{i}"}))
-        (cell / f"exemplar_{i}.meta.json").write_text(json.dumps({"score": score}))
+        (cell / f"exemplar_{i}.json").write_text(json.dumps({"id": f"e{i}"}), encoding="utf-8")
+        (cell / f"exemplar_{i}.meta.json").write_text(json.dumps({"score": score}), encoding="utf-8")
     monkeypatch.setattr("services.reference_bank._BANK_ROOT", bank)
     exs = load_exemplars("general", "list", limit=3)
     scores = [e.score for e in exs]

@@ -49,10 +49,10 @@ class TestInjectPolishStylesheetsFlags:
         # Create fake globals.css that should NOT be touched.
         gp = tmp_path / "src" / "app" / "globals.css"
         gp.parent.mkdir(parents=True)
-        gp.write_text("body { color: red; }\n")
+        gp.write_text("body { color: red; }\n", encoding="utf-8")
         result = inject_polish_stylesheets(str(tmp_path))
         assert result.get("skipped") == "both_flags_off"
-        assert gp.read_text() == "body { color: red; }\n"
+        assert gp.read_text(encoding="utf-8") == "body { color: red; }\n"
 
     def test_no_globals_css_skip(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FORGE_POLISH_INTERACTIONS", "1")
@@ -64,7 +64,7 @@ class TestInjectHappyPath:
     def _make_globals(self, tmp_path):
         gp = tmp_path / "src" / "app" / "globals.css"
         gp.parent.mkdir(parents=True)
-        gp.write_text("body { color: red; }\n")
+        gp.write_text("body { color: red; }\n", encoding="utf-8")
         return gp
 
     def test_interactions_only(self, tmp_path, monkeypatch):
@@ -75,7 +75,7 @@ class TestInjectHappyPath:
         assert result.get("ok")
         assert "interactions" in result.get("injected", [])
         assert "theme-dark" not in result.get("injected", [])
-        text = gp.read_text()
+        text = gp.read_text(encoding="utf-8")
         assert _INTERACTIONS_START in text
         assert _INTERACTIONS_END in text
         # Original preserved.
@@ -89,7 +89,7 @@ class TestInjectHappyPath:
         assert result.get("ok")
         assert "theme-dark" in result.get("injected", [])
         assert "interactions" not in result.get("injected", [])
-        text = gp.read_text()
+        text = gp.read_text(encoding="utf-8")
         assert _DARK_START in text
         assert _DARK_END in text
 
@@ -99,7 +99,7 @@ class TestInjectHappyPath:
         gp = self._make_globals(tmp_path)
         result = inject_polish_stylesheets(str(tmp_path))
         assert set(result.get("injected", [])) == {"interactions", "theme-dark"}
-        text = gp.read_text()
+        text = gp.read_text(encoding="utf-8")
         assert _INTERACTIONS_START in text
         assert _DARK_START in text
 
@@ -108,9 +108,9 @@ class TestInjectHappyPath:
         monkeypatch.setenv("FORGE_POLISH_DARK_MODE", "1")
         gp = self._make_globals(tmp_path)
         inject_polish_stylesheets(str(tmp_path))
-        text_after_first = gp.read_text()
+        text_after_first = gp.read_text(encoding="utf-8")
         inject_polish_stylesheets(str(tmp_path))
-        text_after_second = gp.read_text()
+        text_after_second = gp.read_text(encoding="utf-8")
         # Same sentinels, same content — no duplication.
         assert text_after_first == text_after_second
         assert text_after_second.count(_INTERACTIONS_START) == 1
@@ -124,7 +124,7 @@ class TestFlagValues:
         monkeypatch.delenv("FORGE_POLISH_DARK_MODE", raising=False)
         gp = tmp_path / "src" / "app" / "globals.css"
         gp.parent.mkdir(parents=True)
-        gp.write_text("")
+        gp.write_text("", encoding="utf-8")
         result = inject_polish_stylesheets(str(tmp_path))
         assert "interactions" in result.get("injected", []), f"failed for {val!r}"
 
@@ -134,6 +134,6 @@ class TestFlagValues:
         monkeypatch.delenv("FORGE_POLISH_DARK_MODE", raising=False)
         gp = tmp_path / "src" / "app" / "globals.css"
         gp.parent.mkdir(parents=True)
-        gp.write_text("")
+        gp.write_text("", encoding="utf-8")
         result = inject_polish_stylesheets(str(tmp_path))
         assert result.get("skipped") == "both_flags_off", f"leaked for {val!r}"

@@ -1054,7 +1054,7 @@ def _read_forge_project_id(output_dir: str) -> str | None:
         if not p.exists():
             continue
         try:
-            for line in p.read_text().splitlines():
+            for line in p.read_text(encoding="utf-8").splitlines():
                 s = line.strip()
                 if s.startswith("FORGE_PROJECT_ID="):
                     val = s.split("=", 1)[1].strip().strip('"').strip("'")

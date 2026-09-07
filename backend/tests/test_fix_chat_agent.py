@@ -81,9 +81,9 @@ def _workflow(dirty: bool = True) -> dict:
 @pytest.fixture
 def app_dir(tmp_path: Path) -> Path:
     (tmp_path / "contracts").mkdir()
-    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY))
+    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY), encoding="utf-8")
     (tmp_path / "workflows").mkdir()
-    (tmp_path / "workflows" / "CreateAssessment.json").write_text(json.dumps(_workflow()))
+    (tmp_path / "workflows" / "CreateAssessment.json").write_text(json.dumps(_workflow()), encoding="utf-8")
     return tmp_path
 
 

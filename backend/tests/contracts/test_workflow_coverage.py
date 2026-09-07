@@ -72,7 +72,7 @@ def _palette_node_types() -> set[str]:
 
 def _contract_keys() -> set[str]:
     """Top-level keys in the ACTION_CONTRACTS object literal."""
-    txt = CONTRACTS_TS.read_text()
+    txt = CONTRACTS_TS.read_text(encoding="utf-8")
     start = txt.find("ACTION_CONTRACTS")
     if start < 0:
         return set()
@@ -81,7 +81,7 @@ def _contract_keys() -> set[str]:
 
 def _engine_switch_cases() -> set[str]:
     """`case "foo":` strings inside the executeNode switch."""
-    txt = ENGINE_TS.read_text()
+    txt = ENGINE_TS.read_text(encoding="utf-8")
     return set(re.findall(r'case\s+"(\w+)":', txt))
 
 

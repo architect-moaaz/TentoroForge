@@ -58,7 +58,7 @@ def _make_mobile_dir(
             "splash": {"backgroundColor": brand},
             "extra": {"description": description},
         },
-    }))
+    }), encoding="utf-8")
     return m
 
 

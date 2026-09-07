@@ -281,7 +281,7 @@ def test_run_workflow_gate_repairs_values(tmp_path):
                 ],
             }
         }
-    }))
+    }), encoding="utf-8")
     wf_dir = tmp_path / "workflows"
     wf_dir.mkdir()
     # A fully reachable trigger→action→end graph so the gate keeps the action.
@@ -306,12 +306,12 @@ def test_run_workflow_gate_repairs_values(tmp_path):
             ],
         },
     }
-    (wf_dir / "w.json").write_text(json.dumps(wf))
+    (wf_dir / "w.json").write_text(json.dumps(wf), encoding="utf-8")
 
     summary = run_workflow_gate(str(tmp_path))
     assert summary["value_type_fixes"] >= 1
 
-    out = json.loads((wf_dir / "w.json").read_text())
+    out = json.loads((wf_dir / "w.json").read_text(encoding="utf-8"))
     create_out = next(n for n in out["definition"]["nodes"]
                       if n["id"] == "create_assessment_record")
     vals = create_out["data"]["config"]["values"]
@@ -319,7 +319,7 @@ def test_run_workflow_gate_repairs_values(tmp_path):
     assert vals["scheduledAt"] == "CURRENT_TIMESTAMP"       # untouched
     # No residual mismatch.
     from services.workflow_value_types import columns_by_table_from_registry as _cbt
-    reg = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text())
+    reg = json.loads((tmp_path / "contracts" / "resource-registry.json").read_text(encoding="utf-8"))
     assert analyze_workflow_values(out["definition"], _cbt(reg)) == []
 
 

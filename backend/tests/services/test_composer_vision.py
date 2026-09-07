@@ -154,7 +154,7 @@ def _app(tmp_path: Path, reference: dict | None) -> Path:
     (root / "src" / "contracts").mkdir(parents=True)
     if reference is not None:
         (root / "src" / "contracts" / "composition-reference.json").write_text(
-            json.dumps(reference))
+            json.dumps(reference), encoding="utf-8")
     return root
 
 
@@ -209,7 +209,7 @@ class TestLoadReferenceImages:
 class TestPipelineThreading:
     def test_composer_receives_the_images(self, tmp_path, monkeypatch):
         root = _app(tmp_path, {"project_id": "proj-1"})
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}), encoding="utf-8")
 
         monkeypatch.setenv(pcp.FLAG_ENV, "1")
         monkeypatch.setattr(pcp, "_get_library_manifest",
@@ -239,7 +239,7 @@ class TestPipelineThreading:
         alone — which was every build, since designating a montage is
         rare. Now the page kind picks a curated screen instead."""
         root = _app(tmp_path, {"source": "built-in"})
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}), encoding="utf-8")
         monkeypatch.setenv(pcp.FLAG_ENV, "1")
         monkeypatch.setattr(pcp, "_get_library_manifest",
                             lambda: {"components": {"Table": {}}})
@@ -260,7 +260,7 @@ class TestPipelineThreading:
     def test_a_kind_with_no_reference_composes_on_prose_alone(self, tmp_path, monkeypatch):
         """The old no-images path still exists and still works."""
         root = _app(tmp_path, {"source": "built-in"})
-        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}))
+        (root / "src" / "contracts" / "plan.json").write_text(json.dumps({"pages": []}), encoding="utf-8")
         monkeypatch.setenv(pcp.FLAG_ENV, "1")
         monkeypatch.setattr(pcp, "_get_library_manifest",
                             lambda: {"components": {"Table": {}}})

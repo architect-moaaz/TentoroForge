@@ -132,12 +132,13 @@ def _vendor_one_package(src: Path, dst: Path) -> None:
 
     src_pkg = src / "package.json"
     if src_pkg.exists():
-        content = _json.loads(src_pkg.read_text())
+        content = _json.loads(src_pkg.read_text(encoding="utf-8"))
         content["dependencies"] = _rewrite_vendored_deps(
             content.get("dependencies") or {}
         )
         (dst / "package.json").write_text(
-            _json.dumps(content, indent=2) + "\n"
+            _json.dumps(content, indent=2) + "\n",
+            encoding="utf-8",
         )
 
     src_dist = src / "dist"
@@ -263,14 +264,14 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         if is_template:
-            content = src.read_text()
+            content = src.read_text(encoding="utf-8")
             content = _interpolate(
                 content,
                 project_short_id=project_short_id,
                 locale=locale,
                 direction=direction,
             )
-            dst.write_text(content)
+            dst.write_text(content, encoding="utf-8")
             continue
 
         # A plain .tsx carrying a placeholder — layout.tsx's <html lang/dir> is
@@ -395,7 +396,7 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
         # (dashboard) route group. ("/home" was a bug — home lives at "/".)
         default_initial = "/"
         if nav_path.exists():
-            nav = _json.loads(nav_path.read_text())
+            nav = _json.loads(nav_path.read_text(encoding="utf-8"))
             initial_for, default_initial = derive_root_redirect(nav)
 
         # Emit the session-aware root redirect. The map is inlined at

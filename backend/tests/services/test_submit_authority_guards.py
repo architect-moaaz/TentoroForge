@@ -18,11 +18,11 @@ def _scaffold(tmp_path: Path, pages: list[tuple[str, dict]],
     for rel, page in pages:
         target = outdir / "src" / "schemas" / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(page))
+        target.write_text(json.dumps(page), encoding="utf-8")
     for name, wf in workflows:
-        (outdir / "workflows" / f"{name}.json").write_text(json.dumps(wf))
+        (outdir / "workflows" / f"{name}.json").write_text(json.dumps(wf), encoding="utf-8")
     if plan is not None:
-        (outdir / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+        (outdir / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     return outdir
 
 

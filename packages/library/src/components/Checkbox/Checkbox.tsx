@@ -6,6 +6,7 @@ import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { useRadiusScale } from "../../theme/tokens-context";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
+import { CONTROL_ROW_CLASS } from "../../style/controlRow";
 
 /**
  * Checkbox with side-by-side label. Uses native <input type="checkbox"> with
@@ -30,18 +31,24 @@ export function Checkbox({ name, label, validators: _v, bind: _bind,
   const checkboxCls = `h-4 w-4 ${RADIUS_SURFACE_CLASS[radiusScale]} border-input text-primary accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`;
   return (
     <div
-      className="flex items-center gap-2"
+      className={CONTROL_ROW_CLASS}
       data-checkbox=""
       style={resolveStyle(style)}
       {...useMotion(style?.motion)}
     >
+      {/* `checked` without `onChange` is React's read-only controlled input —
+        * the box renders but can never be ticked. A schema node can only ever
+        * supply the prop, never the handler, so a declarative `checked` is
+        * treated as the INITIAL value (`defaultChecked`) and the input stays
+        * uncontrolled. Same defect and same rule as Switch. */}
       <input
         id={id}
         type="checkbox"
         className={checkboxCls}
         name={name}
-        checked={checked}
-        onChange={onChange ? (e) => onChange(e.target.checked) : undefined}
+        {...(onChange
+          ? { checked, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.checked) }
+          : { defaultChecked: checked })}
       />
       <label
         className="text-sm font-medium leading-none text-foreground cursor-pointer select-none"

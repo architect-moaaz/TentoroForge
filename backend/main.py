@@ -525,7 +525,10 @@ async def list_files(project_id: str):
     files = []
     for path in sorted(project_dir.rglob("*")):
         if path.is_file() and not path.name.startswith("."):
-            rel = str(path.relative_to(project_dir))
+            # `.as_posix()`: the frontend file tree splits these on "/"
+            # (FileTree.tsx:48), so backslashes rendered the whole project
+            # as one flat list of leaves named `src\app\page.tsx`.
+            rel = path.relative_to(project_dir).as_posix()
             files.append(rel)
 
     return {"project_id": project_id, "files": files}
@@ -544,7 +547,7 @@ async def read_file(project_id: str, path: str = Query(...)):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    content = file_path.read_text(errors="replace")
+    content = file_path.read_text(errors="replace", encoding="utf-8")
     return {"path": path, "content": content}
 
 

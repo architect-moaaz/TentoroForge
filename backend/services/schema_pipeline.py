@@ -98,7 +98,7 @@ async def run_schema_frontend_pipeline(
         from services.create_page_coverage import ensure_create_pages_llm
         from pathlib import Path as _Path
         _reg_path = _Path(output_dir) / "registry.json"
-        _reg = json.loads(_reg_path.read_text()) if _reg_path.exists() else {}
+        _reg = json.loads(_reg_path.read_text(encoding="utf-8")) if _reg_path.exists() else {}
         _made = await ensure_create_pages_llm(output_dir, _reg, plan, domain_context)
         if _made:
             yield sse_event("log", {"text": f"[Schema] create-page coverage: generated {', '.join(_made)}"})
@@ -130,14 +130,14 @@ async def run_schema_frontend_pipeline(
         _dead = _wired = 0
         for p in _sroot.rglob("*.json"):
             try:
-                _sc = _json.loads(p.read_text())
+                _sc = _json.loads(p.read_text(encoding="utf-8"))
             except Exception:
                 continue
             _rt = route_from_slug(str(p.relative_to(_sroot).with_suffix("")).replace("\\", "/"))
             _before = _json.dumps(_sc)
             _sc, _find = audit_button_actions(_sc, _routes, _widx, route=_rt)
             if _json.dumps(_sc) != _before:
-                p.write_text(_json.dumps(_sc, indent=2))
+                p.write_text(_json.dumps(_sc, indent=2), encoding="utf-8")
                 _wired += 1
             _dead += len(_find)
         if _wired or _dead:
@@ -166,12 +166,12 @@ async def run_schema_frontend_pipeline(
                 if not is_scheduler_route(_rt, _sched):
                     continue
                 try:
-                    _sc = _json2.loads(p.read_text())
+                    _sc = _json2.loads(p.read_text(encoding="utf-8"))
                 except Exception:
                     continue
                 _sc, _inj = ensure_scheduler_view(_sc, _copy.deepcopy(_node))
                 if _inj:
-                    p.write_text(_json2.dumps(_sc, indent=2))
+                    p.write_text(_json2.dumps(_sc, indent=2), encoding="utf-8")
                     _added += 1
             if _added:
                 yield sse_event("log", {"text": f"[Schema] ResourceTimeline: injected on {_added} scheduler page(s) ({_sched['itemEntity']}×{_sched['resourceEntity']})"})
@@ -214,7 +214,7 @@ def _fill_missing_with_stubs(output_dir: str, plan: dict) -> int:
             continue
         schema = generate_template_schema(p, plan)
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(schema, indent=2))
+        f.write_text(json.dumps(schema, indent=2), encoding="utf-8")
         written += 1
     return written
 
@@ -242,7 +242,7 @@ def _emit_deterministic_page(output_dir: str, plan: dict, page: dict) -> bool:
         _slug = slugify_route(route)
         _existing = _Path(output_dir) / "src" / "schemas" / f"{_slug}.json"
         if _existing.exists():
-            _cur = _json.loads(_existing.read_text())
+            _cur = _json.loads(_existing.read_text(encoding="utf-8"))
             if isinstance(_cur, dict) and \
                isinstance(_cur.get("meta"), dict) and \
                _cur["meta"].get("recipe"):
@@ -258,7 +258,7 @@ def _emit_deterministic_page(output_dir: str, plan: dict, page: dict) -> bool:
     # keeps domain FKs as editable Selects while hiding actor/tenancy FKs.
     full_registry: dict = {}
     try:
-        full_registry = _json.loads((_Path(output_dir) / "registry.json").read_text())
+        full_registry = _json.loads((_Path(output_dir) / "registry.json").read_text(encoding="utf-8"))
     except Exception:
         full_registry = {}
     if not entities:
@@ -282,7 +282,7 @@ def _emit_deterministic_page(output_dir: str, plan: dict, page: dict) -> bool:
         out_path = _Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         _recipe_page["id"] = slug
-        out_path.write_text(_json.dumps(_recipe_page, indent=2))
+        out_path.write_text(_json.dumps(_recipe_page, indent=2), encoding="utf-8")
         return True
 
     # Dashboard/report page with planner-authored widgets → deterministic dashboard builder
@@ -301,7 +301,7 @@ def _emit_deterministic_page(output_dir: str, plan: dict, page: dict) -> bool:
             out_path = _Path(output_dir) / "src" / "schemas" / f"{slug}.json"
             out_path.parent.mkdir(parents=True, exist_ok=True)
             dash["id"] = slug
-            out_path.write_text(_json.dumps(dash, indent=2))
+            out_path.write_text(_json.dumps(dash, indent=2), encoding="utf-8")
             return True
         # else: no valid widgets — fall through to the CRUD/LLM dispatch below.
 
@@ -333,7 +333,7 @@ def _emit_deterministic_page(output_dir: str, plan: dict, page: dict) -> bool:
     out_path = _Path(output_dir) / "src" / "schemas" / f"{slug}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     page_dict["id"] = slug
-    out_path.write_text(_json.dumps(page_dict, indent=2))
+    out_path.write_text(_json.dumps(page_dict, indent=2), encoding="utf-8")
     return True
 
 
@@ -515,7 +515,7 @@ async def _emit_per_page(
         import json as _json
         from pathlib import Path
         (Path(output_dir) / "binding-report.json").write_text(
-            _json.dumps(_BINDING_REPORTS, indent=2))
+            _json.dumps(_BINDING_REPORTS, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -523,7 +523,7 @@ async def _emit_per_page(
     try:
         import json as _json
         (Path(output_dir) / "wiring-report.json").write_text(
-            _json.dumps(_WIRING_REPORTS, indent=2))
+            _json.dumps(_WIRING_REPORTS, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -552,7 +552,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
         schema_file = Path(output_dir) / "src" / "schemas" / f"{slug}.json"
         if not schema_file.exists():
             return
-        schema = json.loads(schema_file.read_text())
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
 
         # Merge deterministic CRUD actions (nav New/Edit + Delete workflow) into
         # the page before building the intent, so the binding pass wires them.
@@ -586,7 +586,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
         try:
             from services.form_field_align import align_form_fields
             _reg_p = Path(output_dir) / "registry.json"
-            _reg = json.loads(_reg_p.read_text()) if _reg_p.exists() else {}
+            _reg = json.loads(_reg_p.read_text(encoding="utf-8")) if _reg_p.exists() else {}
             bound, _afr = align_form_fields(bound, page.get("entity"), _reg)
             if _afr.get("renamed"):
                 logger.info("[FormAlign] %s: renamed %d field(s) to real columns", page.get("route"), _afr["renamed"])
@@ -603,7 +603,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
         except Exception as _en_ex:
             logger.warning("[ExprNorm] %s skipped: %s", page.get("route"), _en_ex)
 
-        schema_file.write_text(json.dumps(bound, indent=2))
+        schema_file.write_text(json.dumps(bound, indent=2), encoding="utf-8")
         reports.append(report)
 
         # ── LLM completeness guard ──────────────────────────────────────────
@@ -622,7 +622,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
             guarded, wiring_report = await run_wiring_guard(
                 bound, real_workflows=real_workflows, real_routes=real_routes,
                 call_llm=call_llm)
-            schema_file.write_text(json.dumps(guarded, indent=2))
+            schema_file.write_text(json.dumps(guarded, indent=2), encoding="utf-8")
             if wiring_reports is not None:
                 wiring_report["route"] = route
                 wiring_reports.append(wiring_report)
@@ -638,7 +638,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
             from services.aggregate_spec import reconcile_page_file
 
             _reg_path = Path(output_dir) / "registry.json"
-            _registry = json.loads(_reg_path.read_text()) if _reg_path.exists() else {}
+            _registry = json.loads(_reg_path.read_text(encoding="utf-8")) if _reg_path.exists() else {}
             _agg = reconcile_page_file(schema_file, _registry)
             if _agg.get("synthesised") or _agg.get("demoted"):
                 logger.info("[Aggregate][LLM] %s: %s synthesised, %s demoted",
@@ -739,7 +739,8 @@ def _regenerate_route_registry(output_dir: str) -> None:
         '  if (!loader) throw new Error(`unknown route \'${route}\'`);\n'
         '  const raw = await loader();\n'
         '  return loadSchema(route, (raw as any).default ?? raw);\n'
-        '}\n'
+        '}\n',
+        encoding="utf-8",
     )
 
     # registry.ts imports `loadSchema` from "./load" — ensure that module exists
@@ -748,4 +749,10 @@ def _regenerate_route_registry(output_dir: str) -> None:
     # fails to compile ("Module not found: Can't resolve './load'").
     load_path = schemas_root / "load.ts"
     if not load_path.exists():
-        load_path.write_text(_SCHEMA_LOAD_TS)
+        # encoding="utf-8" is load-bearing: `_SCHEMA_LOAD_TS` contains a "→"
+        # and `Path.write_text` uses the locale encoding, so on a Windows host
+        # (cp1252) this raised UnicodeEncodeError, `load.ts` was never written,
+        # and registry.ts's `import { loadSchema } from "./load"` failed to
+        # resolve — "Module not found: Can't resolve './load'", the exact
+        # failure the comment above says this block exists to prevent.
+        load_path.write_text(_SCHEMA_LOAD_TS, encoding="utf-8")

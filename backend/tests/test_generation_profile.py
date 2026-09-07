@@ -87,7 +87,7 @@ def test_persist_writes_to_contracts_dir(tmp_path):
     persist_profile(str(tmp_path), get_profile("complete"))
     p = Path(tmp_path) / "contracts" / "generation-profile.json"
     assert p.exists()
-    doc = json.loads(p.read_text())
+    doc = json.loads(p.read_text(encoding="utf-8"))
     assert doc["id"] == "complete"
 
 
@@ -103,5 +103,5 @@ def test_load_profile_silently_ignores_malformed_file(tmp_path):
     fall through to the default."""
     p = Path(tmp_path) / "contracts" / "generation-profile.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{ not valid json")
+    p.write_text("{ not valid json", encoding="utf-8")
     assert load_profile(str(tmp_path)) is None

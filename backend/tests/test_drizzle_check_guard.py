@@ -26,14 +26,14 @@ export const reservations = pgTable(
 def _write(tmp_path, name, text):
     d = tmp_path / "src" / "db" / "schema"
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(text)
+    (d / name).write_text(text, encoding="utf-8")
 
 
 def test_wraps_string_conditions_and_adds_import(tmp_path):
     _write(tmp_path, "reservations.ts", _BAD)
     res = guard_check_constraints(str(tmp_path))
     assert res == {"fixed": 2, "files": 1}
-    out = (tmp_path / "src" / "db" / "schema" / "reservations.ts").read_text()
+    out = (tmp_path / "src" / "db" / "schema" / "reservations.ts").read_text(encoding="utf-8")
     assert out.startswith('import { sql } from "drizzle-orm";')
     assert "sql`status IN ('confirmed', 'cancelled')`" in out
     assert "sql`check_out > check_in`" in out
@@ -63,5 +63,5 @@ def test_does_not_add_duplicate_sql_import(tmp_path):
     text = 'import { sql } from "drizzle-orm";\n' + _BAD
     _write(tmp_path, "reservations.ts", text)
     guard_check_constraints(str(tmp_path))
-    out = (tmp_path / "src" / "db" / "schema" / "reservations.ts").read_text()
+    out = (tmp_path / "src" / "db" / "schema" / "reservations.ts").read_text(encoding="utf-8")
     assert out.count('import { sql } from "drizzle-orm"') == 1

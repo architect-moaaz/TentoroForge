@@ -29,7 +29,7 @@ export const reservations = pgTable("reservations", {
 def _extract(tmp_path) -> dict:
     sd = tmp_path / "src" / "db" / "schema"
     sd.mkdir(parents=True, exist_ok=True)
-    (sd / "reservation.ts").write_text(SCHEMA_TS)
+    (sd / "reservation.ts").write_text(SCHEMA_TS, encoding="utf-8")
     return extract_entities_from_schema(str(tmp_path))
 
 

@@ -23,13 +23,13 @@ def repo(tmp_path: Path) -> Path:
     _run(tmp_path, "git", "init", "-q", "-b", "main")
     _run(tmp_path, "git", "config", "user.email", "smith@test")
     _run(tmp_path, "git", "config", "user.name", "Smith")
-    (tmp_path / "app.py").write_text("print('hello')\n")
+    (tmp_path / "app.py").write_text("print('hello')\n", encoding="utf-8")
     _run(tmp_path, "git", "add", ".")
     _run(tmp_path, "git", "commit", "-q", "-m", "initial")
 
     # Simulate a Smith edit — modify a file, commit it.
-    (tmp_path / "app.py").write_text("print('goodbye')\n")
-    (tmp_path / "src.json").write_text('{"changed": true}\n')
+    (tmp_path / "app.py").write_text("print('goodbye')\n", encoding="utf-8")
+    (tmp_path / "src.json").write_text('{"changed": true}\n', encoding="utf-8")
     _run(tmp_path, "git", "add", ".")
     _run(tmp_path, "git", "commit", "-q", "-m",
          "fix(page): remove Department field")
@@ -45,7 +45,7 @@ class TestGetLastPatch:
         assert len(r["sha"]) >= 7
 
     def test_not_a_git_repo(self, tmp_path: Path):
-        (tmp_path / "empty.txt").write_text("")
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
         r = get_last_patch(str(tmp_path))
         assert r["ok"] is False
         assert "git" in r["error"].lower()
@@ -57,7 +57,7 @@ class TestGetLastPatch:
 
 class TestRevertLastPatch:
     def test_reverts_and_creates_new_commit(self, repo: Path):
-        before = (repo / "app.py").read_text()
+        before = (repo / "app.py").read_text(encoding="utf-8")
         assert before == "print('goodbye')\n"
 
         r = revert_last_patch(str(repo))
@@ -77,7 +77,7 @@ class TestRevertLastPatch:
         assert "fix(page): remove Department field" in subjects[1]
 
         # File content is restored to the state before the reverted commit.
-        after = (repo / "app.py").read_text()
+        after = (repo / "app.py").read_text(encoding="utf-8")
         assert after == "print('hello')\n"
         assert not (repo / "src.json").exists()
 

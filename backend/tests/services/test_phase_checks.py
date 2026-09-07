@@ -68,7 +68,7 @@ def test_validator_crash_quarantines_not_raises():
 
 def test_write_quarantine_persists(tmp_path):
     pc.write_quarantine(str(tmp_path), [{"check": "c", "passed": False}])
-    data = json.loads((tmp_path / "src" / "contracts" / "quarantine.json").read_text())
+    data = json.loads((tmp_path / "src" / "contracts" / "quarantine.json").read_text(encoding="utf-8"))
     assert data["quarantine"][0]["check"] == "c"
 
 

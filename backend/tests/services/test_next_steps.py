@@ -218,14 +218,14 @@ class TestLoadPlan:
         plan_path = tmp_path / "src" / "contracts" / "plan.json"
         plan_path.parent.mkdir(parents=True)
         plan = {"module_name": "X", "data_models": []}
-        plan_path.write_text(json.dumps(plan))
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
         assert load_plan(tmp_path) == plan
 
     def test_reads_from_contracts(self, tmp_path: Path):
         plan_path = tmp_path / "contracts" / "plan.json"
         plan_path.parent.mkdir(parents=True)
         plan = {"module_name": "Y", "data_models": []}
-        plan_path.write_text(json.dumps(plan))
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
         assert load_plan(tmp_path) == plan
 
     def test_missing_returns_none(self, tmp_path: Path):
@@ -234,7 +234,7 @@ class TestLoadPlan:
     def test_bad_json_returns_none(self, tmp_path: Path):
         p = tmp_path / "contracts" / "plan.json"
         p.parent.mkdir(parents=True)
-        p.write_text("{not json")
+        p.write_text("{not json", encoding="utf-8")
         assert load_plan(tmp_path) is None
 
     def test_wrapper_falls_back_when_no_plan(self, tmp_path: Path):

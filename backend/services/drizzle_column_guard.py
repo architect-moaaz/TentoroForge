@@ -142,7 +142,7 @@ def guard_drizzle_columns(output_dir: str | Path) -> dict[str, Any]:
     for p in sorted(schema_dir.glob("*.ts")):
         if p.name in ("index.ts", "relations.ts"):
             continue
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         helpers: set[str] = set()
         file_changes: list[dict] = []
 
@@ -159,7 +159,7 @@ def guard_drizzle_columns(output_dir: str | Path) -> dict[str, Any]:
         if new_text != text:
             for h in sorted(helpers):
                 new_text = _ensure_import(new_text, h)
-            p.write_text(new_text)
+            p.write_text(new_text, encoding="utf-8")
             changes.extend(file_changes)
 
     return {"fixed": len(changes), "changes": changes}

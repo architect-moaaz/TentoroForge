@@ -52,7 +52,7 @@ def is_visual_qa_enabled() -> bool:
 def _brief_identity(root: Path) -> dict:
     """The slice of the design brief the critic judges against."""
     try:
-        brief = json.loads((root / "contracts" / "brief.json").read_text())
+        brief = json.loads((root / "contracts" / "brief.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
     out = {}
@@ -67,7 +67,7 @@ def _sweep_pages(root: Path) -> list[dict]:
     first (it carries the most first-impression weight)."""
     try:
         data = json.loads(
-            (root / "journeys" / "sweep-results.json").read_text())
+            (root / "journeys" / "sweep-results.json").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return []
     pages = []

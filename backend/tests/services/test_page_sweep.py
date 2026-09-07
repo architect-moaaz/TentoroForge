@@ -56,7 +56,7 @@ def test_emit_writes_manifest_and_spec(tmp_path: Path):
     out = emit_sweep(root)
     assert out is not None
     assert (root / "journeys" / "sweep.json").is_file()
-    spec = (root / "journeys" / "sweep.spec.ts").read_text()
+    spec = (root / "journeys" / "sweep.spec.ts").read_text(encoding="utf-8")
     assert 'data-empty="true"' in spec
     assert "sweep-results.json" in spec
 

@@ -14,7 +14,7 @@ export const schemas: Record<string, () => Promise<unknown>> = {
 
 def test_routes_from_registry(tmp_path):
     p = tmp_path / "src" / "schemas"; p.mkdir(parents=True)
-    (p / "registry.ts").write_text(REGISTRY)
+    (p / "registry.ts").write_text(REGISTRY, encoding="utf-8")
     assert routes_from_registry(tmp_path) == ["/", "/reservations", "/reservations/[id]"]
 
 def test_routes_missing_registry_defaults_to_root(tmp_path):

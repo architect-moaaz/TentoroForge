@@ -178,7 +178,7 @@ class TestSystemColumnExclusion:
         p = _write_schema(tmp_path, "bookings/new",
                           {"id": "x", "route": "/bookings/new", "root": {}})
         assert apply_maquettes_to_records(str(tmp_path))["applied"] == 1
-        doc = json.loads(p.read_text())
+        doc = json.loads(p.read_text(encoding="utf-8"))
         names = []
         def walk(n):
             if not isinstance(n, dict):
@@ -246,7 +246,7 @@ class TestWizardMode:
         p = _write_schema(tmp_path, "bookings/new",
                           {"id": "x", "route": "/bookings/new", "root": {}})
         assert apply_maquettes_to_records(str(tmp_path))["applied"] == 1
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
 
     def test_multi_section_create_becomes_wizard(self, tmp_path: Path):
         _write_workflow(tmp_path, "CreateBooking")
@@ -311,7 +311,7 @@ class TestStatusStepper:
         p = _write_schema(tmp_path, "bookings/[id]",
                           {"id": "x", "route": "/bookings/[id]", "root": {}})
         assert apply_maquettes_to_records(str(tmp_path))["applied"] == 1
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
 
     def test_status_enum_emits_stepper(self, tmp_path: Path):
         _write_plan(tmp_path, [{"name": "bookings", "fields": [
@@ -339,7 +339,7 @@ class TestEditMode:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         form = _find(out, "Form")
         assert form is not None
         # Form has 3 section Cards (one per group).
@@ -353,7 +353,7 @@ class TestEditMode:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         ds = out["dataSources"]
         assert len(ds) == 1
         assert ds[0]["name"] == "record"
@@ -366,7 +366,7 @@ class TestEditMode:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         form = _find(out, "Form")
         assert form["props"]["defaults"] == "{{record}}"
 
@@ -379,7 +379,7 @@ class TestCreateMode:
         p = _write_schema(tmp_path, "bookings/new",
                            {"id": "x", "route": "/bookings/new", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert out["dataSources"] == []
 
     def test_no_defaults_bound(self, tmp_path: Path):
@@ -388,7 +388,7 @@ class TestCreateMode:
         p = _write_schema(tmp_path, "bookings/new",
                            {"id": "x", "route": "/bookings/new", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         form = _find(out, "Form")
         assert "defaults" not in form["props"]
 
@@ -398,7 +398,7 @@ class TestCreateMode:
         p = _write_schema(tmp_path, "bookings/new",
                            {"id": "x", "route": "/bookings/new", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         form = _find(out, "Form")
         assert form["props"]["onSubmit"]["op"] == "insert"
 
@@ -410,7 +410,7 @@ class TestViewMode:
         p = _write_schema(tmp_path, "bookings/[id]",
                            {"id": "x", "route": "/bookings/[id]", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # No Form in view mode.
         assert _find(out, "Form") is None
         dl = _find(out, "DescriptionList")
@@ -431,7 +431,7 @@ class TestUnknownModeFallsBackToEdit:
         p = _write_schema(tmp_path, "bookings/new",
                            {"id": "x", "route": "/bookings/new", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # Edit mode binds record and has defaults; check the data-mode attr.
         assert out["root"]["props"]["data-mode"] == "edit"
 
@@ -448,7 +448,7 @@ class TestControlHints:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # Find the notes field in the form.
         rte = _find(out, "RichTextEditor")
         assert rte is not None
@@ -506,7 +506,7 @@ class TestHeroVariants:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         first = out["root"]["children"][0]
         assert first["props"]["data-hero-kind"] == "page-header"
         assert _find(first, "Heading")["props"]["content"] == "Edit booking"
@@ -520,7 +520,7 @@ class TestHeroVariants:
         p = _write_schema(tmp_path, "bookings/[id]",
                            {"id": "x", "route": "/bookings/[id]", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         first = out["root"]["children"][0]
         assert first["props"]["data-hero-kind"] == "status-led"
         badge = _find(first, "Badge")
@@ -544,7 +544,7 @@ class TestHeroVariants:
         p = _write_schema(tmp_path, "products/[id]",
                            {"id": "x", "route": "/products/[id]", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         first = out["root"]["children"][0]
         assert first["props"]["data-hero-kind"] == "media-lead"
         img = _find(first, "Image")
@@ -560,7 +560,7 @@ class TestHeroVariants:
         p = _write_schema(tmp_path, "bookings/new",
                            {"id": "x", "route": "/bookings/new", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         first = out["root"]["children"][0]
         assert first["props"]["data-hero-kind"] == "editorial"
         # First child of the editorial hero is the eyebrow Text.
@@ -592,7 +592,7 @@ class TestFooterVariants:
         p = _write_schema(tmp_path, "bookings/[id]",
                            {"id": "x", "route": "/bookings/[id]", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         footer = _find_by_data_slot(out, "record-footer")
         assert footer is not None
         assert footer["props"]["data-footer-kind"] == "timestamps"
@@ -605,7 +605,7 @@ class TestFooterVariants:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         footer = _find_by_data_slot(out, "record-footer")
         assert footer["type"] == "Card"
         assert footer["props"]["tone"] == "danger"
@@ -626,7 +626,7 @@ class TestSignatureMovesAttr:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert out["root"]["props"]["data-signature-move"] == "sticky-save-bar field-focus-guide"
 
 
@@ -657,7 +657,7 @@ class TestMetaSectionReadOnly:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         # Find the Meta section — walk the form.
         form = _find(out, "Form")
         meta_card = None
@@ -682,7 +682,7 @@ class TestMetaSectionReadOnly:
         p = _write_schema(tmp_path, "bookings/[id]",
                            {"id": "x", "route": "/bookings/[id]", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         assert _find(out, "Form") is None
 
 
@@ -700,7 +700,7 @@ class TestAdvancedSectionCollapsible:
         p = _write_schema(tmp_path, "bookings/[id]/edit",
                            {"id": "x", "route": "/bookings/[id]/edit", "root": {}})
         apply_maquettes_to_records(str(tmp_path))
-        out = json.loads(p.read_text())
+        out = json.loads(p.read_text(encoding="utf-8"))
         form = _find(out, "Form")
         adv = None
         for card in form["children"]:

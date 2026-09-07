@@ -76,13 +76,13 @@ def test_case_insensitive_entity_match():
 
 def _mk_registry(tmp_path: Path, entities: dict) -> None:
     reg = {"entities": entities}
-    (tmp_path / "registry.json").write_text(json.dumps(reg))
+    (tmp_path / "registry.json").write_text(json.dumps(reg), encoding="utf-8")
 
 
 def _mk_workflow(tmp_path: Path, name: str, doc: dict) -> None:
     wf_dir = tmp_path / "workflows"
     wf_dir.mkdir(exist_ok=True)
-    (wf_dir / f"{name}.json").write_text(json.dumps(doc))
+    (wf_dir / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _mk_form_schema(tmp_path: Path, route: str, workflow: str, field: str) -> Path:
@@ -102,7 +102,7 @@ def _mk_form_schema(tmp_path: Path, route: str, workflow: str, field: str) -> Pa
                 {"type": "Input", "props": {"name": field, "label": "Status"}},
             ],
         },
-    }))
+    }), encoding="utf-8")
     return fp
 
 
@@ -175,7 +175,7 @@ def test_per_entity_status_workflow_beats_polluted_global(tmp_path):
     ensure_enum_selects(str(tmp_path))
 
     schema = json.loads(
-        (tmp_path / "src" / "schemas" / "recruitment-drive-new.json").read_text()
+        (tmp_path / "src" / "schemas" / "recruitment-drive-new.json").read_text(encoding="utf-8")
     )
     inputs = _find_all_typed(schema, ("Input", "Select"))
     status_node = next(n for n in inputs if n["props"].get("name") == "status")

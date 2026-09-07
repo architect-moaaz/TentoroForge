@@ -30,13 +30,13 @@ def test_sync_writes_domain_workflows_despite_existing_crud(tmp_path):
     out = tmp_path / "app"
     (out / "workflows").mkdir(parents=True)
     (out / "workflows" / "CreateUser.json").write_text(json.dumps(
-        {"id": "CreateUser", "name": "CreateUser", "definition": {"nodes": []}}))
+        {"id": "CreateUser", "name": "CreateUser", "definition": {"nodes": []}}), encoding="utf-8")
     plan = {"data_models": [{"name": "Document", "fields": []}],
             "workflows": [_rich_wf("MarkRecordReviewed")]}
     _sync_workflows_from_plan(str(out), plan)
     names = set()
     for p in (out / "workflows").glob("*.json"):
-        names.add(json.loads(p.read_text()).get("name", "").lower())
+        names.add(json.loads(p.read_text(encoding="utf-8")).get("name", "").lower())
     assert "createuser" in names                      # untouched
     assert "markrecordreviewed" in names, names       # domain wf landed
 
@@ -47,7 +47,7 @@ def test_sync_does_not_duplicate_existing_workflow(tmp_path):
     (out / "workflows").mkdir(parents=True)
     (out / "workflows" / "MarkRecordReviewed.json").write_text(json.dumps(
         {"id": "MarkRecordReviewed", "name": "MarkRecordReviewed",
-         "definition": {"nodes": []}}))
+         "definition": {"nodes": []}}), encoding="utf-8")
     plan = {"data_models": [], "workflows": [_rich_wf("MarkRecordReviewed")]}
     _sync_workflows_from_plan(str(out), plan)
     files = list((out / "workflows").glob("*.json"))
@@ -76,14 +76,14 @@ def _mk_launcher_app(tmp_path: Path, trigger: str) -> Path:
                   {"name": "PlantDetailPage", "route": "/plants/[id]",
                    "kind": "detail"}],
         "workflows": [{"name": "AddToCartWorkflow", "trigger": trigger}],
-    }))
+    }), encoding="utf-8")
     (root / "workflows" / "AddToCartWorkflow.json").write_text(json.dumps(
         {"id": "AddToCartWorkflow", "name": "AddToCartWorkflow",
-         "definition": {"nodes": []}}))
+         "definition": {"nodes": []}}), encoding="utf-8")
     # root route ships as home.json (no index.json) — the fleet layout
     (root / "src" / "schemas" / "home.json").write_text(json.dumps(
         {"id": "home", "route": "/",
-         "root": {"type": "Stack", "children": []}}))
+         "root": {"type": "Stack", "children": []}}), encoding="utf-8")
     return root
 
 
@@ -93,7 +93,7 @@ def test_or_alternative_trigger_injects_on_resolvable_page(tmp_path):
         tmp_path, "button on storefrontpage or plantdetailpage")
     rep = materialize_workflow_launchers(root)
     assert len(rep["injected"]) == 1, rep
-    doc = json.loads((root / "src" / "schemas" / "home.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "home.json").read_text(encoding="utf-8"))
     assert any(c.get("props", {}).get("workflow") == "AddToCartWorkflow"
                for c in doc["root"]["children"])
 
@@ -111,22 +111,22 @@ def test_dead_form_ref_repointed_to_plan_workflow(tmp_path):
                    "kind": "form"}],
         "workflows": [{"name": "RunOcrPipeline",
                        "trigger": "form_submit on documentuploadpage"}],
-    }))
+    }), encoding="utf-8")
     (root / "workflows" / "RunOcrPipeline.json").write_text(json.dumps(
         {"id": "RunOcrPipeline", "name": "RunOcrPipeline",
-         "definition": {"nodes": []}}))
+         "definition": {"nodes": []}}), encoding="utf-8")
     (root / "src" / "schemas" / "documents" / "upload.json").write_text(
         json.dumps({"id": "upload", "route": "/documents/upload",
                     "root": {"type": "Stack", "children": [
                         {"type": "Form",
                          "props": {"workflow": "UploadDocument"},
-                         "children": []}]}}))
+                         "children": []}]}}), encoding="utf-8")
     rep = repoint_dead_form_refs(root)
     assert rep["repointed"] == [{"route": "/documents/upload",
                                  "dead_ref": "UploadDocument",
                                  "workflow": "RunOcrPipeline"}]
     doc = json.loads(
-        (root / "src" / "schemas" / "documents" / "upload.json").read_text())
+        (root / "src" / "schemas" / "documents" / "upload.json").read_text(encoding="utf-8"))
     assert doc["root"]["children"][0]["props"]["workflow"] == "RunOcrPipeline"
 
 
@@ -140,15 +140,15 @@ def test_live_form_ref_never_touched(tmp_path):
         "pages": [{"name": "UploadPage", "route": "/upload", "kind": "form"}],
         "workflows": [{"name": "RunOcrPipeline",
                        "trigger": "form_submit on uploadpage"}],
-    }))
+    }), encoding="utf-8")
     for wf in ("RunOcrPipeline", "ProcessDocument"):
         (root / "workflows" / f"{wf}.json").write_text(json.dumps(
-            {"id": wf, "name": wf, "definition": {"nodes": []}}))
+            {"id": wf, "name": wf, "definition": {"nodes": []}}), encoding="utf-8")
     (root / "src" / "schemas" / "upload.json").write_text(json.dumps(
         {"id": "upload", "route": "/upload",
          "root": {"type": "Stack", "children": [
              {"type": "Form", "props": {"workflow": "ProcessDocument"},
-              "children": []}]}}))
+              "children": []}]}}), encoding="utf-8")
     rep = repoint_dead_form_refs(root)
     assert rep["repointed"] == []                     # live ref respected
 
@@ -179,14 +179,14 @@ def _mk_manual_app(tmp_path: Path, *, trigger: str, steps: list | None = None,
         "pages": pages,
         "workflows": [{"name": wf_name, "trigger": trigger,
                        "steps": steps or []}],
-    }))
+    }), encoding="utf-8")
     (root / "workflows" / f"{wf_name}.json").write_text(json.dumps(
-        {"id": wf_name, "name": wf_name, "definition": {"nodes": []}}))
+        {"id": wf_name, "name": wf_name, "definition": {"nodes": []}}), encoding="utf-8")
     for pg in pages:
         fname = pg["route"].strip("/").replace("/", "_") or "home"
         (root / "src" / "schemas" / f"{fname}.json").write_text(json.dumps(
             {"id": fname, "route": pg["route"],
-             "root": {"type": "Stack", "children": []}}))
+             "root": {"type": "Stack", "children": []}}), encoding="utf-8")
     return root
 
 
@@ -200,7 +200,7 @@ def test_manual_on_entity_trigger_injects_on_entity_page(tmp_path):
     rep = materialize_workflow_launchers(root)
     assert len(rep["injected"]) == 1, rep
     doc = json.loads(
-        (root / "src" / "schemas" / "applications.json").read_text())
+        (root / "src" / "schemas" / "applications.json").read_text(encoding="utf-8"))
     assert any(c.get("props", {}).get("workflow") == "ShortlistCandidate"
                for c in doc["root"]["children"])
 
@@ -213,7 +213,7 @@ def test_bare_manual_trigger_resolves_via_step_table(tmp_path):
             "actionType": "db_insert", "table": "bookings"}}])
     rep = materialize_workflow_launchers(root)
     assert len(rep["injected"]) == 1, rep
-    doc = json.loads((root / "src" / "schemas" / "bookings.json").read_text())
+    doc = json.loads((root / "src" / "schemas" / "bookings.json").read_text(encoding="utf-8"))
     assert any(c.get("props", {}).get("workflow") == "BookClassWorkflow"
                for c in doc["root"]["children"])
 
@@ -302,6 +302,6 @@ def test_sync_translated_workflow_declares_process_variables(tmp_path):
     _sync_workflows_from_plan(str(out), plan)
     files = list((out / "workflows").glob("*.json"))
     assert len(files) == 1
-    doc = json.loads(files[0].read_text())
+    doc = json.loads(files[0].read_text(encoding="utf-8"))
     names = {v["name"] for v in doc.get("processVariables", [])}
     assert "memberId" in names, doc.get("processVariables")

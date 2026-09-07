@@ -282,7 +282,7 @@ def test_validate_output_dir_reads_locked_spec_and_workflows(tmp_path: Path):
                 "values": {"completedAt": "CURRENT_TIMESTAMP"},
             }}},
         ]},
-    }))
+    }), encoding="utf-8")
     findings = validate_output_dir(tmp_path)
     codes = {f.code for f in findings}
     # SQL literal must fire.

@@ -151,13 +151,13 @@ def guard_nav_targets(output_dir: str | Path) -> dict:
 
     for jf in sorted(root.rglob("*.json")):
         try:
-            schema = json.loads(jf.read_text())
+            schema = json.loads(jf.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         changed: list = []
         walk(schema, changed)
         if changed:
-            jf.write_text(json.dumps(schema, indent=2))
+            jf.write_text(json.dumps(schema, indent=2), encoding="utf-8")
             for frm, to in changed:
                 result["changes"].append((frm, to))
                 if to is None:

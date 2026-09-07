@@ -133,7 +133,7 @@ class TestTryFixMenuRouteMismatch:
         assert "/users" in fix["message"]
 
         # shell.json actually rewritten in place.
-        shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+        shell = json.loads((tmp_path / "src/schemas/shell.json").read_text(encoding="utf-8"))
         rec = shell["children"][0]["children"][0]["props"]["groups"][0]["items"][0]
         assert rec["route"] == "/recruiters"
 
@@ -152,7 +152,7 @@ class TestTryFixMenuRouteMismatch:
             "recruiters menu shows the wrong page", str(tmp_path),
         )
         assert fix is not None
-        shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+        shell = json.loads((tmp_path / "src/schemas/shell.json").read_text(encoding="utf-8"))
         rec = shell["children"][0]["children"][0]["props"]["groups"][0]["items"][0]
         assert rec["route"] == "/recruiters"
 

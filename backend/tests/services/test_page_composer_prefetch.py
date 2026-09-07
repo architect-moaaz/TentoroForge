@@ -52,7 +52,7 @@ def app(tmp_path: Path) -> Path:
             {"route": "/bills", "title": "Bills", "entity": "bills"},
             {"route": "/members", "title": "Members", "entity": "members"},
         ],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -186,7 +186,7 @@ def test_failures_are_never_persisted(app, stub_inputs, monkeypatch):
 
     cache = app / "contracts" / P.CACHE_FILENAME
     if cache.exists():
-        assert json.loads(cache.read_text()) == {}, "a failure was cached"
+        assert json.loads(cache.read_text(encoding="utf-8")) == {}, "a failure was cached"
 
 
 def test_flag_off_never_calls_the_llm(app, monkeypatch):
@@ -249,7 +249,7 @@ def test_disk_cache_memo_invalidates_on_external_write(app):
     assert P._load_disk_cache(path) == {"a": 1}
 
     import os, time
-    path.write_text(json.dumps({"b": 2}))
+    path.write_text(json.dumps({"b": 2}), encoding="utf-8")
     # Force a distinct mtime — some filesystems have coarse resolution.
     os.utime(path, (time.time() + 2, time.time() + 2))
     assert P._load_disk_cache(path) == {"b": 2}

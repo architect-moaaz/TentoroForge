@@ -34,7 +34,7 @@ def app(tmp_path: Path) -> Path:
         "footer": {"kind": "insight", "content": "Total capacity"},
         "row_treatment": "status-led",
         "signature_moves": ["sticky-first-column"],
-    }]))
+    }]), encoding="utf-8")
     (c / "record-maquettes.json").write_text(json.dumps([{
         "entity": "Event", "route": "/events/[id]", "mode": "view",
         "hero": {"kind": "status-led", "title": "Event Detail"},
@@ -44,13 +44,13 @@ def app(tmp_path: Path) -> Path:
         ],
         "control_hints": {"description": "rich-text"},
         "footer": {"kind": "audit"},
-    }]))
+    }]), encoding="utf-8")
     (c / "dashboard-maquette.json").write_text(json.dumps({
         "kpis": [{"label": "Total Events", "entity": "Event", "op": "count"}],
         "primary_chart": {"kind": "bar", "title": "Tickets by Event",
                           "entity": "Ticket", "group_by": "eventId"},
         "subtitle": "How the season is tracking",
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -100,7 +100,7 @@ def test_missing_or_unreadable_contracts_are_silent(tmp_path):
     assert build_maquette_brief(tmp_path, "") == ""
     bad = tmp_path / "src" / "contracts"
     bad.mkdir(parents=True)
-    (bad / "collection-maquettes.json").write_text("{not json")
+    (bad / "collection-maquettes.json").write_text("{not json", encoding="utf-8")
     assert build_maquette_brief(tmp_path, "/events", "list") == ""
 
 
@@ -111,6 +111,6 @@ def test_route_matching_ignores_trailing_slash(app):
 def test_page_author_actually_asks_for_the_brief():
     """Guards the wiring, not just the module — the reversal is only
     real if the authoring agent calls this."""
-    src = Path("agents/page_schema_agent.py").read_text()
+    src = Path("agents/page_schema_agent.py").read_text(encoding="utf-8")
     assert "build_maquette_brief" in src
     assert "_maq_block + " in src   # prepended to the prompt, not discarded

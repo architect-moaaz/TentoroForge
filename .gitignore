@@ -89,3 +89,9 @@ backend/rules_output.json
 
 # Runtime cost log, appended to by every run — not source.
 backend/data/build-usage.jsonl
+
+# Local MCP server wiring. Absolute interpreter and repo paths that are true
+# only on the machine that wrote them, so committing it breaks every other
+# checkout. See .mcp.json.example for the shape.
+.mcp.json
+!.mcp.json.example

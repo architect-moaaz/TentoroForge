@@ -120,16 +120,57 @@ describe("applyAction — duplicateNode", () => {
 });
 
 describe("applyAction — bind/unbind", () => {
-  it("bindProp wraps literal in $binding", () => {
+  const textProp = (a: any) => (a.pageSchemas.home.root.children![0].props as any).text;
+
+  it("bindProp writes a {{expr}} STRING, never the {$binding} object", () => {
+    // The object form was implemented by nothing outside the editor: it survived
+    // interpolateDeep (which only transforms strings) and validateProps (which
+    // cannot coerce it) and reached React in child position, so binding a prop
+    // rendered "⚠ render error" and then autosaved the breakage into the
+    // generated app. The string is what interpolate.ts actually resolves.
     const { next } = applyAction(fixture(), {
       type: "bindProp", pageId: "home", nodeId: "n2",
       propName: "text", binding: "form.name",
     });
-    expect((next.pageSchemas.home.root.children![0].props as any).text)
-      .toEqual({ $binding: "form.name" });
+    expect(textProp(next)).toBe("{{form.name}}");
+    expect(typeof textProp(next)).toBe("string");
   });
 
-  it("unbindProp replaces $binding with literal", () => {
+  it("an EMPTY bind writes \"\", not \"{{}}\"", () => {
+    // The bind toggle binds before the user has typed anything. "{{}}" would be
+    // a template that resolves to nothing while still reading as bound — the
+    // same bug in a quieter costume. "" is honestly "no value yet", renders as
+    // nothing, and still satisfies a required string field.
+    const { next } = applyAction(fixture(), {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "",
+    });
+    expect(textProp(next)).toBe("");
+  });
+
+  it("undo of an EMPTY bind restores the literal (the inverse used to be asymmetric)", () => {
+    // unbindProp tested the TRUTHINESS of prev.$binding, so a bind that was
+    // toggled but never filled took the updateProp branch and undo behaved
+    // differently from a filled one. Shape, not truthiness, decides now.
+    const before = fixture();
+    const { next, inverse } = applyAction(before, {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "",
+    });
+    const restored = applyAction(next, inverse).next;
+    expect(textProp(restored)).toBe(textProp(before));
+  });
+
+  it("re-binding an already-bound prop round-trips through its inverse", () => {
+    const start = applyAction(fixture(), {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "a.one",
+    }).next;
+    const { next, inverse } = applyAction(start, {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "b.two",
+    });
+    expect(textProp(next)).toBe("{{b.two}}");
+    expect(textProp(applyAction(next, inverse).next)).toBe("{{a.one}}");
+  });
+
+  it("unbindProp replaces the binding with the literal", () => {
     const start = applyAction(fixture(), {
       type: "bindProp", pageId: "home", nodeId: "n2",
       propName: "text", binding: "form.name",
@@ -285,5 +326,73 @@ describe("applyAction — renamePage / updateRoute", () => {
     });
     expect(next.navFlow.pages[0].route).toBe("/welcome");
     expect(next.pageSchemas.home.route).toBe("/welcome");
+  });
+});
+
+/**
+ * Regression — docs/editor-audit/panels.md, "addPage overwrites an existing
+ * page and its undo deletes it". `pageSchemas[id] = {...}` with no existence
+ * check destroyed the user's page, duplicated its navFlow entry, and returned
+ * `inverse: removePage`, so Ctrl-Z then deleted what was left.
+ */
+describe("applyAction — addPage refuses to destroy an existing page", () => {
+  it("throws on a colliding pageId and leaves the original tree untouched", () => {
+    const start = fixture();
+    expect(() =>
+      applyAction(start, {
+        type: "addPage", pageId: "home", route: "/home-2", title: "Home 2",
+        root: { id: "new-root", type: "Stack", children: [] },
+      }),
+    ).toThrow(/already exists/);
+    // applyAction must not have mutated the input on the way to throwing.
+    expect(start.pageSchemas.home.root.id).toBe("n1");
+    expect(start.navFlow.pages).toHaveLength(1);
+  });
+
+  it("throws on a colliding route even when the pageId is new", () => {
+    expect(() =>
+      applyAction(fixture(), {
+        type: "addPage", pageId: "landing", route: "/", title: "Landing",
+        root: { id: "lr", type: "Stack", children: [] },
+      }),
+    ).toThrow(/route "\/" is already served by page "home"/);
+  });
+
+  it("throws when navFlow already has the id but pageSchemas does not", () => {
+    const start = fixture();
+    start.navFlow.pages.push({
+      id: "orphan", route: "/orphan", title: "Orphan",
+      schemaFile: "src/schemas/orphan.json", params: [],
+    } as any);
+    expect(() =>
+      applyAction(start, {
+        type: "addPage", pageId: "orphan", route: "/orphan-2", title: "Orphan",
+        root: { id: "or", type: "Stack", children: [] },
+      }),
+    ).toThrow(/navFlow already has an entry/);
+  });
+
+  it("a fresh page still adds, and its undo only removes what it created", () => {
+    const { next, inverse } = applyAction(fixture(), {
+      type: "addPage", pageId: "about", route: "/about", title: "About",
+      root: { id: "ar", type: "Stack", children: [] },
+    });
+    expect(next.pageSchemas.about).toBeDefined();
+    const { next: undone } = applyAction(next, inverse);
+    // The page that existed before the add survives the undo intact.
+    expect(undone.pageSchemas.home.root.id).toBe("n1");
+    expect(undone.pageSchemas.about).toBeUndefined();
+    expect(undone.navFlow.pages.map(p => p.id)).toEqual(["home"]);
+  });
+
+  it("removePage → undo (addPage) round-trips without tripping the guards", () => {
+    const start = fixture();
+    const { next: removed, inverse } = applyAction(start, {
+      type: "removePage", pageId: "home",
+    });
+    expect(removed.pageSchemas.home).toBeUndefined();
+    const { next: restored } = applyAction(removed, inverse);
+    expect(restored.pageSchemas.home.root.id).toBe("n1");
+    expect(restored.navFlow.pages.map(p => p.id)).toEqual(["home"]);
   });
 });

@@ -13,6 +13,7 @@ import { createRoot } from "react-dom/client";
 import { Engine, EngineProvider } from "@tentoroforge/engine";
 import { syntheticNodeId } from "@forge/patches";
 import { useEditorStore } from "@/lib/editor-store";
+import { normaliseSchema } from "@/components/canvas/Canvas";
 import { useCanvasClick } from "@/components/canvas/hooks/useSelection";
 import React from "react";
 
@@ -30,34 +31,10 @@ if (typeof window !== "undefined" && !(window as any).ResizeObserver) {
   (window as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 }
 
-// ---- replicate Canvas.normaliseSchema (not exported) ------------------------
-function normaliseSchema(raw: any): any {
-  const seen = new Set<string>();
-  function uniq(base: string, p: string): string {
-    if (!seen.has(base)) { seen.add(base); return base; }
-    let candidate = `${base}_${p || "root"}`;
-    let n = 2;
-    while (seen.has(candidate)) candidate = `${base}_${p || "root"}_${n++}`;
-    seen.add(candidate);
-    return candidate;
-  }
-  function injectIds(node: any, p = ""): any {
-    if (!node) return node;
-    const baseId = node.id ?? syntheticNodeId(node);
-    const id = uniq(baseId, p);
-    return {
-      ...node, id,
-      children: Array.isArray(node.children)
-        ? node.children.map((c: any, i: number) => injectIds(c, p ? `${p}.${i}` : `${i}`))
-        : undefined,
-    };
-  }
-  const root = raw.root
-    ?? (Array.isArray(raw.children) && raw.children.length > 0
-      ? { type: "Stack", id: "_synthetic_root", children: raw.children }
-      : { type: "Text", id: "_no_content", props: { content: "(empty)" } });
-  return { ...raw, root: injectIds(root) };
-}
+// Canvas exports normaliseSchema now, so this test exercises the REAL one.
+// It used to hold a verbatim copy with the comment "(not exported)", which meant
+// the copy could drift from production and the test would keep passing — it
+// would not have caught the legacy-binding migration being added to the real one.
 
 // ---- replicate PropertiesPanel.findNodeInArtifacts --------------------------
 function findNodeInArtifacts(artifacts: any, nodeId: string): boolean {
@@ -73,11 +50,6 @@ function findNodeInArtifacts(artifacts: any, nodeId: string): boolean {
   }
   return false;
 }
-
-// Portable fixture mirroring a real LLM-generated schema shape (structural +
-// library nodes, all with explicit ids). If a real generated schema is present
-// on this machine we use it (richer coverage); otherwise the inline fixture
-// keeps the test CI-safe.
 const FIXTURE = {
   schemaVersion: "2", id: "home", title: "Home", dataSources: [],
   root: {

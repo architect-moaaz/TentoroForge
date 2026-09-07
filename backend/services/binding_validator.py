@@ -96,6 +96,20 @@ _STAT_NODE_TYPES = {
     "gauge", "progress", "counter", "scorecard",
 }
 _STAT_BINDING_KEYS = ("value", "current", "count", "score")
+# The ROOT identifier of any `{{root}}` / `{{root.path}}` occurring anywhere in
+# a prop value (including nested objects and arrays).
+_ANY_ROOT_RE = re.compile(r"\{\{\s*([A-Za-z_][\w]*)")
+# Binding roots the renderer supplies without a page fetch: the signed-in
+# actor, the route, the form under edit, the current repeat item. These must
+# never be reported as dangling — mirrors page_planner.SCOPE_ROOTS, which is
+# the generation-time half of the same rule.
+_SCOPE_ROOTS = frozenset({
+    "user", "actor", "session", "route", "params", "param", "query",
+    "search", "form", "state", "theme", "now", "today",
+    "item", "row", "index", "i",
+})
+# Keys a Repeat names its per-row alias with.
+_ALIAS_KEYS = ("as", "alias", "itemname", "var")
 # Widgets that legitimately ship with literal, unbacked data.
 _STATIC_WIDGET_TYPES = {"activityfeed", "approvalstepper"}
 # ops we treat as a collection/options load (used for `entity` resolution).
@@ -503,6 +517,106 @@ def _check_page(rel: str, page: dict, resolver: _SlugResolver,
                     "file": rel, "kind": "static_widget", "ref": node.get("type"),
                     "detail": f"{node.get('type')} renders literal data with no dataSource "
                               f"binding (static widget — advisory).",
+                })
+
+    # Any REMAINING binding, in any prop, whose root resolves to nothing. The
+    # checks above only inspect the props they know the names of; this one is
+    # the backstop, and reports each root once per page so a repeated binding
+    # does not bury the rest of the gate's output.
+    already = {e.get("ref") for e in errors
+               if e.get("file") == rel and e.get("kind") == "binding_unresolved"}
+    tail: list = []
+    _check_dangling_roots(rel, page, ds_names, tail)
+    errors.extend(e for e in tail if e.get("ref") not in already)
+
+
+#: Props/keys a Repeat names its collection with (`bind` is canonical).
+_REPEAT_SOURCE_KEYS = ("bind", "source", "datasource", "items", "data", "rows",
+                       "records", "list", "entries")
+
+
+def _repeat_aliases(page: dict) -> set[str]:
+    """Canon per-row aliases every Repeat on the page introduces.
+
+    Both the explicit alias (`as`/`alias`) and the IMPLICIT one: a Repeat over
+    `orders` whose children bind `{{order.ref}}` has named nothing, but `order`
+    is a row scope, not a missing dataSource. Reporting it would fail pages
+    that render correctly, so the singular of each collection a Repeat names
+    counts as a scope too.
+    """
+    out: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if _node_type(node) == "repeat" or node.get("repeat"):
+                for holder in (node, _props(node)):
+                    for k, v in holder.items():
+                        if not isinstance(v, str) or not v.strip():
+                            continue
+                        ck = _canon(k)
+                        if ck in _ALIAS_KEYS:
+                            out.add(_canon(v.lstrip("$")))
+                        elif ck in _REPEAT_SOURCE_KEYS:
+                            out.add(_singularish(_canon(v.strip("{} "))))
+                if isinstance(node.get("repeat"), str):
+                    out.add(_singularish(_canon(node["repeat"])))
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(page.get("root") if isinstance(page.get("root"), dict) else page)
+    return {a for a in out if a}
+
+
+def _binding_roots(value) -> set[str]:
+    """Root identifiers of every `{{…}}` inside a prop value, however nested."""
+    out: set[str] = set()
+    if isinstance(value, str):
+        out.update(_ANY_ROOT_RE.findall(value))
+    elif isinstance(value, dict):
+        for v in value.values():
+            out |= _binding_roots(v)
+    elif isinstance(value, list):
+        for v in value:
+            out |= _binding_roots(v)
+    return out
+
+
+def _check_dangling_roots(rel: str, page: dict, ds_names: set[str],
+                          errors: list) -> None:
+    """Report any binding whose ROOT names neither a dataSource nor a scope.
+
+    The stat/list checks above only look at the props they know about, so a
+    binding in any other prop went unexamined. `/items` shipped three Stat
+    tiles bound to `{{metrics.list_total_inventory_value}}` on a page whose
+    dataSources were named `items`, `totalInventoryValue` and `lowStockCount`:
+    the root named nothing, the renderer (correctly) refuses to leak a raw
+    template, and the tiles rendered BLANK in production. A binding that
+    resolves to nothing is a build error, not a rendering detail.
+    """
+    scopes = _SCOPE_ROOTS | _repeat_aliases(page)
+    declared = {_canon(n) for n in ds_names}
+    seen: set[str] = set()
+    root = page.get("root") if isinstance(page.get("root"), dict) else page
+    for node, _ in _iter_nodes_ctx(root, False):
+        props = _props(node)
+        if not props:
+            continue
+        for key, value in props.items():
+            for name in _binding_roots(value):
+                c = _canon(name)
+                if c in declared or c in scopes or name in seen:
+                    continue
+                seen.add(name)
+                errors.append({
+                    "file": rel, "kind": "binding_unresolved", "ref": name,
+                    "detail": f"{node.get('type')} {key} binds "
+                              f"'{{{{{name}…}}}}' but no dataSource named "
+                              f"'{name}' is declared on this page and it is "
+                              f"not a known scope — it resolves to nothing, "
+                              f"so the widget renders blank.",
                 })
 
 

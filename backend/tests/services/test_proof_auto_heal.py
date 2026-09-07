@@ -245,7 +245,7 @@ def test_run_auto_heal_fixes_sql_literals_and_converges(tmp_path: Path):
     assert result.iterations >= 1
     assert result.fixes_by_type.get("sql-literal") == 1
     # The workflow file should now have $now instead of CURRENT_TIMESTAMP.
-    wf = json.loads((tmp_path / "workflows" / "wf.json").read_text())
+    wf = json.loads((tmp_path / "workflows" / "wf.json").read_text(encoding="utf-8"))
     val = wf["definition"]["nodes"][1]["data"]["config"]["values"]["ts"]
     assert val == "$now"
 
@@ -284,6 +284,6 @@ def test_persist_heal_report_writes_json(tmp_path: Path):
     result = run_auto_heal(tmp_path)
     path = persist_heal_report(result, tmp_path)
     assert path.exists()
-    loaded = json.loads(path.read_text())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
     assert "iterations" in loaded
     assert "converged" in loaded

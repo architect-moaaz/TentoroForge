@@ -35,14 +35,55 @@ from services.platform_integrations_crypto import CryptoError, decrypt
 
 log = logging.getLogger(__name__)
 
+
+def tool_result_is_error(result: Any) -> bool:
+    """Did this `CallToolResult` report a tool error?
+
+    `isError` ON THE WIRE, `is_error` ON THE OBJECT. mcp 2.0 renamed the field
+    and kept camelCase only as a pydantic serialisation alias, so the attribute
+    does not exist — and `getattr(result, "isError", False)` does not raise, it
+    quietly returns the default. Every call site that read it that way declared
+    every failed tool call a success and handed the caller the server's error
+    text in `content`, to be parsed as if it were a result: a Figma import that
+    failed server-side was consumed as design data, and the platform MCP
+    test/call UI reported OK on a broken tool.
+
+    Both spellings are read so this keeps working if a server or an older SDK
+    hands back an object carrying only the alias. Same guard as
+    `a2ui_authority.py:733`, which is where this was first diagnosed.
+    """
+    return bool(getattr(result, "is_error", None) or getattr(result, "isError", False))
+
 # MCP SDK imports are guarded so that this module still imports cleanly
 # in environments where the SDK is not yet installed (e.g. lint-only
 # tooling). The functions themselves raise a clear error at call-time.
 try:
     from mcp import ClientSession
     from mcp.client.sse import sse_client
-    from mcp.client.streamable_http import streamablehttp_client
-    from mcp.shared.exceptions import McpError as _SdkMcpError
+    try:
+        from mcp.client.streamable_http import streamablehttp_client
+    except ImportError:
+        # mcp 2.0 renamed this `streamablehttp_client` -> `streamable_http_client`.
+        # It is the FIRST name in this try block, so the rename took the whole
+        # guarded import down with it: `_MCP_AVAILABLE` was False, and every
+        # entry point here (`probe`, `list_tools`, `call_tool`) raised
+        # "MCP SDK not installed" on a machine where mcp 2.0.0 is installed and
+        # working. The platform MCP surface — server test, the Agent Builder
+        # tool picker — was dark, and the SDK-missing message named the wrong
+        # cause. Aliased rather than renamed so a 1.x install still resolves.
+        from mcp.client.streamable_http import (  # type: ignore[attr-defined]
+            streamable_http_client as streamablehttp_client,
+        )
+    try:
+        from mcp.shared.exceptions import McpError as _SdkMcpError
+    except ImportError:
+        # Same mcp 2.0 rename story as streamablehttp_client above:
+        # `McpError` -> `MCPError`. Two renamed symbols in one guarded import
+        # is why the whole module reported "mcp SDK is not installed" on a
+        # machine running mcp 2.0.0.
+        from mcp.shared.exceptions import (  # type: ignore[attr-defined]
+            MCPError as _SdkMcpError,
+        )
     _MCP_AVAILABLE = True
 except ImportError:  # pragma: no cover - only on stripped installs
     _MCP_AVAILABLE = False
@@ -242,7 +283,7 @@ async def call_tool(
             content_out.append({"type": "text", "text": str(block)})
     return {
         "content": content_out,
-        "isError": bool(getattr(result, "isError", False)),
+        "isError": tool_result_is_error(result),
     }
 
 

@@ -16,10 +16,15 @@ export interface AvatarProps extends AvatarPropsType {
   children?: React.ReactNode;
 }
 
+// Five rows, because the Zod enum and the registry `options` both offer five.
+// `xs` and `xl` were missing and fell through `?? SIZE_CLASS.md`, so two of the
+// five choices in the dropdown rendered identically to `md` and said nothing.
 const SIZE_CLASS: Record<string, string> = {
+  xs: "h-6  w-6  text-[10px]",
   sm: "h-8  w-8  text-xs",
   md: "h-10 w-10 text-sm",
   lg: "h-16 w-16 text-base",
+  xl: "h-20 w-20 text-lg",
 };
 
 const STATUS_CLASS: Record<string, string> = {

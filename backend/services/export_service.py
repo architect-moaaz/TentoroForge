@@ -401,7 +401,7 @@ def write_production_bundle(
 
     for filename, content in files.items():
         filepath = output_path / filename
-        filepath.write_text(content)
+        filepath.write_text(content, encoding="utf-8")
         files_written.append(filename)
 
     return files_written

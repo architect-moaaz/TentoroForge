@@ -23,7 +23,7 @@ def _mk_app(tmp_path: Path, html: str, *, preview_route: bool = True) -> Path:
 
 def _html(root: Path) -> str:
     p = root / "src" / "schemas" / "documents" / "[id].json"
-    doc = json.loads(p.read_text())
+    doc = json.loads(p.read_text(encoding="utf-8"))
     return doc["root"]["children"][0]["props"]["html"]
 
 

@@ -28,7 +28,32 @@ const ALIGN_CLASS: Record<string, string> = {
   stretch: "items-stretch",
 };
 
+/**
+ * `gap` arrives either as a dotted spacing token ("tokens.spacing.6") or as the
+ * registry's bare scale keyword (none|xs|sm|md|lg|xl) — the latter is what a
+ * palette drop and the properties panel both write.
+ *
+ * The bare keyword used to fall through to `var(--token-md)`, and compileTokens
+ * emits --token-md from the radius group AND the shadow group (the legacy alias
+ * drops the group prefix) with shadow last, so a dropped Cluster asked for
+ * `gap: var(--token-md)` and got a box-shadow string. Rendered proof before this
+ * change: `style="gap:var(--token-md)"` with a computed `gap: normal` — the
+ * children touched. Map the keywords onto the spacing scale explicitly, with the
+ * literal rem as the var() fallback.
+ */
+const SCALE_GAP: Record<string, string> = {
+  none: "0px",
+  xs:   "var(--token-spacing-1, 0.25rem)",
+  sm:   "var(--token-spacing-2, 0.5rem)",
+  md:   "var(--token-spacing-4, 1rem)",
+  lg:   "var(--token-spacing-6, 1.5rem)",
+  xl:   "var(--token-spacing-8, 2rem)",
+  "2xl": "var(--token-spacing-12, 3rem)",
+};
+
 function tokenVar(ref: string): string {
+  if (SCALE_GAP[ref]) return SCALE_GAP[ref];
+  if (/^-?[\d.]+(px|rem|em|%)$/.test(ref)) return ref;
   return `var(--token-${ref.replace(/^tokens\./, "").replace(/\./g, "-")})`;
 }
 

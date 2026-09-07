@@ -38,7 +38,7 @@ async def test_e2e_pages_pass_after_one_patch(tmp_path):
         "meta": {"title": "Users"}, "dataSources": [],
         "root": {"id": "root", "type": "Stack", "props": {}, "children": []},
     }
-    (schemas_dir / "list.json").write_text(json.dumps(schema))
+    (schemas_dir / "list.json").write_text(json.dumps(schema), encoding="utf-8")
 
     runner = FidelityLoopRunner(
         output_dir=output_dir,
@@ -65,13 +65,13 @@ async def test_e2e_pages_pass_after_one_patch(tmp_path):
     # Log was written
     log_path = output_dir / "src" / "contracts" / "fidelity-log.json"
     assert log_path.exists()
-    log = json.loads(log_path.read_text())
+    log = json.loads(log_path.read_text(encoding="utf-8"))
     assert "users/list" in log
     assert log["users/list"]["exit_status"] == "pass"
     assert log["users/list"]["flags"]["fidelity_loop"] is True
 
     # Schema on disk was updated
-    final_schema = json.loads((schemas_dir / "list.json").read_text())
+    final_schema = json.loads((schemas_dir / "list.json").read_text(encoding="utf-8"))
     assert final_schema["meta"]["title"] == "Better Users"
 
     # iter screenshot was saved

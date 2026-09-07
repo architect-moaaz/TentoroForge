@@ -54,7 +54,7 @@ def _write(tmp_path: Path, name: str, wf: dict) -> Path:
     wdir = tmp_path / "workflows"
     wdir.mkdir(exist_ok=True)
     p = wdir / f"{name}.json"
-    p.write_text(json.dumps(wf))
+    p.write_text(json.dumps(wf), encoding="utf-8")
     return p
 
 
@@ -67,7 +67,7 @@ def test_removes_mustache_key_not_in_process_vars(tmp_path):
     )
     _write(tmp_path, "CreateUser", wf)
     summary = clean_workflow_values(str(tmp_path))
-    written = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())
+    written = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))
     values = written["definition"]["nodes"][1]["data"]["config"]["values"]
     assert "isActive" not in values
     assert values == {"email": "email", "password": "password"}
@@ -87,7 +87,7 @@ def test_keeps_plain_string_mapping_even_without_process_var(tmp_path):
     )
     _write(tmp_path, "CreateUser", wf)
     clean_workflow_values(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values == {"email": "email", "role": "role"}
@@ -100,7 +100,7 @@ def test_keeps_mustache_binding_that_maps_to_declared_process_var(tmp_path):
     )
     _write(tmp_path, "CreateUser", wf)
     clean_workflow_values(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert "isActive" in values
@@ -114,7 +114,7 @@ def test_keeps_static_literal_values(tmp_path):
     )
     _write(tmp_path, "CreateUser", wf)
     clean_workflow_values(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values["role"] == "customer"
@@ -148,7 +148,7 @@ def test_handles_db_update_node_too(tmp_path):
     }
     _write(tmp_path, "UpdateUser", wf)
     clean_workflow_values(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "UpdateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "UpdateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert "stale" not in values
@@ -175,7 +175,7 @@ def test_walks_multiple_mutation_nodes(tmp_path):
     )
     _write(tmp_path, "CreateUser", wf)
     summary = clean_workflow_values(str(tmp_path))
-    written = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())
+    written = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))
     assert written["definition"]["nodes"][1]["data"]["config"]["values"] == {
         "email": "email"
     }

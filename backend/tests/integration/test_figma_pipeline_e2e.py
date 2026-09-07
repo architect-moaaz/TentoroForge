@@ -61,7 +61,7 @@ def _find_node_with_path(root, type_path):
 ])
 def test_commitbiz_login_structure(required_path):
     from services.figma_to_schema import build_page_schema
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     page = build_page_schema(doc).page
     # The page wraps a list of children — wrap in a synthetic root for the search
     root = {"type": "_Root", "children": page.get("children") or []}
@@ -71,7 +71,7 @@ def test_commitbiz_login_structure(required_path):
 
 def test_login_page_emits_emerald_primary_token():
     from services.figma_to_schema import build_page_schema
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     tokens = build_page_schema(doc).tokens
     primary = tokens.get("color", {}).get("primary", {}).get("500", "")
     # Emerald-ish hex

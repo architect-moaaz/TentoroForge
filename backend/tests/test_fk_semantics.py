@@ -77,14 +77,14 @@ def test_schema_reference_fallback(tmp_path):
     sdir = tmp_path / "src" / "db" / "schema"; sdir.mkdir(parents=True)
     (sdir / "pets.ts").write_text(
         'import { owners } from "./owners";\n'
-        'export const pets = pgTable("pets", { ownerId: uuid("owner_id").references(() => owners.id) });\n')
+        'export const pets = pgTable("pets", { ownerId: uuid("owner_id").references(() => owners.id) });\n', encoding="utf-8")
     allroles = classify_registry(reg, output_dir=str(tmp_path))
     assert allroles["Pet"]["ownerId"].role == "domain"
 
 
 def _write_registry(tmp_path, reg):
     cdir = tmp_path / "contracts"; cdir.mkdir(parents=True, exist_ok=True)
-    (cdir / "resource-registry.json").write_text(json.dumps(reg))
+    (cdir / "resource-registry.json").write_text(json.dumps(reg), encoding="utf-8")
 
 
 def test_emit_fk_semantics_json(tmp_path):
@@ -92,7 +92,7 @@ def test_emit_fk_semantics_json(tmp_path):
     reg = _users_entity(_reg([{"name": "ownerId", "type": "uuid", "fk": "owner", "notNull": False}]))
     _write_registry(tmp_path, reg)
     emit_fk_semantics(str(tmp_path))
-    data = json.loads((tmp_path / "contracts" / "fk-semantics.json").read_text())
+    data = json.loads((tmp_path / "contracts" / "fk-semantics.json").read_text(encoding="utf-8"))
     assert data["Pet"]["ownerId"]["role"] == "domain"
     assert data["Pet"]["ownerId"]["targetSlug"] == "owners"
 
@@ -102,7 +102,7 @@ def test_emit_fk_roles_module(tmp_path):
     reg = _users_entity(_reg([{"name": "ownerId", "type": "uuid", "fk": "owner", "notNull": False}]))
     _write_registry(tmp_path, reg)
     emit_fk_roles_module(str(tmp_path))
-    ts = (tmp_path / "src" / "lib" / "fk-roles.ts").read_text()
+    ts = (tmp_path / "src" / "lib" / "fk-roles.ts").read_text(encoding="utf-8")
     assert "export const FK_ROLES" in ts
     assert "export function fkRole(table" in ts
     assert '"pets"' in ts and '"ownerId"' in ts and '"domain"' in ts

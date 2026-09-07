@@ -191,7 +191,7 @@ def test_harvest_workflow_statuses(tmp_path):
         {"type": "action", "data": {"config": {"actionType": "db_update", "table": "applications", "values": {"status": "Rejected"}}}},
         {"type": "exclusive_gateway", "data": {"config": {"expression": "status == 'Hired'"}}},
         {"type": "action", "data": {"config": {"actionType": "db_update", "values": {"recruiterNotes": "{{notes}}"}}}}  # free text + template -> ignored
-    ]}}))
+    ]}}), encoding="utf-8")
     out = harvest_workflow_statuses(str(tmp_path))
     got = out.get("status") or out.get("Status") or []
     assert set(got) == {"Shortlisted", "Rejected", "Hired"}

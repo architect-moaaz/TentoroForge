@@ -82,24 +82,24 @@ class TestGenerateSet:
         pub = tmp_path / "public"
         for name in ("logo.svg", "logo-large.svg", "favicon.svg",
                      "apple-touch-icon.svg"):
-            assert ">H</text>" in (pub / name).read_text()
+            assert ">H</text>" in (pub / name).read_text(encoding="utf-8")
 
     def test_radius_kind_pill_makes_full_round_favicon(self, tmp_path):
         generate_logo_set(str(tmp_path), app_name="A", brand_hex="#000",
                           radius_kind="pill")
-        fav = (tmp_path / "public/favicon.svg").read_text()
+        fav = (tmp_path / "public/favicon.svg").read_text(encoding="utf-8")
         assert 'rx="8"' in fav  # 16/2 = 8 → pill circle for 16px mark
 
     def test_radius_kind_sharp_2_makes_tiny_corners(self, tmp_path):
         generate_logo_set(str(tmp_path), app_name="A", brand_hex="#000",
                           radius_kind="sharp_2")
-        large = (tmp_path / "public/logo-large.svg").read_text()
+        large = (tmp_path / "public/logo-large.svg").read_text(encoding="utf-8")
         # 256 / 32 = 8 → small corners
         assert 'rx="8"' in large
 
     def test_radius_kind_soft_8_default(self, tmp_path):
         generate_logo_set(str(tmp_path), app_name="A", brand_hex="#000")
-        logo = (tmp_path / "public/logo.svg").read_text()
+        logo = (tmp_path / "public/logo.svg").read_text(encoding="utf-8")
         # 64 / 8 = 8 for soft_8
         assert 'rx="8"' in logo
 
@@ -109,8 +109,8 @@ class TestGenerateSet:
 
     def test_deterministic_across_runs(self, tmp_path):
         r1 = generate_logo_set(str(tmp_path), app_name="Rentr", brand_hex="#2D5A8E")
-        first = (tmp_path / "public/logo.svg").read_text()
+        first = (tmp_path / "public/logo.svg").read_text(encoding="utf-8")
         r2 = generate_logo_set(str(tmp_path), app_name="Rentr", brand_hex="#2D5A8E")
-        second = (tmp_path / "public/logo.svg").read_text()
+        second = (tmp_path / "public/logo.svg").read_text(encoding="utf-8")
         assert first == second
         assert r1 == r2

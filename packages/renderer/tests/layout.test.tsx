@@ -30,7 +30,9 @@ describe("Spacer renderer", () => {
     const html = renderToString(
       renderNode({ id: "sp", type: "Spacer", props: { size: "spacing.6" } } as any, ctx)
     );
-    expect(html).toContain("var(--token-spacing-6)");
+    // The var() now carries a literal fallback so the Spacer still has a size
+    // on a page whose token stylesheet has not loaded — see Spacer.tsx.
+    expect(html).toContain("var(--token-spacing-6,");
   });
 });
 
