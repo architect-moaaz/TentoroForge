@@ -2,6 +2,7 @@
 import * as React from "react";
 import { starterRegistry } from "@forge/registry";
 import { useEditorStore } from "@/lib/editor-store";
+import { resolveLayoutBox } from "../layout-box";
 import { getDraggingComponent } from "@/lib/palette-drag";
 import {
   GRID_CELL_TYPE,
@@ -502,22 +503,8 @@ export function makeGridCellNode(children: unknown[] = []): any {
  */
 const DROPPED_GRID_ROWS = 2;
 
-/**
- * Walk through any `display:contents` wrapper (the LibraryDispatcher wraps every
- * library component in one) to the element that actually generates a layout box.
- * A contents element has no box, so measuring it yields nothing usable.
- * Mirrors SelectionOverlay's resolveBoxEl.
- */
-function resolveLayoutBox(el: HTMLElement | null): HTMLElement | null {
-  if (!el) return null;
-  if (typeof getComputedStyle !== "function") return el;
-  if (getComputedStyle(el).display !== "contents") return el;
-  for (const child of Array.from(el.children) as HTMLElement[]) {
-    const inner = resolveLayoutBox(child);
-    if (inner) return inner;
-  }
-  return null;
-}
+// The `display:contents` walk lives in ../layout-box — shared with the five
+// other canvas features that measure a node.
 
 /**
  * Measure a parent element's CONTENT box in intrinsic CSS px.

@@ -578,3 +578,14 @@ export type {
   TourOverlayPropsType,
   TourStepType,
 } from "./components/TourOverlay/TourOverlay.schema";
+
+// Design time — the one signal that says "this tree is being authored, not
+// run", plus the stand-in that runtime-fed components render instead of
+// `null` while a human is looking at them. See util/designTime.tsx for why
+// this is a context rather than a prop or a window global.
+export {
+  DesignTimeProvider,
+  DesignTimePlaceholder,
+  useDesignTime,
+  useIdleRender,
+} from "./util/designTime";

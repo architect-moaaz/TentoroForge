@@ -72,6 +72,7 @@ export {
   NavigatorContext,
   NavigatorProvider,
   useNavigator,
+  useHref,
   // Base-path translation for hosts that serve app routes under a prefix
   // (the preview renderer's /p/<project>/…). One implementation, so every
   // component that navigates through the seam gets it at once.

@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import { resolveStyle } from "../../style/resolveStyle";
+import { useIdleRender } from "../../util/designTime";
 import type { TourStepType } from "./TourOverlay.schema";
 
 type Props = {
@@ -76,6 +77,12 @@ export function TourOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stepIdx]);
 
+  const idle = useIdleRender(
+    "TourOverlay",
+    "Tour is not running — the spotlight appears once the app starts it.",
+    220,
+  );
+
   const end = () => {
     setActive(false);
     try {
@@ -85,7 +92,9 @@ export function TourOverlay({
     } catch { /* ignore */ }
   };
 
-  if (!active || cleanSteps.length === 0) return null;
+  // Same rule as PresenceIndicator/UndoManager: a dormant tour renders
+  // nothing in a shipped app and a selectable stand-in while it is authored.
+  if (!active || cleanSteps.length === 0) return idle;
 
   const isLast = stepIdx >= cleanSteps.length - 1;
   const step = cleanSteps[stepIdx];

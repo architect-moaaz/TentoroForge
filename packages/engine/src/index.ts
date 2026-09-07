@@ -39,6 +39,7 @@ export {
   NavigatorContext,
   NavigatorProvider,
   useNavigator,
+  useHref,
   createBasePathNavigator,
   resolveWithBasePath,
 } from "@tentoroforge/renderer";

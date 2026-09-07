@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type RefObject, type M
 import { Copy, Trash2 } from "lucide-react";
 import { useEditorStore } from "@/lib/editor-store";
 import { AlignmentGuides } from "./AlignmentGuides";
+import { resolveNodeBox } from "./layout-box";
 import {
   computeAlignmentGuides,
   pickSnap,
@@ -44,25 +45,10 @@ function handlePositions(
 }
 
 /** Resolve the layout-bearing element for a node id, walking through any
- * `display:contents` wrapper the library dispatcher adds around a component. */
-function resolveBoxEl(
-  canvas: HTMLElement | null,
-  id: string,
-): HTMLElement | null {
-  let el = canvas?.querySelector<HTMLElement>(`[data-node-id="${id}"]`) ?? null;
-  if (el && getComputedStyle(el).display === "contents") {
-    const walk = (e: HTMLElement): HTMLElement | null => {
-      for (const child of Array.from(e.children) as HTMLElement[]) {
-        if (getComputedStyle(child).display !== "contents") return child;
-        const inner = walk(child);
-        if (inner) return inner;
-      }
-      return null;
-    };
-    el = walk(el);
-  }
-  return el;
-}
+ * `display:contents` wrapper the library dispatcher adds around a component.
+ * Shared with the five other canvas features that measure a node — see
+ * layout-box.ts. */
+const resolveBoxEl = resolveNodeBox;
 
 /** Find the immediate parent id of a node (searches children + slots). */
 function parentIdFor(artifacts: any, nodeId: string): string | null {

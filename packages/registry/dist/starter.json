@@ -256,7 +256,8 @@
   "Breadcrumb": {
     "props": {
       "items": {},
-      "separator": {}
+      "separator": {},
+      "currentPageAuto": {}
     }
   },
   "Section": {
@@ -902,7 +903,9 @@
   "Spinner": {
     "props": {
       "label": {},
-      "size": {}
+      "size": {},
+      "variant": {},
+      "color": {}
     }
   },
   "Banner": {

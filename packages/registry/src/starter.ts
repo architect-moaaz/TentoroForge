@@ -1477,6 +1477,19 @@ export const breadcrumbEntry: RegistryEntry = {
       group: "style",
       description: "Separator character between items.",
     },
+    // The last crumb is always "the page you are on", so the same trail had to
+    // be copied onto every page with one word changed — and it went stale the
+    // moment a route was renamed. `Breadcrumb.tsx` now derives that crumb from
+    // the route's own last segment. Seeded `false`, which is exactly what the
+    // component does when the prop is absent: turning it on for every existing
+    // breadcrumb in every shipped app would be a default read as a command.
+    currentPageAuto: {
+      type: "boolean",
+      default: false,
+      control: "toggle",
+      group: "behavior",
+      description: "Append a final, non-linked crumb for the current page, labelled from its route.",
+    },
   },
 };
 
@@ -4568,6 +4581,21 @@ export const spinnerEntry: RegistryEntry = {
   props: {
     label: { type: "string", default: "Loading", control: "text",   group: "content", description: "Accessible label." },
     size:  { type: "enum",   default: "md",      control: "select", group: "style", options: ["sm", "md", "lg"], description: "Spinner size." },
+    // Both of these are declared by `SpinnerProps` AND by `SpinnerNode.props`
+    // and read by `Spinner.tsx`; neither was reachable from the panel, so the
+    // auditor's "a spinner on a primary-coloured surface is invisible and the
+    // Style panel cannot fix it" was true and unfixable from the editor —
+    // `resolveStyle(style)` lands on the outer span, never on the arc.
+    variant: { type: "enum",   default: "ring", control: "select", group: "style",
+               options: ["ring", "dots", "bars"],
+               description: "Shape of the busy indicator. \"ring\" is the classic spinner." },
+    // NO default. `control: "color"` seeded with `""` is the exact defect that
+    // made every dropped Sparkline draw `stroke=\"\"` → `none`: a parameter
+    // default only fires for `undefined`, so a blank seed BEATS the component's
+    // own fallback. Absent means "use the theme's primary", which is what an
+    // unconfigured spinner should do.
+    color:   { type: "string", control: "color", group: "style",
+               description: "Colour of the moving part only (accepts \"currentColor\" to inherit the surrounding text). Unset uses the theme primary." },
   },
 };
 

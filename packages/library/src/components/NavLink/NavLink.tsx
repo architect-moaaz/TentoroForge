@@ -2,6 +2,7 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
+import { useNavigator } from "@tentoroforge/renderer";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { resolveIcon } from "../../icons";
@@ -41,6 +42,12 @@ export function NavLink({
   href, navigate, target, label, icon, children, currentPath, className, style,
 }: Props) {
   const dest = (href ?? navigate ?? target ?? "").trim();
+  // The rendered href goes through the Navigator's base-path translation, the
+  // same one `push` applies. A NavLink under the preview renderer's
+  // `/p/<project>` prefix otherwise advertises an origin-root URL that 404s on
+  // middle-click, ⌘-click and "copy link address". `pathMatchesRoute` below
+  // still compares the AUTHORED route, which is what the schema means.
+  const nav = useNavigator();
   const content = children ?? label;
   const Icon = icon ? resolveIcon(icon) : null;
 
@@ -82,7 +89,7 @@ export function NavLink({
       };
   return (
     <a
-      {...(inert ? { "data-navlink-unset": "", "aria-disabled": true } : { href: dest })}
+      {...(inert ? { "data-navlink-unset": "", "aria-disabled": true } : { href: nav.resolveHref ? nav.resolveHref(dest) : dest })}
       aria-current={active ? "page" : undefined}
       data-active={active ? "true" : undefined}
       className={className}

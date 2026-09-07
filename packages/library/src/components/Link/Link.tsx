@@ -31,6 +31,7 @@ export function Link({ label, navigate, workflow, args, target, style, className
   const ctxDispatch = useContext(WorkflowDispatcherContext);
   const nav = useNavigator();
   const dest = typeof navigate === "string" ? navigate.trim() : "";
+  const href = (u: string) => (nav.resolveHref ? nav.resolveHref(u) : u);
 
   // A LINK WITH NOWHERE TO GO IS NOT A LINK.
   //
@@ -77,10 +78,16 @@ export function Link({ label, navigate, workflow, args, target, style, className
         textDecoration: inert ? ("none" as const) : ("underline" as const),
         fontSize: `var(${tokenToCssVar("typography.base")})`,
       };
+  // The href below is the RESOLVED url, not the raw route. onClick hijacks a
+  // plain left-click and goes through nav.push, but middle-click,
+  // modifier-click, "copy link address", a crawler and the whole pre-hydration
+  // window all read the attribute — and under a base path it pointed at the
+  // origin root. Same translation as push, from the same seam, so the two can
+  // never disagree.
   return (
     <a
       // No `href` at all when there is nothing to go to — see above.
-      {...(inert ? {} : { href: dest || undefined })}
+      {...(inert ? {} : { href: dest ? href(dest) : undefined })}
       {...(inert ? { "data-link-unset": "", "aria-disabled": true } : {})}
       {...(target === "_blank"
         ? { target: "_blank", rel: "noopener noreferrer" }

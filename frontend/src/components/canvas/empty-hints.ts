@@ -69,20 +69,11 @@ export function isVisuallyEmpty(box: Element): boolean {
 
 /**
  * Walk through `display: contents` wrappers to the element that generates a
- * layout box. LibraryDispatcher wraps every library component in one, and a
- * contents element has no box to measure or draw over. Mirrors the identical
- * helpers in SelectionOverlay and useDrop.
+ * layout box. Re-exported under the name this module's callers already use;
+ * the implementation is shared — see layout-box.ts for why it stopped being
+ * six private copies.
  */
-export function resolveBoxEl(el: HTMLElement | null): HTMLElement | null {
-  if (!el) return null;
-  if (typeof getComputedStyle !== "function") return el;
-  if (getComputedStyle(el).display !== "contents") return el;
-  for (const child of Array.from(el.children) as HTMLElement[]) {
-    const inner = resolveBoxEl(child);
-    if (inner) return inner;
-  }
-  return null;
-}
+export { resolveLayoutBox as resolveBoxEl } from "./layout-box";
 
 /**
  * The prop a user has to fill in to make this component show something.

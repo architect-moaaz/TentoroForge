@@ -3,7 +3,7 @@ import { useRef, useEffect, useMemo, type CSSProperties, type DragEvent } from "
 import { Plus } from "lucide-react";
 import { Engine, EngineProvider } from "@tentoroforge/engine";
 import { compileTokens, NavigatorProvider } from "@tentoroforge/renderer";
-import { defaultTokens } from "@tentoroforge/library";
+import { defaultTokens, DesignTimeProvider } from "@tentoroforge/library";
 import { resolvePreviewSources } from "@/lib/preview-resolve";
 import { useArtifacts } from "./hooks/useArtifacts";
 import { useCanvasClick, useCanvasPointerDown } from "./hooks/useSelection";
@@ -15,6 +15,7 @@ import { DropIndicator } from "./DropIndicator";
 import { ReorderIndicator } from "./ReorderIndicator";
 import { GridGuides } from "./GridGuides";
 import { EmptyNodeHints } from "./EmptyNodeHints";
+import { resolveLayoutBox } from "./layout-box";
 import { useEditorStore } from "@/lib/editor-store";
 import { syntheticNodeId, migrateBindingsDeep } from "@forge/patches";
 import { INERT_NAVIGATOR } from "@/lib/inert-navigator";
@@ -266,11 +267,11 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
       // box), so setting draggable there does nothing — Chromium won't start a
       // native drag from a boxless element. Walk to the inner box and mark THAT
       // draggable; the reorder handler still resolves the node via closest().
-      let target: HTMLElement = el;
-      if (getComputedStyle(el).display === "contents") {
-        const inner = el.querySelector<HTMLElement>(":scope > *");
-        if (inner) target = inner;
-      }
+      // This used to look exactly ONE level down and not check whether the
+      // child was itself `display: contents` — so a component that nests a
+      // second wrapper got `draggable` on another boxless element and could not
+      // be dragged at all. Shared walk, same as every other measurement here.
+      const target = resolveLayoutBox(el) ?? el;
       target.setAttribute("draggable", "true");
     });
   }, [activeSchema]);
@@ -330,11 +331,24 @@ export function Canvas({ projectId, pagePath, device = "desktop", zoom = 1 }: Ca
           className={`${editorPadding} relative`}
           style={tokenCssVars}
         >
-          <NavigatorProvider value={INERT_NAVIGATOR}>
-            <EngineProvider designSpec={designSpec ?? {}} navFlow={navFlow} cssVarTokens={(liveTokens as Record<string, unknown>) ?? cssVarTokens}>
-              <Engine schema={activeSchema} previewData={resolvedPreview} />
-            </EngineProvider>
-          </NavigatorProvider>
+          {/* DESIGN TIME.
+              The canvas is the one surface where "renders nothing" is a bug
+              rather than correct behaviour. Components fed only by a runtime
+              this surface does not run — PresenceIndicator (SSE presence),
+              UndoManager (the mutation queue), TourOverlay (a tour the app
+              starts) — all ended in `return null`, which produced a node with
+              a 0x0 rect, no DOM, nothing to select and nothing for the
+              empty-node hint to attach to. Three audit entries, one cause.
+              The flag lives here and nowhere else: every other host (the
+              preview renderer, the generated app) leaves the context at its
+              default `false` and keeps rendering nothing. */}
+          <DesignTimeProvider>
+            <NavigatorProvider value={INERT_NAVIGATOR}>
+              <EngineProvider designSpec={designSpec ?? {}} navFlow={navFlow} cssVarTokens={(liveTokens as Record<string, unknown>) ?? cssVarTokens}>
+                <Engine schema={activeSchema} previewData={resolvedPreview} />
+              </EngineProvider>
+            </NavigatorProvider>
+          </DesignTimeProvider>
           {isEmptyCanvas && (
             // pointer-events-none so drops still land on the canvas root below.
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-8 text-center">

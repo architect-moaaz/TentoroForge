@@ -31,6 +31,30 @@ export type Navigator = {
   back: () => void;
   /** Re-fetch server data for the current route without a full reload. No-op by default. */
   refresh: () => void;
+  /**
+   * Translate an app-relative route into the URL THIS HOST SERVES IT AT, for
+   * rendering into an `href` attribute.
+   *
+   * WHY THE SEAM NEEDS THIS AS WELL AS `push`
+   * -----------------------------------------
+   * `push` fixed the click. It did not fix the *attribute*, and an anchor is
+   * more than its click handler: middle-click, ⌘-click, "copy link address",
+   * a crawler, and the whole pre-hydration window all read the raw `href`.
+   * Under the preview renderer's `/p/<project>` prefix that href still points
+   * at the origin root, so every one of those paths 404s while a plain
+   * left-click works — a bug that only shows up for the user who opens things
+   * in a new tab.
+   *
+   * The components that could hijack the click (Link, NavLink) were papering
+   * over it; the one that renders anchors and CANNOT hijack — Breadcrumb, whose
+   * crumbs are plain `<a href>` — was simply broken. Both need the same
+   * translation, so it belongs on the seam that already owns the base path
+   * rather than in each component.
+   *
+   * Optional: a host that supplies its own Navigator and omits it keeps
+   * identity behaviour, which is exactly what it has today.
+   */
+  resolveHref?: (url: string) => string;
 };
 
 const defaultNavigator: Navigator = {
@@ -86,6 +110,10 @@ export function createBasePathNavigator(
     replace: (url) => inner.replace(resolveWithBasePath(basePath, url)),
     back: () => inner.back(),
     refresh: () => inner.refresh(),
+    // Same translation, same rule set — so an href and the push it fronts can
+    // never disagree about where a route lives.
+    resolveHref: (url) =>
+      resolveWithBasePath(basePath, inner.resolveHref ? inner.resolveHref(url) : url),
   };
 }
 
@@ -94,6 +122,19 @@ export const NavigatorContext = React.createContext<Navigator | null>(null);
 /** Returns the host-provided Navigator, or a window.location-backed default. */
 export function useNavigator(): Navigator {
   return React.useContext(NavigatorContext) ?? defaultNavigator;
+}
+
+/**
+ * The URL to put in an `href` for an app-relative route, under whatever prefix
+ * the current host serves the app at. Identity when the host declares none,
+ * which is every case that works today.
+ *
+ * Use this for the ATTRIBUTE; keep using `useNavigator().push` for the click.
+ */
+export function useHref(url: string): string {
+  const nav = useNavigator();
+  if (typeof url !== "string" || url === "") return url;
+  return nav.resolveHref ? nav.resolveHref(url) : url;
 }
 
 export function NavigatorProvider({
