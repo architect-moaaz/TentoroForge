@@ -980,17 +980,25 @@ export function SmithPanel({
               built behind a bare button. */}
           <Definition doc={blueprint as Record<string, unknown> | null} />
           <p className="mt-3 text-xs text-muted-foreground">
-            The definition is ready and nothing has been built from it yet.
-            Approving builds the application — the pages, the data and the
-            workflows — which takes a few minutes.
-          </p>
+              {/* "Nothing built" was said over a project with fourteen of
+                  fifteen pages composed — the one that failed had brought the
+                  gate back, and the sentence claimed the whole build was
+                  missing. Say what is actually left. */}
+              {layoutCount === 0
+                ? "The definition is ready and nothing has been built from it yet. " +
+                  "Approving builds the application — the pages, the data and the " +
+                  "workflows — which takes a few minutes."
+                : `${pageCount - layoutCount} of ${pageCount} page${pageCount === 1 ? "" : "s"} ` +
+                  "still has no layout. Approving composes what is missing and " +
+                  "leaves the rest as built."}
+            </p>
           <button
             onClick={approve}
             disabled={busy}
             className="mt-3 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            Approve and build
-          </button>
+              {layoutCount === 0 ? "Approve and build" : "Finish the missing pages"}
+            </button>
         </div>
       ) : (
         <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
