@@ -387,6 +387,39 @@ async def list_versions(
 # Preview
 # ===========================================================================
 
+def preview_serve_path(project: Project) -> str:
+    """Where a browser reaches this project's preview.
+
+    The dev server is registered under the short id and started with
+    ``NEXT_BASE_PATH`` set to this prefix, so every page and asset URL it emits
+    begins here, and the proxy in ``routers.preview_proxy`` looks the server
+    up by the same id. A client that composes the prefix itself has to know
+    both facts — the Workspace composed ``/preview/<route>`` from the
+    project's UUID, which no route serves — so the endpoints say it instead.
+    """
+    return f"/api/projects/{project.short_id}/preview/serve"
+
+
+def preview_app_dir(project: Project) -> Path | None:
+    """The directory ``next dev`` runs in, or None when there is no app yet.
+
+    The Blueprint engine projects the application into ``<output_dir>/app``
+    (``blueprint_generate``'s ``app_root``); the row's ``output_dir`` is the
+    project root holding it beside the Blueprint, contracts and compose files.
+    Earlier generators wrote the app at that root. Whichever holds the
+    package.json is the application — starting ``next dev`` at the root of a
+    Blueprint project ran ``npm install`` in a directory with nothing to
+    install and then waited thirty seconds for a server that never came.
+    """
+    if not project.output_dir:
+        return None
+    root = Path(project.output_dir)
+    for candidate in (root / "app", root):
+        if (candidate / "package.json").is_file():
+            return candidate
+    return None
+
+
 @router.post("/api/projects/{project_id}/preview/start")
 async def preview_start(
     project_id: uuid.UUID,
@@ -396,11 +429,18 @@ async def preview_start(
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir or not Path(project.output_dir).exists():
         raise HTTPException(status_code=404, detail="Project directory not found")
+    app_dir = preview_app_dir(project)
+    if app_dir is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No application to preview yet — nothing has been built "
+                   "into this project.",
+        )
     try:
-        port = await start_preview(project.short_id, project.output_dir)
+        port = await start_preview(project.short_id, str(app_dir))
         project.preview_port = port
         await db.commit()
-        return {"port": port}
+        return {"port": port, "servePath": preview_serve_path(project)}
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -427,7 +467,11 @@ async def preview_status(
 ):
     project = await get_project_with_auth(project_id, user, db)
     port = get_preview_port(project.short_id)
-    return {"running": port is not None, "port": port}
+    return {
+        "running": port is not None,
+        "port": port,
+        "servePath": preview_serve_path(project),
+    }
 
 
 @router.get("/api/projects/{project_id}/preview/health")

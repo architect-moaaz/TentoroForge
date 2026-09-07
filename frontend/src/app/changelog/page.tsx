@@ -27,6 +27,14 @@ User-visible changes to the Tentoro Forge platform. Newest first.
 
 ---
 
+## 2026-09-07
+
+### Application Workspace — Pages open the live application
+- 🐛 **Selecting a page under Pages opened a 404** — the Workspace framed \`/api/projects/<uuid>/preview/<route>\`, which no route serves: the preview proxy lives at \`/preview/serve\` under the project's short id, and nothing had started the dev server it forwards to. The first page selected now starts the preview (a running one is reused), the frame follows the path the backend says it serves at, and the middle pane says "Starting the preview…" or why it could not start, with a Try again, instead of showing a blank frame.
+- 🐛 **Preview start ran \`next dev\` in the wrong directory** — the Blueprint engine builds the application into \`<project>/app\`, but \`POST /preview/start\` launched at the project root, ran \`npm install\` on nothing, and waited thirty seconds for a server that never came. It starts in the directory that holds the package.json, and a project with no application yet is told so at once. \`/preview/start\` and \`/preview/status\` now return \`servePath\`.
+
+---
+
 ## 2026-07-29
 
 ### UAT bug sweep — B-021 series (Planters / Nursery Management)
