@@ -21,6 +21,24 @@ describe("Input", () => {
     expect((getByLabelText("X") as HTMLInputElement).required).toBe(true);
   });
 
+  it("honors the HTML-standard minLength/maxLength validators", () => {
+    // A page composer reaches for `minLength`/`maxLength`; the schema used to
+    // know only `min`/`max` and rejected the field, dropping its page.
+    const { getByLabelText } = render(
+      <Input name="x" label="X" type="text" validators={{ minLength: 2, maxLength: 8 }} />
+    );
+    const el = getByLabelText("X") as HTMLInputElement;
+    expect(el.minLength).toBe(2);
+    expect(el.maxLength).toBe(8);
+  });
+
+  it("the explicit maxLength wins over the historic max", () => {
+    const { getByLabelText } = render(
+      <Input name="x" label="X" type="text" validators={{ max: 5, maxLength: 12 }} />
+    );
+    expect((getByLabelText("X") as HTMLInputElement).maxLength).toBe(12);
+  });
+
   it("calls onChange with the new value", () => {
     const calls: string[] = [];
     const { getByLabelText } = render(

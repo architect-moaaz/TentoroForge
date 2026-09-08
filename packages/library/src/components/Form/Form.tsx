@@ -124,6 +124,7 @@ const FIELD_CONTROL =
   "disabled:cursor-not-allowed disabled:opacity-50";
 const FIELD_TEXTAREA = FIELD_CONTROL.replace("h-10 ", "min-h-20 ");
 const FIELD_ERROR = "text-micro text-destructive";
+const FIELD_HINT = "text-micro text-muted-foreground";
 const FORM_SUBMIT =
   "mt-4 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm " +
   "font-medium text-primary-foreground transition-colors hover:bg-primary/90 " +
@@ -809,7 +810,11 @@ function FormFieldImpl({
               valueAsNumber: field.kind === "number",
             })}
           />
-          {error && <p role="alert" className={FIELD_ERROR}>{error}</p>}
+          {error
+            ? <p role="alert" className={FIELD_ERROR}>{error}</p>
+            : (field as { hint?: string }).hint
+              ? <p className={FIELD_HINT}>{(field as { hint?: string }).hint}</p>
+              : null}
         </div>
       );
     case "textarea":
@@ -822,7 +827,11 @@ function FormFieldImpl({
             className={FIELD_TEXTAREA}
             {...register(name, { required: effRequired ? "required" : false })}
           />
-          {error && <p role="alert" className={FIELD_ERROR}>{error}</p>}
+          {error
+            ? <p role="alert" className={FIELD_ERROR}>{error}</p>
+            : (field as { hint?: string }).hint
+              ? <p className={FIELD_HINT}>{(field as { hint?: string }).hint}</p>
+              : null}
         </div>
       );
     case "select":
@@ -841,7 +850,11 @@ function FormFieldImpl({
               </option>
             ))}
           </select>
-          {error && <p role="alert" className={FIELD_ERROR}>{error}</p>}
+          {error
+            ? <p role="alert" className={FIELD_ERROR}>{error}</p>
+            : (field as { hint?: string }).hint
+              ? <p className={FIELD_HINT}>{(field as { hint?: string }).hint}</p>
+              : null}
         </div>
       );
     case "checkbox":

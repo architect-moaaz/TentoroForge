@@ -58,6 +58,12 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
                        style, value, onChange, iconLeft, iconRight }: InputProps) {
   const id = useInputId(name);
   const required = validators?.required === true;
+  // Both vocabularies apply as string length; the explicit HTML-standard
+  // `minLength`/`maxLength` win over the historic `min`/`max`.
+  const minLen = typeof validators?.minLength === "number" ? validators.minLength
+    : typeof validators?.min === "number" ? validators.min : undefined;
+  const maxLen = typeof validators?.maxLength === "number" ? validators.maxLength
+    : typeof validators?.max === "number" ? validators.max : undefined;
   // THE PAGE'S SEARCH BOX. `type: "search"` writes `q` to the URL (debounced),
   // which the page passes to its list source's `search`; the searchable
   // columns manifest decides what it matches. A drawn "Search policies…"
@@ -121,8 +127,8 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
             placeholder={placeholder}
             required={required}
             pattern={validators?.pattern}
-            minLength={typeof validators?.min === "number" ? validators.min : undefined}
-            maxLength={typeof validators?.max === "number" ? validators.max : undefined}
+            minLength={minLen}
+            maxLength={maxLen}
             value={isSearch ? draft : value}
             onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
           />
@@ -144,8 +150,8 @@ export function Input({ name, label, type, placeholder, validators, bind: _bind,
           placeholder={placeholder}
           required={required}
           pattern={validators?.pattern}
-          minLength={typeof validators?.min === "number" ? validators.min : undefined}
-          maxLength={typeof validators?.max === "number" ? validators.max : undefined}
+          minLength={minLen}
+          maxLength={maxLen}
           value={isSearch ? draft : value}
           onChange={isSearch ? (e) => setDraft(e.target.value) : onChange ? (e) => onChange(e.target.value) : undefined}
         />
