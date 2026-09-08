@@ -66,15 +66,18 @@ def build_deploy_env(
     # System vars WIN — deploy-time truth beats stored user data.
     env["DATABASE_URL"] = neon_url
 
-    # Vercel returns bare hostnames ("acme.vercel.app"); if the caller
-    # already prefixed with https:// (or http://), strip it so we don't
-    # emit https://https://…
-    host = vercel_url
-    for scheme in ("https://", "http://"):
-        if host.startswith(scheme):
-            host = host[len(scheme):]
-            break
-    env["NEXTAUTH_URL"] = f"https://{host}"
+    # NEXTAUTH_URL IS DELIBERATELY NOT SET. The real deployment URL is not
+    # known until AFTER the deployment is created, and a Vercel env change does
+    # not touch an already-running deployment — so the old flow shipped a
+    # `placeholder.vercel.app` NEXTAUTH_URL that NextAuth then built every
+    # sign-in/callback/CSRF URL against, and login could never complete (the
+    # providers endpoint literally returned `https://placeholder.vercel.app/…`).
+    # NextAuth v4 falls back to Vercel's own `VERCEL_URL` (the actual host)
+    # when NEXTAUTH_URL is unset, which is correct on both preview and
+    # per-deployment URLs. `vercel_url` is retained in the signature for
+    # callers but is no longer used here; the provider deletes any stale
+    # NEXTAUTH_URL a prior deploy pinned.
+    _ = vercel_url
 
     # Empty NEXTAUTH_SECRET means "redeploy — reuse the secret Vercel already
     # has". Emitting NEXTAUTH_SECRET="" leaves a footgun for any caller that

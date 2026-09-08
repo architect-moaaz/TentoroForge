@@ -14,7 +14,9 @@ def test_merges_integrations_with_system_vars() -> None:
         nextauth_secret="deadbeef",
     )
     assert env["DATABASE_URL"] == "postgres://ep.neon.tech/main"
-    assert env["NEXTAUTH_URL"] == "https://acme.vercel.app"
+    # NEXTAUTH_URL is intentionally NOT set — NextAuth reads Vercel's own
+    # VERCEL_URL (the real host) instead of a placeholder that broke login.
+    assert "NEXTAUTH_URL" not in env
     assert env["NEXTAUTH_SECRET"] == "deadbeef"
     assert env["RESEND_API_KEY"] == "re_1"
     assert env["ANTHROPIC_API_KEY"] == "sk_1"
@@ -49,25 +51,18 @@ def test_skips_none_and_empty_integration_values() -> None:
     assert env["SET"] == "v"
 
 
-def test_prefixes_vercel_url_with_https() -> None:
-    env = build_deploy_env(
-        integrations={},
-        neon_url="postgres://x",
-        vercel_url="acme.vercel.app",  # Vercel returns bare host
-        nextauth_secret="s",
-    )
-    assert env["NEXTAUTH_URL"] == "https://acme.vercel.app"
-
-
-def test_strips_incoming_scheme_from_vercel_url() -> None:
-    # Guard against double-scheme like "https://https://acme.vercel.app"
-    env = build_deploy_env(
-        integrations={},
-        neon_url="postgres://x",
-        vercel_url="https://acme.vercel.app",
-        nextauth_secret="s",
-    )
-    assert env["NEXTAUTH_URL"] == "https://acme.vercel.app"
+def test_nextauth_url_is_never_set_whatever_the_vercel_url() -> None:
+    # The real host is not known until after the deployment exists, and a
+    # placeholder pinned every sign-in/callback/CSRF URL to the wrong host —
+    # login could never complete. NextAuth v4 uses Vercel's VERCEL_URL when
+    # NEXTAUTH_URL is unset, so the deploy leaves it unset regardless of what
+    # (unused) vercel_url a caller passes.
+    for vu in ("acme.vercel.app", "https://acme.vercel.app", ""):
+        env = build_deploy_env(
+            integrations={}, neon_url="postgres://x",
+            vercel_url=vu, nextauth_secret="s",
+        )
+        assert "NEXTAUTH_URL" not in env
 
 
 def test_blob_token_included_when_present() -> None:

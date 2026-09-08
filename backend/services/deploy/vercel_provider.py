@@ -300,7 +300,7 @@ class VercelDeployProvider:
             env = build_deploy_env(
                 integrations=dict(snapshot.integrations),
                 neon_url=neon_url,
-                vercel_url="placeholder.vercel.app",  # rewritten after deploy
+                vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
                 nextauth_secret=nextauth_secret,
                 # Reusing an existing Neon DB = a redeploy with live data;
                 # tell the build to skip schema reset + reseed.
@@ -322,6 +322,17 @@ class VercelDeployProvider:
                     await self.vercel.set_env(
                         vercel_project_id, key, val, ["production"]
                     )
+
+            # NEXTAUTH_URL is intentionally unset so NextAuth falls back to
+            # Vercel's own VERCEL_URL — the real host — on both preview and
+            # per-deployment URLs. A prior deploy may have pinned a stale
+            # `placeholder.vercel.app` here; remove it so the fallback takes
+            # over rather than login building every URL against the placeholder.
+            stale_nextauth = existing_by_key.get("NEXTAUTH_URL")
+            if stale_nextauth and stale_nextauth.get("id"):
+                await self.vercel.delete_env(
+                    vercel_project_id, stale_nextauth["id"]
+                )
 
             # 5. Upload — upload each file to /v2/files keyed by SHA1,
             #    then create a deployment referencing them sha-only.
@@ -354,45 +365,11 @@ class VercelDeployProvider:
             row.status = "build"
             await self._flush()
 
-            # Re-set NEXTAUTH_URL now that we know the real Vercel URL.
-            # We just PATCHed it above with the placeholder value; the
-            # env-id is still in `existing_by_key` from the pre-deploy
-            # list_env call.
-            nextauth_url_value = f"https://{vercel_url}"
-            nextauth_row = existing_by_key.get("NEXTAUTH_URL")
-            if nextauth_row and nextauth_row.get("id"):
-                await self.vercel.update_env(
-                    vercel_project_id,
-                    nextauth_row["id"],
-                    nextauth_url_value,
-                    ["production"],
-                )
-            else:
-                # First publish path — the earlier POST created it, so
-                # re-lookup by refreshing the env list.
-                refreshed = await self.vercel.list_env(vercel_project_id)
-                match = next(
-                    (
-                        e for e in refreshed
-                        if e.get("key") == "NEXTAUTH_URL"
-                        and "production" in (e.get("target") or [])
-                    ),
-                    None,
-                )
-                if match and match.get("id"):
-                    await self.vercel.update_env(
-                        vercel_project_id,
-                        match["id"],
-                        nextauth_url_value,
-                        ["production"],
-                    )
-                else:
-                    await self.vercel.set_env(
-                        vercel_project_id,
-                        "NEXTAUTH_URL",
-                        nextauth_url_value,
-                        ["production"],
-                    )
+            # No NEXTAUTH_URL rewrite here any more: the value is left unset so
+            # NextAuth reads Vercel's VERCEL_URL at runtime. The old rewrite
+            # PATCHed the env AFTER the deployment was created, which never
+            # reached the already-built deployment — that is the bug this
+            # replaces (login served against `placeholder.vercel.app`).
 
             yield DeployEvent("build", "Vercel is building your app…")
 

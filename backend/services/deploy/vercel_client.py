@@ -203,6 +203,18 @@ class VercelClient:
             )
         return r.json()
 
+    async def delete_env(self, project_id: str, env_id: str) -> None:
+        """Remove an env row by id. Used to clear a NEXTAUTH_URL a prior
+        deploy pinned to a placeholder / a stale per-deployment URL, so
+        NextAuth falls back to Vercel's own VERCEL_URL (the real host).
+        A 404 is fine — the row is already gone."""
+        r = await self._client.delete(
+            f"{BASE}/v9/projects/{project_id}/env/{env_id}",
+            params=self._params(),
+        )
+        if r.status_code not in (200, 204, 404):
+            _raise_with_body(r, f"delete_env project={project_id!r} id={env_id!r}")
+
     # ── Deployments ─────────────────────────────────────────────────
 
     async def upload_file(self, sha: str, raw: bytes) -> None:
