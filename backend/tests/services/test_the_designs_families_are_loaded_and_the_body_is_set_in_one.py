@@ -36,3 +36,36 @@ def test_a_design_with_no_typography_requests_nothing():
     import tempfile
     css = _tokens(Path(tempfile.mkdtemp()), {"colors": {"primary": "#c9a84c"}})
     assert "googleapis" not in css and "body {" not in css
+
+
+def test_a_prose_rationale_in_a_scale_is_not_a_token():
+    """A rationale nested in the radius scale is metadata, not a length.
+
+    The Blueprint types `radius` as an open string->string map, so a design
+    pass can drop a whole sentence beside the real steps. Emitted as a custom
+    property, its `;` ends the declaration early and `next build` dies on
+    `tokens.css Unknown word`. Only the dimension-valued steps are tokens.
+    """
+    import tempfile
+    css = _tokens(Path(tempfile.mkdtemp()), {"radius": {
+        "none": "0px", "sm": "3px", "md": "5px", "pill": "999px",
+        "rationale": "Small radii read as tooling rather than consumer "
+                     "software; status badges stay near-square so they align "
+                     "cleanly in dense table columns"}})
+    assert "--radius-sm: 3px;" in css and "--radius-pill: 999px;" in css
+    assert "--radius-rationale" not in css, "prose is not a scale step"
+    assert "--radius: 5px;" in css, "the bare --radius still resolves from md"
+    # No emitted custom-property value carries a `;` that would end the
+    # declaration early — the failure mode this guards.
+    for line in css.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--"):
+            assert stripped.count(";") == 1, f"broken declaration: {line!r}"
+
+
+def test_a_spacing_scale_drops_prose_too():
+    import tempfile
+    css = _tokens(Path(tempfile.mkdtemp()), {"spacing": {
+        "sm": "8px", "lg": "24px", "note": "generous; airy"}})
+    assert "--space-sm: 8px;" in css and "--space-lg: 24px;" in css
+    assert "--space-note" not in css

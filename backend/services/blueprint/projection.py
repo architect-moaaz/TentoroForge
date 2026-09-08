@@ -766,6 +766,32 @@ def _kebab(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
 
 
+#: A CSS length unit, or none for a bare `0`. `fr`/`%` included: spacing and
+#: radius scales legitimately use them.
+_CSS_UNIT = (r"(?:px|rem|em|%|fr|vh|vw|vmin|vmax|vi|vb|svh|lvh|dvh|svw|lvw|dvw|"
+             r"ch|ex|cap|ic|lh|rlh|pt|pc|cm|mm|in|q)")
+_CSS_DIMENSION = re.compile(
+    rf"^-?(?:\d+\.?\d*|\.\d+){_CSS_UNIT}?$", re.IGNORECASE)
+_CSS_FUNC = re.compile(r"^(?:calc|clamp|min|max|var|round)\(.*\)$",
+                       re.IGNORECASE | re.DOTALL)
+
+
+def _is_css_dimension(value: str) -> bool:
+    """Is this the TYPE a length scale requires — a dimension, not prose?
+
+    A `radius`/`spacing` scale is `{step: <css-length>}`, but the Blueprint
+    contract types it as an open string→string map, so a design pass can nest a
+    `rationale` (a whole sentence) beside the real steps. Emitted verbatim as a
+    custom property, that prose carries a `;` that ends the declaration early
+    and the next word is `Unknown word` — the whole `tokens.css`, and so the
+    preview build, fails. The rationale is not a scale step; a value that is not
+    a dimension is simply not part of the scale. `0`, `12px`, `0.5rem`, `50%`,
+    and `calc(...)`/`var(...)` forms are; a sentence is not.
+    """
+    v = str(value).strip()
+    return bool(v) and (bool(_CSS_DIMENSION.match(v)) or bool(_CSS_FUNC.match(v)))
+
+
 #: Where a component expects a shadcn name the Blueprint does not use, the
 #: nearest declared role stands in. Only aliases — every declared role is
 #: emitted under its own name regardless, so nothing depends on this table
@@ -848,11 +874,11 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f"  --radius: {radius};")
     elif isinstance(radius, dict):
         for key, value in sorted(radius.items()):
-            if isinstance(value, str) and value:
+            if isinstance(value, str) and _is_css_dimension(value):
                 lines.append(f"  --radius-{_kebab(key)}: {value};")
         # Components ask for a bare `--radius`; `md` is the sane middle.
         for key in ("md", "control", "card"):
-            if isinstance(radius.get(key), str):
+            if isinstance(radius.get(key), str) and _is_css_dimension(radius[key]):
                 lines.append(f"  --radius: {radius[key]};")
                 break
 
@@ -875,7 +901,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     spacing = design.get("spacing")
     if isinstance(spacing, dict):
         for key, value in sorted(spacing.items()):
-            if isinstance(value, str) and value:
+            if isinstance(value, str) and _is_css_dimension(value):
                 lines.append(f"  --space-{_kebab(key)}: {value};")
 
     out = Path(app_root) / "src" / "app"
