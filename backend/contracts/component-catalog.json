@@ -14434,6 +14434,9 @@
           "selectable": {
             "type": "boolean"
           },
+          "sortable": {
+            "type": "boolean"
+          },
           "rowActions": {
             "type": "array",
             "items": {

@@ -73,6 +73,15 @@ describe("Table — modern data mode", () => {
     expect(() => TableProps.parse({ columns: cols, rows: rows, selectable: true, pageSize: 10, title: "T" })).not.toThrow();
     expect(() => TableProps.parse({ columns: null })).not.toThrow(); // null → []
   });
+
+  it("accepts a table-wide sortable and turns sorting off when false", () => {
+    // A composer's `sortable: true` on the table used to fail the whole page
+    // (additionalProperties). It's the table-wide default now.
+    expect(() => TableProps.parse({ columns: cols, rows, sortable: true })).not.toThrow();
+    const { container } = render(<Table columns={cols} rows={rows} sortable={false} />);
+    // Sorting off → no clickable (cursor-pointer) headers.
+    expect(container.querySelectorAll("th.cursor-pointer").length).toBe(0);
+  });
 });
 
 describe("Table — legacy children mode", () => {
