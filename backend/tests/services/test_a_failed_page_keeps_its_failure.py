@@ -39,17 +39,25 @@ INDEPENDENT = (
 
 
 @pytest.mark.parametrize("projection", INDEPENDENT)
-def test_it_runs_before_the_refusal(projection):
+def test_it_runs_before_the_drop(projection):
     src = _source()
-    assert src.index(f"{projection}(svc.doc") < src.index("raise PlanError"), (
+    assert src.index(f"{projection}(svc.doc") < src.index('if result.get("failed")'), (
         f"{projection} is skipped when any page fails to plan"
     )
 
 
-def test_the_refusal_still_happens():
-    """The pages really did fail. This is about what the failure destroys, not
-    about tolerating it — the node must still fail so the retry runs."""
-    assert "raise PlanError" in _source()
+def test_a_failed_page_is_dropped_not_fatal():
+    """Drop-and-continue: a page whose authored tree cannot be planned is
+    dropped (its route 404s) — the same outcome an uncomposed page already
+    gets — and the node SUCCEEDS. Hard-failing here cascaded to `integration`
+    and held the whole project in `draft` (no Publish) over a few imperfect
+    pages while the rest were ready to ship."""
+    src = _source()
+    assert "raise PlanError" not in src, "one bad page must not fail the node"
+    # The drop is logged (page_funnel + _unbuilt_pages already account for the
+    # missing route); nothing new is written to the closed Blueprint runtime.
+    assert "logger.warning" in src
+    assert "unplannedPages" not in src, "must not write an undeclared runtime field"
 
 
 def test_the_scaffold_ships_what_it_imports():

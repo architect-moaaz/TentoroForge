@@ -1427,7 +1427,6 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
-    from services.blueprint.page_planner import PlanError
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
         project_public_resources,
@@ -1490,12 +1489,30 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_public_resources(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
+    # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree
+    # the planner cannot render is dropped — its route 404s — which is exactly
+    # the outcome `_unbuilt_pages` already gives a page that never composed (see
+    # the fan-out note: "the run still succeeds, and the app 404s where a page
+    # should be"). Raising here instead failed the whole `frontend` node,
+    # cascaded to `integration`/`testing`, and held the project in `draft` — no
+    # Publish — over a handful of imperfect pages while forty others were ready
+    # to ship. A frontend retry cannot fix these anyway: the tree is authored by
+    # `page_layouts`, and re-planning the same tree fails the same way. Record
+    # what was dropped so the run and the UI still name it, and let the node
+    # succeed with the pages that DID plan.
+    # A dropped page writes no schema, so it is already accounted for where a
+    # never-composed page is: `runtime["pages"]` (the preview node's page_funnel
+    # counts it as planned-but-not-served) and `_unbuilt_pages`, which is what
+    # the run panel's "N pages did not build" is read from. Nothing new is
+    # written to the closed Blueprint here — only a log line naming the reason,
+    # which page_funnel does not carry.
     if result.get("failed"):
-        raise PlanError(
-            f"{len(result['failed'])} page(s) authored but could not be "
-            "planned:\n" + "\n".join(
-                f"  {f['page']}: {f['reason'][:200]}" for f in result["failed"]
-            )
+        logger.warning(
+            "[frontend] %d authored page(s) could not be planned and were "
+            "dropped (their routes 404): %s",
+            len(result["failed"]),
+            "; ".join(f"{f['page']}: {str(f['reason'])[:120]}"
+                      for f in result["failed"][:6]),
         )
 
 
