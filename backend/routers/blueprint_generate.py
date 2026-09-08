@@ -114,6 +114,73 @@ def _status_report(doc: dict) -> str:
             f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
 
 
+def _is_built(output_dir) -> bool:
+    """Whether the application has actually been GENERATED, not just defined.
+
+    A define writes only the Blueprint (.forge/blueprint/current.json); the
+    build is what emits the Next app, and app_emitter writes its package.json.
+    So that file existing is the honest 'built' signal. It matters because a
+    change means two different things on the two sides of the build: before it,
+    a request is an edit to the DEFINITION (redraft and re-show for review);
+    after it, a change to the running app (compose / mutate). DEFECT-C-03/B-09
+    is the pre-build case being routed as if the app already existed.
+    """
+    from pathlib import Path as _P
+    return (_P(output_dir) / "app" / "package.json").is_file()
+
+
+#: A message that asks to ADD or CHANGE something in the definition — an
+#: imperative, not a question. Leading verb is the strong signal; a few whole
+#: phrases catch the polite forms. Interrogatives are excluded so a question
+#: ("what does this app do?") is answered, not turned into a redraft.
+_EDIT_LEAD_VERBS = (
+    "add", "remove", "delete", "include", "change", "rename", "make", "put",
+    "drop", "replace", "support", "allow", "enable", "require", "also",
+    "introduce", "create", "build", "let", "give",
+)
+_EDIT_PHRASES = (
+    "there should be", "there needs to be", "it should", "the app should",
+    "we need", "i need", "i want", "i'd like", "i would like", "please add",
+    "can you add", "could you add", "add a ", "add an ", "should also",
+    "needs to have", "should have", "must have",
+)
+_QUESTION_LEADS = (
+    "what", "why", "how", "where", "who", "when", "which", "is ", "are ",
+    "does ", "do ", "can i", "could i", "should i", "explain", "trace",
+    "show", "tell me", "has ", "have ",
+)
+
+
+def _definition_edit(message: str) -> bool:
+    """True when a message asks to change the definition (an edit), not ask
+    about it (a question). Conservative on both sides: a clear imperative is an
+    edit; a clear interrogative is not; anything ambiguous is left to the model.
+
+    DEFECT-C-03/B-09: 'Add a Clients module with a client list page' and 'Add an
+    approval step' are edits to the definition, but pre-build they were routed
+    to the composer, which has no app to change and deflected.
+    """
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    # A bare lifecycle command ('build', 'approve', 'define') is a command, not
+    # an edit — even though 'build' leads the edit-verb list.
+    if _lifecycle_verb(message) is not None:
+        return False
+    first = text.split()[0] if text.split() else ""
+    # A question wins: 'can you add a page?' still reads as a request, so only
+    # treat as a question when it leads with an interrogative AND names no edit.
+    leads_question = first in _QUESTION_LEADS or any(
+        text.startswith(q) for q in _QUESTION_LEADS)
+    has_edit = (first in _EDIT_LEAD_VERBS
+                or any(p in text for p in _EDIT_PHRASES))
+    if has_edit:
+        return True
+    if leads_question:
+        return False
+    return False
+
+
 #: A requirement id, however the user spaces or cases it ("REQ-001", "req 12").
 _REQ_ID_RE = re.compile(r"\bREQ[-_ ]?0*(\d+)\b", re.IGNORECASE)
 #: Words that make a message an INSPECTION of a requirement rather than an edit
@@ -1169,6 +1236,22 @@ async def smith_chat(
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
                 return defined_now
+
+            # DEFECT-C-03/B-09: A DEFINITION exists but the app is NOT built
+            # yet, and this is a request to change what will be built. That is
+            # an edit to the definition, not to a running app — so redraft the
+            # definition (re-run the domain nodes with the request appended) and
+            # re-show it for review, then advance to BLUEPRINT_REVIEW. Routing
+            # it to the composer instead is what produced "there is no page at
+            # /clients" and "no pages defined yet": the composer has no built app
+            # to change before the build has run. Only clear edits redraft; a
+            # question ("what does this app do?") still falls through to be
+            # answered.
+            if svc is not None and not _is_built(output_dir) \
+                    and _definition_edit(req.message):
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=False, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that

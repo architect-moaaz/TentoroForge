@@ -137,3 +137,45 @@ def test_integration_reply_names_the_system_and_offers_an_alternative():
     assert "Greenhouse" in r
     assert "requirement" in r.lower()          # offers the real alternative
     assert "figma" in r.lower() and "pilot" in r.lower()  # names what IS supported
+
+
+# ── DEFECT-C-03/B-09: a change at the definition gate redrafts the definition ──
+
+from routers.blueprint_generate import _is_built, _definition_edit
+
+
+def test_is_built_is_the_emitted_app_not_the_definition(tmp_path):
+    # A defined-but-unbuilt project: Blueprint on disk, no emitted app.
+    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
+    (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
+    assert _is_built(str(tmp_path)) is False
+    # After a build, app_emitter has written the Next app's package.json.
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    assert _is_built(str(tmp_path)) is True
+
+
+def test_definition_edit_detects_a_gate_modification():
+    assert _definition_edit("Add a Clients module with a client list page.") is True
+    assert _definition_edit("Add an approval step.") is True
+    assert _definition_edit("there should be a manager approval") is True
+    assert _definition_edit("remove the interviews module") is True
+    assert _definition_edit("please add a payments page") is True
+
+
+def test_definition_edit_leaves_questions_to_be_answered():
+    assert _definition_edit("what does this app do?") is False
+    assert _definition_edit("why did you decide that?") is False
+    assert _definition_edit("where is candidate stage change implemented?") is False
+    assert _definition_edit("trace REQ-001") is False
+    assert _definition_edit("") is False
+
+
+def test_definition_edit_ignores_bare_lifecycle_commands():
+    # 'build' leads the edit verbs but is a command — must not redraft.
+    assert _definition_edit("build") is False
+    assert _definition_edit("approve") is False
+    assert _definition_edit("define") is False
+    assert _definition_edit("status") is False
+    # …but 'build a dashboard at /' is still an edit.
+    assert _definition_edit("build a dashboard at /") is True
