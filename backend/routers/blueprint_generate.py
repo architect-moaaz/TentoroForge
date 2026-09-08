@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -111,6 +112,80 @@ def _status_report(doc: dict) -> str:
            else "Say `define` to (re)draft the definition, then `approve` to build.")
     return (f"State: {state}. {reqs} requirement(s), {pages} page(s) drafted; "
             f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
+
+
+#: A requirement id, however the user spaces or cases it ("REQ-001", "req 12").
+_REQ_ID_RE = re.compile(r"\bREQ[-_ ]?0*(\d+)\b", re.IGNORECASE)
+#: Words that make a message an INSPECTION of a requirement rather than an edit
+#: to one. "trace REQ-001", "is REQ-3 implemented", "where is REQ-007".
+_TRACE_HINTS = ("trace", "show", "explain", "where", "what", "which", "status",
+                "verif", "implement", "cover", "does ", "is ", "has ", "trace",
+                "?")
+
+
+def _requirement_query(message: str) -> str | None:
+    """The requirement id a message is ASKING ABOUT, normalised to `REQ-NNN`,
+    or None. Fires only when the message names a REQ id AND reads as an
+    inspection — a change like 'reword REQ-001' is left for the mover.
+
+    DEFECT-I-05: 'Trace REQ-001' came back 'the Blueprint contains no
+    requirement IDs', denying ids the Blueprint plainly has. The trace machinery
+    (verification.requirement_verdict + code_intel.trace) already answers this;
+    the live chat just never reached it. This detector routes the question to a
+    deterministic answer instead of the model that was getting it wrong.
+    """
+    if not message:
+        return None
+    m = _REQ_ID_RE.search(message)
+    if not m:
+        return None
+    low = message.lower()
+    edit_words = ("reword", "rename", "change ", "remove ", "delete ", "edit ",
+                  "update ", "add ")
+    if any(w in low for w in edit_words) and not any(
+            h in low for h in ("trace", "show", "explain", "where", "status")):
+        return None
+    if not any(h in low for h in _TRACE_HINTS):
+        return None
+    return f"REQ-{int(m.group(1)):03d}"
+
+
+def _requirement_report(doc: dict, req_id: str) -> str:
+    """A deterministic trace of one requirement — its text, PASSED/FAILED
+    verdict, and the artifact ids that implement it — read straight off the
+    Blueprint. Honest when the id is genuinely absent (names that, does not
+    deny the whole scheme)."""
+    reqs = [r for r in (doc or {}).get("requirements") or [] if isinstance(r, dict)]
+    match = next((r for r in reqs if str(r.get("id")) == req_id), None)
+    if match is None:
+        known = ", ".join(str(r.get("id")) for r in reqs[:6])
+        if not reqs:
+            return (f"{req_id} can't be traced yet — this project has no "
+                    "requirements defined. Say `define` first.")
+        return (f"{req_id} isn't a requirement in this Blueprint. It has "
+                f"{len(reqs)} requirement(s), e.g. {known}.")
+    desc = str(match.get("description") or "").strip()
+    lines = [f"{req_id} — {desc}" if desc else req_id]
+    try:
+        from services.smith import code_intel
+        tr = code_intel.trace(doc, req_id)
+        lines.append(f"Verdict: {getattr(tr, 'verdict', 'UNKNOWN')}.")
+        chain = getattr(tr, "chain", {}) or {}
+        order = ("FLOW", "RULE", "PAGE", "API", "ENTITY", "TEST")
+        parts = [f"{p.title()}: {', '.join(chain[p])}"
+                 for p in order if chain.get(p)]
+        # Anything the ordered list didn't name, so nothing is silently dropped.
+        parts += [f"{p.title()}: {', '.join(ids)}"
+                  for p, ids in sorted(chain.items())
+                  if p not in order and ids]
+        if parts:
+            lines.append("Traced to — " + "; ".join(parts) + ".")
+        else:
+            lines.append("Nothing cites it yet — it has no implementing "
+                         "artifacts in the Blueprint.")
+    except Exception:  # noqa: BLE001 — a trace degrades to the text + id, never 500s
+        pass
+    return "\n".join(lines)
 
 
 #: Action verbs whose presence means the app actually DOES something. A brief
@@ -902,6 +977,18 @@ async def smith_chat(
                 emit("message", {"text": _status_report(svc.doc if svc else {}),
                                  "status": "reported"})
                 return {"status": "reported"}
+
+            # DEFECT-I-05: 'Trace REQ-001' is a question with a determinate
+            # answer — the requirement's text, verdict and the ids that cite it,
+            # all in the Blueprint. Answer it here rather than let the model
+            # deny the id exists. Only fires on a defined project that actually
+            # has the requirements to trace.
+            if svc is not None:
+                asked_req = _requirement_query(req.message)
+                if asked_req:
+                    emit("message", {"text": _requirement_report(svc.doc, asked_req),
+                                     "status": "reported"})
+                    return {"status": "reported"}
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means

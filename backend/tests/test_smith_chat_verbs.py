@@ -3,6 +3,7 @@ functionless-guard and state-advance helpers on the live /smith/chat path."""
 import copy
 from routers.blueprint_generate import (
     _lifecycle_verb, _status_report, _is_functionless_brief, _advance_state_to_review,
+    _requirement_query, _requirement_report,
 )
 
 
@@ -51,3 +52,47 @@ def test_advance_state_walks_discovery_to_review():
     # idempotent-ish: from BLUEPRINT_REVIEW it stays put (no illegal jump)
     _advance_state_to_review(svc)
     assert svc.doc["state"] == "BLUEPRINT_REVIEW"
+
+
+# ── DEFECT-I-05: 'Trace REQ-001' answered from the Blueprint, not denied ──
+
+def test_requirement_query_detects_a_traced_id():
+    assert _requirement_query("Trace REQ-001.") == "REQ-001"
+    assert _requirement_query("trace req 12") == "REQ-012"
+    assert _requirement_query("is REQ-3 implemented?") == "REQ-003"
+    assert _requirement_query("where is REQ-007 done") == "REQ-007"
+
+
+def test_requirement_query_ignores_edits_and_non_ids():
+    # An edit that names an id is the mover's, not a trace.
+    assert _requirement_query("reword REQ-001 to be clearer") is None
+    assert _requirement_query("remove REQ-2") is None
+    # No id at all.
+    assert _requirement_query("add a candidate page") is None
+    assert _requirement_query("build a requisition tracker") is None  # 'req' w/o a number
+    assert _requirement_query("") is None
+
+
+def test_requirement_report_names_the_requirement_and_verdict():
+    doc = {"requirements": [
+        {"id": "REQ-001", "description": "Recruiters can add candidates."},
+        {"id": "REQ-002", "description": "Scheduling emails the candidate."},
+    ]}
+    out = _requirement_report(doc, "REQ-001")
+    assert "REQ-001" in out
+    assert "Recruiters can add candidates." in out
+    # A verdict line is present (PASSED/FAILED/UNKNOWN — value depends on trace).
+    assert "Verdict:" in out or "trace" in out.lower() or "cites it" in out.lower()
+
+
+def test_requirement_report_is_honest_about_a_missing_id():
+    doc = {"requirements": [{"id": "REQ-001", "description": "x"}]}
+    out = _requirement_report(doc, "REQ-999")
+    assert "REQ-999" in out and "isn't a requirement" in out
+    # …and never denies the whole scheme the way the model did.
+    assert "no requirement IDs" not in out
+
+
+def test_requirement_report_when_nothing_is_defined_yet():
+    out = _requirement_report({"requirements": []}, "REQ-001")
+    assert "no requirements defined" in out and "define" in out.lower()
