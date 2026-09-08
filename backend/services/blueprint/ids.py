@@ -394,10 +394,26 @@ class IdAllocator:
 
         with self._lock:
             existing = self.bindings.get(natural_key)
-            if existing:
+            if existing and existing.split("-", 1)[0] == prefix:
                 # Restoring a deprecated artifact reuses its own ID (§22).
                 self.retired.discard(existing)
                 return existing
+            if existing:
+                # NATURAL-KEY COLLISION ACROSS ARTIFACT TYPES. A bare human name
+                # keys more than one thing — the "Guest" ENTITY and a "Guest"
+                # ROLE — and agents hand that bare name as the natural key.
+                # Returning the binding regardless of prefix put an entity id on
+                # a role (`roles/9/id: ENTITY-007`), which the `^ROLE-` contract
+                # refused and which sank the whole security node and cascaded to
+                # the app. An id is NEVER shared across artifact types, so the
+                # requested prefix disambiguates: qualify the key by it. The two
+                # types get distinct ids, the first binding is untouched, and the
+                # lookup stays idempotent (the same role re-resolves here).
+                natural_key = f"{prefix}::{natural_key}"
+                requalified = self.bindings.get(natural_key)
+                if requalified:
+                    self.retired.discard(requalified)
+                    return requalified
 
             nxt = self.counters.get(prefix, 0) + 1
             self.counters[prefix] = nxt
