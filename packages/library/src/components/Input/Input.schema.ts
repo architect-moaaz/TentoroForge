@@ -20,8 +20,14 @@ export const InputProps = z.object({
   bind:        z.string().optional(),
   validators:  z.object({
     required: z.boolean().optional(),
-    min:      z.number().optional(),
-    max:      z.number().optional(),
+    // `min`/`max` are the historic names; the renderer applies both as string
+    // length (min|maxLength). A page composer reaches for the HTML-standard
+    // `minLength`/`maxLength` just as readily — accept those too rather than
+    // reject the whole field. The renderer prefers the explicit ones.
+    min:       z.number().optional(),
+    max:       z.number().optional(),
+    minLength: z.number().optional(),
+    maxLength: z.number().optional(),
     pattern:  z.string().optional(),
     message:  z.string().optional(),
   }).optional(),

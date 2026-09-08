@@ -179,12 +179,18 @@ class DagNode:
     #: Names a key in :data:`FANOUT`, which resolves the subjects from the
     #: Blueprint. A node without it runs exactly once, as before.
     fanout: str = ""
+    #: A node the application can ship without. Its failure is recorded but
+    #: does not fail the run or block its dependents — the built app is not
+    #: held in `draft` over an artifact that is not the running app itself
+    #: (e.g. `testing`, which is verification, and is the last node to spend
+    #: the API — so a low credit balance there should not sink a ready build).
+    optional: bool = False
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="") -> DagNode:
+       fanout="", optional=False) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout)
+                   note, kind, fanout, optional)
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -290,7 +296,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("integration", "backend",
        ("backend", "frontend", "workflows", "business_rules", "security", "integrations"),
        (), kind="projection"),
-    _n("testing", "testing", ("integration",), ("tests",)),
+    _n("testing", "testing", ("integration",), ("tests",), optional=True),
     # §20 + §23 — both read off what the Blueprint already carries, so neither
     # is an agent. Placed after authoring and before verification, so the
     # verification report is made against a document that knows what it assumed.
@@ -759,6 +765,11 @@ class RunReport:
     blocked_because: dict[str, str] = field(default_factory=dict)
     change_requests: list = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
+    #: Optional node -> why it failed, having been allowed through. The app
+    #: SHIPPED WITHOUT IT: `testing` is verification, not the running app, so a
+    #: failure there (a low credit balance, a transient fault) is recorded here
+    #: rather than in `failed`, and does not hold a built application in `draft`.
+    degraded: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -894,6 +905,28 @@ def _execute(
             max_attempts=max_attempts, commit=commit,
             user_request=user_request, app_root=app_root, ledger=ledger,
         )
+        # AN OPTIONAL NODE NEVER HOLDS THE APPLICATION IN DRAFT. If it failed,
+        # count it done anyway — its dependents (the deterministic tail: memory,
+        # verification, preview) run, the run stays `ok`, and the built app
+        # reaches `ready`. The failure is not hidden: it moves to `degraded`,
+        # which the report still carries. `testing` is the case that matters —
+        # verification, not the running app, and the last node to spend the API.
+        for key in wave:
+            if DAG[key].optional and key not in done:
+                labels = [key] + [
+                    lbl for lbl in list(report.failed)
+                    if lbl.startswith(f"{key}:")
+                ]
+                for lbl in labels:
+                    if lbl in report.failed:
+                        report.failed.remove(lbl)
+                        report.degraded[lbl] = report.failed_because.pop(lbl, "")
+                done.add(key)
+                logger.warning(
+                    "[%s] optional node failed and was shipped without: %s",
+                    key, "; ".join(report.degraded.get(lbl, "")
+                                   for lbl in labels)[:200],
+                )
         ran = set(wave)
         remaining = [key for key in remaining if key not in ran]
 
@@ -1427,7 +1460,6 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
-    from services.blueprint.page_planner import PlanError
     from services.blueprint.projection import (
         apply_frontend_projection, project_design_tokens, project_middleware,
         project_public_resources,
@@ -1490,12 +1522,30 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_public_resources(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
+    # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree
+    # the planner cannot render is dropped — its route 404s — which is exactly
+    # the outcome `_unbuilt_pages` already gives a page that never composed (see
+    # the fan-out note: "the run still succeeds, and the app 404s where a page
+    # should be"). Raising here instead failed the whole `frontend` node,
+    # cascaded to `integration`/`testing`, and held the project in `draft` — no
+    # Publish — over a handful of imperfect pages while forty others were ready
+    # to ship. A frontend retry cannot fix these anyway: the tree is authored by
+    # `page_layouts`, and re-planning the same tree fails the same way. Record
+    # what was dropped so the run and the UI still name it, and let the node
+    # succeed with the pages that DID plan.
+    # A dropped page writes no schema, so it is already accounted for where a
+    # never-composed page is: `runtime["pages"]` (the preview node's page_funnel
+    # counts it as planned-but-not-served) and `_unbuilt_pages`, which is what
+    # the run panel's "N pages did not build" is read from. Nothing new is
+    # written to the closed Blueprint here — only a log line naming the reason,
+    # which page_funnel does not carry.
     if result.get("failed"):
-        raise PlanError(
-            f"{len(result['failed'])} page(s) authored but could not be "
-            "planned:\n" + "\n".join(
-                f"  {f['page']}: {f['reason'][:200]}" for f in result["failed"]
-            )
+        logger.warning(
+            "[frontend] %d authored page(s) could not be planned and were "
+            "dropped (their routes 404): %s",
+            len(result["failed"]),
+            "; ".join(f"{f['page']}: {str(f['reason'])[:120]}"
+                      for f in result["failed"][:6]),
         )
 
 

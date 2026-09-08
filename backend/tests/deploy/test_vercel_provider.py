@@ -159,9 +159,15 @@ async def test_publish_full_flow_first_deploy(
     # Neon was created exactly once, Vercel project resolved exactly once
     assert neon.create_project.call_count == 1
     assert vercel.get_or_create_project.call_count == 1
-    # Env vars pushed at least: NODE_ENV / DATABASE_URL / NEXTAUTH_URL /
-    # NEXTAUTH_SECRET / RESEND_API_KEY + one final NEXTAUTH_URL re-set
-    assert vercel.set_env.call_count >= 5
+    # NEXTAUTH_URL is no longer pushed — NextAuth reads Vercel's VERCEL_URL.
+    # The core system vars and any integrations still are.
+    pushed_keys = {
+        (c.args[1] if len(c.args) > 1 else c.kwargs.get("key"))
+        for c in vercel.set_env.call_args_list
+    }
+    assert "DATABASE_URL" in pushed_keys
+    assert "NEXTAUTH_SECRET" in pushed_keys
+    assert "NEXTAUTH_URL" not in pushed_keys
 
 
 @pytest.mark.asyncio

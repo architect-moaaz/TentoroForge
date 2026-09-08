@@ -1,8 +1,21 @@
 const path = require("path");
 
+// Preview-behind-prefix mode: when the platform serves this app inside the
+// visual-editor iframe on a hosted deployment (UAT/prod), the backend
+// reverse-proxies requests at a path prefix, so basePath + assetPrefix teach
+// Next to emit `/_next/static/…` and page links with that prefix. Unset (the
+// Vercel deploy case, and a plain `verify_build`) → app runs at root,
+// unchanged. This used to live in an app-foundation `next.config.ts`, which
+// never took effect: Next loads `next.config.js` over `.ts`, so the prefix was
+// silently dropped. Folded here, into the one config Next actually reads.
+const PREVIEW_BASE_PATH = process.env.NEXT_BASE_PATH || undefined;
+const PREVIEW_ASSET_PREFIX = process.env.NEXT_ASSET_PREFIX || PREVIEW_BASE_PATH;
+
 /** @type {import("next").NextConfig} */
 module.exports = {
   reactStrictMode: true,
+  ...(PREVIEW_BASE_PATH ? { basePath: PREVIEW_BASE_PATH } : {}),
+  ...(PREVIEW_ASSET_PREFIX ? { assetPrefix: PREVIEW_ASSET_PREFIX } : {}),
   transpilePackages: [
     "@tentoroforge/engine",
     "@tentoroforge/library",
@@ -46,6 +59,16 @@ module.exports = {
       ...config.resolve.alias,
       "@tentoroforge/feel-lite": path.resolve(__dirname, "./src/lib/feel-lite"),
       "@forge/patches": path.resolve(__dirname, "./vendor/@forge/patches"),
+      // The app-foundation floor ships a dev-only editor route
+      // (src/app/(dev-only)/editor/*) whose editor-mount imports
+      // `@tentoroforge/editor` — the heavy visual-editor UI. That package is
+      // deliberately NOT vendored into generated apps (visual editing lives in
+      // the platform, not the app), so `next build` compiles the dev-only
+      // route eagerly and dies on `Can't resolve '@tentoroforge/editor'`.
+      // Alias it to an empty module: the import resolves, the build passes, and
+      // the dev-only route is a stub nobody serves. `false` is webpack 5's own
+      // "empty module" — no null-loader dependency needed.
+      "@tentoroforge/editor": false,
     };
     return config;
   },

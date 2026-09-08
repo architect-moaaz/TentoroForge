@@ -19,6 +19,27 @@ describe("Form", () => {
     expect(dispatch).toHaveBeenCalledWith("createProduct", { name: "Widget" });
   });
 
+  it("merges fixed args under the field values when dispatching", async () => {
+    // A composer authors a Form that passes the record it acts on plus a
+    // decision constant; the whole page used to fail because Form forbade
+    // `args`. Field values win over args on any key collision.
+    const dispatch = vi.fn();
+    render(
+      <Form
+        workflow="reviewWriteOff"
+        args={{ writeOffId: "wo_123", decision: "APPROVE" }}
+        defaultValues={{ note: "" }}
+        fields={[{ kind: "text", name: "note", label: "Note" }]}
+        __dispatch={dispatch}
+      />
+    );
+    await userEvent.type(screen.getByLabelText("Note"), "ok");
+    await userEvent.click(screen.getByRole("button", { name: /save|submit/i }));
+    expect(dispatch).toHaveBeenCalledWith("reviewWriteOff", {
+      writeOffId: "wo_123", decision: "APPROVE", note: "ok",
+    });
+  });
+
   it("disables the submit button while the workflow dispatch is in flight", async () => {
     let resolveDispatch!: () => void;
     const pending = new Promise<void>((r) => {

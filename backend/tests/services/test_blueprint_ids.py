@@ -396,3 +396,21 @@ def test_prefixes_match_the_typescript_schema():
     # Entries carry trailing `// comment` annotations; take the quoted tokens.
     ts_prefixes = tuple(re.findall(r'"([A-Z]+)"', block))
     assert ts_prefixes == ID_PREFIXES
+
+
+def test_allocate_never_returns_another_types_id_for_a_shared_name():
+    """A bare human name can key two artifact types — the "Guest" ENTITY and a
+    "Guest" ROLE — because agents hand the bare name as the natural key. The
+    allocator used to return the binding regardless of the requested prefix,
+    putting an entity id on a role (`roles/9/id: ENTITY-007`) — which the
+    `^ROLE-` contract refused and which sank the whole security node. An id is
+    never shared across types: the prefix disambiguates."""
+    a = IdAllocator(counters={"ENTITY": 7, "ROLE": 0},
+                    bindings={"Guest": "ENTITY-007"})
+    role = a.allocate("ROLE", "Guest")
+    assert role.startswith("ROLE-") and role != "ENTITY-007"
+    assert a.allocate("ROLE", "Guest") == role, "idempotent for the same role"
+    assert a.allocate("ENTITY", "Guest") == "ENTITY-007", "entity binding untouched"
+    # A same-type name still round-trips to its own id.
+    b = IdAllocator(counters={"ROLE": 3}, bindings={"ROLE:admin": "ROLE-003"})
+    assert b.allocate("ROLE", "ROLE:admin") == "ROLE-003"

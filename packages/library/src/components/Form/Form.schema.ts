@@ -39,70 +39,65 @@ const Interaction = z
   })
   .strict();
 
+// Props every field kind carries, whatever its control. Shared so a field
+// never loses its whole page to an over-narrow variant: a `required` checkbox
+// (a consent tick) and a `hint` under any input are ordinary things a page
+// composer asks for — the renderer reads `required` for validation and shows
+// `hint` as helper text, so both belong on all kinds, not a curated few.
+const fieldBase = {
+  name: z.string(),
+  label: z.string(),
+  required: z.boolean().optional(),
+  // Short helper text shown under the control (not the rules-engine hint).
+  hint: z.string().optional(),
+  interaction: Interaction.optional(),
+} as const;
+
 const Field = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.enum(["text", "email", "number"]),
-      name: z.string(),
-      label: z.string(),
-      required: z.boolean().optional(),
+      ...fieldBase,
       placeholder: z.string().optional(),
-      interaction: Interaction.optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal("textarea"),
-      name: z.string(),
-      label: z.string(),
-      required: z.boolean().optional(),
+      ...fieldBase,
       rows: z.number().optional(),
-      interaction: Interaction.optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal("select"),
-      name: z.string(),
-      label: z.string(),
-      required: z.boolean().optional(),
+      ...fieldBase,
       options: z.array(z.object({ value: z.string(), label: z.string() })),
-      interaction: Interaction.optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal("checkbox"),
-      name: z.string(),
-      label: z.string(),
-      interaction: Interaction.optional(),
+      ...fieldBase,
     })
     .strict(),
   z
     .object({
       kind: z.literal("date"),
-      name: z.string(),
-      label: z.string(),
-      required: z.boolean().optional(),
-      interaction: Interaction.optional(),
+      ...fieldBase,
     })
     .strict(),
   z
     .object({
       kind: z.literal("radio"),
-      name: z.string(),
-      label: z.string(),
-      required: z.boolean().optional(),
+      ...fieldBase,
       options: z.array(z.object({ value: z.string(), label: z.string() })),
-      interaction: Interaction.optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal("switch"),
-      name: z.string(),
-      label: z.string(),
-      interaction: Interaction.optional(),
+      ...fieldBase,
     })
     .strict(),
   // Typed object for jsonb config columns — a fieldset of nested typed sub-fields.
@@ -111,22 +106,18 @@ const Field = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("object"),
-      name: z.string(),
-      label: z.string(),
+      ...fieldBase,
       description: z.string().optional(),
       fields: z.array(z.record(z.unknown())),
-      interaction: Interaction.optional(),
     })
     .strict(),
   // Free-form string→value map (add/remove rows) for jsonb columns of unknown shape.
   z
     .object({
       kind: z.literal("keyvalue"),
-      name: z.string(),
-      label: z.string(),
+      ...fieldBase,
       description: z.string().optional(),
       valueType: z.enum(["text", "number", "boolean"]).optional(),
-      interaction: Interaction.optional(),
     })
     .strict(),
 ]);
@@ -167,6 +158,14 @@ export const FormProps = z.object({
   // id like FLOW-002 and matches no rule.
   entity:        z.string().optional(),
   fields:        z.array(Field).optional(),
+  // Fixed arguments dispatched with the form's `workflow`, merged UNDER the
+  // user-entered field values (so a field never silently loses to a constant).
+  // A composer authors these to carry the context the submit needs but the
+  // user doesn't type — the record being acted on ({{write_offs.id}}), a
+  // decision constant ("APPROVE"), an approver role. Buttons already declare
+  // `args` for exactly this; a Form that dispatches a workflow needs it too,
+  // and rejecting it failed the whole page over a prop the renderer can honor.
+  args:          z.record(z.unknown()).optional(),
   defaultValues: z.record(z.unknown()).optional(),
   submitLabel:   z.string().optional(),
   style:         StyleSlot.optional(),

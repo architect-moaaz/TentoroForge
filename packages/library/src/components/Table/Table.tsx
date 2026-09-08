@@ -41,6 +41,8 @@ export interface TableProps {
   searchable?: boolean;
   pageSize?: number;
   selectable?: boolean;
+  /** Table-wide sortable default; per-column `sortable` overrides it. */
+  sortable?: boolean;
   rowActions?: RowActionDef[];
   rowHref?: string;
   striped?: boolean;
@@ -363,6 +365,8 @@ export function Table(props: TableProps) {
   const dataMode = !!records && !children;
   const searchable = props.searchable ?? dataMode;
   const selectable = props.selectable ?? false;
+  // Table-wide sortable default (columns still override per-column).
+  const tableSortable = props.sortable ?? true;
 
   const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<string | null>(null);
@@ -642,7 +646,7 @@ export function Table(props: TableProps) {
                 </th>
               )}
               {columns.map((col) => {
-                const sortable = dataMode && (col.sortable ?? true);
+                const sortable = dataMode && (col.sortable ?? tableSortable);
                 const align = col.align ?? (formats[col.key] === "number" || formats[col.key] === "currency" ? "right" : "left");
                 return (
                   <th

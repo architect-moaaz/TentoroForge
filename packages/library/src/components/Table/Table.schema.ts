@@ -75,6 +75,11 @@ export const TableProps = z
     searchable: z.boolean().optional(), // global search box (default on in data mode)
     pageSize: z.number().optional(), // rows per page; small sets render without a pager
     selectable: z.boolean().optional(), // checkbox column + select-all
+    // Table-wide sortable default. Columns are sortable by default in data
+    // mode; a composer that writes `sortable: true` on the table meant exactly
+    // that, and `sortable: false` is the (previously missing) way to turn the
+    // default off table-wide. Per-column `sortable` still wins.
+    sortable: z.boolean().optional(),
     rowActions: z.array(RowAction).optional(), // per-row actions (View/Edit/Delete…)
     rowHref: z.string().optional(), // make each row a link, e.g. "/guests/{id}"
     striped: z.boolean().optional(),

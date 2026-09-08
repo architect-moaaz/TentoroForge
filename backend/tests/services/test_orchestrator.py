@@ -1085,3 +1085,19 @@ def test_one_node_cannot_spend_the_whole_wave_budget(svc):
     assert peak_total <= WAVE_CONCURRENCY, "the wave budget was exceeded"
     assert peak_node["page_layouts"] <= FANOUT_CONCURRENCY, (
         "one node took more than its own width out of the shared budget")
+
+
+def test_an_optional_node_failure_does_not_sink_the_run(svc):
+    """`testing` is verification, not the running app — and the last node to
+    spend the API. A failure there (a low credit balance) must NOT hold a built
+    app in draft: it is shipped without, recorded in `degraded`, and the run
+    stays ok so the app can still reach ready."""
+    def executor(spec: TaskSpec) -> AgentResult:
+        if spec.node == "testing":
+            raise RuntimeError("credit balance too low")
+        return page_agent_result(spec)
+
+    report = run(svc, executor, plan=["testing"], max_attempts=1)
+    assert report.ok, f"failed={report.failed} blocked={report.blocked}"
+    assert "testing" in report.degraded and "testing" not in report.failed
+    assert "credit balance too low" in report.degraded["testing"]

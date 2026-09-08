@@ -70,6 +70,14 @@ def _iter_files(root: Path) -> Iterator[Path]:
         rel = p.relative_to(root)
         if set(rel.parts) & _EXCLUDE_DIRS_ANYWHERE:
             continue
+        # ANY Next.js build/dist directory, not just `.next`. The verification
+        # build compiles into `.next-verify` (NEXT_DIST_DIR), whose webpack
+        # cache alone is 200MB+ — one `.next-verify/cache/.../0.pack` blew the
+        # per-file upload limit the moment the deploy started shipping the
+        # projected `<output>/app`. All `.next*` dirs are build output, never
+        # source.
+        if any(part == ".next" or part.startswith(".next-") for part in rel.parts):
+            continue
         if rel.parts and rel.parts[0] in _EXCLUDE_DIRS_ROOT_ONLY:
             continue
         # Next.js route groups named "(dev-only)" host in-app editor
