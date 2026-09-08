@@ -23,7 +23,7 @@ import { api } from "@/lib/api";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
 /** What the orchestrator says about one node, as the run unfolds. */
-export type NodeState = "waiting" | "running" | "done";
+export type NodeState = "waiting" | "running" | "done" | "failed";
 
 export interface RunNode {
   key: string;
@@ -186,6 +186,8 @@ export function useBlueprintRun(projectId: string | null) {
           stage?: string | null;
           nodesDone?: number;
           nodesTotal?: number;
+          callsDone?: number;
+          nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
           elapsedMs?: number;
           awaitingApproval?: boolean;
           status?: string;
@@ -200,6 +202,19 @@ export function useBlueprintRun(projectId: string | null) {
             // fabricated node list would claim names we were not told.
             nodesDone: snap.nodesDone ?? 0,
             nodesTotal: snap.nodesTotal ?? 0,
+            callsDone: snap.callsDone ?? prev.callsDone,
+            // The rows come back with the count: the registry keeps each node's
+            // state from the same events this reducer folds, so a reload no longer
+            // shows a bare counter for the rest of the run.
+            nodes:
+              Array.isArray(snap.nodes) && snap.nodes.length > 0
+                ? snap.nodes.map((n) => ({
+                    key: n.key,
+                    state: n.state,
+                    subject: n.subject,
+                    calls: n.calls ?? 0,
+                  }))
+                : prev.nodes,
             awaitingApproval: Boolean(snap.awaitingApproval),
             reattachedStage: snap.stage ?? null,
             reattachedElapsedMs: snap.elapsedMs ?? null,
@@ -416,27 +431,55 @@ export function reduce(
       return {
         ...prev,
         nodes: prev.nodes.map((n) =>
-          n.key === data.node
-            ? { ...n, state: "running", subject: data.subject as string }
-            : n,
+          n.key === data.node ? { ...n, state: "running", subject: undefined } : n,
         ),
       };
 
-    case "node:done":
+    // ONE PAGE OF A FAN-OUT FINISHED; THE NODE HAS NOT. The stream reads the
+    // run ledger, which says so in two different lines: a subject per page,
+    // and one `node:done` when the node itself is complete. Ticking on the
+    // first subject is what showed Page Design complete while fourteen more
+    // pages were still composing.
+    case "node:subject":
       return {
         ...prev,
-        // A fan-out node emits `node:done` once per subject, so it is only
-        // finished when the orchestrator's own nodesDone says so. Marking it
-        // done on the first subject showed `page_layouts` complete while four
-        // more pages were still composing.
         nodes: prev.nodes.map((n) =>
           n.key === data.node
-            ? { ...n, state: "done", subject: undefined, calls: n.calls + 1 }
+            ? {
+                ...n,
+                state: "running",
+                calls: n.calls + 1,
+                subject:
+                  data.index != null && data.total
+                    ? `${data.index} of ${data.total}`
+                    : (data.subject as string | undefined),
+              }
             : n,
         ),
         nodesDone: (data.nodesDone as number) ?? prev.nodesDone,
         nodesTotal: (data.nodesTotal as number) ?? prev.nodesTotal,
         callsDone: (data.callsDone as number) ?? prev.callsDone,
+      };
+
+    case "node:done":
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n) =>
+          n.key === data.node ? { ...n, state: "done", subject: undefined } : n,
+        ),
+        nodesDone: (data.nodesDone as number) ?? prev.nodesDone,
+        nodesTotal: (data.nodesTotal as number) ?? prev.nodesTotal,
+        callsDone: (data.callsDone as number) ?? prev.callsDone,
+      };
+
+    case "node:failed":
+    case "node:blocked":
+    case "node:skipped":
+      return {
+        ...prev,
+        nodes: prev.nodes.map((n) =>
+          n.key === data.node ? { ...n, state: "failed", subject: undefined } : n,
+        ),
       };
 
     case "forecast":

@@ -1036,3 +1036,5 @@ def test_the_ceiling_leaves_room_for_three_attempts():
 
     assert DEFAULT_TIMEOUT <= 300, (
         f"{DEFAULT_TIMEOUT}s x 3 attempts is longer than anyone will wait")
+
+

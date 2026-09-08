@@ -284,16 +284,60 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
             return max(kids, key=_width)
         return tree
 
-    # WHAT A FRAME SHOWS IS ITS TITLE, NOT ITS LARGEST TEXT. On a legislative
-    # dashboard the only text large enough to be a Heading was the KPI "132",
-    # and every real title was set small in Cairo — so the page was named
-    # "132" and routed to /132. A title has letters and comes first: the
-    # first lettered text of the content region in document order, whatever
-    # its size — the header's title precedes any section heading.
+    def _size(node) -> float:
+        m = re.search(r"\btext-\[(\d+(?:\.\d+)?)px\]", str((node.get("props") or {}).get("className") or ""))
+        return float(m.group(1)) if m else 0.0
+
+    def texts(node, out):
+        """Every lettered text under ``node`` with its drawn size, in order."""
+        if isinstance(node, dict):
+            props = node.get("props") or {}
+            content = props.get("content") if node.get("type") in ("Heading", "Text") else None
+            if _words(content):
+                out.append((content.strip(), _size(node)))
+            for child in node.get("children") or []:
+                texts(child, out)
+        elif isinstance(node, list):
+            for child in node:
+                texts(child, out)
+        return out
+
+    def _norm(text: str) -> str:
+        return "".join(ch for ch in text.lower() if ch.isalnum())
+
+    def beside_content(tree):
+        """The lone frame's chrome: what the first row holds beside the widest
+        region — its rail, drawn once and shared with nothing."""
+        first = next((c for c in tree.get("children") or [] if isinstance(c, dict)), None)
+        kids = [c for c in (first or {}).get("children") or [] if isinstance(c, dict)]
+        if len(kids) >= 2 and any(_width(k) for k in kids):
+            widest = max(kids, key=_width)
+            return [k for k in kids if k is not widest]
+        return []
+
+    # WHAT A FRAME SHOWS IS THE DESTINATION ITS RAIL NAMES. Fifteen frames of
+    # one file each opened with a breadcrumb — "Criterion / Ticket Queue" —
+    # and the first lettered text of every content region was the brand, so
+    # the planner had fifteen frames called "Criterion" and routed them by
+    # position: 14 of 15 wrong. A screen is one of the places its own rail
+    # lists, and the rail is already in hand as the chrome. Among the content
+    # region's texts that name a rail entry, the one drawn largest is the
+    # title, and among equals the later one — a breadcrumb lists ancestors
+    # first. The rail on a legislative dashboard names "لوحة التحكم" and so
+    # does its header at 14px, beneath a 28px KPI and a 20px section heading
+    # that name nothing; the first lettered text remains the fallback for a
+    # frame whose rail names none of its texts.
     out: dict[str, str] = {}
     for node_id, tree in trees.items():
-        content, _removed = _chrome.split(tree, shared) if shared else (content_region(tree), [])
-        heading = first_text(content, ("Heading", "Text"))
+        if shared:
+            content, removed = _chrome.split(tree, shared)
+        else:
+            content, removed = content_region(tree), beside_content(tree)
+        named = {_norm(t) for t, _ in texts(removed, [])}
+        shown = [(size, i, t) for i, (t, size) in enumerate(texts(content, []))
+                 if _norm(t) in named]
+        heading = (max(shown, key=lambda c: (c[0], c[1]))[2] if shown
+                   else first_text(content, ("Heading", "Text")))
         if heading:
             out[node_id] = heading
     return out

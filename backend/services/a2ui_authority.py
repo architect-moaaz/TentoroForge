@@ -85,6 +85,29 @@ DEFAULT_TIMEOUT = int(os.environ.get("FORGE_A2UI_TIMEOUT", "240"))
 
 SurfaceProvider = Callable[[str, str], dict]
 
+
+class ComposerUnavailable(RuntimeError):
+    """The A2UI server cannot serve ANY page right now — bad API key, no
+    credit. One page learning this is information; twenty pages learning it
+    three attempts each is the 2,760-call 401 storm in the server's log. The
+    per-page retry and the page loop both stop on the first one, and the loop
+    says which pages it did not send."""
+
+
+def _server_error(text: str) -> Exception:
+    """Turn the server's error body into the right exception. The server
+    marks account-level faults ``fatal`` so the caller can stop instead of
+    re-learning the same thing per page."""
+    try:
+        body = json.loads(text) if text else {}
+    except ValueError:
+        body = {}
+    msg = body.get("error") if isinstance(body, dict) else None
+    msg = msg or text[:400] or "no detail"
+    if isinstance(body, dict) and body.get("fatal"):
+        return ComposerUnavailable(msg)
+    return RuntimeError(f"a2ui server: {msg[:400]}")
+
 # What each kind of screen is FOR, in the words the composer needs to make its
 # own call. Deliberately a job statement and not a parts list — see
 # `build_requirement` for why the maquette stopped being sent.
@@ -724,7 +747,7 @@ def _mcp_surface(requirement: str, domain_context: str,
                 })
                 if out.isError:
                     text = getattr(out.content[0], "text", "") if out.content else ""
-                    raise RuntimeError(f"a2ui server: {text[:400]}")
+                    raise _server_error(text)
                 for block in out.content:
                     text = getattr(block, "text", None)
                     if text:
@@ -913,6 +936,17 @@ def compose_page_via_a2ui(
                                                             page_id,
                                                             shared_context,
                                                             feedback))
+        except ComposerUnavailable as exc:
+            # Still never a failed build — but neither the attempts left here
+            # nor the pages after this one can change the answer, so this
+            # returns at once and the page loop hears it.
+            logger.error("[a2ui] %s: composer unavailable: %s", route, exc)
+            _say(progress, f"The composer is unavailable ({exc}) — stopping "
+                           "page composition; the deterministic composers "
+                           "take over.")
+            return {"applied": False, "route": route, "kind": kind,
+                    "fatal": True,
+                    "reason": f"composer unavailable: {exc}"}
         except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
             last_exc, payload = exc, None
         else:
@@ -1147,9 +1181,21 @@ def compose_pages_via_a2ui(
 
     chosen, skipped = candidates[:cap], candidates[cap:]
     results = []
-    for route, kind in chosen:
-        results.append(compose_page_via_a2ui(output_dir, route, kind,
-                                             surface_provider=surface_provider))
+    not_sent: list[str] = []
+    fault: Optional[str] = None
+    for i, (route, kind) in enumerate(chosen):
+        r = compose_page_via_a2ui(output_dir, route, kind,
+                                  surface_provider=surface_provider)
+        results.append(r)
+        if r.get("fatal"):
+            # CIRCUIT BREAKER. The composer just said it cannot serve any
+            # request; the pages after this one would each pay three round
+            # trips to hear it again.
+            fault = str(r.get("reason"))
+            not_sent = [rt for rt, _ in chosen[i + 1:]]
+            logger.error("[a2ui] stopping after %s — %d page(s) not sent: %s",
+                         route, len(not_sent), ", ".join(not_sent) or "-")
+            break
 
     applied = [r for r in results if r.get("applied")]
     if skipped:
@@ -1165,6 +1211,8 @@ def compose_pages_via_a2ui(
         "declined": [{"route": r["route"], "reason": r.get("reason")}
                      for r in results if not r.get("applied")],
         "skipped_by_cap": [r for r, _ in skipped],
+        "not_sent": not_sent,
+        "fault": fault,
         "cap": cap,
         "pages": results,
     }

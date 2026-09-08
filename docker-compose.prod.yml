@@ -50,6 +50,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      # The a2ui MCP composer is spawned over stdio from a checkout of the
+      # a2ui repo (services/a2ui_authority.py resolves
+      # `$A2UI_REPO/tools/a2ui-mcp/server.py`). The checkout is mounted
+      # below; its trace log lands in the checkout's own logs/ directory.
+      A2UI_REPO: /a2ui
+      A2UI_LOG_FILE: /a2ui/logs/mcp.jsonl
       APP_ENV: production
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
       # --- deploy providers (generated-app publish flow) ---
@@ -91,6 +97,10 @@ services:
       # dist/ + package.json and copy them into the generated app.
       # Read-only — the container never writes here.
       - ./packages:/packages:ro
+      # The a2ui checkout the composer is spawned from (A2UI_REPO above).
+      # Read-only, with logs/ mounted writable on top for the trace file.
+      - ${A2UI_CHECKOUT:-./a2ui}:/a2ui:ro
+      - ${A2UI_CHECKOUT:-./a2ui}/logs:/a2ui/logs
     # No published ports — nginx is the only entrypoint.
 
   # Self-Verify Pass runner — headless Chromium + Fastify.

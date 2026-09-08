@@ -119,11 +119,19 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # vocabulary `jsx_to_schema` reads, so the page that comes back is the
     # same kind of object a Figma frame produces.
     html = str(structure.get("html") or "") if structure.get("source") == "uxpilot_html" else ""
+    # A REST EXTRACTION RECORDS FIGMA'S NATIVE NODE TREE, NOT MCP CODE. The
+    # hosted MCP that yields `code` is gated to partners (DCR is refused); the
+    # REST API returns the same structure as JSON, and
+    # `figma_to_schema.build_page_schema` already turns that into the identical
+    # element vocabulary `jsx_to_schema` emits. Same seam, same tree out.
+    rest_doc = (structure.get("document")
+                if structure.get("source") == "rest_node_document"
+                and isinstance(structure.get("document"), dict) else None)
     provider = "uxpilot" if html else "figma"
-    if not code and not html:
-        # An extraction that recorded the node tree rather than the code. §102
-        # wants that visible as a thin reference, not as a broken page.
-        logger.info("[figma] %s has no design_context code for %s — composing "
+    if not code and not html and rest_doc is None:
+        # An extraction that recorded neither code, HTML, nor a REST node tree.
+        # §102 wants that visible as a thin reference, not as a broken page.
+        logger.info("[figma] %s has no composable structure for %s — composing "
                     "instead", page.get("id"), node_id)
         return None
 
@@ -165,6 +173,12 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                 html, list(structure.get("assets") or []), str(app_root),
                 title=str(page.get("name") or "") or None,
             ))
+        elif rest_doc is not None:
+            schema, assets = _build_from_rest(
+                rest_doc, str(app_root),
+                title=str(page.get("name") or "") or None,
+                canvas=canvas,
+            )
         else:
             schema, assets = _run(build_schema_from_jsx(
                 code,
@@ -229,13 +243,17 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
     # the tree exactly as composed, which is the page that already renders.
     live_sources: list[dict] = []
     try:
-        # The region and table passes read the frame's JSX layers; HTML has
-        # no layers to read, so a UX Pilot page keeps the tree as mapped.
-        classified = _classify_regions(svc, page, code, screen, app_root) if code else []
-        # A TABLE DRAWN AS TEXT is read from its layers rather than looked
-        # at: header, first rows, the card's title. Bound to an entity it
-        # becomes a live Table whose rows open the entity's detail page.
-        classified = list(classified or []) + (_classify_tables(svc, code) if code else [])
+        # The region and table passes read the frame's structure. The MCP path
+        # gives it as JSX layers; the REST path gives a schema tree with the
+        # same geometry (`boxes`) and node text. Either is enough — a UX Pilot
+        # page (HTML, no layers) is the only one that keeps the tree as mapped.
+        can_classify = bool(code) or rest_doc is not None
+        classified = _classify_regions(svc, page, code, screen, app_root) if can_classify else []
+        # A TABLE DRAWN AS TEXT is read from its layers (MCP code) or from the
+        # composed tree (REST). Bound to an entity it becomes a live Table whose
+        # rows open the entity's detail page.
+        classified = list(classified or []) + (
+            _classify_tables(svc, code, schema["children"][0]) if can_classify else [])
         if classified:
             from services.figma import realize as _realize
 
@@ -299,9 +317,23 @@ def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
                     page.get("id"))
         return None
 
+    # A DRAWN ENTRY POINT OPENS A FORM FOR WHAT ITS WORKFLOW NEEDS. "+ New
+    # Case" drawn on a page whose file never drew the New Case screen binds to
+    # the case workflow, and a lone button collects no `caseType`: the contract
+    # refused four pages of one file on that. The button opens a dialog whose
+    # form takes the workflow's required inputs and runs it.
+    sources = list(schema.get("dataSources") or []) + live_sources + extra_sources
+    try:
+        from services.figma import entry_points as _entry
+        root, picker_sources, opened = _entry.open_forms(svc.doc, page, root, sources)
+        if opened:
+            sources += picker_sources
+            logger.info("[figma] %s: %d entry point(s) now open a form", page.get("id"), opened)
+    except Exception as exc:  # noqa: BLE001 — never the page
+        logger.warning("[figma] entry points for %s: %s", page.get("id"), exc)
     out = {
         "root": root,
-        "dataSources": list(schema.get("dataSources") or []) + live_sources + extra_sources,
+        "dataSources": sources,
         "assets": dict(assets or {}),
         "provider": provider,
     }
@@ -321,6 +353,46 @@ async def _build_from_html(
     assets = await download_figma_assets(list(asset_urls), app_root) if asset_urls else {}
     schema = transform_html_to_schema(html, assets, title=title or "Design Import")
     return schema, assets
+
+
+def _build_from_rest(
+    document: dict, app_root: str, *, title: str | None,
+    canvas: tuple[float, float] | None,
+) -> tuple[dict, dict[str, str]]:
+    """A Figma REST node document as a PageV2 tree — the REST-API counterpart of
+    ``build_schema_from_jsx``, for when the hosted MCP's ``get_design_context``
+    code is unavailable (it is gated to partners).
+
+    ``build_page_schema`` already parses Figma's native node JSON — geometry,
+    text, fills, auto-layout, typography — into the same element vocabulary
+    ``jsx_to_schema`` emits, so the tree that comes back drops into the same
+    chrome/region/realize downstream unchanged (verified by the task-A spike).
+
+    Assets are not downloaded here: REST image fills resolve through a separate
+    ``/v1/images`` fetch that belongs to the extraction step, so this passes
+    none and the tree carries whatever the transformer resolved. Synchronous —
+    ``build_page_schema`` does no I/O.
+    """
+    from services.figma_to_schema import build_page_schema
+
+    page = build_page_schema(document, asset_paths={}).page
+    # `build_page_schema` flattens a Stack root into `children`; compose treats
+    # `schema["children"][0]` as THE frame root, so re-wrap when it flattened.
+    kids = [c for c in (page.get("children") or []) if isinstance(c, dict)]
+    root = kids[0] if len(kids) == 1 else {"type": "Stack", "props": {}, "children": kids}
+    schema: dict = {
+        "schemaVersion": "2.0",
+        "id": page.get("id") or "page",
+        "title": title or page.get("title") or "Design Import",
+        "dataSources": [],
+        "children": [root],
+        # Same markers the JSX path stamps, so the renderer/shell treats a
+        # REST-derived page exactly like an MCP-derived one.
+        "_figmaDerived": True,
+    }
+    if canvas:
+        schema["_figmaCanvas"] = {"width": canvas[0], "height": canvas[1], "fit": "scale"}
+    return schema, {}
 
 
 def _set_action_vocabulary(doc: dict) -> None:
@@ -411,11 +483,15 @@ def _search_source_for(doc: dict, page: dict, root: dict, existing: list[dict]) 
     return [{"name": name[:1].lower() + name[1:] + "List", "op": "list", "entity": name, "limit": 50}]
 
 
-def _classify_tables(svc: Any, code: str) -> list[dict]:
-    """Drawn tables bound to entities, with the row link resolved."""
+def _classify_tables(svc: Any, code: str, root: dict | None = None) -> list[dict]:
+    """Drawn tables bound to entities, with the row link resolved.
+
+    Reads the table from the MCP code layers when there is code, and from the
+    composed schema tree (the REST path) otherwise — `classify_tables` binds
+    the same ``DrawnTable`` shape either way."""
     from services.figma import tables as _tables
     try:
-        drawn = _tables.drawn_tables(code)
+        drawn = _tables.drawn_tables(code) if code else _tables.drawn_tables_from_tree(root or {})
         if not drawn:
             return []
         from services.blueprint.executors import AnthropicModel

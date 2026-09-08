@@ -253,10 +253,83 @@ def from_code(codes: Iterable[str],
 
 
 def from_screens(screens: Iterable[Any]) -> dict[str, Any]:
-    """`from_code` over a DesignReference's screens."""
+    """`from_code` over a DesignReference's screens.
+
+    An MCP screen carries its `code`; a REST screen carries a node document
+    instead, so its colours are read from the tree the transformer builds — the
+    `className` tokens `from_code` already parses, serialised into one blob."""
     screens = list(screens)
     return from_code(
-        [str((getattr(s, "structure", None) or {}).get("code") or "") for s in screens],
+        [_code_like(s) for s in screens],
         [((getattr(s, "width", None) or 0), (getattr(s, "height", None) or 0))
          if getattr(s, "width", None) and getattr(s, "height", None) else None for s in screens],
     )
+
+
+def _code_like(screen: Any) -> str:
+    """The className evidence `from_code` needs, from either extraction shape.
+
+    An MCP screen is code already. A REST screen is a Figma node document, which
+    is serialised to the minimal nested tags `_surfaces` walks — each carrying
+    its solid fill as `bg-[#hex]`, its size as `w-[Wpx] h-[Hpx]` from the node's
+    box, and a text node's colour as `text-[#hex]`. That gives the palette the
+    same area-weighted surfaces it reads from Dev Mode code, from Figma's own
+    geometry rather than className scraping.
+    """
+    structure = getattr(screen, "structure", None) or {}
+    code = str(structure.get("code") or "")
+    if code:
+        return code
+    if structure.get("source") != "rest_node_document":
+        return ""
+    document = structure.get("document")
+    if not isinstance(document, dict):
+        return ""
+    return _document_to_pseudocode(document)
+
+
+def _fill_hex(node: dict) -> str | None:
+    """The first visible solid fill of a node, as `#rrggbb`."""
+    for f in node.get("fills") or []:
+        if not isinstance(f, dict) or f.get("type") != "SOLID" or f.get("visible") is False:
+            continue
+        c = f.get("color") or {}
+        try:
+            r, g, b = (int(round(float(c[k]) * 255)) for k in ("r", "g", "b"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        return f"#{r:02x}{g:02x}{b:02x}"
+    return None
+
+
+def _document_to_pseudocode(document: dict) -> str:
+    """A Figma node document as the nested tags `_surfaces`/`from_code` parse."""
+    parts: list[str] = []
+
+    def emit(node: dict) -> None:
+        if not isinstance(node, dict):
+            return
+        bb = node.get("absoluteBoundingBox") or {}
+        classes: list[str] = []
+        fill = _fill_hex(node)
+        is_text = str(node.get("type") or "").upper() == "TEXT"
+        if fill:
+            classes.append(f"text-[{fill}]" if is_text else f"bg-[{fill}]")
+        try:
+            w, h = float(bb.get("width")), float(bb.get("height"))
+            classes.append(f"w-[{w:g}px]")
+            classes.append(f"h-[{h:g}px]")
+        except (TypeError, ValueError):
+            pass
+        cls = " ".join(classes)
+        nid = str(node.get("id") or "")
+        parts.append(f'<div className="{cls}" data-node-id="{nid}">')
+        chars = node.get("characters")
+        if isinstance(chars, str) and chars.strip():
+            parts.append(chars.strip())
+        for child in node.get("children") or []:
+            emit(child)
+        parts.append("</div>")
+
+    emit(document)
+    return "".join(parts)

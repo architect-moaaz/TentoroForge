@@ -17,10 +17,11 @@
  * of.
  */
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChevronRight, ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronRight, ChevronDown, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { SmithPanel } from "@/components/smith/SmithPanel";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
@@ -64,6 +65,28 @@ const TREE: Array<{ group: string; sections: Array<[string, string]> }> = [
 
 type Blueprint = Record<string, unknown>;
 
+/**
+ * §94's preview states, as the Workspace sees them.
+ *
+ * `servePath` is where the browser reaches the running app: the backend
+ * registers the dev server under the project's short id and starts it with
+ * that prefix as its basePath, so the same-origin rewrite of /api/projects/*
+ * carries the frame, and every asset the app emits, through the proxy. The
+ * frame used to compose `/preview/<route>` from the UUID in this page's URL,
+ * which no route serves — selecting a page opened a 404.
+ */
+type Preview =
+  | { status: "stopped" }
+  | { status: "starting" }
+  | { status: "running"; servePath: string }
+  | { status: "failed"; reason: string };
+
+interface PreviewStatus {
+  running: boolean;
+  port: number | null;
+  servePath: string;
+}
+
 export default function WorkspacePage({
   params,
 }: {
@@ -71,12 +94,33 @@ export default function WorkspacePage({
 }) {
   const { projectId } = use(params);
   const search = useSearchParams();
-  const brief = search.get("brief") ?? undefined;
-  const evidence = search.getAll("doc");
+  return (
+    <Workspace
+      projectId={projectId}
+      brief={search.get("brief") ?? undefined}
+      evidence={search.getAll("doc")}
+    />
+  );
+}
+
+export function Workspace({
+  projectId,
+  brief,
+  evidence,
+}: {
+  projectId: string;
+  brief?: string;
+  evidence: string[];
+}) {
   const [doc, setDoc] = useState<Blueprint | null>(null);
   const [missing, setMissing] = useState(false);
   const [route, setRoute] = useState<string | null>(null);
   const [previewNonce, setPreviewNonce] = useState(0);
+  const [preview, setPreview] = useState<Preview>({ status: "stopped" });
+  // Read by callbacks that must not re-create themselves on every state
+  // change — a start already in flight is not started twice.
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
 
   const loadBlueprint = useCallback(async () => {
     const token =
@@ -105,12 +149,61 @@ export default function WorkspacePage({
     void loadBlueprint();
   }, [loadBlueprint]);
 
+  // A preview left running by an earlier visit is reused, not restarted.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<PreviewStatus>(`/api/projects/${projectId}/preview/status`)
+      .then((s) => {
+        if (!cancelled && s.running && previewRef.current.status === "stopped") {
+          setPreview({ status: "running", servePath: s.servePath });
+        }
+      })
+      .catch(() => {
+        /* not running, or not reachable — selecting a page will start it */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  /** Start the dev server unless it is already up or on its way. */
+  const ensurePreview = useCallback(async () => {
+    const current = previewRef.current.status;
+    if (current === "running" || current === "starting") return;
+    setPreview({ status: "starting" });
+    try {
+      const started = await api.post<PreviewStatus>(
+        `/api/projects/${projectId}/preview/start`,
+      );
+      setPreview({ status: "running", servePath: started.servePath });
+    } catch (err) {
+      setPreview({
+        status: "failed",
+        reason: err instanceof Error ? err.message : "The preview could not start.",
+      });
+    }
+  }, [projectId]);
+
+  // §113 — selecting a page opens it in the live application. The first
+  // selection is what starts the application; nothing else on this page
+  // needs it running.
+  const selectRoute = useCallback(
+    (r: string) => {
+      setRoute(r);
+      void ensurePreview();
+    },
+    [ensurePreview],
+  );
+
   // A finished run changes both panes: the Blueprint gained sections and the
-  // preview is serving new files.
+  // preview is serving new files. A preview that could not start because the
+  // application did not exist yet can start now.
   const onRunComplete = useCallback(() => {
     void loadBlueprint();
     setPreviewNonce((n) => n + 1);
-  }, [loadBlueprint]);
+    if (previewRef.current.status === "failed" && route) void ensurePreview();
+  }, [loadBlueprint, ensurePreview, route]);
 
   const pages = (doc?.pages as Array<Record<string, unknown>>) ?? [];
 
@@ -133,16 +226,16 @@ export default function WorkspacePage({
           missing={missing}
           pages={pages}
           activeRoute={route}
-          onSelectRoute={setRoute}
+          onSelectRoute={selectRoute}
         />
 
         <main className="min-w-0 flex-1 bg-muted/30">
           {route ? (
-            <iframe
-              key={`${route}-${previewNonce}`}
-              src={`/api/projects/${projectId}/preview${route}`}
-              className="h-full w-full border-0 bg-background"
-              title="Live application"
+            <LiveApplication
+              route={route}
+              preview={preview}
+              nonce={previewNonce}
+              onRetry={ensurePreview}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center">
@@ -164,6 +257,53 @@ export default function WorkspacePage({
           className="w-[380px] shrink-0"
         />
       </div>
+    </div>
+  );
+}
+
+/** The middle pane: the page asked for, or why it is not on screen yet. */
+function LiveApplication({
+  route,
+  preview,
+  nonce,
+  onRetry,
+}: {
+  route: string;
+  preview: Preview;
+  nonce: number;
+  onRetry: () => void;
+}) {
+  if (preview.status === "running") {
+    return (
+      <iframe
+        key={`${route}-${nonce}`}
+        src={`${preview.servePath}${route}`}
+        className="h-full w-full border-0 bg-background"
+        title="Live application"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full items-center justify-center p-8 text-center">
+      {preview.status === "failed" ? (
+        <div className="max-w-sm space-y-3">
+          <p className="text-sm text-muted-foreground">
+            The preview could not start: {preview.reason}
+          </p>
+          <button
+            onClick={onRetry}
+            className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Starting the preview…
+        </div>
+      )}
     </div>
   );
 }

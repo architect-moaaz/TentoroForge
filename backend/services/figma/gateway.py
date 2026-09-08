@@ -286,6 +286,26 @@ class FigmaGateway:
                          "data": base64.b64encode(r.content).decode("ascii")}]
         raise FigmaGatewayError("not_allowed", f"{tool!r} has no REST equivalent")
 
+    async def rest_node(self, *, file_key: str, node_id: str) -> dict[str, Any]:
+        """The raw Figma REST node document for one frame, from api.figma.com.
+
+        The structure `get_design_context` returns as generated code, in Figma's
+        native JSON — geometry, text, fills, auto-layout. Used when the hosted
+        MCP that yields the code is unavailable (it is gated to partners);
+        `figma_to_schema.build_page_schema` turns this into the same tree. The
+        token is resolved here and discarded with the frame, like every call —
+        never returned, never stored (§42).
+        """
+        from services.figma_client import fetch_figma_node
+
+        token = self.resolver.resolve(self.credential.ref)
+        if not token:
+            raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
+        document = await fetch_figma_node(file_key, node_id, token)
+        if not document:
+            raise FigmaGatewayError("tool_error", f"REST returned no node {node_id!r}")
+        return document
+
     async def _invoke(self, tool: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         try:
             from mcp import ClientSession

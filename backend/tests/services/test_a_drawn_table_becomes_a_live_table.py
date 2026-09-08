@@ -138,8 +138,8 @@ def test_the_composer_runs_it_beside_the_vision_pass():
     import inspect
     from services.blueprint import figma_layout
     src = inspect.getsource(figma_layout.compose)
-    assert "_classify_tables(svc, code)" in src
-    assert src.index("_classify_regions(") < src.index("_classify_tables(svc, code)") < src.index("_realize.realize(")
+    assert "_classify_tables(svc, code" in src
+    assert src.index("_classify_regions(") < src.index("_classify_tables(svc, code") < src.index("_realize.realize(")
 
 
 def test_the_entitys_own_page_wins_over_another_view_of_it():

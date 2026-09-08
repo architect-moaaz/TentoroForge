@@ -34,18 +34,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  */
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 import {
-  CheckCircle2,
-  Loader2,
-  Circle,
   AlertCircle,
-  Send,
-  SkipForward,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  ListChecks,
-  Paperclip,
-  Mic,
+  Circle,
   Image as ImageIcon,
+  ListChecks,
+  Loader2,
+  Mic,
+  Paperclip,
+  Send,
+  SkipForward,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -85,6 +86,7 @@ const STAGE_VERB: Record<string, string> = {
   workflows: "Working out the workflows",
   business_rules: "Writing the rules down",
   apis: "Designing the endpoints",
+  figma_design_system: "Holding to the Figma design",
   page_layouts: "Composing the screens",
   backend: "Generating the backend",
   frontend: "Generating the frontend",
@@ -117,6 +119,7 @@ const STAGE_LABEL: Record<string, string> = {
   security: "Security & Roles",
   integrations: "Integrations",
   apis: "API Surface",
+  figma_design_system: "Figma Design System",
   page_layouts: "Page Design",
   frontend: "Frontend",
   backend: "Backend",
@@ -977,17 +980,25 @@ export function SmithPanel({
               built behind a bare button. */}
           <Definition doc={blueprint as Record<string, unknown> | null} />
           <p className="mt-3 text-xs text-muted-foreground">
-            The definition is ready and nothing has been built from it yet.
-            Approving builds the application — the pages, the data and the
-            workflows — which takes a few minutes.
-          </p>
+              {/* "Nothing built" was said over a project with fourteen of
+                  fifteen pages composed — the one that failed had brought the
+                  gate back, and the sentence claimed the whole build was
+                  missing. Say what is actually left. */}
+              {layoutCount === 0
+                ? "The definition is ready and nothing has been built from it yet. " +
+                  "Approving builds the application — the pages, the data and the " +
+                  "workflows — which takes a few minutes."
+                : `${pageCount - layoutCount} of ${pageCount} page${pageCount === 1 ? "" : "s"} ` +
+                  "still has no layout. Approving composes what is missing and " +
+                  "leaves the rest as built."}
+            </p>
           <button
             onClick={approve}
             disabled={busy}
             className="mt-3 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            Approve and build
-          </button>
+              {layoutCount === 0 ? "Approve and build" : "Finish the missing pages"}
+            </button>
         </div>
       ) : (
         <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
@@ -1459,7 +1470,9 @@ function StageRow({ node }: { node: RunNode }) {
       ? CheckCircle2
       : node.state === "running"
         ? Loader2
-        : Circle;
+        : node.state === "failed"
+          ? XCircle
+          : Circle;
 
   return (
     <li className="flex items-center gap-2 text-xs">
@@ -1468,6 +1481,7 @@ function StageRow({ node }: { node: RunNode }) {
           "h-3.5 w-3.5 shrink-0",
           node.state === "done" && "text-green-600",
           node.state === "running" && "animate-spin text-primary",
+          node.state === "failed" && "text-destructive",
           node.state === "waiting" && "text-muted-foreground/40",
         )}
       />

@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 import uuid
 from typing import Any
 
@@ -57,6 +56,7 @@ logger = logging.getLogger(__name__)
 #: A task with no strong reference can be collected mid-await, so they are held
 #: here until they finish and discard themselves.
 from services import run_registry
+from services.blueprint.run_progress import Progress
 
 _DETACHED: set[asyncio.Task] = set()
 
@@ -318,41 +318,16 @@ async def generate_via_blueprint(
             # The nodes everything downstream derives from stay at `high`.
             usage = RunUsage()
             executor = make_executor(svc, tiered_router(), usage=usage)
-            # Two different units, and conflating them made the progress
-            # meaningless: `done` counted executor calls while `total` counted
-            # nodes, so a fan-out node reported 44 of 22 and kept climbing.
-            # A node that fans out is one node and many calls; a reader wants
-            # both, and neither can stand in for the other.
-            nodes_done: set[str] = set()
-            calls_done = 0
-            # `traced` is called from the orchestrator's worker threads, and a
-            # wave of independent nodes now has several of them in flight at
-            # once. `calls_done += 1` is a read and a write, so concurrent
-            # calls lose increments and the progress the user watches drifts
-            # below the work actually done.
-            counted = threading.Lock()
+            # Progress is read off the run ledger — the account the
+            # orchestrator keeps anyway — rather than counted around the
+            # executor. Counting calls marked a fan-out node done at its
+            # first page, never saw the nodes that are services rather than
+            # agent calls, and left a reloaded page with a count and no rows.
+            progress = Progress(emit, total=len(plan))
 
-            def traced(spec):
-                nonlocal calls_done
-                emit("node:start", {"node": spec.node, "agent": spec.agent,
-                                    "subject": spec.subject})
-                result = executor(spec)
-                with counted:
-                    calls_done += 1
-                    nodes_done.add(spec.node)
-                    done_now, calls_now = len(nodes_done), calls_done
-                emit("node:done", {
-                    "node": spec.node,
-                    "subject": spec.subject,
-                    # progress through the graph
-                    "nodesDone": done_now, "nodesTotal": len(plan),
-                    # work done inside it, which a fan-out multiplies
-                    "callsDone": calls_now,
-                })
-                return result
-
-            report = run(svc, traced, plan=plan, commit=True,
-                         user_request=req.description, app_root=app_root)
+            report = run(svc, executor, plan=plan, commit=True,
+                         user_request=req.description, app_root=app_root,
+                         observer=progress)
 
             # §26 — what the finished application should contain, so the run
             # can be checked against the plan rather than only watched.
@@ -1007,26 +982,11 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 
     usage = RunUsage()
     executor = make_executor(svc, tiered_router(), usage=usage)
-    done: set[str] = set()
-    calls = 0
-    counted = threading.Lock()
+    progress = Progress(emit, total=len(plan))
 
-    def traced(spec):
-        nonlocal calls
-        emit("node:start", {"node": spec.node, "agent": spec.agent,
-                            "subject": spec.subject})
-        result = executor(spec)
-        with counted:
-            calls += 1
-            done.add(spec.node)
-            n, c = len(done), calls
-        emit("node:done", {"node": spec.node, "subject": spec.subject,
-                           "nodesDone": n, "nodesTotal": len(plan),
-                           "callsDone": c})
-        return result
-
-    report = run(svc, traced, plan=plan, commit=True,
-                 user_request=description, app_root=app_root)
+    report = run(svc, executor, plan=plan, commit=True,
+                 user_request=description, app_root=app_root,
+                 observer=progress)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())

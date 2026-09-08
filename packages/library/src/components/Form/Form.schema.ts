@@ -1,6 +1,44 @@
 import { z } from "zod";
 import { StyleSlot } from "@tentoroforge/schema";
 
+// The optional `interaction` block a form field may carry — the field-
+// interaction contract the renderer's formInteraction engine reads
+// (renderer/src/runtime/formInteraction.ts). The zod Field union lagged the
+// TS `Field = FieldSpec & { interaction? }` type and this schema: a select
+// whose options come from a resource (a record picker for a `<thing>Id`
+// input) was a field the runtime rendered and the schema rejected.
+const Interaction = z
+  .object({
+    computed: z
+      .object({ formula: z.string(), readOnly: z.boolean().optional() })
+      .strict()
+      .optional(),
+    optionsFrom: z
+      .object({
+        source: z.string(),
+        value: z.string(),
+        label: z.string(),
+        filter: z.record(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+    dependsOn: z.array(z.string()).optional(),
+    onChange: z
+      .object({
+        fetch: z
+          .object({ resource: z.string(), by: z.string(), from: z.string() })
+          .strict(),
+        set: z.record(z.string()),
+      })
+      .strict()
+      .optional(),
+    visibleIf: z.string().optional(),
+    requiredIf: z.string().optional(),
+    enabledIf: z.string().optional(),
+    readOnlyIf: z.string().optional(),
+  })
+  .strict();
+
 const Field = z.discriminatedUnion("kind", [
   z
     .object({
@@ -9,6 +47,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       required: z.boolean().optional(),
       placeholder: z.string().optional(),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -18,6 +57,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       required: z.boolean().optional(),
       rows: z.number().optional(),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -27,6 +67,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       required: z.boolean().optional(),
       options: z.array(z.object({ value: z.string(), label: z.string() })),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -34,6 +75,7 @@ const Field = z.discriminatedUnion("kind", [
       kind: z.literal("checkbox"),
       name: z.string(),
       label: z.string(),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -42,6 +84,7 @@ const Field = z.discriminatedUnion("kind", [
       name: z.string(),
       label: z.string(),
       required: z.boolean().optional(),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -51,6 +94,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       required: z.boolean().optional(),
       options: z.array(z.object({ value: z.string(), label: z.string() })),
+      interaction: Interaction.optional(),
     })
     .strict(),
   z
@@ -58,6 +102,7 @@ const Field = z.discriminatedUnion("kind", [
       kind: z.literal("switch"),
       name: z.string(),
       label: z.string(),
+      interaction: Interaction.optional(),
     })
     .strict(),
   // Typed object for jsonb config columns — a fieldset of nested typed sub-fields.
@@ -70,6 +115,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       description: z.string().optional(),
       fields: z.array(z.record(z.unknown())),
+      interaction: Interaction.optional(),
     })
     .strict(),
   // Free-form string→value map (add/remove rows) for jsonb columns of unknown shape.
@@ -80,6 +126,7 @@ const Field = z.discriminatedUnion("kind", [
       label: z.string(),
       description: z.string().optional(),
       valueType: z.enum(["text", "number", "boolean"]).optional(),
+      interaction: Interaction.optional(),
     })
     .strict(),
 ]);

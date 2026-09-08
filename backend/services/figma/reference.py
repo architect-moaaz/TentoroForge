@@ -39,12 +39,15 @@ is how a human answers it, and it is the input a visual check needs later.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from services.figma.gateway import FigmaGateway, FigmaGatewayError
 from services.figma.url import FigmaTarget
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +233,7 @@ async def extract(
     for screen in list(ref.screens):
         if not screen.looks_like_screen:
             continue
+        context = None
         try:
             context = await gateway.call(
                 "get_design_context", file_key=target.file_key,
@@ -251,9 +255,29 @@ async def extract(
                 forceCode=True,
             )
         except FigmaGatewayError as exc:
-            ref.gaps.append(f"no structure for {screen.name} ({exc.kind})")
+            # THE CODE PATH IS THE HOSTED MCP'S, AND IT IS GATED TO PARTNERS.
+            # When it will not answer, the REST API still returns the frame's
+            # native node tree, which `build_page_schema` composes into the same
+            # page. So a failure here is not the end of the screen — it is the
+            # cue to fetch the REST node document below.
+            logger.info("[figma] no design context for %s (%s); fetching the "
+                        "REST node tree", screen.name, exc.kind)
+
+        payload = payload_of(context) if context is not None else None
+        if isinstance(payload, str) and payload.strip():
+            _attach_structure(ref, screen, context)   # the hosted MCP's code
             continue
-        _attach_structure(ref, screen, context)
+
+        document = payload if isinstance(payload, dict) else None
+        if document is None:
+            try:
+                document = await gateway.rest_node(
+                    file_key=target.file_key, node_id=screen.node_id)
+            except FigmaGatewayError as exc:
+                ref.gaps.append(f"no structure for {screen.name} ({exc.kind})")
+                continue
+        # Routed through the same seam; its dict branch stores a REST document.
+        _attach_structure(ref, screen, [{"type": "structured", "data": document}])
 
     # §55 wants navigation, modal relationships and drill-down from prototype
     # links. Generated TSX cannot express them, so when that is all the server
@@ -629,8 +653,14 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
         ref.gaps.append(f"no usable structure for {screen.name}")
         return
 
+    # A JSON NODE TREE — from the REST API, or a non-hosted MCP. Kept under
+    # `document` with a `source` the composer recognises, so `figma_layout`
+    # routes it through `build_page_schema` exactly as it routes the hosted
+    # MCP's code string through `jsx_to_schema`. (Spreading the tree's own keys
+    # into `structure` left the composer with no `code` and no `document`, so
+    # the page silently fell through to A2UI.)
     ref.screens[index] = _replace(
-        screen, structure={**(payload if isinstance(payload, dict) else {"raw": payload}),
+        screen, structure={"source": "rest_node_document", "document": payload,
                            "boxes": (screen.structure or {}).get("boxes") or []})
 
     known = {c.node_id for c in ref.components}

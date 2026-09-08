@@ -645,7 +645,7 @@ def apply_agent_result(
     from services.blueprint.service import (
         ARTIFACT_SECTIONS, resolve_batch_references,
     )
-    from services.blueprint.ids import IdAllocator
+    from services.blueprint.ids import IdAllocator, parse_id
 
     allocated: dict[str, str] = {}
     with IdAllocator.session(output_dir=svc.output_dir) as alloc:
@@ -656,7 +656,20 @@ def apply_agent_result(
             )
             if not prefix:
                 continue
-            artifact_id = p.body.get("id") or alloc.allocate(prefix, p.natural_key)
+            # A body id is honoured ONLY when it belongs to this section — a
+            # resumed proposal carrying its own TEST-007 keeps it, and the batch
+            # stays idempotent. But identity is assigned, not authored
+            # (§12/§116): the testing agent cited the requirement it verifies
+            # (`RULE-005`, `REQ-010`) in the id field, and honouring that put a
+            # rule's id on a test, which the `^TEST-` contract refused — and,
+            # once written, made every later write to the document fail. A
+            # wrong-prefix id is dropped and a real one allocated.
+            body_id = p.body.get("id")
+            try:
+                keep = bool(body_id) and parse_id(str(body_id))[0] == prefix
+            except Exception:  # noqa: BLE001 — an unparseable id is not ours to keep
+                keep = False
+            artifact_id = str(body_id) if keep else alloc.allocate(prefix, p.natural_key)
             allocated[p.natural_key] = artifact_id
             # Agents cite each other by the human name far more often than by
             # the natural key, so accept both.
