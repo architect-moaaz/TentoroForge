@@ -114,6 +114,15 @@ async def _smoke_test_db(url: str) -> tuple[bool, str | None]:
 # template fix should propagate to already-generated projects without
 # a full regen.
 _PLATFORM_REFRESH_FILES = ("vercel.json",)
+# Runtime templates whose relative path differs between the template dir and
+# the generated app: (template-relative, app-relative). seed.ts is
+# platform-owned — its LOGIC is identical for every app (per-app data lives in
+# seed.json) — so a fix to it (e.g. always ensuring the admin user exists even
+# when FORGE_KEEP_DB_STATE preserves domain data) must reach already-generated
+# projects on their next publish, without a regen.
+_PLATFORM_REFRESH_RUNTIME_MAP = (
+    ("seed.ts", "src/db/seed.ts"),
+)
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"
 )
@@ -149,6 +158,13 @@ def _refresh_platform_files(output_dir: Path) -> None:
         if not src.is_file():
             continue
         (output_dir / name).write_bytes(src.read_bytes())
+    for tmpl_rel, app_rel in _PLATFORM_REFRESH_RUNTIME_MAP:
+        src = _TEMPLATE_RUNTIME_DIR / tmpl_rel
+        if not src.is_file():
+            continue
+        dst = output_dir / app_rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
     for rel in _PLATFORM_REFRESH_FOUNDATION_FILES:
         src = _TEMPLATE_FOUNDATION_DIR / rel
         if not src.is_file():

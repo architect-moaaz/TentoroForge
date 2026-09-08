@@ -453,25 +453,32 @@ async function recordSeedFingerprint(fp: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Idempotency gate — skip the whole seed when the schema shape is
-  // unchanged from the last successful seed AND at least one domain
-  // table has rows. Override with FORCE_SEED=1 for a manual reseed
-  // (useful after a data wipe or when developing seed content).
-  if (process.env.FORGE_KEEP_DB_STATE === "1"
-      && !/^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""))) {
-    console.log("[seed] FORGE_KEEP_DB_STATE=1 — preserving existing data, skipping reseed");
+  const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
+
+  // THE ADMIN MUST ALWAYS EXIST — the skip gates below preserve DOMAIN data,
+  // never the sign-in. Skipping the whole seed when FORGE_KEEP_DB_STATE=1 left
+  // a DB with a schema and no users: a database reused from an earlier deploy
+  // attempt was never seeded, so `admin@example.com` never existed and login
+  // was impossible. `seedAdmin` upserts on email, so running it every time is
+  // idempotent and never clobbers a real admin.
+  const adminId = await seedAdmin();
+
+  // Idempotency gate — preserve existing DOMAIN data when the DB is being
+  // reused (redeploy) or the schema shape is unchanged and data is present.
+  // Override with FORCE_SEED=1 for a manual reseed (after a data wipe or when
+  // developing seed content). The admin is already ensured above either way.
+  if (process.env.FORGE_KEEP_DB_STATE === "1" && !forceSeed) {
+    console.log("[seed] FORGE_KEEP_DB_STATE=1 — admin ensured; preserving domain data");
     return;
   }
   const currentFp = computeSchemaFingerprint();
-  const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
   if (!forceSeed && await shouldSkipSeed(currentFp)) {
     console.log(
-      `[seed] shape unchanged (fingerprint=${currentFp}) + data present — skipping. ` +
-      `Set FORCE_SEED=1 to reseed.`
+      `[seed] shape unchanged (fingerprint=${currentFp}) + data present — ` +
+      `admin ensured, skipping domain data. Set FORCE_SEED=1 to reseed.`
     );
     return;
   }
-  const adminId = await seedAdmin();
   await seedDomain(adminId);
   await recordSeedFingerprint(currentFp);
   console.log(`[seed] complete — fingerprint recorded (${currentFp}).`);
