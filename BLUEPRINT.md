@@ -11971,6 +11971,61 @@ default (`"1 hour"`) so the amount is never blank, and the card humanizes raw-ms
 is usable on nodes with no description field; `KeyValueMapper` "Add" gives a new
 blank row a distinct placeholder key instead of silently overwriting the first.
 
+### 32.7.4 Production QA pass — hosted-UAT defects (2026-09-08, branch `component-fixes`)
+
+Triage of QA's hosted-UAT defect list (PrompttoAppTestCases). Method: verify each
+against the CURRENT merged code before fixing — several were already resolved by the
+merged smithv2 work (e.g. GET /decisions returned 200 [] locally, not the QA's 500).
+The large "Blocked" set cascades from a few real defects + the hosted environment.
+
+**Fixed + tested (this branch):**
+- **DEFECT-E-01 (preview blank on hosted) — core fix.** Workspace `PreviewFrame` loaded
+  the iframe from `http://localhost:${port}` (the backend's internal port, unreachable on
+  hosted); `usePreview` discarded the relative, auth-free proxy `servePath` the backend
+  already returns. Now loads the proxy path (same pattern as CanvasFrame/LiveApplication);
+  pages + `_next/static` assets resolve through the proxy on localhost and hosted.
+  RESIDUAL (documented for the generator, not fixed here): a GATED app's NextAuth
+  middleware redirects `/login` WITHOUT the `NEXT_BASE_PATH` prefix and its matcher
+  exclusions don't account for basePath, so the app's own login page loops under the proxy
+  — the generated-app auth template must be basePath-aware (and the built app regenerated).
+- **DEFECT-H-INDEX (Data Model / Workflows / Rules / Business Rules tabs dead).** The
+  blueprint pipeline nests the app at `output_dir/app` and never writes `app-model.json`;
+  the reader assumed the root → 404 forever. Added `app_model_from_blueprint` (§76 pattern)
+  so `/app-model` derives `database.tables` (+ columns, FK refs, enums), workflows, rules
+  and pages from the Blueprint; verified 200 with 8 tables / 6 enums / 12 wf / 38 rules.
+- **DEFECT-I-01 / I-05 (verification verdict + requirement trace).** `requirement_verdict`
+  (§75) and `code_intel.trace` (§18) existed + tested but the build discarded the report and
+  nothing exposed them. Added `GET /blueprint/verification` (summary + findings + per-req
+  PASSED/FAILED) and `GET /blueprint/requirement/{id}` (verdict facets + trace + files).
+- **DEFECT-B-03 (GET /decisions 500).** The DMN decision-tables list now degrades to `[]`
+  when the table is absent (the UAT 500 was an unapplied migration, no global handler).
+
+**Root-caused, needs the senior's core architecture (NOT hacked — would risk the live
+product and conflict with in-flight work):** a single architectural fact drives the whole
+Smith cluster — the live `POST /smith/chat` panel drives the verb-less `SmithSession`
+engine, while the full-featured `Smith` class (`services/smith/smith.py`) — which already
+implements `status`/`define`/`approve`, the explicit-define gate, the DISCOVERY→DEFINITION
+→BLUEPRINT_REVIEW state machine, DEC-nnn decision recording + citation, change-vs-edit
+routing, and requirement trace — is wired only to the DAG/office endpoint. Consequences:
+STATUS-VERB (`status` falls into a define), B-07 (define fires on ordinary replies; state
+stuck at DISCOVERY), C-03/B-09/F-07 (change requests misrouted to `compose_route` → "no
+page at /clients"; no definition-redraft or honest-refusal verb), C-06 (no functionless
+guard), B-03 (DEC-nnn never recorded from chat; "why" deflects), and I-05's chat side. The
+fix is to route the live chat through the `Smith` class engine — a senior-owned migration.
+
+**By design (not a defect):** THINKING-LEAK — Smith reasoning is intentionally streamed to
+the conversation (code comment at `blueprint_generate.py` §111: "where the user asked for
+it"; not persisted to the transcript).
+
+**Known gaps (team-tracked):** D-07 (build resume), F-11 (preview selection events), H-07
+(legacy tabs), I-06 (generated tests), K-03 (deployment writer).
+
+**Environment/credentials-blocked (not code):** file upload in the QA browser pane (A-03,
+B-05, B-08), Figma/UX Pilot creds (G-*), export download + local run (J-01..J-04), two
+accounts (L-02), backend/DB access (M-02/M-04, E-14), Vercel creds (K-02), one-build budget
+(N-01/N-03, D-04). Most E-*/F-*/L-03/L-04/M-03 cascade from E-01 and unblock with a working
+hosted preview + the gated-app auth-template fix above.
+
 ### 32.8 What still holds
 
 §9A (schema / renderer contract), §13 (bindings — `{{expr}}` over a data engine),
