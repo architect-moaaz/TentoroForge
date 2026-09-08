@@ -455,6 +455,85 @@ async def read_blueprint(
     return svc.doc
 
 
+@router.get("/api/projects/{project_id}/blueprint/verification")
+async def read_verification(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """§75 cross-artifact verification result for the whole application.
+
+    DEFECT-I-01: the build runs the matrix but `apply_findings` only stamps
+    per-artifact OUT_OF_SYNC status and the report itself was discarded — no
+    endpoint exposed it, so 'was requirement X verified' had no answer. The
+    matrix is deterministic, so compute it on demand from the on-disk Blueprint
+    and surface the summary + findings + a per-requirement PASSED/FAILED roll-up.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.blueprint.verification import verify, requirement_verdict
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    report = verify(svc.doc)
+    verdicts = []
+    for r in (svc.doc.get("requirements") or []):
+        rid = r.get("id") if isinstance(r, dict) else None
+        if not rid:
+            continue
+        try:
+            verdicts.append(requirement_verdict(svc.doc, rid))
+        except Exception:  # noqa: BLE001 — one bad requirement must not 500 the roll-up
+            verdicts.append({"requirement": rid, "result": "UNKNOWN"})
+    passed = sum(1 for v in verdicts if v.get("result") == "PASSED")
+    return {
+        "summary": report.summary() if hasattr(report, "summary") else {},
+        "findings": [f.__dict__ if hasattr(f, "__dict__") else f
+                     for f in (getattr(report, "findings", []) or [])],
+        "requirements": verdicts,
+        "counts": {"total": len(verdicts), "passed": passed, "failed": len(verdicts) - passed},
+    }
+
+
+@router.get("/api/projects/{project_id}/blueprint/requirement/{requirement_id}")
+async def read_requirement_trace(
+    project_id: uuid.UUID,
+    requirement_id: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-requirement PASSED/FAILED verdict + the §18 trace chain (REQ→FLOW→
+    RULE→PAGE→API→ENTITY→TEST) and the files that implement it.
+
+    DEFECT-I-05: the requirement ids and `code_intel.trace` exist but the runtime
+    chat never queried them, so Smith wrongly claimed 'no requirement IDs'. This
+    endpoint answers directly from the Blueprint.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.blueprint.verification import requirement_verdict
+    from services.smith import code_intel
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    ids = {str(r.get("id")) for r in (svc.doc.get("requirements") or []) if isinstance(r, dict)}
+    if requirement_id not in ids:
+        raise HTTPException(status_code=404,
+                            detail=f"{requirement_id} is not a requirement in this Blueprint")
+    verdict = requirement_verdict(svc.doc, requirement_id)
+    try:
+        trace = code_intel.trace(svc.doc, requirement_id)
+        trace_out = trace.render() if hasattr(trace, "render") else (
+            trace.__dict__ if hasattr(trace, "__dict__") else trace)
+        files = list(getattr(trace, "files", []) or [])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("trace failed for %s/%s: %s", project_id, requirement_id, e)
+        trace_out, files = None, []
+    return {"requirement": requirement_id, "verdict": verdict, "trace": trace_out, "files": files}
+
+
 class SmithChatTurn(BaseModel):
     """One earlier turn, as the client has it."""
 

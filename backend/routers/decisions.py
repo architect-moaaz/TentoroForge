@@ -1,5 +1,6 @@
 """Decision table endpoints — CRUD, evaluation, testing, versions, and execution logs."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -26,6 +27,7 @@ from schemas.decision import (
 from services.project_service import get_project_with_auth
 
 router = APIRouter(tags=["decisions"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -41,15 +43,29 @@ async def list_decision_tables(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all decision tables for a project."""
+    """List all decision tables (DMN) for a project.
+
+    NOTE: these are DMN business-rule decision TABLES, unrelated to Smith's §20
+    DEC-nnn conversation decisions (which live in the Blueprint's decisions[]
+    ledger). DEFECT-B-03 observed this endpoint 500 on the UAT: the cause is the
+    `decision_tables` relation not existing (migrations not applied there), which
+    surfaced as a raw 500 with no global handler. A read that a project simply
+    hasn't used this optional feature for must not 500 — degrade to an empty list.
+    """
     await get_project_with_auth(project_id, user, db)
 
-    result = await db.execute(
-        select(DecisionTable)
-        .where(DecisionTable.project_id == project_id)
-        .order_by(DecisionTable.created_at.desc())
-    )
-    return result.scalars().all()
+    from sqlalchemy.exc import ProgrammingError, OperationalError
+    try:
+        result = await db.execute(
+            select(DecisionTable)
+            .where(DecisionTable.project_id == project_id)
+            .order_by(DecisionTable.created_at.desc())
+        )
+        return result.scalars().all()
+    except (ProgrammingError, OperationalError) as e:  # missing table / migration
+        await db.rollback()
+        logger.warning("decision_tables unavailable for %s (%s) — returning []", project_id, e)
+        return []
 
 
 @router.post(
