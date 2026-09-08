@@ -101,6 +101,11 @@ services:
       # Read-only, with logs/ mounted writable on top for the trace file.
       - ${A2UI_CHECKOUT:-./a2ui}:/a2ui:ro
       - ${A2UI_CHECKOUT:-./a2ui}/logs:/a2ui/logs
+      # The a2ui composer regenerates the forge component catalog under
+      # specification/v0_9/catalogs on each run; the parent /a2ui is :ro, so
+      # that write hit "[Errno 30] Read-only file system" and EVERY page fell
+      # back to the authoring agent. Mount the catalogs dir writable on top.
+      - ${A2UI_CHECKOUT:-./a2ui}/specification/v0_9/catalogs:/a2ui/specification/v0_9/catalogs
     # No published ports — nginx is the only entrypoint.
 
   # Self-Verify Pass runner — headless Chromium + Fastify.
