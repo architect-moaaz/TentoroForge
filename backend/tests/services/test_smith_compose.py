@@ -29,17 +29,83 @@ def test_a_deprecated_page_is_not_a_target():
     assert _page_for_route(_doc(), "/old") is None
 
 
-def test_an_unknown_route_says_what_the_app_does_have():
-    """Refusing without naming the alternatives sends someone guessing."""
+def test_an_unknown_route_is_created_not_refused():
+    """DEFECT C-03/B-09/F-07: composing a route the definition does not have was
+    refused with "there is no page at '/clients'", dead-ending the one request
+    someone makes to grow a definition. compose_route's own contract is a route
+    that "renders nothing or 404s" — the purest case of which is a route that
+    isn't there — so it now CREATES the page, then composes it."""
     from services.smith.compose import compose_route
+
+    saved: dict = {}
 
     class _Svc:
         doc = _doc()
         output_dir = "/tmp/nope"
 
-    with pytest.raises(ComposeError) as exc:
-        compose_route(_Svc(), "/nowhere")
-    assert "/sessions" in str(exc.value)
+        def upsert(self, section, body, natural_key=None):
+            body = {**body, "id": "PAGE-777"}
+            self.doc.setdefault("pages", []).append(body)
+            saved["section"] = section
+            saved["body"] = body
+            return body
+
+        def save(self):
+            saved["saved"] = True
+
+    class _Result:
+        proposals = ["one"]
+
+    import services.smith.change as change_mod
+    original = change_mod.apply_change
+    change_mod.apply_change = lambda *a, **k: _Result()
+    try:
+        compose_route(_Svc(), "/clients", executor=lambda spec: _Result())
+    finally:
+        change_mod.apply_change = original
+
+    assert saved["section"] == "pages"
+    assert saved["body"]["route"] == "/clients"
+    assert saved["body"]["name"] == "Clients"
+    assert saved.get("saved") is True
+
+
+def test_creating_a_page_writes_a_schema_valid_contract(ats, tmp_path):
+    """The four fields a PAGE requires (id/name/route/purpose) — id allocated by
+    upsert — must leave the document still valid, or the composition that
+    follows refuses it."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import _ensure_page
+
+    s = BlueprintService(output_dir=tmp_path)
+    s.doc = ats
+    s.root.mkdir(parents=True, exist_ok=True)
+    s.save()
+
+    before = len(s.doc.get("pages") or [])
+    page = _ensure_page(s, "/client-invoices", request="track client invoices")
+
+    assert page["route"] == "/client-invoices"
+    assert page["name"] == "Client Invoices"      # derived from the route
+    assert page["purpose"]                          # required, non-empty
+    assert page["id"].startswith("PAGE-")           # allocated by upsert
+    assert s.is_valid()                             # still schema-valid
+    assert len(s.doc["pages"]) == before + 1
+
+    # Idempotent: asking again returns the same page, never a duplicate.
+    again = _ensure_page(s, "/client-invoices")
+    assert again["id"] == page["id"]
+    assert len(s.doc["pages"]) == before + 1
+
+
+def test_route_to_name_derivation():
+    from services.smith.compose import _name_from_route
+
+    assert _name_from_route("/clients") == "Clients"
+    assert _name_from_route("/client-invoices") == "Client Invoices"
+    assert _name_from_route("/team_members") == "Team Members"
+    assert _name_from_route("/") == "Home"
+    assert _name_from_route("/orders/[id]") == "Id"   # the dynamic segment's name
 
 
 def test_a_composer_that_returns_nothing_is_not_reported_as_success():
