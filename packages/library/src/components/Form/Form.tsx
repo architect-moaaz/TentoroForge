@@ -92,6 +92,8 @@ type Props = {
   /** The entity whose form this is — the model its form-side rules are evaluated for. */
   entity?: string;
   fields?: Field[];
+  /** Fixed arguments merged under the field values when dispatching `workflow`. */
+  args?: Record<string, unknown>;
   defaultValues?: Record<string, unknown>;
   submitLabel?: string;
   /** What to do after the workflow dispatch succeeds. Default:
@@ -131,7 +133,7 @@ const FORM_SUBMIT =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 " +
   "disabled:pointer-events-none disabled:opacity-50 cursor-pointer";
 
-export function Form({ workflow, fields, defaultValues, submitLabel = "Save", onSuccess, onError, style, className, children, __dispatch, __fetchData, entity }: Props) {
+export function Form({ workflow, fields, args, defaultValues, submitLabel = "Save", onSuccess, onError, style, className, children, __dispatch, __fetchData, entity }: Props) {
   const isDeclarative = Array.isArray(fields) && fields.length > 0;
   if (isDeclarative) {
     return (
@@ -139,6 +141,7 @@ export function Form({ workflow, fields, defaultValues, submitLabel = "Save", on
         workflow={workflow}
         entity={entity}
         fields={fields!}
+        args={args}
         defaultValues={defaultValues}
         submitLabel={submitLabel}
         onSuccess={onSuccess}
@@ -170,7 +173,7 @@ export function Form({ workflow, fields, defaultValues, submitLabel = "Save", on
     fd.forEach((v, k) => { values[k] = v; });
     setSubmitting(true);
     try {
-      await dispatch(workflow, values);
+      await dispatch(workflow, { ...args, ...values });
       runOutcome(
         withDefaults(onSuccess, { toast: "Saved", navigate: parentPath() }),
         "success",
@@ -206,6 +209,7 @@ export function Form({ workflow, fields, defaultValues, submitLabel = "Save", on
 function DeclarativeForm({
   workflow,
   fields,
+  args,
   defaultValues,
   submitLabel,
   onSuccess,
@@ -216,6 +220,7 @@ function DeclarativeForm({
   workflow?: string;
   entity?: string;
   fields: Field[];
+  args?: Record<string, unknown>;
   defaultValues?: Record<string, unknown>;
   submitLabel: string;
   onSuccess?: FormOutcomeAction;
@@ -282,7 +287,7 @@ function DeclarativeForm({
     const dispatch = __dispatch ?? ctxDispatch ?? fallbackDispatch;
     setSubmitting(true);
     try {
-      await dispatch(workflow, values);
+      await dispatch(workflow, { ...args, ...values });
       runOutcome(
         withDefaults(onSuccess, { toast: "Saved", navigate: parentPath() }),
         "success",

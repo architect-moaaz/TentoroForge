@@ -158,6 +158,14 @@ export const FormProps = z.object({
   // id like FLOW-002 and matches no rule.
   entity:        z.string().optional(),
   fields:        z.array(Field).optional(),
+  // Fixed arguments dispatched with the form's `workflow`, merged UNDER the
+  // user-entered field values (so a field never silently loses to a constant).
+  // A composer authors these to carry the context the submit needs but the
+  // user doesn't type — the record being acted on ({{write_offs.id}}), a
+  // decision constant ("APPROVE"), an approver role. Buttons already declare
+  // `args` for exactly this; a Form that dispatches a workflow needs it too,
+  // and rejecting it failed the whole page over a prop the renderer can honor.
+  args:          z.record(z.unknown()).optional(),
   defaultValues: z.record(z.unknown()).optional(),
   submitLabel:   z.string().optional(),
   style:         StyleSlot.optional(),

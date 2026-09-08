@@ -6935,6 +6935,10 @@
               ]
             }
           },
+          "args": {
+            "type": "object",
+            "additionalProperties": {}
+          },
           "defaultValues": {
             "type": "object",
             "additionalProperties": {}
