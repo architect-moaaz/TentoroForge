@@ -1213,6 +1213,18 @@ async def smith_chat(
                     })
                     return {"status": "asked"}
 
+                # NOTE on DEFECT-B-07 ("define must be explicit"): NOT enforced
+                # here on purpose. The workbook contradicts itself — GP-01 (P0)
+                # and C-01 (P0, precondition "B-03 done") both expect the
+                # definition to be READY right after the clarifications are
+                # answered, with no `define` step between them, i.e. an
+                # auto-define. Making define explicit would satisfy B-07 (P1) by
+                # regressing those P0 cases (C-01 would wait forever for a
+                # definition that never auto-drafts). The concrete B-07 symptom
+                # that WAS a bug — the `status` command triggering a define — is
+                # fixed by the lifecycle-verb guard above. The auto-define on a
+                # genuine answer is what the golden path relies on, so it stays;
+                # resolving the spec contradiction is a product call.
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
                             "understood before building anything.",
