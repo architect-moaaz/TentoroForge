@@ -67,6 +67,102 @@ def _detach(task: "asyncio.Task") -> None:
 router = APIRouter(tags=["generation", "blueprint"])
 
 
+# ---------------------------------------------------------------------------
+# Lifecycle verbs, status, and pre-define guards for the live chat handler.
+# The live /smith/chat path (this file) historically had NO verb parsing, so
+# `status` fell into the define branch (DEFECT-STATUS-VERB), define fired as a
+# side effect of ordinary replies (DEFECT-B-07), and a functionless brief was
+# defined without pushback (DEFECT-C-06). These small deterministic helpers
+# give the live path the verbs the Smith class already has, without swapping
+# engines.
+# ---------------------------------------------------------------------------
+
+#: Words that are COMMANDS, not descriptions to reason about.
+_LIFECYCLE_VERBS = frozenset({"status", "define", "approve", "build", "preview",
+                              "export", "deploy"})
+
+
+def _lifecycle_verb(message: str) -> str | None:
+    """The lifecycle verb a message IS, or None. Only an exact one-word command
+    counts — 'define the roles for me' is a sentence, not the `define` verb."""
+    if not message:
+        return None
+    word = message.strip().lower().rstrip(".!").strip()
+    return word if word in _LIFECYCLE_VERBS else None
+
+
+def _status_report(doc: dict) -> str:
+    """A deterministic status line read straight off the Blueprint — never a
+    define. Answers 'where are we' with the state, what has been drafted, and
+    the next explicit step."""
+    from services.smith import decisions as _decisions
+    state = (doc or {}).get("state", "DISCOVERY")
+    reqs = len((doc or {}).get("requirements") or [])
+    pages = len((doc or {}).get("pages") or [])
+    total_dec = len((doc or {}).get("decisions") or [])
+    try:
+        by_user = len(_decisions.by_user(doc or {}))
+    except Exception:  # noqa: BLE001
+        by_user = 0
+    if not reqs and not pages:
+        return ("State: DISCOVERY — nothing defined yet. Describe what you want "
+                "to build, then say `define` to draft the definition.")
+    nxt = ("Say `approve` to build." if state in ("BLUEPRINT_REVIEW", "DEFINITION")
+           else "Say `define` to (re)draft the definition, then `approve` to build.")
+    return (f"State: {state}. {reqs} requirement(s), {pages} page(s) drafted; "
+            f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
+
+
+#: Action verbs whose presence means the app actually DOES something. A brief
+#: with none of these and an explicit "just/only shows text" shape is a page
+#: that does nothing (DEFECT-C-06).
+_ACTION_HINTS = (
+    "create", "add", "manage", "track", "edit", "update", "delete", "remove",
+    "approve", "schedule", "book", "assign", "submit", "review", "record",
+    "store", "save", "search", "filter", "report", "upload", "download",
+    "sign in", "log in", "login", "register", "post", "comment", "vote",
+    "order", "pay", "invoice", "notify", "email", "list of", "dashboard",
+    "workflow", "role", "user", "account", "database", "form", "calculate",
+)
+_FUNCTIONLESS_SHAPE = (
+    "just says", "just shows", "just displays", "only says", "only shows",
+    "only displays", "simply says", "that says", "which says", "displaying the text",
+    "shows the text", "says welcome", "says hello",
+)
+
+
+def _is_functionless_brief(brief: str) -> bool:
+    """True for a brief that describes a page with no function — a static bit of
+    text and nothing to do (DEFECT-C-06). Conservative: it must BOTH look like a
+    static-text page AND name no capability, so a real app is never refused."""
+    b = (brief or "").lower()
+    if len(b) > 400:  # a substantial brief is not a one-line 'welcome' page
+        return False
+    looks_static = any(s in b for s in _FUNCTIONLESS_SHAPE)
+    has_action = any(h in b for h in _ACTION_HINTS)
+    return looks_static and not has_action
+
+
+#: The §94 chain a define walks through, all ungated. Used to advance a live
+#: define run to the review gate (DEFECT-B-07: state stuck at DISCOVERY).
+_DEFINE_STATE_CHAIN = ("DISCOVERY", "CLARIFICATION", "DEFINITION", "BLUEPRINT_REVIEW")
+
+
+def _advance_state_to_review(svc) -> None:
+    """Walk the Blueprint state from wherever it is up to BLUEPRINT_REVIEW after
+    a define, so GET /blueprint reports the review gate instead of DISCOVERY.
+    Best-effort: a refused/illegal step just stops the walk."""
+    from services.blueprint.orchestrator import transition, IllegalTransition
+    cur = svc.doc.get("state", "DISCOVERY")
+    if cur not in _DEFINE_STATE_CHAIN:
+        return
+    for nxt in _DEFINE_STATE_CHAIN[_DEFINE_STATE_CHAIN.index(cur) + 1:]:
+        try:
+            transition(svc, nxt)
+        except IllegalTransition:
+            break
+
+
 class BlueprintGenerateRequest(BaseModel):
     """§4.1 — the prompt, and nothing the engine can work out for itself."""
 
@@ -774,6 +870,7 @@ async def smith_chat(
 
         def work() -> dict:
             existing = output_dir / ".forge" / "blueprint" / "current.json"
+            svc = None
             defined = False
             if existing.is_file():
                 svc = BlueprintService.load(output_dir=str(output_dir))
@@ -795,6 +892,16 @@ async def smith_chat(
                 # it below, which is exactly what used to happen immediately.
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
+
+            # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
+            # reason about. Answer it deterministically from the Blueprint and
+            # return — it must NEVER fall through and trigger a define (which it
+            # did, because this handler had no verb parsing at all).
+            verb = _lifecycle_verb(req.message)
+            if verb == "status":
+                emit("message", {"text": _status_report(svc.doc if svc else {}),
+                                 "status": "reported"})
+                return {"status": "reported"}
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
@@ -850,6 +957,21 @@ async def smith_chat(
                                 "status": "asked",
                             })
                         return {"status": "asked"}
+
+                # DEFECT-C-06: a page that would do nothing is refused, not
+                # defined. A static 'just says Welcome' brief with no capability
+                # gets a what-should-it-do question instead of the expensive
+                # define fan-out and an approvable blank application.
+                if _is_functionless_brief(_the_brief):
+                    emit("message", {
+                        "text": "That describes a page with nothing to do — it "
+                                "would only show some text. What should the app "
+                                "let people DO (create or manage something, sign "
+                                "in, run a workflow)? Tell me that and I'll define "
+                                "it.",
+                        "status": "asked",
+                    })
+                    return {"status": "asked"}
 
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
@@ -1066,6 +1188,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
                  observer=progress)
+    # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
+    # transition()), so GET /blueprint reported DISCOVERY forever and the
+    # approve/build gates were unreachable. A define that produced requirements
+    # has reached the review gate — advance the §94 state to BLUEPRINT_REVIEW.
+    # (Not on the approved/build pass; that path moves past review on its own.)
+    if not approved and (svc.doc.get("requirements") or svc.doc.get("pages")):
+        _advance_state_to_review(svc)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
