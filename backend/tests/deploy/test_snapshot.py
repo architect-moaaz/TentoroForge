@@ -47,6 +47,19 @@ def test_excludes_build_and_secret_files(tmp_path: Path) -> None:
     assert paths == {"package.json"}
 
 
+def test_excludes_the_verification_build_dir(tmp_path: Path) -> None:
+    """`.next-verify` (NEXT_DIST_DIR) is build output, and its webpack cache
+    alone is 200MB+ — shipping `<output>/app` started uploading it and blew the
+    per-file limit. All `.next*` dirs are excluded, not just `.next`."""
+    _mk(tmp_path, "package.json", "{}")
+    _mk(tmp_path, ".next-verify/cache/webpack/server-production/0.pack", "big")
+    _mk(tmp_path, ".next-verify-final/trace", "x")
+    _mk(tmp_path, "src/app.tsx", "export default () => null;")
+
+    paths = {f["file"] for f in build_snapshot(tmp_path)}
+    assert paths == {"package.json", "src/app.tsx"}
+
+
 def test_encodes_binary_files_as_base64(tmp_path: Path) -> None:
     _mk(tmp_path, "public/logo.png", b"\x89PNG\r\n\x1a\n\xff\xfe")
     _mk(tmp_path, "package.json", "{}")
