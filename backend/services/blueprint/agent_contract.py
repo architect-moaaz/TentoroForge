@@ -671,6 +671,16 @@ def apply_agent_result(
                 keep = False
             artifact_id = str(body_id) if keep else alloc.allocate(prefix, p.natural_key)
             allocated[p.natural_key] = artifact_id
+            if not keep and body_id:
+                # ACTUALLY drop it — do not just allocate beside it. The
+                # comment above promised a wrong-prefix id is dropped, but the
+                # body kept it, and `upsert` honours a body id unless another
+                # artifact already owns it. So a role carrying an entity id
+                # (`roles/9/id: ENTITY-007`) reached the document and failed
+                # CONTRACT validation, sinking the whole `security` node and
+                # cascading to the app. Write the allocated id onto the body so
+                # the artifact is KEPT with a valid identity rather than lost.
+                p.body["id"] = artifact_id
             # Agents cite each other by the human name far more often than by
             # the natural key, so accept both.
             for alias in (p.body.get("name"), p.body.get("route"),

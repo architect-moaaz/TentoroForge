@@ -591,3 +591,34 @@ def test_the_document_object_is_restored_in_place(tmp_path):
         apply_agent_result(svc, _bad_widget())
 
     assert svc.doc is held, "callers were left holding the poisoned copy"
+
+
+
+def test_a_role_carrying_an_entity_id_is_kept_with_a_real_role_id(svc):
+    """§12/§116 — identity is assigned, not authored. The security agent put an
+    entity id on a role (`roles/9/id: ENTITY-007`); `upsert` honoured the body
+    id, so the whole document failed CONTRACT validation and the `security`
+    node — then the app — went down over one mislabelled id. A wrong-prefix id
+    is now actually replaced with a real ROLE id: the role is kept, not lost,
+    and the Blueprint stays legal."""
+    from services.blueprint.ids import role_key
+
+    result = AgentResult(
+        task_id="TASK-900",
+        agent="security",
+        proposals=[
+            ArtifactProposal(
+                section="roles",
+                natural_key=role_key("Case Manager"),
+                body={"id": "ENTITY-007", "name": "Case Manager",
+                      "description": "Owns case triage."},
+            )
+        ],
+        confidence=0.9,
+    )
+    app = apply_agent_result(svc, result)
+    assert app.applied
+    roles = svc.doc.get("roles") or []
+    assert len(roles) == 1
+    assert roles[0]["id"].startswith("ROLE-") and roles[0]["id"] != "ENTITY-007"
+    assert svc.is_valid(), "the document must satisfy the contract"
