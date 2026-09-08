@@ -65,6 +65,11 @@ export const TooltipNode = z.object({
     label:   z.string().min(1),
     content: z.string().min(1),
     side:    z.enum(["top", "right", "bottom", "left"]).optional(),
+    // `Tooltip.tsx` hardwired `delayDuration={0}`, so every authored tooltip
+    // fired instantly and the conventional hover-intent window was not
+    // expressible anywhere. Optional and unseeded, so nothing already on disk
+    // changes. Same bounds as `HoverCardNode.props.openDelay`.
+    delayMs: z.number().int().min(0).max(5000).optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

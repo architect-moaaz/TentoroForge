@@ -12,14 +12,20 @@ export interface TooltipProps extends TooltipPropsType {
   children?: React.ReactNode;
 }
 
-export function Tooltip({ label, content, side = "top", style, className, children }: TooltipProps) {
+export function Tooltip({ label, content, side = "top", delayMs, style, className, children }: TooltipProps) {
   // `className` was declared in this component's Zod schema AND its node schema
   // and destructured by neither, so a producer writing `props.className` on the
   // node had it silently dropped. Merged last so an authored utility class wins
   // over the built-in one, which is the reason a producer sets it. See util/cx.
 
+  // `delayDuration` was hardwired to 0, so every Tooltip in every generated app
+  // fired the instant the pointer crossed it — the one behaviour a hint must
+  // not have — and no layer could express otherwise. 700ms is the conventional
+  // hover intent and is what unset now means; a caller that genuinely wants the
+  // old instant behaviour passes `delayMs={0}`, which was not expressible
+  // before. Same call, and the same default, as HoverCard's `openDelay`.
   return (
-    <RTooltip.Provider delayDuration={0}>
+    <RTooltip.Provider delayDuration={delayMs ?? 700}>
       <RTooltip.Root>
         <RTooltip.Trigger asChild>
           <span tabIndex={0} data-tooltip="" style={resolveStyle(style)} {...useMotion(style?.motion)}

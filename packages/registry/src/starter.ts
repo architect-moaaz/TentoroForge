@@ -840,6 +840,14 @@ export const tooltipEntry: RegistryEntry = {
     // every drop.
     side:    { type: "enum", control: "select", group: "style", options: ["top", "right", "bottom", "left"],
                description: "Which side of the trigger the hint opens on. Unset opens above." },
+    // `Tooltip.tsx` hardwired `delayDuration={0}`, so every tooltip in every
+    // generated app fired the instant the pointer crossed it and the
+    // conventional hover-intent window was not authorable in any layer. The
+    // pair HoverCard already got, one prop over. NO default: unset is 700ms in
+    // the component, and a seed would write the conventional value onto every
+    // drop as though the author had chosen it.
+    delayMs: { type: "number", control: "number", group: "behavior",
+               description: "Hover intent in ms before the hint opens. Unset uses the conventional 700; 0 opens instantly." },
   },
 };
 
@@ -2713,27 +2721,45 @@ export const tableSortableEntry: RegistryEntry = {
       description: "Columns as [{ key, label, width?, align?, sortable? }].",
     },
     caption: {
+      // `""` on a `.optional()` string the component gates on `{caption && …}`
+      // is absence spelled longer — the same sweep that took `""` off
+      // `Table.caption`, `Popover.title` and `HoverCard.title`.
       type: "string",
-      default: "",
       control: "text",
       group: "content",
       description: "Accessible table caption.",
     },
-    onSort: {
-      type: "object",
-      // The one prop here that is not authorable by ANY control, and was wired to
-      // the most dangerous one. TableSortable CALLS this — `onSort(key, dir)` —
-      // so ActionPicker's `{ action: "navigate", ... }` was a truthy non-function
-      // that threw "onSort is not a function" on the first header click. It is not
-      // a `{ key, dir }` descriptor either; that is the ARGUMENT, not the value.
-      // Left null: the host wires the callback at runtime and the headers already
-      // sort client-side without one. Kept in the registry so the prop is visible
-      // and documented rather than mysteriously absent.
-      default: null,
-      control: "json",
-      group: "behavior",
-      description: "Runtime callback invoked as onSort(key, dir) when a header is clicked. Wired by the host app, not authorable here — sorting works without it.",
+    // THE VOID. `TableSortable.tsx` built its `<tbody>` from `children` alone
+    // while `slots` here is `leaf`, so the editor could never supply children
+    // and the component had no `rows` prop to expose instead: every route to a
+    // row was closed, and a dropped TableSortable was a header over nothing,
+    // permanently, with no empty state to say so. The component now takes
+    // `rows`, so the registry can offer it.
+    //
+    // A BINDING, not a seeded literal array — the same call as `Table.rows`.
+    // `TableSortable.tsx` reads the resolved value, and the renderer resolves
+    // `{{items}}` before the component is called; a seeded sample array would
+    // freeze design-time data into a shipped app. `null` is the registry's
+    // documented "no seed" marker for binding descriptors and is stripped by
+    // `normalizeSeed` at drop.
+    rows: {
+      type: "binding", default: null, control: "binding", group: "data",
+      description: "The rows to sort and render. A binding over one of the project's collections, e.g. {{items}}.",
     },
+    emptyText: {
+      type: "string", control: "text", group: "content",
+      description: "Headline shown when there are no rows. Falls back to the component's own copy.",
+    },
+    // `onSort` HAS NO DESCRIPTOR ON PURPOSE — it is not a value an author can
+    // write. The component CALLS it (`onSort(key, dir)`), so the only thing a
+    // control could put there is a truthy non-function, and the next header
+    // click throws "onSort is not a function". It was previously offered as
+    // `{ type: "object", control: "json" }`: a control whose sole possible use
+    // was a crash, inert only for as long as nobody touched it. Removing the
+    // control rather than the prop is the honest half to remove — the host app
+    // still wires the callback at runtime, and the headers sort client-side
+    // over `rows` without one. `ROUTED: registry+library — if onSort ever needs
+    // to be authorable it wants a workflow reference, not a JSON object.`
   },
 };
 
@@ -5323,7 +5349,34 @@ export const tourOverlayEntry: RegistryEntry = {
     "Step-by-step onboarding tour. Auto-starts on first visit; dismissal is persisted to localStorage under storageKey so it never re-triggers.",
   slots: { type: "leaf" },
   props: {
-    steps:      { type: "string",  default: "",                 control: "text",   group: "content",  description: "Array of {target, title, body, placement?} step defs (JSON)." },
+    // A NON-EMPTY ARRAY OF OBJECTS, NOT A ONE-LINE TEXT BOX.
+    //
+    // This was `{ type: "string", control: "text", default: "" }` against
+    // `TourOverlayProps.steps = z.array(TourStep).min(1)` — required, no
+    // default, where `TourStep` is a `.strict()` `{target, title, body?,
+    // placement}`. Building the registry's own default props object and parsing
+    // it FAILED: `invalid_type, expected array, received string`. It was the
+    // only registry seed in the library that could not satisfy its own
+    // component schema. `TourOverlay.tsx` then does
+    // `Array.isArray(steps) ? … : []` and renders nothing, so every
+    // palette-dropped TourOverlay was invalid on arrival.
+    //
+    // Same fix, and the same reasoning, as `Select.options` and `Wizard.steps`:
+    // a `.min(1)` array prop is seeded with a real, valid example, because the
+    // `json` control renders an EMPTY textarea for an absent default and an
+    // empty textarea tells the author nothing about the shape they owe it.
+    // `h1` is the seeded target because it is the one selector that resolves on
+    // essentially any authored page — a step pointing at nothing highlights
+    // nothing, which is the same "looks broken, is unconfigured" trap.
+    steps: {
+      type: "array",
+      default: [
+        { target: "h1", title: "Start here", body: "Point this step at the element you want to introduce.", placement: "auto" },
+      ],
+      control: "json",
+      group: "content",
+      description: "Steps as [{ target, title, body?, placement? }] — target is a CSS selector on this page.",
+    },
     storageKey: { type: "string",  default: "forge-tour-default", control: "text", group: "behavior", description: "localStorage key used to record dismissal." },
     autoStart:  { type: "boolean", default: true,               control: "toggle", group: "behavior", description: "When true, the tour auto-opens on mount." },
     nextLabel:  { type: "string",  default: "Next",             control: "text",   group: "content",  description: "Label for the Next button." },

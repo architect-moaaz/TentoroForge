@@ -447,7 +447,8 @@
     "props": {
       "columns": {},
       "caption": {},
-      "onSort": {}
+      "rows": {},
+      "emptyText": {}
     }
   },
   "ApprovalStepper": {
@@ -968,7 +969,8 @@
     "props": {
       "label": {},
       "content": {},
-      "side": {}
+      "side": {},
+      "delayMs": {}
     }
   },
   "Drawer": {

@@ -54,8 +54,24 @@ def parse_log():
         m3 = re.match(r"### (.+)", part)
         m4 = re.match(r"#### FIX — (.+)", part)
         if m4:
-            name = m4.group(1).split("(")[0].strip().strip("`")
-            fixes.setdefault(name, []).append(part)
+            # A FIX BLOCK MAY COVER SEVERAL COMPONENTS AT ONCE, AND MOST DO.
+            #
+            # This took `m4.group(1).split("(")[0]` as a single name, so
+            # `#### FIX — Tooltip · Popover · Drawer · Chart · DataBoundary:
+            # props the component reads and the panel did not offer  (registry)`
+            # registered one "component" called
+            # `Tooltip · Popover · Drawer · Chart · DataBoundary: props the
+            # component reads…`, which matches no registry entry. `done` was
+            # therefore False for every component fixed in a grouped block, and
+            # the report announced **18 open bugs that were closed in the log it
+            # was reading** — including four (Repeat, Conditional, DataBoundary,
+            # Slot) whose fix the same log measures as `notRendered 4 → 0`.
+            #
+            # The fixers group deliberately: the grouping is the finding ("one
+            # class, six components"), so the parser has to read a list where a
+            # list was written, not demand one heading per component.
+            for name in _fix_names(m4.group(1), part):
+                fixes.setdefault(name, []).append(part)
         elif m3:
             raw = m3.group(1).strip()
             if raw.startswith("<"):          # the template placeholder
@@ -71,6 +87,56 @@ def parse_log():
                 "severities": re.findall(r"\b(blocker|major|minor)\b", body, re.I),
             }
     return entries, fixes
+
+
+def _fix_names(heading, body=""):
+    """Every component name a `#### FIX — …` block claims to cover.
+
+    A `- **Covers:** A, B, C` line in the body WINS when present, because a
+    heading is prose and some of them name the class rather than its members:
+    `className / style declared in the contract and dropped by the component`
+    fixed eight components and names none of them, so DataGrid, Timeline,
+    OptimisticProvider and FocusRing kept reporting as open bugs after they were
+    fixed. Scanning the body for component names instead was rejected: fix
+    blocks also mention components in `ROUTED:` lines, which mean the OPPOSITE
+    of fixed (the Table block routes TableSortable that way), and a false
+    RESOLVED is far worse in this report than a false OPEN.
+
+    Falling back to the heading keeps every single-component block working
+    unchanged, so `Covers:` is only needed where the heading is not a list.
+
+    Headings are written for a human and come in four observed shapes:
+
+        FIX — Banner  (registry)
+        FIX — CartPanel + CartPage  (registry)
+        FIX — Repeat · Conditional · DataBoundary · Slot: the four nodes …
+        FIX — Tooltip · Popover · Drawer · Chart · DataBoundary: props the …
+
+    So: drop the trailing `(layer)` note, cut the prose at the first colon or
+    em-dash that follows the list, then split on the separators the fixers
+    actually use. Names are matched against the registry by the caller, so a
+    fragment of prose that survives simply matches nothing — this can add a
+    false RESOLVED only if a prose word is exactly a component name, which is
+    why the prose is cut before splitting rather than after.
+    """
+    covers = re.search(r"^- \*\*Covers:\*\*(.+)$", body, re.M)
+    if covers:
+        listed = covers.group(1).strip()
+        # An explicit "(none — a mechanism, not an instance)" is a real answer:
+        # the parity guard and the hint overlay fixed a mechanism, and claiming
+        # they resolved a component would be the same lie in the other
+        # direction.
+        if listed.startswith("("):
+            return []
+        return [p.strip().strip("`") for p in listed.split(",") if p.strip()]
+
+    head = heading.split("(")[0]
+    # `Repeat · Conditional · … : the four nodes the editor could not see`
+    head = head.split(":")[0]
+    # A `—` after the list introduces a note: `Table  (registry) — every route…`
+    head = head.split("—")[0]
+    parts = re.split(r"[·+,]| and ", head)
+    return [p.strip().strip("`") for p in parts if p.strip()]
 
 
 def _field(body, label):

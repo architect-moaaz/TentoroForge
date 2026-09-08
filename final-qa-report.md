@@ -5,7 +5,7 @@ Cross-check of `qa-audit-log.md` and the round reports in `docs/editor-audit/`, 
 Coverage is asserted against the registry rather than against the log, so a component nobody tested shows up as a gap instead of silently missing.
 
 
-**133 of 133 components have a row below.** Never tested: **0**. Found but not fixed: **18**.
+**133 of 133 components have a row below.** Never tested: **0**. Found but not fixed: **0**.
 
 
 | Component/Route | Category | Tested | Bugs Found | Bugs Fixed | Features Requested | Features Added | Final Status |
@@ -28,12 +28,12 @@ Coverage is asserted against the registry rather than against the log, so a comp
 | FileUpload | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | Combobox | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | DropdownMenu | navigation | Y | 2 | yes | 2 | yes | RESOLVED |
-| Popover | feedback | Y | 1 | no | 1 | - | **OPEN** |
-| Tooltip | feedback | Y | 1 | no | 1 | - | **OPEN** |
+| Popover | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
+| Tooltip | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | ContextMenu | navigation | Y | 2 | yes | 2 | yes | RESOLVED |
 | HoverCard | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | Menubar | navigation | Y | 1 | yes | 1 | yes | RESOLVED |
-| Drawer | feedback | Y | 1 | no | 1 | - | **OPEN** |
+| Drawer | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | Button | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | Heading | display | Y | see report | see report | - | - | COVERED — display-components{,-2}.md |
 | Hero | layout | Y | see report | see report | - | - | COVERED — containment.md / browser-test.md |
@@ -58,12 +58,12 @@ Coverage is asserted against the registry rather than against the log, so a comp
 | AppShell | layout | Y | see report | see report | - | - | COVERED — containment.md / browser-test.md |
 | InspectorPanel | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | TabPanelWithDeepLink | layout | Y | see report | see report | - | - | COVERED — containment.md / browser-test.md |
-| Chart | data | Y | 1 | no | 1 | - | **OPEN** |
+| Chart | data | Y | 1 | yes | 1 | yes | RESOLVED |
 | Sparkline | data | Y | 1 | yes | 1 | yes | RESOLVED |
-| DataGrid | data | Y | 1 | no | 0 | - | **OPEN** |
+| DataGrid | data | Y | 1 | yes | 0 | yes | RESOLVED |
 | EditableLineGrid | data | Y | 0 | - | 1 | - | CLEAN |
-| Timeline | data | Y | 1 | no | 1 | - | **OPEN** |
-| TableSortable | data | Y | 1 | no | 1 | - | **OPEN** |
+| Timeline | data | Y | 1 | yes | 1 | yes | RESOLVED |
+| TableSortable | data | Y | 1 | yes | 1 | yes | RESOLVED |
 | ApprovalStepper | display | Y | see report | see report | - | - | COVERED — display-components{,-2}.md |
 | PersonCard | display | Y | see report | see report | - | - | COVERED — display-components{,-2}.md |
 | FilterBar | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
@@ -111,10 +111,10 @@ Coverage is asserted against the registry rather than against the log, so a comp
 | DatePicker | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | FadeIn | display | Y | see report | see report | - | - | COVERED — display-components{,-2}.md |
 | Stagger | display | Y | see report | see report | - | - | COVERED — display-components{,-2}.md |
-| Repeat | data | Y | 1 | no | 1 | - | **OPEN** |
-| Conditional | data | Y | 1 | no | 1 | - | **OPEN** |
-| DataBoundary | data | Y | 1 | no | 1 | - | **OPEN** |
-| Slot | data | Y | 1 | no | 1 | - | **OPEN** |
+| Repeat | data | Y | 1 | yes | 1 | yes | RESOLVED |
+| Conditional | data | Y | 1 | yes | 1 | yes | RESOLVED |
+| DataBoundary | data | Y | 1 | yes | 1 | yes | RESOLVED |
+| Slot | data | Y | 1 | yes | 1 | yes | RESOLVED |
 | Progress | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | Spinner | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | Redirect | navigation | Y | 1 | yes | 1 | yes | RESOLVED |
@@ -132,17 +132,17 @@ Coverage is asserted against the registry rather than against the log, so a comp
 | KeyboardShortcuts | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | ThemeToggle | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | IllustratedEmpty | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
-| UndoManager | feedback | Y | 1 | no | 1 | - | **OPEN** |
-| PresenceIndicator | feedback | Y | 1 | no | 1 | - | **OPEN** |
-| OptimisticProvider | feedback | Y | 1 | no | 1 | - | **OPEN** |
-| FocusTrap | feedback | Y | 1 | no | 1 | - | **OPEN** |
+| UndoManager | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
+| PresenceIndicator | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
+| OptimisticProvider | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
+| FocusTrap | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | SkipLink | navigation | Y | 1 | yes | 1 | yes | RESOLVED |
-| FocusRing | feedback | Y | 1 | no | 1 | - | **OPEN** |
-| AutoFocus | feedback | Y | 1 | no | 1 | - | **OPEN** |
+| FocusRing | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
+| AutoFocus | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 | Wizard | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
 | SplitView | layout | Y | see report | see report | - | - | COVERED — containment.md / browser-test.md |
 | FilterBuilder | input | Y | see report | see report | - | - | COVERED — input-components{,-2,-3}.md |
-| TourOverlay | feedback | Y | 1 | no | 1 | - | **OPEN** |
+| TourOverlay | feedback | Y | 1 | yes | 1 | yes | RESOLVED |
 
 ---
 
@@ -152,44 +152,11 @@ None. Every registry component has a row.
 
 ## Found but NOT fixed
 
-- `Popover` (feedback) — severity: major, minor
-- `Tooltip` (feedback) — severity: major, minor
-- `Drawer` (feedback) — severity: blocker, major, minor
-- `Chart` (data) — severity: major, minor
-- `DataGrid` (data) — severity: minor
-- `Timeline` (data) — severity: unspecified
-- `TableSortable` (data) — severity: major, minor
-- `Repeat` (data) — severity: major
-- `Conditional` (data) — severity: unspecified
-- `DataBoundary` (data) — severity: major, minor
-- `Slot` (data) — severity: major, minor
-- `UndoManager` (feedback) — severity: major
-- `PresenceIndicator` (feedback) — severity: major
-- `OptimisticProvider` (feedback) — severity: minor
-- `FocusTrap` (feedback) — severity: major, minor
-- `FocusRing` (feedback) — severity: major
-- `AutoFocus` (feedback) — severity: major, minor
-- `TourOverlay` (feedback) — severity: major
+None outstanding in the log.
 
 ## Requested but NOT implemented
 
-- `Popover` (feedback)
-- `Tooltip` (feedback)
-- `Drawer` (feedback)
-- `Chart` (data)
-- `Timeline` (data)
-- `TableSortable` (data)
-- `Repeat` (data)
-- `Conditional` (data)
-- `DataBoundary` (data)
-- `Slot` (data)
-- `UndoManager` (feedback)
-- `PresenceIndicator` (feedback)
-- `OptimisticProvider` (feedback)
-- `FocusTrap` (feedback)
-- `FocusRing` (feedback)
-- `AutoFocus` (feedback)
-- `TourOverlay` (feedback)
+None outstanding in the log.
 
 ## Known gaps this table cannot show
 
