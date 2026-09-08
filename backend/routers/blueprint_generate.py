@@ -188,6 +188,80 @@ def _requirement_report(doc: dict, req_id: str) -> str:
     return "\n".join(lines)
 
 
+# The only external systems this platform integrates with are the two design
+# SOURCES. Everything else — an ATS, a CRM, a payments or messaging provider —
+# is not something Smith can wire up, and saying so plainly beats asking which
+# sync direction the user wants for a thing that will never be built.
+_SUPPORTED_INTEGRATIONS = ("figma", "ux pilot", "uxpilot")
+#: Phrasings that mean "wire this app to an external system".
+_INTEGRATION_PHRASES = (
+    "integrate with", "integration with", "integrate it with", "integrate into",
+    "connect to", "connect it to", "connect with", "connect this to",
+    "sync with", "sync to", "sync it with", "hook up to", "hook it up to",
+    "pull from", "webhook to", "api integration with",
+)
+#: If the target names a part of THIS app, the phrase is internal wiring ("connect
+#: the form to the dashboard"), not an external integration — leave it to the mover.
+_INTERNAL_TARGET_NOUNS = (
+    "page", "screen", "route", "dashboard", "table", "list", "form", "view",
+    "workflow", "tab", "panel", "section", "field", "button", "modal", "sidebar",
+    "nav", "menu", "record", "entity", "database", "db", "endpoint", "api route",
+)
+
+
+def _unsupported_integration(message: str) -> str | None:
+    """The external system a message asks to integrate with, when that system
+    is NOT one Smith supports — or None.
+
+    DEFECT-F-07: 'Integrate with Greenhouse' was met with 'which sync direction
+    — import / push / two-way?', implying a capability the platform does not
+    have. Only Figma and UX Pilot (design sources) are wired; an ATS/CRM/payment
+    integration is not, and the honest answer is to say so and offer what can be
+    done (record it as a requirement, or rebuild), not to interview the user
+    about a build that will never happen.
+
+    Conservative: fires only on an explicit integration phrase, and never for
+    the two design sources (they have their own connect flow).
+    """
+    if not message:
+        return None
+    low = message.lower()
+    for phrase in _INTEGRATION_PHRASES:
+        idx = low.find(phrase)
+        if idx == -1:
+            continue
+        tail = message[idx + len(phrase):].strip()
+        tail_low = tail.lower()
+        if not tail:
+            continue
+        if any(s in tail_low for s in _SUPPORTED_INTEGRATIONS):
+            return None  # Figma / UX Pilot — the supported design-source flow
+        # The named system, trimmed to its first clause / few words for the reply.
+        name = re.split(r"[.,;:\n]", tail, maxsplit=1)[0].strip()
+        name = " ".join(name.split()[:5])
+        if not name:
+            continue
+        # "connect the form to the dashboard" is internal wiring, not an
+        # external integration — don't refuse it as one.
+        if any(re.search(rf"\b{re.escape(n)}\b", name.lower())
+               for n in _INTERNAL_TARGET_NOUNS):
+            return None
+        return name
+    return None
+
+
+def _unsupported_integration_reply(name: str) -> str:
+    return (
+        f"I can't connect an app to {name} — external integrations like that "
+        "aren't something I can build yet. The only outside sources I wire up "
+        "are Figma and UX Pilot, and those are design references, not data "
+        "connections.\n\nWhat I can do: record it as a requirement so it's "
+        "captured in the definition (and whoever builds the integration later "
+        "has it written down), or make changes to the app I did build. Want me "
+        "to note it as a requirement?"
+    )
+
+
 #: Action verbs whose presence means the app actually DOES something. A brief
 #: with none of these and an explicit "just/only shows text" shape is a page
 #: that does nothing (DEFECT-C-06).
@@ -989,6 +1063,18 @@ async def smith_chat(
                     emit("message", {"text": _requirement_report(svc.doc, asked_req),
                                      "status": "reported"})
                     return {"status": "reported"}
+
+            # DEFECT-F-07: an external integration Smith cannot build (an ATS, a
+            # CRM, a payments provider) is refused honestly here — before the
+            # model can engage as if it were a normal change and ask which sync
+            # direction the user wants for something that will never be built.
+            # Not gated on `approved`: an integration ask is never an approval.
+            if not req.approved:
+                unsupported = _unsupported_integration(req.message)
+                if unsupported:
+                    emit("message", {"text": _unsupported_integration_reply(unsupported),
+                                     "status": "asked"})
+                    return {"status": "asked"}
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means

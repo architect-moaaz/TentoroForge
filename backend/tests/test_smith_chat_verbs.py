@@ -96,3 +96,44 @@ def test_requirement_report_is_honest_about_a_missing_id():
 def test_requirement_report_when_nothing_is_defined_yet():
     out = _requirement_report({"requirements": []}, "REQ-001")
     assert "no requirements defined" in out and "define" in out.lower()
+
+
+# ── DEFECT-F-07: honest refusal for an unsupported external integration ──
+
+from routers.blueprint_generate import (
+    _unsupported_integration, _unsupported_integration_reply,
+)
+
+
+def test_unsupported_integration_is_detected():
+    assert _unsupported_integration("Integrate with Greenhouse.") == "Greenhouse"
+    assert _unsupported_integration("connect to Salesforce") == "Salesforce"
+    assert _unsupported_integration("please sync with our Stripe account") \
+        == "our Stripe account"
+    assert _unsupported_integration("pull from HubSpot nightly") == "HubSpot nightly"
+
+
+def test_supported_design_sources_are_not_refused():
+    # Figma / UX Pilot have their own connect flow — never the F-07 refusal.
+    assert _unsupported_integration("integrate with Figma") is None
+    assert _unsupported_integration("connect to UX Pilot") is None
+
+
+def test_internal_wiring_is_not_mistaken_for_an_integration():
+    # "connect X to the dashboard/page/list" is internal, not external.
+    assert _unsupported_integration("connect the form to the dashboard") is None
+    assert _unsupported_integration("connect to the candidates page") is None
+    assert _unsupported_integration("sync to the roles table") is None
+
+
+def test_non_integration_messages_are_ignored():
+    assert _unsupported_integration("add a candidates page") is None
+    assert _unsupported_integration("what does this app do?") is None
+    assert _unsupported_integration("") is None
+
+
+def test_integration_reply_names_the_system_and_offers_an_alternative():
+    r = _unsupported_integration_reply("Greenhouse")
+    assert "Greenhouse" in r
+    assert "requirement" in r.lower()          # offers the real alternative
+    assert "figma" in r.lower() and "pilot" in r.lower()  # names what IS supported
