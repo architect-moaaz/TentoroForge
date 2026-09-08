@@ -660,11 +660,25 @@ export function SmithPanel({
   const bp = (blueprint ?? {}) as Record<string, unknown>;
   const pageCount = (bp.pages as unknown[] | undefined)?.length ?? 0;
   const layoutCount = (bp.pageLayouts as unknown[] | undefined)?.length ?? 0;
+  // THE GATE CLEARS ONCE THE APP HAS BEEN BUILT. A preview build that ran
+  // (`runtime.build`) means the application exists — a handful of pages the
+  // composer never managed are missing routes that 404, not a reason to force
+  // the "Finish the missing pages" screen forever. Left as `layoutCount <
+  // pageCount` alone, any page that deterministically fails to compose kept
+  // that true for good: the gate reappeared after every run, and each click
+  // fired another full (Opus) page_layouts fan-out — which is how one app ran
+  // up ~$40 chasing eleven pages that were never going to compose. A
+  // never-built definition (no `runtime.build`) still shows the gate, so a
+  // first build is still offered.
+  const alreadyBuilt = Boolean(
+    (bp.runtime as { build?: unknown } | undefined)?.build,
+  );
   const definedNotBuilt =
     !busy &&
     Array.isArray(bp.requirements) &&
     (bp.requirements as unknown[]).length > 0 &&
-    layoutCount < Math.max(pageCount, 1);
+    layoutCount < Math.max(pageCount, 1) &&
+    !alreadyBuilt;
 
   // What the side panel is showing: the run you picked, or the live one.
   const sidePlan =
