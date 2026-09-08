@@ -23,6 +23,16 @@ const DEVICE_SIZES = {
 
 type Device = keyof typeof DEVICE_SIZES;
 
+// The preview dev server is started behind a basePath of
+// `/api/projects/<id>/preview/serve` (see backend/preview.py) and reached
+// through the proxy at that path — never the raw dev-server port. A bare
+// `http://localhost:<port>` only works when the browser and the server share a
+// machine; on a hosted deploy it is the SERVER's localhost, so the iframe
+// failed with "unable to connect to localhost". Route through the same origin
+// the API client uses (empty on a hosted deploy → relative, so the platform's
+// reverse proxy forwards it; the dev host locally).
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
+
 interface PreviewFrameProps {
   projectId: string;
   project: Project | null;
@@ -38,7 +48,12 @@ export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
     checkStatus();
   }, [checkStatus]);
 
-  const previewUrl = port ? `http://localhost:${port}` : null;
+  // Reach the dev server through the backend proxy, which fronts it at the
+  // basePath the preview was started under. `port` is what tells us a preview
+  // is actually running; the browser never connects to it directly.
+  const previewUrl = port
+    ? `${API_BASE}/api/projects/${projectId}/preview/serve/`
+    : null;
   const deviceSize = DEVICE_SIZES[device];
 
   return (
