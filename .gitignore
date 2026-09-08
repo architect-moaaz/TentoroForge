@@ -107,3 +107,6 @@ zz-*.mts
 qa-a-*.mts
 .qa-*.mts
 **/tests/qa-a-*.test.tsx
+
+# Runtime logs
+.logs/
