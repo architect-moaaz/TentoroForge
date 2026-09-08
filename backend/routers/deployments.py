@@ -16,6 +16,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -40,6 +41,22 @@ router = APIRouter()
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
+
+def _deploy_app_dir(output_dir: str) -> str:
+    """The application directory to ship — `<output>/app` for a Blueprint app.
+
+    The Blueprint engine projects the application into `<output>/app` (beside
+    `.forge` and `contracts`), while earlier generators wrote it at the output
+    root. Deploying the root then fails vendor refresh with `package.json
+    missing: <output>/package.json`, because package.json is one level down.
+    Prefer the `app/` subdir when it holds the app — the same rule
+    resolveProject.ts and the preview follow.
+    """
+    nested = Path(output_dir) / "app"
+    if (nested / "package.json").exists() or (nested / "src" / "schemas").is_dir():
+        return str(nested)
+    return output_dir
 
 
 async def _require_project(
@@ -98,7 +115,7 @@ async def publish(
     snapshot = DeploySnapshot(
         project_id=str(project.id),
         project_slug=project.short_id,
-        output_dir=project.output_dir,
+        output_dir=_deploy_app_dir(project.output_dir),
         integrations=integrations,
         triggered_by=str(user.id),
     )
