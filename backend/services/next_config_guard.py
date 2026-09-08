@@ -19,30 +19,53 @@ from __future__ import annotations
 
 import os
 
-# The single authoritative config. Keep in sync with app_emitter.py's emit.
+# The single authoritative config — THE one source. app_emitter imports
+# `AUTHORITATIVE_NEXT_CONFIG` from here rather than keeping its own copy: two
+# copies is exactly how `basePath` came to be added to the (orphaned) template
+# next.config.ts for the preview proxy and NOT to the .js that actually ships,
+# so the preview never ran under its prefix.
+#
+# basePath / assetPrefix: the platform iframes the generated app behind a
+# reverse proxy at /api/projects/<id>/preview/serve/… (preview.py sets
+# NEXT_BASE_PATH / NEXT_ASSET_PREFIX). Without these, Next emits page + asset
+# URLs at the root — /_next/…, /login — so from inside the iframe every asset
+# 404s and the auth middleware's /login redirect loops. Env-gated: unset (the
+# Vercel deploy case) → the spreads collapse to {} and the app runs at root,
+# exactly as before.
 #
 # outputFileTracingIncludes: Server Components read src/schemas/**/*.json and
-# src/contracts/*.json via fs.readFile at render time — those aren't static
-# imports, so Next's file-tracer would otherwise leave them out of the
-# serverless bundle. Deployed to Vercel, /dashboard then hits ENOENT on
-# `/var/task/src/schemas/home.json` and every SSR route 500s. Ship them
-# alongside every route.
+# src/contracts/*.json, and rules/engine.ts reads rules/** — all via fs at
+# render time, none a static import Next's file-tracer can see, so each has to
+# be forced into every serverless function's trace or Vercel hits ENOENT on
+# `/var/task/src/schemas/home.json` (SSR 500s) or silently disables every
+# business rule.
 _AUTHORITATIVE = (
     "/** @type {import('next').NextConfig} */\n"
+    "// Preview-behind-prefix mode — see services/next_config_guard.py.\n"
+    "const PREVIEW_BASE_PATH = process.env.NEXT_BASE_PATH || undefined;\n"
+    "const PREVIEW_ASSET_PREFIX = process.env.NEXT_ASSET_PREFIX || PREVIEW_BASE_PATH;\n"
     "module.exports = {\n"
     "  reactStrictMode: true,\n"
+    "  ...(PREVIEW_BASE_PATH ? { basePath: PREVIEW_BASE_PATH } : {}),\n"
+    "  ...(PREVIEW_ASSET_PREFIX ? { assetPrefix: PREVIEW_ASSET_PREFIX } : {}),\n"
     '  transpilePackages: ["@tentoroforge/engine", "@tentoroforge/library", '
     '"@tentoroforge/renderer", "@tentoroforge/schema"],\n'
     '  serverExternalPackages: ["isomorphic-dompurify", "jsdom"],\n'
+    '  distDir: process.env.NEXT_DIST_DIR || ".next",\n'
     "  outputFileTracingIncludes: {\n"
-    '    "/**/*": ['
-    '"./src/schemas/**/*.json", "./src/contracts/**/*.json", "./registry.json"'
+    '    "/**": ['
+    '"./src/schemas/**/*.json", "./src/contracts/**/*.json", "./registry.json", '
+    '"./rules/**/*", "./src/rules/**/*"'
     "],\n"
     "  },\n"
     "  typescript: { ignoreBuildErrors: true },\n"
     '  images: { domains: ["localhost"] },\n'
     "};\n"
 )
+
+#: Public name for the one authoritative config, imported by app_emitter so the
+#: emitted file and this backstop can never drift apart again.
+AUTHORITATIVE_NEXT_CONFIG = _AUTHORITATIVE
 
 # The markers of a bad config: jsdom/its subtree bundled via transpilePackages,
 # the authoritative markers missing, OR outputFileTracingIncludes missing
@@ -58,6 +81,11 @@ def _is_wrong(text: str) -> bool:
     # Older-generation apps hit this before the tracing includes existed;
     # heal them on the next sweep.
     if "outputFileTracingIncludes" not in text:
+        return True
+    # Missing the preview basePath wiring → the app cannot run under the
+    # editor's reverse proxy (blank preview + /login redirect loop). A config
+    # written before this existed has no NEXT_BASE_PATH reference; heal it.
+    if "NEXT_BASE_PATH" not in text:
         return True
     # jsdom (or its subtree) inside transpilePackages is the failure mode. Cheap
     # heuristic: the bad deps should only ever appear on the serverExternalPackages

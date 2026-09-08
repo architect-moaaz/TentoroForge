@@ -33,11 +33,22 @@ const nextConfig: NextConfig = {
   // A verification build (`verify_build`) sets NEXT_DIST_DIR so it compiles
   // beside a running dev server instead of into its `.next`.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // ONE object, every runtime-read file. These lists lived in TWO
+  // `outputFileTracingIncludes` keys in this same literal, and the second
+  // silently overwrote the first (duplicate object key — last wins), so the
+  // schemas / contracts / registry.json entries were dropped from the
+  // serverless bundle and hit ENOENT at render on Vercel, the very failure the
+  // first block existed to prevent. All of them are fs-read at request time
+  // (Server Components read src/schemas/**/*.json + src/contracts/*.json;
+  // rules/engine.ts loadRules reads rules/**), none is a static import Next's
+  // file-tracer can see, so each has to be forced into every function's trace.
   outputFileTracingIncludes: {
-    "/**/*": [
+    "/**": [
       "./src/schemas/**/*.json",
       "./src/contracts/**/*.json",
       "./registry.json",
+      "./rules/**/*",
+      "./src/rules/**/*",
     ],
   },
   typescript: {
@@ -45,15 +56,6 @@ const nextConfig: NextConfig = {
   },
   eslint: {
     ignoreDuringBuilds: true,
-  },
-  // Business rules ship as JSON read at request time via fs (rules/engine.ts
-  // loadRules). Next's output-file-tracing does NOT include fs-read files it
-  // can't see statically, so on Vercel/serverless the `rules/` dir was dropped
-  // from the function bundle → readdir ENOENT → ALL rules silently disabled in
-  // production while working locally. Force both candidate dirs into every
-  // serverless function's trace.
-  outputFileTracingIncludes: {
-    "/**": ["./rules/**/*", "./src/rules/**/*"],
   },
   images: {
     domains: ["localhost", "picsum.photos", "placehold.co"],

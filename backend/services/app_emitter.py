@@ -337,29 +337,19 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
     except Exception as e:
         logger.warning("[drizzle-config] emit skipped: %s", e)
 
-    # Single authoritative next.config.js. The agent sometimes ALSO emits a
-    # next.config.ts; with both present Next picks ambiguously and may drop
-    # transpilePackages, leaking the vendored packages' browser code (which uses
-    # `self`) into the server/middleware bundle -> "self is not defined" 500 on
-    # every authenticated route. Write one config and remove conflicting variants.
+    # Single authoritative next.config.js, imported from next_config_guard so
+    # the emitted file and the repair-sweep backstop are ONE string that cannot
+    # drift — the drift is what left the shipped .js without the preview
+    # `basePath` that the (deleted) template .ts carried. The agent sometimes
+    # ALSO emits a next.config.ts; with both present Next picks ambiguously and
+    # may drop transpilePackages, leaking the vendored packages' browser code
+    # (which uses `self`) into the server/middleware bundle -> "self is not
+    # defined" 500 on every authenticated route. Write one config and remove
+    # conflicting variants.
     try:
-        (out / "next.config.js").write_text(
-            "/** @type {import('next').NextConfig} */\n"
-            "module.exports = {\n"
-            "  reactStrictMode: true,\n"
-            '  transpilePackages: ["@tentoroforge/engine", "@tentoroforge/library", '
-            '"@tentoroforge/renderer", "@tentoroforge/schema"],\n'
-            '  serverExternalPackages: ["isomorphic-dompurify", "jsdom"],\n'
-            "  outputFileTracingIncludes: {\n"
-            '    "/**/*": ['
-            '"./src/schemas/**/*.json", "./src/contracts/**/*.json", "./registry.json"'
-            "],\n"
-            "  },\n"
-            "  typescript: { ignoreBuildErrors: true },\n"
-            '  images: { domains: ["localhost"] },\n'
-            "};\n",
-            encoding="utf-8",
-        )
+        from services.next_config_guard import AUTHORITATIVE_NEXT_CONFIG
+
+        (out / "next.config.js").write_text(AUTHORITATIVE_NEXT_CONFIG, encoding="utf-8")
         for _alt in ("next.config.ts", "next.config.mjs"):
             _p = out / _alt
             if _p.exists():
