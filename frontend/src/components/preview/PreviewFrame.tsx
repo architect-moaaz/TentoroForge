@@ -31,14 +31,26 @@ interface PreviewFrameProps {
 export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
   const [device, setDevice] = useState<Device>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
-  const { port, isStarting, error, startPreview, stopPreview, checkStatus } =
+  const { port, servePath, isStarting, error, startPreview, stopPreview, checkStatus } =
     usePreview(projectId);
 
   useEffect(() => {
     checkStatus();
   }, [checkStatus]);
 
-  const previewUrl = port ? `http://localhost:${port}` : null;
+  // Load the app through the backend PROXY path, not the backend's internal
+  // localhost port (DEFECT-E-01: blank on hosted). The generated Next app is
+  // started with NEXT_BASE_PATH = this serve path, so its pages and assets are
+  // emitted under it and the proxy forwards them verbatim; the proxy is
+  // auth-free by design (an iframe can't send the platform bearer token). Same
+  // pattern as CanvasFrame / the Blueprint page's LiveApplication. Prefix with
+  // the API origin when set (hosted split origin), else the relative path
+  // resolves via next.config's /api/projects rewrite.
+  const previewUrl = servePath
+    ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${servePath}`
+    : port
+      ? `http://localhost:${port}`
+      : null;
   const deviceSize = DEVICE_SIZES[device];
 
   return (
