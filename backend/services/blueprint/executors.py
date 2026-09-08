@@ -346,7 +346,17 @@ class AnthropicModel:
     def _anthropic(self) -> Any:
         if self._client is None:
             import anthropic
-            import httpx
+
+            # WHICH httpx THE SDK SPEAKS IS THE SDK'S CHOICE, NOT OURS. Newer
+            # anthropic releases vendor `httpx2` and reject an `httpx.Timeout`
+            # outright ("this SDK uses httpx2. Use httpx2.Timeout") — a rebuild
+            # that pulls the newer SDK then fails EVERY agent node at construction
+            # time, before a single token is requested. Build the Timeout from
+            # whichever module the installed SDK actually uses.
+            try:
+                import httpx2 as _sdk_httpx  # type: ignore
+            except ImportError:
+                import httpx as _sdk_httpx
 
             # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
             # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
@@ -362,8 +372,8 @@ class AnthropicModel:
             # 115-138s each, legitimately.
             self._client = anthropic.Anthropic(
                 default_headers={"accept-encoding": self.accept_encoding},
-                timeout=httpx.Timeout(connect=15.0, read=300.0,
-                                      write=60.0, pool=15.0),
+                timeout=_sdk_httpx.Timeout(connect=15.0, read=300.0,
+                                           write=60.0, pool=15.0),
                 max_retries=3,
             )
         return self._client
