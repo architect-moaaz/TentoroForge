@@ -31,7 +31,9 @@ from schemas.project import (
     AgentJobResponse,
     VersionResponse,
 )
-from services.project_service import create_project, copy_project, get_project_with_auth
+from services.project_service import (
+    create_project, copy_project, get_project_with_auth, reconcile_ready_status,
+)
 from preview import start_preview, stop_preview, get_preview_port, health_check
 
 router = APIRouter(tags=["projects"])
@@ -112,7 +114,10 @@ async def get_project(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    # A build that passed but whose SSE handler died still becomes ready here,
+    # so Publish reflects the app that was actually built.
+    return await reconcile_ready_status(project, db)
 
 
 @router.put("/api/projects/{project_id}", response_model=ProjectResponse)

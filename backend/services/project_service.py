@@ -160,3 +160,46 @@ async def get_project_with_auth(
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
     return project
+
+
+def _build_passed(output_dir: str | None) -> bool:
+    """A preview build ran and PASSED — the application is genuinely built.
+
+    The `preview` node writes ``runtime.build.status == "passed"`` into the
+    Blueprint the moment the projected app compiles, so it is the artifact that
+    says an application exists, independent of any request lifecycle.
+    """
+    if not output_dir:
+        return False
+    import json
+    path = Path(output_dir) / ".forge" / "blueprint" / "current.json"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return ((doc.get("runtime") or {}).get("build") or {}).get("status") == "passed"
+
+
+async def reconcile_ready_status(project: Project, db: AsyncSession) -> Project:
+    """Derive `ready` from the build artifact, not the request that ran it.
+
+    The status→`ready` flip lived only in the ``/generate/blueprint`` SSE
+    handler, *after* the stream. A ~15-20 minute generation the user navigated
+    away from finished in the background — the run ledger recorded ``run:end``
+    and the ``preview`` build passed — but the handler that marks the project
+    ready died with the connection, so a genuinely BUILT application sat in
+    ``draft`` with Publish disabled over a run that had actually succeeded.
+
+    On read, a ``draft`` project whose build passed is reconciled to ``ready``.
+    Only ``draft`` is touched: ``generating`` means a run is in flight, and the
+    terminal states own themselves. Idempotent — a ready project is returned
+    unchanged.
+    """
+    if project.status != ProjectStatus.draft:
+        return project
+    if _build_passed(project.output_dir):
+        project.status = ProjectStatus.ready
+        await db.commit()
+        await db.refresh(project)
+    return project
