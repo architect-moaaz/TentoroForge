@@ -25,6 +25,7 @@ endpoint count was diffed by hand.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -179,6 +180,156 @@ def _definition_edit(message: str) -> bool:
     if leads_question:
         return False
     return False
+
+
+# A 'why did you decide…' question, and the words that carry its meaning.
+_WHY_LEADS = ("why", "how did you decide", "how come", "on what basis",
+              "what made you", "what's the reason", "whats the reason")
+_CITE_STOPWORDS = frozenset("""
+why did you decide decided decides deciding that this the a an is are was were
+be been being only can cannot could would should do does don't didn't i we it
+they them there here what when where how to of for on in and or but with as by
+from make made makes choose chose chosen your my our me us so such not no yes
+about into over under than then just also have has had will won't smith app
+application system reason think thought going want wanted need needs
+""".split())
+
+
+def _discovery_answers(turns) -> list[tuple[str, str]]:
+    """(question, answer) pairs from a transcript: each USER turn that answers a
+    preceding SMITH question. The opening brief (a user turn with no question
+    before it) is not an answer and is skipped.
+
+    Deliberately structural, not semantic — it does not try to say WHICH
+    artifact an answer decides (that binding needs the model, and getting it
+    wrong corrupts confidence). It only captures that the user was asked X and
+    said Y, which is exactly what a discovery decision records.
+    """
+    pairs: list[tuple[str, str]] = []
+    last_q = ""
+    for role, text in turns:
+        text = (text or "").strip()
+        if not text:
+            continue
+        if str(role).lower() in ("smith", "assistant"):
+            last_q = text
+        elif str(role).lower() == "user" and last_q:
+            pairs.append((last_q, text))
+            last_q = ""
+    return pairs
+
+
+def _record_discovery_answers(output_dir, turns, emit=None) -> int:
+    """Record the user's discovery answers as `source: user` decisions.
+
+    DEFECT-B-03: the answers to Smith's clarification questions never reached
+    current.json as decisions — `by_user` was 0, the Decisions view was empty,
+    and there was nothing to cite. The full Smith engine records them bound to
+    the artifact each one settles; this deterministic path records them UNBOUND
+    (the schema needs only id/decision/source) so it adds a real audit trail
+    with `source: user` WITHOUT the semantic artifact-binding that would touch
+    confidence if it guessed wrong. Idempotent by a content key, best-effort:
+    a failure to record must never fail the turn.
+    """
+    pairs = _discovery_answers(turns)
+    if not pairs:
+        return 0
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.smith import bootstrap as _bind_ids
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except Exception:  # noqa: BLE001 — no Blueprint yet, nothing to attach to
+        return 0
+    try:
+        _bind_ids(svc)
+        # Dedupe by CONTENT, not by the allocator's natural key: a discovery
+        # decision is unbound, so a fresh bootstrap re-keys it and the key-based
+        # dedup would miss — recording the same answer twice on a re-define.
+        # The decision text is the stable identity here.
+        existing = {(d.get("decision") or "").strip()
+                    for d in (svc.doc.get("decisions") or [])
+                    if isinstance(d, dict)}
+        n = 0
+        for question, answer in pairs:
+            text = answer[:600].strip()
+            if not text or text in existing:
+                continue
+            existing.add(text)
+            key = "discovery-" + hashlib.sha1(
+                answer.lower().encode("utf-8")).hexdigest()[:10]
+            body = {
+                "decision": text,
+                "reason": (f"In discovery, asked: {question}"[:600]),
+                "source": "user",
+                "approvedBy": "user",
+                "binding": True,
+                "status": "APPROVED",
+                "version": svc.doc.get("version", 1),
+            }
+            svc.upsert("decisions", body, natural_key=key)
+            n += 1
+        if not n:
+            return 0
+        svc.validate()
+        svc.save()
+        logger.info("[smith-chat] recorded %d discovery decision(s) for %s",
+                    n, output_dir)
+        return n
+    except Exception as exc:  # noqa: BLE001 — audit trail is a courtesy, not a gate
+        logger.warning("[smith-chat] discovery-answer recording skipped: %s", exc)
+        return 0
+
+
+def _cite_from_blueprint(doc: dict, message: str) -> str | None:
+    """A 'why did you decide X' question answered by CITING the Blueprint's own
+    decision or requirement, or None when nothing matches well enough.
+
+    DEFECT-B-03: 'Why did you decide that only recruiters can add candidates?'
+    was met with 'I did not follow that. Which screen should I change?' — a
+    change-request deflection to a question that has an answer in the document.
+    The decisions[] ledger and the requirements both record the reasoning; this
+    finds the best-matching one and quotes it, rather than letting the model
+    treat the question as an edit. Conservative: needs a real keyword overlap,
+    else it returns None and the model handles it — a weak guess is worse than
+    no guess (§116).
+    """
+    low = (message or "").lower().strip()
+    if not (low.startswith("why") or any(p in low for p in _WHY_LEADS)):
+        return None
+    words = {w for w in re.findall(r"[a-z0-9]+", low) if len(w) >= 3
+             and w not in _CITE_STOPWORDS}
+    if len(words) < 2:
+        return None  # nothing distinctive to match on
+
+    def _score(text: str) -> int:
+        toks = set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+        return len(words & toks)
+
+    best_kind = best_text = best_id = None
+    best = 1  # require at least 2 overlapping content words (strictly > 1)
+    # Decisions first — a recorded decision is the most direct citation.
+    for d in (doc.get("decisions") or []):
+        if not isinstance(d, dict):
+            continue
+        sc = _score(f"{d.get('decision', '')} {d.get('reason', '')}")
+        if sc > best:
+            best, best_kind, best_id = sc, "decision", d.get("id")
+            best_text = d.get("reason") or d.get("decision") or ""
+    for r in (doc.get("requirements") or []):
+        if not isinstance(r, dict):
+            continue
+        sc = _score(r.get("description", ""))
+        if sc > best:
+            best, best_kind, best_id = sc, "requirement", r.get("id")
+            best_text = r.get("description") or ""
+    if best_kind is None:
+        return None
+    text = " ".join(str(best_text).split())
+    if best_kind == "decision":
+        return (f"That's a recorded decision — {best_id}: \"{text}\". "
+                "It's in the definition's decision log, not a guess.")
+    return (f"The definition records that as {best_id}: \"{text}\". "
+            "That requirement is where the choice is written down.")
 
 
 #: A requirement id, however the user spaces or cases it ("REQ-001", "req 12").
@@ -1131,6 +1282,17 @@ async def smith_chat(
                                      "status": "reported"})
                     return {"status": "reported"}
 
+            # DEFECT-B-03: 'Why did you decide X?' is a question the Blueprint
+            # can answer — the decision log and the requirements both record the
+            # reasoning. Cite it here rather than let the model treat the
+            # question as an edit ('which screen should I change?'). Only fires
+            # on a confident match; otherwise the model answers.
+            if svc is not None:
+                cited = _cite_from_blueprint(svc.doc, req.message)
+                if cited:
+                    emit("message", {"text": cited, "status": "reported"})
+                    return {"status": "reported"}
+
             # DEFECT-F-07: an external integration Smith cannot build (an ATS, a
             # CRM, a payments provider) is refused honestly here — before the
             # model can engage as if it were a normal change and ask which sync
@@ -1247,6 +1409,16 @@ async def smith_chat(
                                        app_name=getattr(project, "name", "") or "")
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
+                # DEFECT-B-03: the answers that shaped this definition are
+                # recorded as `source: user` decisions now that the Blueprint
+                # exists to hold them — so `status` shows "N from you", the
+                # Decisions view has content, and "why did you decide X" can
+                # cite them. Best-effort; never fails the define.
+                _record_discovery_answers(
+                    output_dir,
+                    [(t.role, t.text) for t in req.history if t.text]
+                    + [("user", req.message)],
+                    emit=emit)
                 return defined_now
 
             # DEFECT-C-03/B-09: A DEFINITION exists but the app is NOT built

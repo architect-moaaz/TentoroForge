@@ -179,3 +179,121 @@ def test_definition_edit_ignores_bare_lifecycle_commands():
     assert _definition_edit("status") is False
     # …but 'build a dashboard at /' is still an edit.
     assert _definition_edit("build a dashboard at /") is True
+
+
+# ── DEFECT-B-03: 'why did you decide X' cites the Blueprint, not a deflection ──
+
+from routers.blueprint_generate import _cite_from_blueprint
+
+
+def _doc_with_decisions():
+    return {
+        "decisions": [
+            {"id": "DEC-004", "source": "user",
+             "decision": "Only recruiters can add candidates.",
+             "reason": "The team asked that candidate creation be restricted to recruiters."},
+            {"id": "DEC-009", "source": "user",
+             "decision": "Scheduling sends an email to the candidate.",
+             "reason": "Interview scheduling notifies the candidate by email."},
+        ],
+        "requirements": [
+            {"id": "REQ-002",
+             "description": "All routes require a recruiter session; no candidate self-registration exists."},
+            {"id": "REQ-014",
+             "description": "Interview scheduling emails the candidate the date, time and location."},
+        ],
+    }
+
+
+def test_why_question_cites_the_matching_decision():
+    out = _cite_from_blueprint(
+        _doc_with_decisions(),
+        "Why did you decide that only recruiters can add candidates?")
+    assert out is not None
+    assert "DEC-004" in out
+    assert "recruiters" in out.lower()
+    # It cites, it does not deflect.
+    assert "which screen" not in out.lower()
+
+
+def test_why_question_falls_back_to_a_requirement_when_no_decision_matches():
+    doc = {"requirements": [
+        {"id": "REQ-014",
+         "description": "Interview scheduling emails the candidate the date and time."},
+    ]}
+    out = _cite_from_blueprint(doc, "why does scheduling send an email to the candidate?")
+    assert out is not None and "REQ-014" in out
+
+
+def test_non_why_and_weak_matches_fall_through_to_the_model():
+    doc = _doc_with_decisions()
+    # Not a why-question at all.
+    assert _cite_from_blueprint(doc, "add a candidates page") is None
+    # A why-question with nothing distinctive to match → None (model handles it).
+    assert _cite_from_blueprint(doc, "why not?") is None
+    # A why-question about something the Blueprint doesn't cover → None, not a
+    # wrong guess.
+    assert _cite_from_blueprint(doc, "why did you pick postgres for billing invoices?") is None
+
+
+# ── DEFECT-B-03 (recording): discovery answers become source=user decisions ──
+
+from routers.blueprint_generate import _discovery_answers, _record_discovery_answers
+
+
+def test_discovery_answers_pairs_questions_with_answers():
+    turns = [
+        ("user", "Build a recruitment tracker."),          # the brief, not an answer
+        ("smith", "Which language should the interface be in?"),
+        ("user", "English."),
+        ("smith", "Who can add candidates?"),
+        ("user", "Only recruiters."),
+    ]
+    pairs = _discovery_answers(turns)
+    assert pairs == [
+        ("Which language should the interface be in?", "English."),
+        ("Who can add candidates?", "Only recruiters."),
+    ]
+    # The opening brief is never treated as an answer.
+    assert all("Build a recruitment tracker" not in a for _q, a in pairs)
+
+
+def test_record_discovery_answers_writes_source_user_decisions(tmp_path):
+    import json
+    from pathlib import Path
+    from services.blueprint.service import BlueprintService
+    from services.smith import decisions as dmod
+
+    doc = json.loads((Path("fleet/blueprints/ats-live.json")).read_text())
+    s = BlueprintService(output_dir=tmp_path)
+    s.doc = doc
+    s.root.mkdir(parents=True, exist_ok=True)
+    s.save()
+
+    before = len(dmod.by_user(s.doc))
+    turns = [
+        ("user", "Build a recruitment tracker."),
+        ("smith", "Who can add candidates?"),
+        ("user", "Only recruiters can add candidates."),
+        ("smith", "Does scheduling send email?"),
+        ("user", "Yes, scheduling emails the candidate."),
+    ]
+    n = _record_discovery_answers(str(tmp_path), turns)
+    assert n == 2
+
+    reloaded = BlueprintService.load(output_dir=str(tmp_path))
+    after = dmod.by_user(reloaded.doc)
+    assert len(after) == before + 2
+    texts = " ".join(d.get("decision", "") for d in after)
+    assert "Only recruiters" in texts and "scheduling emails" in texts
+    assert reloaded.is_valid()
+
+    # Idempotent: recording the same answers again adds nothing.
+    _record_discovery_answers(str(tmp_path), turns)
+    reloaded2 = BlueprintService.load(output_dir=str(tmp_path))
+    assert len(dmod.by_user(reloaded2.doc)) == before + 2
+
+
+def test_record_discovery_answers_is_safe_with_no_blueprint(tmp_path):
+    # No current.json yet → nothing recorded, no raise.
+    assert _record_discovery_answers(str(tmp_path), [("user", "x")]) == 0
