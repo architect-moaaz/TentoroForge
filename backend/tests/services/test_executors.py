@@ -1571,13 +1571,16 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("data_model", "page_contracts", "database", "security"):
+    for node in ("data_model", "database", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
-    # The declaration is what remains of the call that hit 32k writing every
-    # step; the steps are authored one workflow per call inside the default.
+    # The declarations are what remain of the calls that hit 32k writing
+    # every step and every contract; those are authored one workflow and one
+    # feature per call inside the default.
     assert r.for_task("workflows", "x").max_tokens == 32000
+    assert r.for_task("page_contracts", "x").max_tokens == 32000
     for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "testing", "workflow_steps"):
+                 "page_layouts", "design_system", "testing", "workflow_steps",
+                 "page_details"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "database", "security", "workflows"}
@@ -1674,3 +1677,112 @@ def test_the_authors_reply_updates_the_declared_row_whatever_it_called_it(tmp_pa
     assert applied.applied
     assert len(svc.doc["workflows"]) == 2, "a second row was allocated"
     assert svc.doc["workflows"][0]["steps"]
+
+
+# ---------------------------------------------------------------------------
+# Pages: the set is declared once, the contracts written per feature
+# ---------------------------------------------------------------------------
+
+
+def _declared_page_set(tmp_path):
+    from services.blueprint.ids import page_key
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.upsert("data.entities", {"name": "Case", "table": "cases",
+                                 "fields": [{"name": "id", "type": "uuid"}]},
+               natural_key="Case")
+    case = svc.doc["data"]["entities"][0]["id"]
+    for route, name in (("/cases", "Cases"), ("/cases/[id]", "Case")):
+        svc.upsert("pages", {"name": name, "route": route, "purpose": "x",
+                             "pattern": "entity_list", "data": {"primaryEntity": case},
+                             "figmaFrame": "1:1"},
+                   natural_key=page_key(route))
+    svc.upsert("pages", {"name": "Home", "route": "/", "purpose": "x",
+                         "pattern": "dashboard"}, natural_key=page_key("/"))
+    svc.validate()
+    svc.save()
+    return svc, case
+
+
+def test_the_page_set_declaration_is_asked_for_no_contract():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "NOTHING ELSE" in NODE_TASKS["page_contracts"]
+    assert "navigatesTo" not in NODE_TASKS["page_contracts"]
+    assert "ONE feature" in NODE_TASKS["page_details"]
+    assert "navigatesTo" in NODE_TASKS["page_details"]
+
+
+def test_the_declaration_keeps_only_what_it_declares():
+    """Given the whole page shape a model will sometimes fill it, and a
+    declaration carrying `states` reads as a written contract to resume."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+    from services.blueprint.executors import pin_page_set
+
+    result = AgentResult(task_id="t", agent="page_design", proposals=[
+        ArtifactProposal(section="pages", natural_key="/x",
+                         body={"name": "X", "route": "/x", "purpose": "p",
+                               "pattern": "form", "states": ["loading"],
+                               "actions": ["a"], "primaryTasks": ["t"]}),
+        ArtifactProposal(section="widgets", natural_key="w", body={"kind": "metric"}),
+    ])
+    pin_page_set(result)
+    assert [p.section for p in result.proposals] == ["pages"]
+    assert sorted(result.proposals[0].body) == ["name", "pattern", "purpose", "route"]
+
+    # a section this agent may never write is not tidied away: the contract
+    # refuses it, and the refusal is the point
+    from services.blueprint.agent_contract import AgentResult as _R
+
+    rogue = _R(task_id="t", agent="page_design", proposals=[
+        ArtifactProposal(section="businessRules", natural_key="r", body={"name": "x"})])
+    pin_page_set(rogue)
+    assert [p.section for p in rogue.proposals] == ["businessRules"]
+
+
+def test_the_contract_author_is_handed_its_feature_and_the_whole_set_by_id(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc, case = _declared_page_set(tmp_path)
+    system, user = build_prompt(svc.doc, "page_details", subject=case,
+                                output_dir=svc.output_dir)
+    assert "ONE feature" in system
+    assert "naturalKeys" in user and "PAGE:/cases/[id]" in user
+    # the feature's own pages in full, every page by id for navigatesTo
+    assert user.count('"purpose": "x"') == 2
+    assert '"route": "/"' in user
+
+
+def test_the_contract_authors_reply_updates_the_declared_pages_and_only_those(tmp_path):
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, apply_agent_result,
+    )
+    from services.blueprint.executors import pin_page_identity
+
+    svc, case = _declared_page_set(tmp_path)
+    detail = next(p for p in svc.doc["pages"] if p["route"] == "/cases/[id]")
+    result = AgentResult(task_id="t", agent="page_design", confidence=0.9, proposals=[
+        # route respelled, frame forgotten, entity dropped
+        ArtifactProposal(section="pages", natural_key="/Cases/[ID]",
+                         body={"name": "Case", "route": "/Cases/[ID]", "purpose": "One",
+                               "pattern": "record_workspace", "module": "MODULE-999",
+                               "states": ["loading", "populated"],
+                               "data": {"supportingEntities": []}}),
+        # a page the declaration never decided
+        ArtifactProposal(section="pages", natural_key="/cases/archive",
+                         body={"name": "Archive", "route": "/cases/archive",
+                               "purpose": "invented", "states": ["loading"]}),
+    ])
+    pin_page_identity(svc, case, result)
+    assert len(result.proposals) == 1, "an invented page got through"
+    body = result.proposals[0].body
+    assert result.proposals[0].natural_key == "PAGE:/cases/[id]"
+    assert body["id"] == detail["id"] and body["route"] == "/cases/[id]"
+    assert body["figmaFrame"] == "1:1" and "module" not in body
+    assert body["data"]["primaryEntity"] == case
+
+    applied = apply_agent_result(svc, result, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["pages"]) == 3, "a second page was allocated"
+    assert next(p for p in svc.doc["pages"] if p["route"] == "/cases/[id]")["states"]

@@ -218,7 +218,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("database", "data_model", ("data_model",), ("database",)),
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("database", "workflow_steps", "page_contracts"), ("apis",),
+    _n("apis", "api", ("database", "workflow_steps", "page_details"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -232,7 +232,26 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # which is also what blocks the theme-token projection.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
-    _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",)),
+    # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
+    # This node answers the slot question — which features exist, which are
+    # declined, and for each page its route, pattern, module and entity —
+    # and nothing more. Measured, the single call that also wrote every
+    # contract was the longest declaration of a build (120s median, 486s and
+    # 52k output tokens on a 53-page app), and everything after it waited.
+    # A workflow needs a page's id and route to say where it launches; a
+    # contract's tasks and states it never reads. So `workflows` depends on
+    # this node and runs beside `page_details`.
+    _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",),
+       note="the page set: filled or declined per feature, routes decided"),
+    # One call per feature — an entity's pages together, so a list and its
+    # detail are written as one flow — each given the declared page set so
+    # `navigatesTo` can name any page by an id that already exists.
+    # Produces `pages`, as the single node did; it writes widgets too, but a
+    # produced section is what resume and impact analysis read, and an
+    # application with no dashboard has none.
+    _n("page_details", "page_design", ("page_contracts",), ("pages",),
+       fanout="page_features",
+       note="the contracts: tasks, states, views, actions, widgets, per feature"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
     # colour system and type scale, so a model asked to "extract" them can only
@@ -270,7 +289,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # waves earlier, into the same wave as `workflows` — concurrent with the
     # thing it reads.
     _n("page_layouts", "a2ui_pages",
-       ("page_contracts", "design_system", "figma_design_system", "workflows"),
+       ("page_details", "design_system", "figma_design_system", "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),
@@ -364,7 +383,35 @@ FANOUT: dict[str, Any] = {
         w["id"] for w in (doc.get("workflows") or [])
         if w.get("id") and w.get("status") != "DEPRECATED"
     ],
+    # One call per feature: an entity's pages together, and a page that
+    # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
+    # primary record) on its own.
+    "page_features": lambda doc: page_features(doc),
 }
+
+
+def page_features(doc: Mapping[str, Any]) -> list[str]:
+    """The subjects `page_details` fans out over, in first-seen order."""
+    seen: list[str] = []
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or not page.get("id") \
+                or page.get("status") == "DEPRECATED":
+            continue
+        subject = str((page.get("data") or {}).get("primaryEntity") or "") \
+            or str(page["id"])
+        if subject not in seen:
+            seen.append(subject)
+    return seen
+
+
+def feature_pages(doc: Mapping[str, Any], subject: str) -> list[dict]:
+    """The declared pages one `page_details` subject is asked to write."""
+    return [
+        p for p in doc.get("pages") or []
+        if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+        and ((str((p.get("data") or {}).get("primaryEntity") or "") or str(p.get("id")))
+             == subject)
+    ]
 
 
 def subjects_for(node: "DagNode", doc: dict) -> list[str]:
@@ -761,6 +808,15 @@ def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
                for row in doc.get("pageLayouts") or [])
 
 
+def _contracts_present(doc: Mapping[str, Any], subject: str) -> bool:
+    """A declared page is authored once it carries its `states`: the
+    declaration decides that a page exists and where, the contract says what
+    it must handle, and `states` is the one field every contract declares
+    ("empty and error states up front") that no declaration writes."""
+    pages = feature_pages(doc, subject)
+    return bool(pages) and all(bool(p.get("states")) for p in pages)
+
+
 def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
     """A declared workflow is authored once it carries steps. `workflows`
     and `workflow_steps` both write the `workflows` section, so "the section
@@ -779,6 +835,7 @@ def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
 _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "pages": _layout_present,
     "workflows": _steps_present,
+    "page_features": _contracts_present,
 }
 
 

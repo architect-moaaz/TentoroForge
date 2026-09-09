@@ -258,10 +258,10 @@ def test_a_node_with_unmet_dependencies_is_skipped_not_attempted(svc):
             raise RuntimeError("page agent is down")
         return page_agent_result(spec)
 
-    report = run(svc, executor, plan=["page_contracts", "page_layouts"], max_attempts=1)
+    report = run(svc, executor, plan=["page_contracts", "page_details"], max_attempts=1)
     assert "page_contracts" in report.failed
-    assert "page_layouts" in report.skipped
-    assert "page_layouts" not in attempted
+    assert "page_details" in report.skipped
+    assert "page_details" not in attempted
 
 
 def test_failed_tasks_are_retried(svc):
@@ -294,9 +294,9 @@ def test_low_confidence_blocks_the_node_and_its_dependents(svc):
         r.confidence = 0.2
         return r
 
-    report = run(svc, unsure, plan=["page_contracts", "page_layouts"])
+    report = run(svc, unsure, plan=["page_contracts", "page_details"])
     assert "page_contracts" in report.blocked
-    assert "page_layouts" in report.skipped
+    assert "page_details" in report.skipped
     assert svc.doc.get("pages", []) == []
 
 
@@ -646,11 +646,11 @@ def test_a_skipped_node_records_which_dependency_stopped_it(svc):
     def fails(spec):
         raise RuntimeError("no")
 
-    report = run(svc, fails, plan=["page_contracts", "page_layouts"],
+    report = run(svc, fails, plan=["page_contracts", "page_details"],
                  max_attempts=1)
     # `skipped` stays node keys, so membership tests keep working.
-    assert report.skipped == ["page_layouts"]
-    assert report.skipped_because["page_layouts"] == "page_contracts"
+    assert report.skipped == ["page_details"]
+    assert report.skipped_because["page_details"] == "page_contracts"
 
 
 def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
@@ -1520,3 +1520,100 @@ def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_pat
     shutil.rmtree(app_root / "node_modules")
     orchestrator._project_preview(svc, str(app_root))
     assert seen[-1]["install"] is True, "no node_modules: the build installs for itself"
+
+
+# ---------------------------------------------------------------------------
+# The page set is decided once and the contracts are written per feature
+# ---------------------------------------------------------------------------
+
+
+def _declared_pages(svc):
+    from services.blueprint.ids import page_key
+
+    svc.upsert("data.entities", {"name": "Case", "table": "cases",
+                                 "fields": [{"name": "id", "type": "uuid"}]},
+               natural_key="Case")
+    svc.upsert("data.entities", {"name": "Note", "table": "notes",
+                                 "fields": [{"name": "id", "type": "uuid"}]},
+               natural_key="Note")
+    case, note = (e["id"] for e in svc.doc["data"]["entities"])
+    for route, name, entity in (("/cases", "Cases", case), ("/cases/[id]", "Case", case),
+                                ("/notes", "Notes", note), ("/", "Home", None)):
+        body = {"name": name, "route": route, "purpose": "x", "pattern": "entity_list"}
+        if entity:
+            body["data"] = {"primaryEntity": entity}
+        svc.upsert("pages", body, natural_key=page_key(route))
+    svc.validate()
+    svc.save()
+    return case, note
+
+
+def test_workflows_are_declared_against_the_page_set_and_contracts_run_beside_them():
+    """A workflow needs a page's id and route to say where it launches; a
+    contract's tasks and states it never reads. The two longest declarations
+    of a build used to run one after the other."""
+    assert DAG["page_details"].depends_on == frozenset({"page_contracts"})
+    assert DAG["page_details"].fanout == "page_features"
+    assert "page_contracts" in DAG["workflows"].depends_on
+    assert "page_details" not in DAG["workflows"].depends_on
+    assert "page_details" in DAG["page_layouts"].depends_on
+    assert "page_details" in DAG["apis"].depends_on
+    at = {k: i for i, level in enumerate(levels()) for k in level}
+    assert at["page_details"] == at["workflows"]
+    assert at["page_layouts"] == at["workflow_steps"]
+
+
+def test_a_feature_is_an_entitys_pages_and_an_orphan_page_is_its_own(svc):
+    from services.blueprint.orchestrator import feature_pages, page_features
+
+    case, note = _declared_pages(svc)
+    home = next(p["id"] for p in svc.doc["pages"] if p["route"] == "/")
+    assert page_features(svc.doc) == [case, note, home]
+    assert [p["route"] for p in feature_pages(svc.doc, case)] == ["/cases", "/cases/[id]"]
+    assert [p["route"] for p in feature_pages(svc.doc, home)] == ["/"]
+
+
+def test_resuming_the_contracts_reruns_only_the_features_without_states(svc):
+    """`page_contracts` and `page_details` both write `pages`, so "the section
+    has content" would call the author done the moment the declaration ran.
+    A contract declares its states up front; a declaration never does."""
+    from services.blueprint.orchestrator import pending_subjects
+
+    case, note = _declared_pages(svc)
+    home = next(p["id"] for p in svc.doc["pages"] if p["route"] == "/")
+    assert pending_subjects(DAG["page_details"], svc.doc) == [case, note, home]
+    assert "page_contracts" in completed_nodes(svc.doc)
+    assert "page_details" not in completed_nodes(svc.doc)
+    for p in svc.doc["pages"]:
+        if p["route"].startswith("/cases"):
+            p["states"] = ["loading", "empty", "populated", "error"]
+    assert pending_subjects(DAG["page_details"], svc.doc) == [note, home]
+    for p in svc.doc["pages"]:
+        p["states"] = ["loading", "populated"]
+    assert "page_details" in completed_nodes(svc.doc)
+
+
+def test_each_feature_is_written_by_its_own_call_onto_the_declared_pages(svc):
+    """The executor's `pin_page_identity` resolves whatever key the author
+    replied with to the declared one; here the executor is raw, so it
+    answers under the declaration's own key."""
+    from services.blueprint.ids import page_key
+    from services.blueprint.orchestrator import feature_pages
+
+    case, note = _declared_pages(svc)
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.subject)
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="pages", natural_key=page_key(p["route"]),
+                body={"name": p["name"], "route": p["route"], "purpose": "written",
+                      "pattern": p["pattern"], "states": ["loading", "populated"]})
+                for p in feature_pages(svc.doc, spec.subject)])
+
+    report = run(svc, executor, plan=["page_details"], max_attempts=1)
+    assert report.ok, report.failed_because
+    assert len(seen) == 3 and len(svc.doc["pages"]) == 4, "authoring changed the page set"
+    assert all(p["states"] and p["purpose"] == "written" for p in svc.doc["pages"])
