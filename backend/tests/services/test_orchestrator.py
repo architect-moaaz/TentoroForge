@@ -1101,3 +1101,68 @@ def test_an_optional_node_failure_does_not_sink_the_run(svc):
     assert report.ok, f"failed={report.failed} blocked={report.blocked}"
     assert "testing" in report.degraded and "testing" not in report.failed
     assert "credit balance too low" in report.degraded["testing"]
+
+
+def test_a_fanout_holds_its_other_calls_until_the_first_prefix_is_readable(svc):
+    """A cache entry is readable only once the response writing it has begun
+    streaming. Fired together, a node's calls all write the same prefix and
+    none reads it — twelve writes at 1.25x where one write and eleven reads
+    at 0.1x would do. So the first call goes alone, and the rest start when
+    it signals its prefix is there: seconds in, long before it returns."""
+    import threading
+    import time
+
+    _fanout_svc(svc, pages=6)
+    lock = threading.Lock()
+    started: list[str] = []
+    others_when_signalled: list[int] = []
+    others_when_leader_returned: list[int] = []
+
+    def executor(spec):
+        with lock:
+            started.append(spec.subject)
+            n = len(started)
+        if n == 1:
+            time.sleep(0.1)                       # prefill
+            with lock:
+                others_when_signalled.append(len(started) - 1)
+            spec.prefix_ready.set()               # first streamed event
+            time.sleep(0.4)                       # the rest of the reply
+            with lock:
+                others_when_leader_returned.append(len(started) - 1)
+        return _layout_result(spec)
+
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert len(started) == 6
+    assert others_when_signalled == [0], "a follower ran before the prefix existed"
+    assert others_when_leader_returned == [5], (
+        "the followers waited for the leader to finish, not for its prefix")
+
+
+def test_a_fanout_whose_leader_cannot_signal_is_released_when_it_returns(svc):
+    """A client that does not stream, or a page A2UI composes on its own
+    server, never says when its prefix is readable. The wave must not stall
+    on it: when the leader returns, the rest go."""
+    import threading
+    import time
+
+    _fanout_svc(svc, pages=4)
+    lock = threading.Lock()
+    started: list[str] = []
+    others_when_leader_returned: list[int] = []
+
+    def executor(spec):
+        with lock:
+            started.append(spec.subject)
+            n = len(started)
+        if n == 1:
+            time.sleep(0.2)
+            with lock:
+                others_when_leader_returned.append(len(started) - 1)
+        return _layout_result(spec)
+
+    t0 = time.monotonic()
+    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    assert len(started) == 4
+    assert others_when_leader_returned == [0]
+    assert time.monotonic() - t0 < 5, "the followers waited out the bound instead"

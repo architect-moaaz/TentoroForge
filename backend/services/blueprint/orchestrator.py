@@ -729,6 +729,12 @@ class TaskSpec:
     #: otherwise a retry re-runs an identical prompt and reproduces the
     #: identical mistake, which is exactly what it did.
     feedback: str = ""
+    #: A `threading.Event`, shared by every call of one node in a round, set
+    #: once the node's cached prefix is readable: by the model client at its
+    #: first streamed event, or by :func:`_gather` when the call returns.
+    #: The node's other calls wait on it before they start. Set by the
+    #: orchestrator; never part of a spec's identity.
+    prefix_ready: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -1000,6 +1006,14 @@ FANOUT_CONCURRENCY = 12
 #: raise half a change.
 WAVE_CONCURRENCY = 14
 
+#: How long a fan-out's followers wait for the first call to say its cached
+#: prefix is readable, before going anyway. Prefill on a ~20k-token prefix
+#: takes seconds; the bound exists for the cases that cannot signal — a
+#: transport that does not stream, A2UI composing on its own server — where
+#: the event is set only when the leader returns, and for a leader that
+#: hangs, which must not hang the wave behind it.
+PREFIX_WARM_WAIT_S = 30.0
+
 
 @dataclass
 class _NodeRun:
@@ -1205,19 +1219,44 @@ def _gather(
     classified outcome (§102), not a crash; the caller decides whether it is a
     retry or a failure.
     """
+    import threading
     from concurrent.futures import ThreadPoolExecutor
+
+    # ONE CALL WRITES THE CACHE; THE REST READ IT. A cache entry is readable
+    # only once the response that writes it has begun streaming, so a node's
+    # calls fired together over one prefix all write it and none reads it —
+    # twelve compositions at once paid twelve writes of the same ~20k-token
+    # prefix at 1.25x, where one write and eleven reads at 0.1x would have
+    # done. The first call of each node goes alone; the others wait for its
+    # prefix to be readable — the seconds prefill takes, not the minute the
+    # reply does — and then run exactly as wide as before.
+    leaders: dict[str, TaskSpec] = {}
+    for spec in specs:
+        leaders.setdefault(spec.node, spec)
+    ready = {node: threading.Event() for node in leaders}
+    for spec in specs:
+        spec.prefix_ready = ready[spec.node]
+    # Leaders are submitted first so every one of them holds a thread before
+    # any follower spends one waiting.
+    ordered = [*leaders.values(),
+               *(s for s in specs if leaders[s.node] is not s)]
 
     def call(spec: TaskSpec) -> tuple[tuple[str, str], Any]:
         key = (spec.node, spec.subject)
+        if leaders[spec.node] is not spec:
+            ready[spec.node].wait(PREFIX_WARM_WAIT_S)
         with limits[spec.node]:
             try:
                 return key, executor(spec)
             except Exception as exc:  # §102 — a classified outcome, not a crash
                 return key, exc
+            finally:
+                # However it ended, the followers are not held for it.
+                ready[spec.node].set()
 
     workers = max(1, min(WAVE_CONCURRENCY, len(specs)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return dict(pool.map(call, specs))
+        return dict(pool.map(call, ordered))
 
 
 def _apply_round(

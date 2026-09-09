@@ -55,6 +55,14 @@ import tempfile as _tempfile
 _TEST_OUTPUT = _tempfile.mkdtemp(prefix="forge-test-output-")
 os.environ["FORGE_OUTPUT_BASE"] = _TEST_OUTPUT
 
+# THE USAGE LEDGER TOO. `RunUsage.record` appends every call it sees to the
+# platform-wide `data/build-usage.jsonl`, and the executor tests feed it
+# fakes with round token counts. Over twelve days, 601 suite runs wrote 1,250
+# rows there — projects named `blueprint` and `a`, $108 of estimated spend that
+# never touched the API — and any total read from the file carried them. Same
+# remedy as the output directory: one file per session, gone with it.
+os.environ["FORGE_USAGE_LOG"] = os.path.join(_TEST_OUTPUT, "build-usage.jsonl")
+
 
 def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     """Take the projects with us. Best-effort: a leftover temp directory is a

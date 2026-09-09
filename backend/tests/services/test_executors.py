@@ -808,7 +808,9 @@ def test_large_max_tokens_uses_streaming():
     from services.blueprint.executors import AnthropicModel
 
     src = inspect.getsource(AnthropicModel.__call__)
-    assert "messages.stream" in src and "get_final_message" in src
+    assert "messages.stream" in src
+    # The stream is drained by `_stream_reasoning`, whichever way it ends.
+    assert "get_final_message" in inspect.getsource(AnthropicModel._stream_reasoning)
 
 
 def test_unfillable_fields_are_withheld_from_agents():
@@ -1588,3 +1590,80 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"
+
+
+def test_a_prefix_can_be_cached_for_an_hour():
+    """Chosen from the start-to-start gap between calls that share the prefix:
+    Smith re-runs page authoring in groups 6 to 55 minutes apart, which is the
+    gap a 5-minute entry expires in and a 1-hour entry survives."""
+    from services.blueprint.executors import _cacheable, image_block
+
+    long = "x" * (2048 * 4)
+    assert _cacheable(long)[0]["cache_control"] == {"type": "ephemeral"}
+    assert _cacheable(long, "1h")[0]["cache_control"] == {
+        "type": "ephemeral", "ttl": "1h"}
+    with pytest.raises(ValueError):
+        _cacheable(long, "2h")
+
+
+def test_page_authoring_keeps_its_prefix_for_an_hour_and_nothing_else_does():
+    from services.blueprint.executors import CACHE_TTL_BY_NODE, tiered_router
+
+    assert set(CACHE_TTL_BY_NODE) <= set(DAG)
+    r = tiered_router()
+    assert r.for_task("page_layouts", DAG["page_layouts"].agent).cache_ttl == "1h"
+    for node in ("data_model", "workflows", "requirements"):
+        assert r.for_task(node, DAG[node].agent).cache_ttl == "5m"
+
+
+def test_the_client_says_its_prefix_is_readable_at_the_first_streamed_event():
+    """What the fan-out waits on. The signal must land on the first event —
+    not when the reply is complete, which is a minute later and would make
+    the wait pointless — and the prefix it marks must carry the client's TTL."""
+    from types import SimpleNamespace
+
+    from services.blueprint.executors import STREAM_ABOVE, AnthropicModel
+
+    events = [SimpleNamespace(type="message_start", delta=None),
+              SimpleNamespace(type="content_block_delta",
+                              delta=SimpleNamespace(type="text_delta", text="{"))]
+    final = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text='{"proposals": []}')],
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1,
+                              cache_read_input_tokens=0,
+                              cache_creation_input_tokens=0))
+    sent: dict = {}
+
+    class _Stream:
+        yielded = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            for ev in events:
+                _Stream.yielded += 1
+                yield ev
+
+        def get_final_message(self):
+            return final
+
+    def stream(**kwargs):
+        sent.update(kwargs)
+        return _Stream()
+
+    fake = SimpleNamespace(messages=SimpleNamespace(stream=stream))
+    model = AnthropicModel(max_tokens=STREAM_ABOVE + 1, cache_ttl="1h",
+                           _client=fake)
+    seen: list[int] = []
+    reply = model(system="s" * (2048 * 4), user="u", schema={"type": "object"},
+                  on_prefix_ready=lambda: seen.append(_Stream.yielded))
+
+    assert seen == [1], "signalled at the wrong moment, or not at all"
+    assert reply.text == '{"proposals": []}'
+    assert sent["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert model.signals_prefix_ready is True
