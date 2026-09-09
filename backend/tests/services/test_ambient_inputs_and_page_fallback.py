@@ -179,3 +179,35 @@ def test_page_findings_still_flags_a_genuinely_missing_field():
            if x["rule"] == "workflow-inputs-unsatisfied"]
     det = " | ".join(x["detail"] for x in bad)
     assert "vesselName" in det and "organisationId" not in det
+
+
+
+# ---------------------------------------------------------------------------
+# The funnel still states the shortfall when the placeholder answers the route
+# ---------------------------------------------------------------------------
+
+
+def test_a_fallback_schema_does_not_count_as_a_served_page(tmp_path):
+    """The placeholder keeps a route from 404ing; it must not also keep the
+    build report from saying the page was never composed. With one layout
+    for two pages the registry serves both routes, and before this the
+    funnel read that as complete."""
+    from services.blueprint.assembly import page_funnel
+    from services.blueprint.projection import project_frontend
+
+    doc = {"application": {"id": "a"}, "pages": [
+        {"id": "PAGE-001", "name": "Cases", "route": "/cases", "purpose": "x",
+         "pattern": "entity_list"},
+        {"id": "PAGE-002", "name": "New case", "route": "/cases/new", "purpose": "x",
+         "pattern": "form"}],
+        "pageLayouts": [{"page": "PAGE-001",
+                         "root": {"type": "Stack", "props": {}, "children": []}}]}
+    result = project_frontend(doc, tmp_path)
+    assert result["fellBack"] == ["PAGE-002"]
+
+    funnel = page_funnel(doc, tmp_path)
+    assert funnel["planned"] == 2 and funnel["served"] == 1
+    assert funnel["missing"] == ["/cases/new"]
+    assert funnel["status"] == "short"
+    assert set(funnel) == {"planned", "served", "missing", "status"}, (
+        "runtime.pages accepts exactly these keys")

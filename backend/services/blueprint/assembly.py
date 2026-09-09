@@ -623,13 +623,40 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Blueprint by construction and disagree with the app.
         served = set(re.findall(r'"([^"]+)":\s*\(\)\s*=>', registry.read_text("utf-8")))
 
-    missing = sorted(planned - served)
+    # A FALLBACK IS A ROUTE THAT ANSWERS, NOT A PAGE THAT WAS BUILT. The
+    # placeholder `plan_pages` writes for a page nothing composed is
+    # registered like any other schema, so the registry alone read a build
+    # of 17 routes with 8 placeholders as "17 served, none missing" — the
+    # exact shortfall this funnel exists to state, hidden by the fix that
+    # keeps those routes from 404ing. The placeholder says what it is in
+    # `meta.fallback`; a route serving one is counted as missing here. The
+    # shape stays what `runtime.pages` accepts (§12: a new key is declared in
+    # the contract first); which of the missing routes carry a placeholder
+    # is in the projection's own `fellBack`.
+    fallback = _fallback_routes(root / "src" / "schemas")
+    missing = sorted((planned - served) | (planned & fallback))
     return {
         "planned": len(planned),
-        "served": len(served & planned),
+        "served": len((served & planned) - fallback),
         "missing": missing,
         "status": "complete" if not missing else "short",
     }
+
+
+def _fallback_routes(schemas: Path) -> set[str]:
+    """Routes whose projected schema is the honest placeholder."""
+    out: set[str] = set()
+    if not schemas.is_dir():
+        return out
+    for path in schemas.rglob("*.json"):
+        try:
+            schema = json.loads(path.read_text("utf-8"))
+        except Exception:  # noqa: BLE001 — an unreadable file is not a placeholder
+            continue
+        if (isinstance(schema, dict) and schema.get("route")
+                and (schema.get("meta") or {}).get("fallback")):
+            out.add(str(schema["route"]))
+    return out
 
 
 def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
