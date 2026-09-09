@@ -145,15 +145,21 @@ describe("Grid renderer — equalRows / equalCols (v4 spike fix)", () => {
 });
 
 describe("Row renderer — default cross-axis alignment", () => {
-  it("uses items-center by default on regular rows", () => {
+  it("is a responsive stack by default: column+stretch on phones, centered row at sm+", () => {
+    // Responsive by default (mobile). A regular authored row stacks vertically
+    // and fills the width below `sm`, and resumes a centered horizontal row at
+    // `sm`+ — so weighted "table" columns and header groups reflow on a phone
+    // instead of cramping or overflowing.
     const html = renderToString(
       renderNode(
         { id: "r", type: "Row", props: { className: "w-full" }, children: [] } as any,
         ctx
       )
     );
-    expect(html).toContain("items-center");
-    expect(html).not.toContain("items-stretch");
+    expect(html).toContain("flex-col");
+    expect(html).toContain("sm:flex-row");
+    expect(html).toContain("items-stretch");
+    expect(html).toContain("sm:items-center");
   });
 
   it("switches to items-stretch when className declares full viewport height", () => {

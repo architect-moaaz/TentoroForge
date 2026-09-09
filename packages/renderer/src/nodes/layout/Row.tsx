@@ -13,6 +13,18 @@ const ALIGN_CLASS: Record<string, string> = {
   end:     "items-end",
   stretch: "items-stretch",
 };
+// Responsive-by-default alignment: below `sm` (640px) an authored row is a
+// vertical stack whose children fill the width (`items-stretch`); at `sm`+ it
+// resumes its intended alignment. Full literal strings (not `sm:${…}`) so the
+// generated app's Tailwind JIT, which scans this vendored package, compiles
+// them — a runtime-concatenated variant is invisible to the scanner and gets
+// purged. Keep in step with ALIGN_CLASS above.
+const SM_ALIGN_CLASS: Record<string, string> = {
+  start:   "items-stretch sm:items-start",
+  center:  "items-stretch sm:items-center",
+  end:     "items-stretch sm:items-end",
+  stretch: "items-stretch sm:items-stretch",
+};
 const JUSTIFY_CLASS: Record<string, string> = {
   start:   "justify-start",
   center:  "justify-center",
@@ -74,11 +86,26 @@ export function Row({ node, children }: { node: any; children: ReactNode[] }) {
   const hasFullHeight = /\b(?:h-screen|h-full|min-h-screen|min-h-full)\b/.test(callerClassRaw);
   const defaultAlign = hasFullHeight ? "stretch" : "center";
 
+  // Responsive by default: an authored row stacks vertically on phones so
+  // weighted "table" columns and header groups reflow instead of cramping or
+  // overflowing, and resumes a horizontal row at `sm`+. Rows drawn from a
+  // Figma frame keep the layout the design gave them, and a row that asked for
+  // a single line (`wrap: false`) is honoured — neither stacks. A caller that
+  // states its own direction (`flex-*` in className → `drawn`) is untouched.
+  const stack = !drawn && p.wrap !== false;
+  const dirClass = stack ? "flex flex-col sm:flex-row" : "flex flex-row";
+  const alignBase = p.align ?? defaultAlign;
+  const alignClass = hasItems
+    ? ""
+    : stack
+      ? (SM_ALIGN_CLASS[alignBase] ?? `items-stretch sm:items-${defaultAlign}`)
+      : (ALIGN_CLASS[alignBase] ?? `items-${defaultAlign}`);
+
   const className = [
-    "flex flex-row",
+    dirClass,
     hasGap || drawn ? "" : _gapClass(p.gap),
     p.wrap === false || drawn ? "" : "flex-wrap",
-    hasItems ? "" : (ALIGN_CLASS[p.align ?? defaultAlign] ?? `items-${defaultAlign}`),
+    alignClass,
     hasJustify ? "" : (JUSTIFY_CLASS[p.justify ?? "start"] ?? "justify-start"),
     callerClassRaw,
   ].filter(Boolean).join(" ");
