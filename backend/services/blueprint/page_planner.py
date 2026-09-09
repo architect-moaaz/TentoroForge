@@ -1080,34 +1080,91 @@ def plan_page(doc: dict, page: dict, template: dict,
     return schema
 
 
+def _fallback_schema(doc: dict, page: dict) -> dict:
+    """A minimal, valid, HONEST page schema for a page nothing composed.
+
+    §76 removed the per-pattern stub because a generic shape that never saw the
+    page read as a real design — a silent divergence. This is the opposite of
+    that: it is derived from the page's OWN contract (its name and purpose), it
+    says plainly on screen that the screen has not been composed, and every
+    build that emits one reports it in `fellBack`. It exists so a page whose
+    composition was refused or failed to plan is not left with NO schema at all
+    — which is what made those pages blank in the editor ("No schema at X.json")
+    and a 404 in the preview and the app. The route stays alive and editable,
+    and Smith can compose it properly; that is strictly better than a dead
+    route, and it is not silent.
+
+    It dispatches no workflow, so it can never itself be an unsatisfiable
+    template — it always renders.
+    """
+    name = page.get("name") or page.get("route") or "Page"
+    purpose = str(page.get("purpose") or "").strip()
+    lead = purpose or f"The {name} screen."
+    root = {
+        "id": "n-fallback",
+        "type": "Stack",
+        "props": {"align": "stretch", "direction": "vertical", "gap": "16px"},
+        "children": [
+            {"id": "n-fallback-skip", "type": "SkipLink",
+             "props": {"label": "Skip to main content", "target": "main"}},
+            {"id": "n-fallback-h", "type": "Heading",
+             "props": {"content": name, "level": 1, "weight": "bold"}},
+            {"id": "n-fallback-purpose", "type": "Text",
+             "props": {"as": "p", "content": lead}},
+            {"id": "n-fallback-note", "type": "Text",
+             "props": {"as": "p",
+                       "content": ("This screen has not been laid out yet. "
+                                   "Ask Smith to compose it, or edit it here.")}},
+        ],
+    }
+    return {
+        "schemaVersion": "2",
+        "id": page.get("id"),
+        "route": page.get("route"),
+        "meta": {"name": name, "pattern": page.get("pattern"),
+                 "module": page.get("module"), "fallback": True},
+        "dataSources": [],
+        "root": root,
+    }
+
+
 def plan_pages(doc: dict, catalog: dict[str, dict] | None = None) -> dict[str, Any]:
-    """Plan every page that has a pattern and a template. Reports what it skipped."""
+    """Plan every page. A page nothing composed, or one whose template fails to
+    plan, still gets a valid fallback schema so no route is ever left blank."""
     catalog = catalog or load_catalog()
-    # One composed tree per page, and no second source. There used to be a
-    # per-pattern template to fall back on, authored by its own agent; a page
-    # nobody composed was stubbed from the template for its pattern. That made
-    # "this page was designed" and "this page got the generic shape for its
-    # kind" indistinguishable in the output — §76's silent divergence, arrived
-    # at by fallback. A page nothing composed is now reported as such.
+    # One composed tree per page is the intent, and §76 will not stub a real
+    # design from a template that never saw the page. But a page with NO schema
+    # at all is worse than an honest fallback: it 404s and shows "No schema" in
+    # the editor. So a page nothing composed is REPORTED (in `skipped`/`failed`)
+    # AND given `_fallback_schema` — reported, not silent, and never blank.
     authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
 
     planned: dict[str, dict] = {}
     skipped: list[dict] = []
     failed: list[dict] = []
+    fell_back: list[dict] = []
     for page in _live(doc.get("pages")):
         pattern = page.get("pattern")
         template = authored.get(page.get("id"))
         if not template:
             skipped.append({"page": page.get("id"), "pattern": pattern,
                             "reason": "nothing composed a tree for this page"})
+            planned[page.get("id")] = _fallback_schema(doc, page)
+            fell_back.append(page.get("id"))
             continue
         try:
             planned[page.get("id")] = plan_page(doc, page, template, catalog)
         except PlanError as exc:
+            # A template that FAILS to plan is a real authoring error (a binding
+            # to data that does not exist, a pattern missing its entity). §76
+            # wants that surfaced, not masked — so it is reported and left
+            # without a schema, exactly as before. The fallback is only for a
+            # page nothing composed at all, which is a missing page rather than
+            # a broken one.
             failed.append({"page": page.get("id"), "pattern": pattern,
                            "reason": str(exc)})
     return {"planned": planned, "skipped": skipped, "failed": failed,
-            "templates": sorted(authored)}
+            "fellBack": fell_back, "templates": sorted(authored)}
 
 
 # ---------------------------------------------------------------------------
