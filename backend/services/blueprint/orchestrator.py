@@ -335,6 +335,30 @@ def subjects_for(node: "DagNode", doc: dict) -> list[str]:
     return resolve(doc) or []
 
 
+def pending_subjects(node: "DagNode", doc: dict) -> list[str]:
+    """The subjects a fan-out node still has to author — resume is *continue*,
+    not *redo*, at the subject grain too.
+
+    A subject already present in the node's output section (a page with a
+    composed ``pageLayouts`` row) is not re-run, so resuming a run that
+    dropped-and-continued composes exactly the pages that failed, without
+    re-spending on — or re-composing, and possibly changing — the ones that
+    already succeeded. `page_layouts` is the dominant cost of a run and this is
+    where re-running "the missing pages" stops meaning "all of them". A `fresh`
+    run starts from an empty document, so nothing is present and every subject
+    runs; a node that writes once (no per-subject row key) is unaffected."""
+    subjects = subjects_for(node, doc)
+    key = _SUBJECT_ROW_KEY.get(node.fanout)
+    if not key:
+        return subjects
+    section, field = key
+    present = {
+        str(row.get(field) or "")
+        for row in (doc.get(section) or []) if isinstance(row, dict)
+    }
+    return [s for s in subjects if s not in present]
+
+
 class CyclicDag(ValueError):
     pass
 
@@ -1106,11 +1130,13 @@ def _run_wave(
     runs: dict[str, _NodeRun] = {}
     for _k in wave:
         if DAG[_k].kind not in ("service", "projection"):
-            _note(ledger, "node_start", _k, len(subjects_for(DAG[_k], svc.doc)))
+            _note(ledger, "node_start", _k, len(pending_subjects(DAG[_k], svc.doc)))
     for key in wave:
         if DAG[key].kind != "agent":
             continue
-        subjects = subjects_for(DAG[key], svc.doc)
+        # Only the subjects not already authored — a resume finishes the pages
+        # a prior run dropped, not the ones it composed (see pending_subjects).
+        subjects = pending_subjects(DAG[key], svc.doc)
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects))
 
     limits = {key: threading.Semaphore(FANOUT_CONCURRENCY) for key in runs}

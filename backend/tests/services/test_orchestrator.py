@@ -1101,3 +1101,22 @@ def test_an_optional_node_failure_does_not_sink_the_run(svc):
     assert report.ok, f"failed={report.failed} blocked={report.blocked}"
     assert "testing" in report.degraded and "testing" not in report.failed
     assert "credit balance too low" in report.degraded["testing"]
+
+
+def test_a_fanout_resume_reruns_only_the_uncomposed_subjects():
+    """Resume is continue, not redo, at the subject grain: a page that already
+    has a composed `pageLayouts` row is not re-run, so a resume of a run that
+    dropped pages recomposes exactly the ones that failed — not all of them,
+    which on `page_layouts` (the dominant cost) would triple the bill."""
+    from services.blueprint.orchestrator import DAG, subjects_for, pending_subjects
+    doc = {
+        "pages": [{"id": f"PAGE-{i}", "route": f"/p{i}"} for i in range(1, 5)],
+        # two of the four already composed
+        "pageLayouts": [{"page": "PAGE-1", "root": {}}, {"page": "PAGE-3", "root": {}}],
+    }
+    node = DAG["page_layouts"]
+    assert sorted(subjects_for(node, doc)) == ["PAGE-1", "PAGE-2", "PAGE-3", "PAGE-4"]
+    assert sorted(pending_subjects(node, doc)) == ["PAGE-2", "PAGE-4"]
+    # A fresh document (nothing composed) still runs every subject.
+    assert sorted(pending_subjects(node, {"pages": doc["pages"], "pageLayouts": []})) == \
+        ["PAGE-1", "PAGE-2", "PAGE-3", "PAGE-4"]
