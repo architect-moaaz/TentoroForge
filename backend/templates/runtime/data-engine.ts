@@ -588,6 +588,26 @@ async function fireRuleEffects(
 // ─── CRUD Operations ───
 
 /**
+ * postgres-js cannot serialize a Date for a STRING-typed column (a `date()` in
+ * string mode, or a text/varchar column) — it throws `The "string" argument
+ * must be of type string ... Received an instance of Date` and fails the whole
+ * write. Coerce any Date destined for a string column to text before the query,
+ * mirroring the workflow write path (DEFECT-DEPLOY-CREATE). Date-object columns
+ * (`timestamp()` in date mode) are left alone — Drizzle serialises those.
+ */
+function stringifyDatesForStringColumns(table: any, data: Record<string, any>): void {
+  for (const [k, v] of Object.entries(data)) {
+    if (!(v instanceof Date)) continue;
+    const col = table?.[k];
+    if (!col || col.dataType !== "string") continue;
+    const ct = String(col.columnType || "");
+    data[k] = /timestamp|date|time/i.test(ct)
+      ? (/time/i.test(ct) ? v.toISOString() : v.toISOString().slice(0, 10))
+      : v.toISOString();
+  }
+}
+
+/**
  * A container-mode (FormData) KeyValueInput submits its jsonb column as a JSON
  * STRING. Drizzle's json/jsonb columns expect an object/array, so parse any
  * string value destined for a json/jsonb column back into a value before insert.
@@ -768,6 +788,7 @@ export async function create(
   await _encryptSensitiveOnWrite(entityName, validated);
 
   // Insert
+  stringifyDatesForStringColumns(entity.table, validated);
   const [record] = await db.insert(entity.table).values(validated as any).returning();
   const event = `${entityName.toLowerCase()}_created`;
 
@@ -835,6 +856,7 @@ export async function update(
   const updateData = { ...patched, updatedAt: new Date() } as any;
   await _encryptSensitiveOnWrite(entityName, updateData);
 
+  stringifyDatesForStringColumns(entity.table, updateData);
   const [record] = await db.update(entity.table).set(updateData).where(where).returning();
   const event = `${entityName.toLowerCase()}_updated`;
 
