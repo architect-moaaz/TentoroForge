@@ -475,3 +475,70 @@ def test_the_critic_can_be_pointed_at_a_cheaper_model(monkeypatch):
     monkeypatch.setenv(OBSERVER_MODEL_ENV, "claude-sonnet-5")
     from_env = anthropic_observer(router)
     assert from_env.critic.model == "claude-sonnet-5"
+
+
+# --- a repair is the whole answer -------------------------------------------
+
+def test_a_repair_that_renames_retires_what_it_replaced(svc):
+    """Measured live: a repair that re-authored the modules under new names
+    appended them, leaving three 'Notes' modules. What the subject authored
+    before and did not re-propose is retired, so the document holds the
+    repair's answer and nothing beside it."""
+    calls: list[TaskSpec] = []
+
+    def author(spec: TaskSpec) -> AgentResult:
+        calls.append(spec)
+        if "observer" in spec.task_id:
+            # The repair re-authors the page under a new route and forgets
+            # to carry the old one across.
+            return page(spec, users=["ROLE-001"], route="/candidates-v2")
+        return page(spec, users=["ROLE-999"])
+
+    report = run(svc, author, plan=["page_contracts"], observer_agent=Observer())
+    assert report.repaired == ["page_contracts"]
+    by_route = {p["route"]: p for p in svc.doc["pages"]}
+    assert by_route["/candidates"]["status"] == "DEPRECATED"
+    assert "superseded by the observer's repair" in by_route["/candidates"]["syncNote"]
+    assert by_route["/candidates-v2"]["status"] != "DEPRECATED"
+    live = [p for p in svc.doc["pages"] if p["status"] != "DEPRECATED"]
+    assert len(live) == 1
+    assert "REPLACES what you wrote before" in calls[1].feedback
+
+
+def test_a_repair_under_the_same_key_updates_in_place_and_retires_nothing(svc):
+    author = Ghost()
+    run(svc, author, plan=["page_contracts"], observer_agent=Observer())
+    assert [p["status"] for p in svc.doc["pages"]] == ["PROPOSED"]
+    assert [p["users"] for p in svc.doc["pages"]] == [["ROLE-001"]]
+
+
+def test_retiring_a_keyed_row_removes_it_and_leaves_its_neighbours(svc):
+    from services.blueprint.orchestrator import _retire
+
+    svc.doc.setdefault("data", {})["constraints"] = [
+        {"entity": "ENTITY-001", "kind": "index", "expression": "member_id"},
+        {"entity": "ENTITY-001", "kind": "index", "expression": "memberId"},
+    ]
+    _retire(svc, {("keyed", "data.constraints",
+                   ("ENTITY-001", "index", "member_id"))}, note="x")
+    assert [c["expression"] for c in svc.doc["data"]["constraints"]] == ["memberId"]
+
+
+def test_proposed_identities_cover_ids_and_keyed_rows():
+    from services.blueprint.agent_contract import AgentApplication
+    from services.blueprint.orchestrator import _proposed_identities
+
+    result = AgentResult(task_id="t", agent="data_model", proposals=[
+        ArtifactProposal(section="data.entities", natural_key="ENTITY:note",
+                         body={"name": "Note"}),
+        ArtifactProposal(section="data.constraints", natural_key="c",
+                         body={"entity": "ENTITY-001", "kind": "index",
+                               "expression": "memberId"}),
+        ArtifactProposal(section="database", natural_key="database",
+                         body={"engine": "postgres"}),
+    ])
+    application = AgentApplication(applied=True, result=result, artifacts=["ENTITY-001"])
+    assert _proposed_identities(result, application) == {
+        ("id", "data.entities", "ENTITY-001"),
+        ("keyed", "data.constraints", ("ENTITY-001", "index", "memberId")),
+    }

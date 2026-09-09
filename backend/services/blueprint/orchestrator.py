@@ -1270,7 +1270,10 @@ def _execute(
         it is right now. The snapshot is taken here, under the lock, so the
         observer reads what the node finished with and not what the next
         apply writes."""
-        watches.setdefault(key, _Watch(subjects=list(subjects)))
+        watches.setdefault(key, _Watch(
+            subjects=list(subjects),
+            authored={k: set(v) for k, v in runs[key].authored.items()},
+        ))
         with svc.lock:
             snapshot = copy.deepcopy(svc.doc)
         fut = pool.submit(
@@ -1344,8 +1347,23 @@ def _execute(
         w = watches[key]
         w.awaiting.discard(spec.subject)
         with svc.lock:
-            refused = _repair_apply(svc, outcome, commit=commit,
-                                    user_request=user_request)
+            refused, application = _repair_apply(
+                svc, outcome, commit=commit, user_request=user_request)
+            if refused is None:
+                # A REPAIR IS THE WHOLE ANSWER, NOT AN ADDENDUM. Ids come
+                # from natural keys, so a re-authoring that renames a module
+                # or re-spells a constraint's expression is a new artifact
+                # beside the old one — measured live: three "Notes" modules
+                # and every index constraint twice, which the observer then
+                # rightly flagged and could not repair. What the subject
+                # authored before and did not re-propose is retired here.
+                now = _proposed_identities(outcome, application)
+                stale = w.authored.get(spec.subject, set()) - now
+                if stale:
+                    _retire(svc, stale,
+                            note=f"superseded by the observer's repair of "
+                                 f"{spec.task_id}")
+                w.authored[spec.subject] = now
         if refused is not None:
             # The author's repair was refused; the original stands, and the
             # next round is told why. Nothing half-applied: apply validates
@@ -1449,6 +1467,8 @@ class _Watch:
     awaiting: set[str] = field(default_factory=set)
     #: Repairs applied this round, to be judged again together.
     landed: list[str] = field(default_factory=list)
+    #: Subject -> identities the node's current answer for it consists of.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
 
 
 def _applied(state: _NodeRun) -> list[str]:
@@ -1512,27 +1532,88 @@ def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
 
 def _repair_apply(
     svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
-) -> str | None:
-    """Apply one repair. ``None`` when it landed; otherwise why it was refused.
+) -> tuple[str | None, Any]:
+    """Apply one repair. ``(None, application)`` when it landed; otherwise
+    ``(why it was refused, None)``.
 
     A refused repair leaves the original artifact exactly as it was — apply
     validates before it commits — so what the observer then flags is the
     author's last accepted answer, never a half-applied fix.
     """
     if isinstance(outcome, Exception):
-        return _reason(outcome)
+        return _reason(outcome), None
     if outcome is None:
-        return "the executor returned nothing"
+        return "the executor returned nothing", None
     try:
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
     except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep,
             InvalidBusinessRule) as exc:
-        return _reason(exc)
+        return _reason(exc), None
     if application.applied:
-        return None
-    return _asked(application)
+        return None, application
+    return _asked(application), None
+
+
+def _proposed_identities(result: Any, application: Any) -> set[tuple]:
+    """What one accepted result consists of, as identities the document keeps.
+
+    An id-bearing artifact is ``("id", section, id)``; a keyed-list row
+    (a constraint, a relationship, a layout) is ``("keyed", section, key)``
+    with the key the section is deduplicated on. Singletons merge and have
+    no identity. Ids are read off ``application.artifacts``, which
+    :func:`apply_agent_result` fills one per id-bearing proposal, in order.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS, SINGLETON_SECTIONS
+
+    out: set[tuple] = set()
+    ids = list(getattr(application, "artifacts", None) or [])
+    i = 0
+    for p in getattr(result, "proposals", None) or []:
+        section = p.section
+        if section in KEYED_LIST_SECTIONS:
+            keys = KEYED_LIST_SECTIONS[section]
+            out.add(("keyed", section, tuple(p.body.get(k) for k in keys)))
+        elif section in SINGLETON_SECTIONS:
+            continue
+        else:
+            if i < len(ids):
+                out.add(("id", section, ids[i]))
+            i += 1
+    return out
+
+
+def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None:
+    """Take a subject's superseded artifacts out of play.
+
+    An id-bearing artifact is marked ``DEPRECATED`` with the note — every
+    consumer already skips that status, and §22 lets it be revived. A keyed
+    row has no status to carry, so it is removed. Saved once.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS
+
+    for ident in identities:
+        kind, section, key = ident
+        if kind == "id":
+            try:
+                svc.set_status(str(key), "DEPRECATED", note=note)
+            except Exception:  # noqa: BLE001 — already gone is already retired
+                continue
+        elif kind == "keyed":
+            keys = KEYED_LIST_SECTIONS[section]
+            if "." in section:
+                parent, child = section.split(".", 1)
+                bucket = (svc.doc.get(parent) or {}).get(child)
+            else:
+                bucket = svc.doc.get(section)
+            if isinstance(bucket, list):
+                bucket[:] = [
+                    row for row in bucket
+                    if not (isinstance(row, dict)
+                            and tuple(row.get(k) for k in keys) == key)
+                ]
+    svc.save()
 
 
 def _call(executor: Executor, spec: TaskSpec) -> Any:
@@ -1723,6 +1804,11 @@ class _NodeRun:
     in_flight: set[str] = field(default_factory=set)
     #: Subject -> attempts made so far.
     attempts: dict[str, int] = field(default_factory=dict)
+    #: Subject -> the identities its accepted proposals wrote (see
+    #: :func:`_proposed_identities`). What a repair of that subject is
+    #: measured against: anything here the repair does not re-propose is
+    #: retired, because a repair is the subject's whole answer.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
 
 
 def _apply_subject(
@@ -1787,6 +1873,8 @@ def _apply_subject(
     if application.applied:
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
+        state.authored.setdefault(subject, set()).update(
+            _proposed_identities(outcome, application))
         _note(ledger, "node_subject", key, subject, _at(), total, True)
         return "applied"
     if application.needs_clarification or outcome.status == "blocked":

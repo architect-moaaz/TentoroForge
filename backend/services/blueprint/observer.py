@@ -164,9 +164,12 @@ class Observation:
         return (
             "The observer reviewed your output against the Blueprint and the "
             "requirements it claims, and found it incomplete. Author it again "
-            "so that every point below is addressed. Keep everything that was "
-            "already correct; do not remove or rename what you are not asked "
-            "to change.\n\n" + "\n".join(lines)
+            "so that every point below is addressed. Your reply REPLACES what "
+            "you wrote before for this subject: include everything that "
+            "should remain, under the same names and keys it already has, "
+            "and correct what is wrong in place. Anything you leave out is "
+            "retired. Do not rename what you are not asked to change.\n\n"
+            + "\n".join(lines)
         )
 
     def summary(self) -> dict[str, Any]:
