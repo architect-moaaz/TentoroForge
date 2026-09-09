@@ -94,7 +94,12 @@ COMPOSITION_SET: dict[str, tuple[str, ...]] = {
 # Components that hold other components. Everything else is a leaf, and saying
 # so keeps the model from nesting a Table inside a Badge.
 CONTAINERS = frozenset(
-    {"Stack", "Row", "Grid", "Card", "Section", "Container", "Cluster", "Split"}
+    {"Stack", "Row", "Grid", "Card", "Section", "Container", "Cluster", "Split",
+     # Dialog/Modal wrap a body and List/Tabs hold item components — the composer
+     # emits `child`/`children` on all of them, and the projection renders those,
+     # but without CONTAINER membership the catalog declared no child slot and
+     # the surface was rejected.
+     "Dialog", "Modal", "List", "Tabs"}
 )
 
 # Props whose value is a data binding rather than a literal. Typed as unknown so
