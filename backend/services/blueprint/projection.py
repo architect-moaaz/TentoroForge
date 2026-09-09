@@ -1600,8 +1600,15 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
 #: Routes the auth flow itself needs, plus build output. A gate that catches
 #: its own login page locks everyone out.
+#:
+#: `login` and `signup` are here, not just `api/auth`: `withAuth` special-cases
+#: only the `signIn` page (`/login`), so `/login` slipped through by luck while
+#: `/signup` was gated — the gate redirected the very visitor who has no account
+#: yet straight back to `/login`, so "Sign up" never opened the signup page.
+#: The pages that create or restore a session cannot themselves require one.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
+    "login", "signup",
 )
 
 
