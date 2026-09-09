@@ -944,14 +944,21 @@ def test_the_two_agents_that_need_everything_still_get_it():
 
 
 def test_the_workflow_task_is_handed_the_node_catalog_and_no_other_is(svc):
-    """The catalog is referred to when the task needs it: the workflow agent
-    authors steps against it, so it sees the nodes and what each needs
-    configured; the data-model agent has no use for it and does not pay."""
-    system, _ = build_prompt(svc.doc, "workflows")
+    """The catalog is referred to when the task needs it: the step author
+    writes against it, so it sees the nodes and what each needs configured;
+    the declaration names workflows without their steps and pays only for
+    the trigger kinds; the data-model agent has no use for it at all."""
+    svc.doc["workflows"] = [{"id": "FLOW-001", "name": "Open a Case",
+                             "trigger": {"kind": "manual"}}]
+    system, _ = build_prompt(svc.doc, "workflow_steps", subject="FLOW-001")
     assert "The workflow nodes you may use" in system
     assert "db_insert" in system and "user_task" in system
     assert "*table" in system  # required config keys are stated, not implied
     assert "then-branch" in system
+
+    declared, _ = build_prompt(svc.doc, "workflows")
+    assert "The workflow nodes you may use" not in declared
+    assert "trigger.kind` is one of" in declared
 
     other, _ = build_prompt(svc.doc, "data_model")
     assert "The workflow nodes you may use" not in other
@@ -1564,11 +1571,13 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("data_model", "page_contracts", "database", "security",
-                 "workflows"):
+    for node in ("data_model", "page_contracts", "database", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
+    # The declaration is what remains of the call that hit 32k writing every
+    # step; the steps are authored one workflow per call inside the default.
+    assert r.for_task("workflows", "x").max_tokens == 32000
     for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "testing"):
+                 "page_layouts", "design_system", "testing", "workflow_steps"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "database", "security", "workflows"}
@@ -1588,3 +1597,80 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"
+
+
+# ---------------------------------------------------------------------------
+# Workflows: declared once, authored one at a time
+# ---------------------------------------------------------------------------
+
+
+def _declared(tmp_path):
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/cases/new", "name": "New",
+                         "purpose": "x"}]
+    for name in ("Open a Case", "Close a Case"):
+        svc.upsert("workflows", {"name": name, "trigger": {"kind": "manual"},
+                                 "launchedFrom": ["PAGE-001"],
+                                 "inputs": [{"name": "title", "kind": "field",
+                                             "type": "string"}]},
+                   natural_key=name)
+    svc.validate()
+    svc.save()
+    return svc
+
+
+def test_the_declaration_is_asked_for_no_steps():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "DO NOT write `steps`" in NODE_TASKS["workflows"]
+    assert "FEEL" not in NODE_TASKS["workflows"], "step rules belong to the author"
+    assert "FEEL" in NODE_TASKS["workflow_steps"]
+    assert "ONE workflow" in NODE_TASKS["workflow_steps"]
+
+
+def test_the_author_is_handed_one_workflow_the_catalog_and_its_key(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc = _declared(tmp_path)
+    wid = svc.doc["workflows"][0]["id"]
+    system, user = build_prompt(svc.doc, "workflow_steps", subject=wid,
+                                output_dir=svc.output_dir)
+    assert "required config key" in system, "the node catalog is the author's"
+    assert "`natural_key` is exactly: Open a Case" in user
+    assert "Open a Case" in user and "Close a Case" not in user, (
+        "the sibling declarations are noise to an author writing one")
+
+
+def test_the_authors_reply_updates_the_declared_row_whatever_it_called_it(tmp_path):
+    """Identity is the natural key. An author that spells the name its own
+    way would be allocated a second workflow: one declared with no steps,
+    one authored that no page launches."""
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, apply_agent_result,
+    )
+    from services.blueprint.executors import pin_workflow_identity
+
+    svc = _declared(tmp_path)
+    wid = svc.doc["workflows"][0]["id"]
+    result = AgentResult(
+        task_id="t", agent="workflow", confidence=0.9,
+        proposals=[ArtifactProposal(
+            section="workflows", natural_key="open-a-case",
+            body={"name": "Open A Case", "trigger": {"kind": "schedule"},
+                  "inputs": [{"name": "priority", "kind": "field", "type": "string"}],
+                  "steps": [{"key": "end", "name": "End", "type": "end"}]})])
+    pin_workflow_identity(svc, wid, result)
+    body = result.proposals[0].body
+    assert result.proposals[0].natural_key == "Open a Case"
+    assert body["id"] == wid and body["name"] == "Open a Case"
+    assert body["trigger"] == {"kind": "manual"}, "the trigger is declared, not authored"
+    assert [i["name"] for i in body["inputs"]] == ["title"], (
+        "inputs are declared: the pages were composed against them")
+    assert body["steps"]
+
+    applied = apply_agent_result(svc, result, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["workflows"]) == 2, "a second row was allocated"
+    assert svc.doc["workflows"][0]["steps"]

@@ -217,7 +217,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("database", "data_model", ("data_model",), ("database",)),
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("database", "workflows", "page_contracts"), ("apis",),
+    _n("apis", "api", ("database", "workflow_steps", "page_contracts"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -284,8 +284,25 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # *from* workflows — and the derivation is the correct direction: a
     # workflow describes what the business does, an endpoint is how it is
     # reached.
+    # WORKFLOWS ARE DECLARED ONCE AND AUTHORED ONE AT A TIME. This node names
+    # them — id, trigger, the page that launches each, the inputs it needs —
+    # and nothing else. Measured, the single call that also wrote every step
+    # was the longest node of a build (106s median, 576s worst, 42k output
+    # tokens on a 35-workflow app) and sat on the critical path twice: pages
+    # could not compose until it returned, and it could not start until
+    # everything at its level had. A page needs a workflow's identity and
+    # contract to wire a button, never its steps; `page_layouts` depends on
+    # this node and not on `workflow_steps` for exactly that reason.
     _n("workflows", "workflow", ("data_model", "page_contracts"), ("workflows",),
-       note="§107 step 16; not a distinct box in §28"),
+       note="§107 step 16; declares each workflow's identity and contract"),
+    # One call per declared workflow, in parallel, each given the node
+    # catalog and one workflow to fill in. A step is a catalog node carrying
+    # what that node declares it needs, refused at apply otherwise — the same
+    # gate as before, now per workflow, so one refused workflow re-asks for
+    # one workflow rather than for all thirty-five.
+    _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
+       fanout="workflows",
+       note="§107 step 16; one authored step graph per declared workflow"),
     _n("business_rules", "business_rules", ("data_model",), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
     _n("security", "security", ("data_model",), ("security", "roles", "permissions"),
@@ -294,7 +311,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
 
     # join
     _n("integration", "backend",
-       ("backend", "frontend", "workflows", "business_rules", "security", "integrations"),
+       ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
        (), kind="projection"),
     _n("testing", "testing", ("integration",), ("tests",), optional=True),
     # §20 + §23 — both read off what the Blueprint already carries, so neither
@@ -322,6 +339,11 @@ FANOUT: dict[str, Any] = {
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
     ],
+    # §107 step 16 — one call per declared workflow.
+    "workflows": lambda doc: [
+        w["id"] for w in (doc.get("workflows") or [])
+        if w.get("id") and w.get("status") != "DEPRECATED"
+    ],
 }
 
 
@@ -348,15 +370,10 @@ def pending_subjects(node: "DagNode", doc: dict) -> list[str]:
     run starts from an empty document, so nothing is present and every subject
     runs; a node that writes once (no per-subject row key) is unaffected."""
     subjects = subjects_for(node, doc)
-    key = _SUBJECT_ROW_KEY.get(node.fanout)
-    if not key:
+    authored = _SUBJECT_AUTHORED.get(node.fanout)
+    if authored is None:
         return subjects
-    section, field = key
-    present = {
-        str(row.get(field) or "")
-        for row in (doc.get(section) or []) if isinstance(row, dict)
-    }
-    return [s for s in subjects if s not in present]
+    return [s for s in subjects if not authored(doc, s)]
 
 
 class CyclicDag(ValueError):
@@ -711,24 +728,37 @@ def completed_nodes(
         # Checked against the rows themselves rather than a count, because a
         # deprecated page leaves a layout behind and a count would call that
         # complete too.
-        subject_key = _SUBJECT_ROW_KEY.get(node.fanout)
-        if node.fanout and subject_key:
-            section, field = subject_key
-            present = {str(row.get(field) or "")
-                       for row in (doc.get(section) or []) if isinstance(row, dict)}
-            if any(subject not in present for subject in subjects_for(node, doc)):
+        authored = _SUBJECT_AUTHORED.get(node.fanout)
+        if node.fanout and authored is not None:
+            if any(not authored(doc, subject) for subject in subjects_for(node, doc)):
                 continue
         done.add(key)
     return done
 
 
-#: For a fan-out node, which produced section names the subject a row was
-#: written for, and under which field. Only fan-outs whose rows carry their
-#: subject can be judged per subject; one that does not (a design source's
-#: requirements carry `evidence`, not a source id) keeps the section-level
-#: rule above, which is the behaviour every run had before this existed.
-_SUBJECT_ROW_KEY: dict[str, tuple[str, str]] = {
-    "pages": ("pageLayouts", "page"),
+def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
+    return any(isinstance(row, dict) and str(row.get("page") or "") == page_id
+               for row in doc.get("pageLayouts") or [])
+
+
+def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
+    """A declared workflow is authored once it carries steps. `workflows`
+    and `workflow_steps` both write the `workflows` section, so "the section
+    has content" is true the moment the first has run; what the second owes
+    is the step graph, and that is what is checked."""
+    return any(isinstance(row, dict) and row.get("id") == workflow_id
+               and bool(row.get("steps"))
+               for row in doc.get("workflows") or [])
+
+
+#: For a fan-out node, whether one subject's artifact has been authored. Only
+#: fan-outs that can be judged per subject are listed; one that cannot (a
+#: design source's requirements carry `evidence`, not a source id) keeps the
+#: section-level rule above, which is the behaviour every run had before this
+#: existed.
+_SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
+    "pages": _layout_present,
+    "workflows": _steps_present,
 }
 
 

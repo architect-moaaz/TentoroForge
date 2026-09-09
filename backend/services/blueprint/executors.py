@@ -1013,45 +1013,46 @@ NODE_TASKS: dict[str, str] = {
         "hole."
     ),
     "workflows": (
-        "Define the business processes as workflows built from the workflow node "
-        "catalog below. Every step IS one of those nodes: its `type` is a catalog "
-        "node, and its `config` carries what that node declares it needs — the "
-        "`actionType` and table/values of an action, the `expression` of a "
-        "condition, the `assignType` and `assignTarget` of a human task — filled "
-        "in with real values (entity tables, `{{variable}}` bindings, role names), "
-        "not left for someone else. A step missing a required key is refused. "
-        "Connect steps with `next` (a branching node's first target is the "
-        "then-branch, its second the else-branch); the workflow's `trigger` is "
-        "the start, and an `end` step is the terminal. A manually-triggered "
-        "workflow must name the page that launches it, and any step that mutates "
-        "an entity must name a real one.\n\n"
-        "Conditions and gateway expressions are FEEL, read by the engine's "
-        "parser: `=` (never `==`), `and`, `or`, `not`, names without braces "
-        "(`caseType = \"Refund\" and refundAmount > 0`), membership as "
-        "`stage in [\"A\", \"B\"]` with square brackets, never parentheses. "
-        "Values in step "
-        "config are templates over what the engine holds: the trigger's "
-        "input fields by name (`{{title}}`, never `{{input.title}}`), a step's "
-        "output under its key (`{{insert_case.id}}`), a variable a "
-        "set_variable step set by its `variableName`; the current time and "
-        "actor are the whole-value sentinels `$now`, `$today`, `$user.id`. "
-        "There is no `now`, `currentUser`, `vars`, `steps` or `sequence` "
-        "root; a template naming one is refused. The expression functions the "
-        "engine has are sum, count, min, max, avg, abs, floor, ceiling, round, "
-        "contains, starts with, ends with, matches, string, number, date, now, "
-        "duration — nothing else (no concat, substring, uuid, upper, format); "
-        "a reference number nothing supplies is `$uuid`, a fresh identifier, "
-        "written in the insert itself. A db_insert supplies every field the "
-        "data model marks required — an input by name, `$now`, `$user.id`, "
-        "`$uuid`, or a literal starting state; one that omits a required "
-        "field is refused, and a later db_update cannot rescue it.\n\n"
+        "Declare the business processes as workflows: for each, its `name`, "
+        "`purpose`, `trigger`, the page that launches it (`launchedFrom`, "
+        "required for a manual trigger) and its `inputs`. DO NOT write "
+        "`steps` — leave the key out entirely. Each workflow's step graph is "
+        "authored in a separate pass, one workflow per call, against the node "
+        "catalog; what that pass needs from you is a complete and correct "
+        "contract, because the pages are composed against this declaration "
+        "at the same time as the steps are written, and a button wired to a "
+        "workflow whose inputs change afterwards is a button that fails.\n\n"
         "Declare `inputs`: what the workflow needs to start. A workflow that "
         "acts on one record declares `{name, kind: \"record\", entity}`; one "
         "that takes what a person types declares `{name, kind: \"field\", "
         "type}` per field. The control that runs the workflow must supply every "
         "required input from its page — the record a detail page shows, the "
         "fields a form collects — and a control that cannot is refused, so an "
-        "input left undeclared is a button that fails when pressed."
+        "input left undeclared is a button that fails when pressed. Every "
+        "field a step will later read (`{{title}}`) must be declared here as "
+        "a `field` input, and a workflow acting on a record must declare the "
+        "record; the step author cannot add inputs the pages were not told "
+        "about."
+    ),
+    "workflow_steps": (
+        "Author the steps of ONE workflow, the one given below. Its identity "
+        "and contract — `name`, `trigger`, `launchedFrom`, `inputs` — are "
+        "already decided and the pages are being composed against them as "
+        "you work; keep them exactly as given and return them unchanged "
+        "alongside the `steps` you write. Return exactly one proposal, for "
+        "this workflow, under the `natural_key` given below.\n\n"
+        "Every step IS a node from the workflow node catalog below: its "
+        "`type` is a catalog node, and its `config` carries what that node "
+        "declares it needs — the `actionType` and table/values of an action, "
+        "the `expression` of a condition, the `assignType` and `assignTarget` "
+        "of a human task — filled in with real values (entity tables, "
+        "`{{variable}}` bindings, role names), not left for someone else. A "
+        "step missing a required key is refused. Connect steps with `next` "
+        "(a branching node's first target is the then-branch, its second the "
+        "else-branch); the workflow's `trigger` is the start, and an `end` "
+        "step is the terminal. Any step that mutates an entity must name a "
+        "real one.\n\n"
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "
@@ -1403,13 +1404,20 @@ def build_prompt(
             )
         return system, user
 
+    if node == "workflow_steps":
+        return _workflow_steps_prompt(doc, system, subject, feedback,
+                                      output_dir=output_dir)
+
     if node == "workflows":
-        # The catalog is pulled in for the one task that authors workflows,
-        # and for no other: the page agents get the component catalog, this
-        # one gets the node catalog. Neither pays for the other's vocabulary.
+        # The node catalog goes to `workflow_steps`, the one task that authors
+        # steps; this one declares and needs only the trigger kinds it may
+        # name. Neither pays for the other's vocabulary.
         from services.catalog import workflow_nodes
 
-        system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+        system += (
+            "\n\nA workflow's `trigger.kind` is one of: "
+            + ", ".join(workflow_nodes().trigger_types) + "."
+        )
         # THE PAGES THAT HAVE NOWHERE TO SUBMIT, named. This agent already
         # reads `pages` (§101) and authored thirty-five good workflows without
         # noticing that eleven create pages had nothing to call: it was asked
@@ -1796,6 +1804,107 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
 SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {"data_model": DATA_MODEL_SCHEMA}
 
 
+def declared_workflow(doc: dict, workflow_id: str) -> dict | None:
+    """The declared row `workflow_steps` is authoring for, or None."""
+    for row in doc.get("workflows") or []:
+        if isinstance(row, dict) and row.get("id") == workflow_id:
+            return row
+    return None
+
+
+#: What the declaration decided and the author may not move. Only `steps` is
+#: the author's. `inputs` stay declared because the pages are composed against
+#: them concurrently: an input the author adds is one no button supplies, and
+#: a step that needs a value nothing declares is refused at apply and re-asked,
+#: which is the right place for that conversation.
+_DECLARED_FIELDS: tuple[str, ...] = (
+    "id", "name", "purpose", "trigger", "launchedFrom", "inputs", "requirements",
+    "status",
+)
+
+
+def _workflow_steps_prompt(doc: dict, system: str, subject: str,
+                           feedback: str, *, output_dir: Any = None) -> tuple[str, str]:
+    """One workflow, the node catalog, and the slice of the Blueprint its
+    steps can name. The full `workflows` section is NOT sent: thirty-four
+    sibling declarations are noise to an author writing the thirty-fifth."""
+    from services.catalog import workflow_nodes
+
+    system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+
+    row = declared_workflow(doc, subject) or {"id": subject}
+    context = context_for(doc, "workflow")
+    context["workflows"] = [row]
+    # The requirements this workflow answers, when it says which; the whole
+    # section otherwise, which is what the declaration was written from.
+    wanted = set(row.get("requirements") or [])
+    if wanted:
+        context["requirements"] = [
+            r for r in context.get("requirements") or []
+            if isinstance(r, dict) and r.get("id") in wanted
+        ]
+    natural_key = _declared_key(output_dir, subject) or str(row.get("name") or subject)
+    user = (
+        f"Author the steps of workflow {subject} ({row.get('name', '')!s}). "
+        f"Its proposal's `natural_key` is exactly: {natural_key}\n\n"
+        "Here is the workflow as declared, and the Blueprint slice its steps "
+        "may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```"
+    )
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+    return system, user
+
+
+def _declared_key(output_dir: Any, workflow_id: str) -> str | None:
+    """The natural key the allocator bound this workflow's id to; None when
+    there is no directory to read the registry from."""
+    if not output_dir:
+        return None
+    from services.blueprint.ids import IdAllocator
+
+    try:
+        return IdAllocator.load(output_dir=output_dir).key_for(workflow_id)
+    except Exception:  # noqa: BLE001 — a missing registry is not a prompt error
+        return None
+
+
+def pin_workflow_identity(svc: Any, workflow_id: str, result: AgentResult) -> None:
+    """Make the author's reply update the declared row, whatever it replied.
+
+    Identity is the natural key (§12). The declaration bound this workflow's
+    id to one key; an author that returns the name spelled differently — or
+    a `natural_key` of its own choosing — would be allocated a second id and
+    the application would carry a declared workflow with no steps beside an
+    authored one nobody's page launches. So the key and the declared fields
+    are put back from the declaration here, before apply, and the reply
+    keeps only what it was asked for: the steps.
+    """
+    row = declared_workflow(svc.doc, workflow_id)
+    if row is None:
+        return
+    from services.blueprint.ids import IdAllocator
+
+    try:
+        key = IdAllocator.load(output_dir=svc.output_dir).key_for(workflow_id)
+    except Exception:  # noqa: BLE001 — fall back to the name, which bound it
+        key = None
+    key = key or str(row.get("name") or workflow_id)
+
+    for proposal in result.proposals:
+        if proposal.section != "workflows":
+            continue
+        proposal.natural_key = key
+        body = dict(proposal.body or {})
+        for field_name in _DECLARED_FIELDS:
+            if field_name in row:
+                body[field_name] = row[field_name]
+            else:
+                body.pop(field_name, None)
+        proposal.body = body
+
+
 def expand_data_model(data: dict) -> list["ArtifactProposal"]:
     """The compact `entities` object as the proposals the pipeline expects.
 
@@ -2063,7 +2172,10 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "page_contracts": 64000,
     "database": 64000,
     "security": 64000,
-    "workflows": 64000,
+    # Declares thirty-odd workflows without their steps; the 64k the single
+    # call needed went on step graphs, which `workflow_steps` now writes one
+    # workflow at a time inside the default.
+    "workflows": 32000,
 }
 
 
@@ -2347,10 +2459,15 @@ def make_executor(
                 )
 
             try:
-                return parse_envelope(text, task_id=spec.task_id,
-                                      agent=spec.agent, node=spec.node)
+                parsed = parse_envelope(text, task_id=spec.task_id,
+                                        agent=spec.agent, node=spec.node)
             except MalformedEnvelope as exc:
                 last = exc
+                continue
+            if spec.node == "workflow_steps":
+                with svc.lock:
+                    pin_workflow_identity(svc, spec.subject, parsed)
+            return parsed
 
         raise MalformedEnvelope(f"{spec.node}: {last}")
 

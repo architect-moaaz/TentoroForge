@@ -1328,3 +1328,82 @@ def test_the_scheduler_holds_the_document_lock_while_applying(svc):
     finally:
         orchestrator.apply_agent_result = real_apply
     assert owned and all(owned)
+
+
+# ---------------------------------------------------------------------------
+# Workflows are declared once and authored one at a time
+# ---------------------------------------------------------------------------
+
+
+def _declared_workflows(svc, n=3):
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/cases/new", "name": "New",
+                         "purpose": "x"}]
+    for i in range(1, n + 1):
+        svc.upsert("workflows", {"name": f"Flow {i}", "trigger": {"kind": "manual"},
+                                 "launchedFrom": ["PAGE-001"]},
+                   natural_key=f"Flow {i}")
+    return svc
+
+
+def test_pages_compose_against_declared_workflows_not_their_steps():
+    """A button names a workflow by id and supplies its inputs; it never reads
+    a step. So `page_layouts` waits for the declaration and runs beside the
+    step authoring, which was the longest node of a build and sat ahead of
+    every page."""
+    assert "workflows" in DAG["page_layouts"].depends_on
+    assert "workflow_steps" not in DAG["page_layouts"].depends_on
+    # what derives from steps waits for them
+    assert "workflow_steps" in DAG["apis"].depends_on
+    assert "workflow_steps" in DAG["integration"].depends_on
+    assert DAG["workflow_steps"].fanout == "workflows"
+    assert DAG["workflow_steps"].depends_on == frozenset({"workflows"})
+    at = {k: i for i, level in enumerate(levels()) for k in level}
+    assert at["page_layouts"] == at["workflow_steps"]
+
+
+def test_workflow_steps_fan_out_over_the_declared_workflows(svc):
+    from services.blueprint.orchestrator import pending_subjects, subjects_for
+
+    _declared_workflows(svc, 3)
+    ids = [w["id"] for w in svc.doc["workflows"]]
+    assert subjects_for(DAG["workflow_steps"], svc.doc) == ids
+    assert pending_subjects(DAG["workflow_steps"], svc.doc) == ids
+
+
+def test_resuming_the_step_authoring_reruns_only_the_stepless(svc):
+    """`workflows` and `workflow_steps` both write one section, so "the
+    section has content" would call the author done the moment the declarer
+    ran. What the author owes is a step graph per workflow, and that is what
+    resume checks."""
+    from services.blueprint.orchestrator import pending_subjects
+
+    _declared_workflows(svc, 3)
+    ids = [w["id"] for w in svc.doc["workflows"]]
+    svc.doc["workflows"][1]["steps"] = [{"key": "end", "name": "End", "type": "end"}]
+    assert pending_subjects(DAG["workflow_steps"], svc.doc) == [ids[0], ids[2]]
+    assert "workflows" in completed_nodes(svc.doc)
+    assert "workflow_steps" not in completed_nodes(svc.doc)
+    for w in svc.doc["workflows"]:
+        w["steps"] = [{"key": "end", "name": "End", "type": "end"}]
+    assert "workflow_steps" in completed_nodes(svc.doc)
+
+
+def test_each_workflow_is_authored_by_its_own_call(svc):
+    _declared_workflows(svc, 3)
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.subject)
+        row = next(w for w in svc.doc["workflows"] if w["id"] == spec.subject)
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="workflows", natural_key=row["name"],
+                body={"name": row["name"], "trigger": row["trigger"],
+                      "steps": [{"key": "end", "name": "End", "type": "end"}]})])
+
+    report = run(svc, executor, plan=["workflow_steps"], max_attempts=1)
+    assert report.ok, report.failed_because
+    assert sorted(seen) == sorted(w["id"] for w in svc.doc["workflows"])
+    assert all(w["steps"] for w in svc.doc["workflows"])
+    assert len(svc.doc["workflows"]) == 3, "authoring created a second row"
