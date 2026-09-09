@@ -248,13 +248,21 @@ def test_planning_is_deterministic(doc, page, catalog):
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 
-def test_pages_without_a_template_are_reported_not_silently_dropped(
+def test_pages_without_a_template_are_reported_AND_given_a_fallback(
         doc, page, catalog):
+    """A page nothing composed is REPORTED (in `skipped`) and also given an
+    honest fallback schema (in `planned`, marked `fallback`, listed in
+    `fellBack`). §76 removed the SILENT per-pattern stub; this is not silent —
+    it is marked and reported — and it exists because a page with NO schema at
+    all was blank in the editor ("No schema at X.json") and a 404 in the
+    preview. Reported, never blank."""
     doc["pages"] = [page]
     doc["pageLayouts"] = []
     result = pp.plan_pages(doc, catalog)
-    assert result["planned"] == {}
-    assert result["skipped"][0]["page"] == "PAGE-001"
+    assert result["skipped"][0]["page"] == "PAGE-001"       # still reported
+    assert set(result["planned"]) == {"PAGE-001"}           # never left blank
+    assert result["planned"]["PAGE-001"]["meta"]["fallback"] is True
+    assert result["fellBack"] == ["PAGE-001"]
 
 
 def test_plan_pages_covers_every_page_with_a_template(doc, page, catalog):
@@ -396,11 +404,15 @@ def test_an_authored_page_is_what_gets_planned(doc, page, catalog):
     assert root["children"][0]["props"]["content"] == "Bespoke"
 
 
-def test_a_page_nobody_composed_is_reported_not_stubbed(doc, page, catalog):
-    """There used to be a per-pattern template behind every page, so a page
-    nobody composed was planned from the generic shape for its kind. That made
-    "designed" and "defaulted" indistinguishable in the output — §76 silent
-    divergence, reached by fallback rather than by drift."""
+def test_a_page_nobody_composed_gets_a_marked_fallback_not_a_silent_stub(doc, page, catalog):
+    """§76's objection was a SILENT per-pattern stub: a generic shape that made
+    "designed" and "defaulted" indistinguishable. The fallback here is the
+    opposite of silent — its `meta.fallback` marks it, it is listed in
+    `fellBack`, and the page is still reported in `skipped` with the "nothing
+    composed" reason. A composed page and a fallback page are trivially
+    distinguishable. What is NOT acceptable (the reason this exists) is a page
+    with no schema at all: blank editor, 404 preview, and Smith unable to fix
+    it. So a page nobody composed is reported AND kept renderable."""
     second = dict(page, id="PAGE-002", route="/other", name="Other")
     doc["pages"] = [page, second]
     doc["pageLayouts"] = [{
@@ -408,9 +420,13 @@ def test_a_page_nobody_composed_is_reported_not_stubbed(doc, page, catalog):
         "root": {"type": "Stack", "props": {}, "children": []},
     }]
     result = pp.plan_pages(doc, catalog)
-    assert set(result["planned"]) == {"PAGE-001"}
+    assert set(result["planned"]) == {"PAGE-001", "PAGE-002"}
     assert [s["page"] for s in result["skipped"]] == ["PAGE-002"]
     assert "nothing composed" in result["skipped"][0]["reason"]
+    # The composed page is real; the uncomposed one is a marked fallback.
+    assert not result["planned"]["PAGE-001"]["meta"].get("fallback")
+    assert result["planned"]["PAGE-002"]["meta"]["fallback"] is True
+    assert result["fellBack"] == ["PAGE-002"]
 
 
 def test_an_authored_page_is_held_to_the_same_catalog(doc, page, catalog):

@@ -247,8 +247,10 @@ def test_frontend_projection_is_idempotent(tmp_path):
     assert first == second
 
 
-def test_a_page_with_no_template_is_reported_not_silently_omitted(tmp_path):
-    """Eleven of eighteen pages emitted must not look like success."""
+def test_a_page_with_no_template_is_reported_and_gets_a_fallback(tmp_path):
+    """A page nothing composed is REPORTED in `skipped` and also gets a written
+    fallback schema, so the route is never blank (no "No schema" in the editor,
+    no 404 in the preview). Reported, never omitted."""
     from services.blueprint.projection import project_frontend
 
     doc = _frontend_doc()
@@ -258,9 +260,10 @@ def test_a_page_with_no_template_is_reported_not_silently_omitted(tmp_path):
         "data": {"primaryEntity": "ENTITY-001"}, "actions": [],
     })
     result = project_frontend(doc, tmp_path / "app")
-    assert result["pages"] == 1
-    assert result["skipped"][0]["page"] == "PAGE-002"
+    assert result["pages"] == 2                              # both routes have a schema
+    assert result["skipped"][0]["page"] == "PAGE-002"        # still reported
     assert result["skipped"][0]["pattern"] == "kanban"
+    assert (tmp_path / "app" / "src" / "schemas" / "board.json").exists()
 
 
 def test_frontend_projection_records_every_file_in_code_map(tmp_path):
@@ -300,20 +303,29 @@ def test_a_pages_implementation_is_reachable_as_its_frontend(tmp_path):
     assert located.mapped
 
 
-def test_a_page_that_stops_planning_does_not_leave_its_schema_behind(tmp_path):
-    """Otherwise the directory still looks complete while one file is stale."""
+def test_a_declared_page_keeps_its_last_good_schema_when_its_layout_is_withdrawn(tmp_path):
+    """A still-declared page whose composed tree is withdrawn keeps its last
+    good schema rather than being deleted. The old policy deleted it (serve
+    nothing over serve stale), which 404'd a route the app still declares — the
+    exact blank-page defect. Now a declared route is never left without a
+    schema: the real one is preserved (not overwritten by the placeholder, not
+    removed). A page that is genuinely removed from the Blueprint is still
+    cleaned up (that file is no longer declared)."""
     from services.blueprint.projection import project_frontend
+    import json as _json
 
     doc = _frontend_doc()
     project_frontend(doc, tmp_path / "app")
-    assert (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
+    cand = tmp_path / "app" / "src" / "schemas" / "candidates.json"
+    assert cand.exists()
 
-    # The composed tree is withdrawn; the page can no longer be planned.
+    # The composed tree is withdrawn but the page is STILL declared.
     doc["pageLayouts"] = []
     result = project_frontend(doc, tmp_path / "app")
-    assert result["pages"] == 0
-    assert result["removed"] == ["candidates.json"]
-    assert not (tmp_path / "app" / "src" / "schemas" / "candidates.json").exists()
+    assert cand.exists(), "a declared route must not be left without a schema"
+    assert "candidates.json" not in result["removed"]
+    # The real layout is kept, not degraded to a placeholder.
+    assert not _json.loads(cand.read_text())["meta"].get("fallback")
 
 
 # ---------------------------------------------------------------------------

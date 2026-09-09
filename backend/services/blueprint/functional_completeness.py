@@ -384,6 +384,43 @@ def _ancestry(root: Any, target: dict) -> str:
     return " > ".join(chain[-4:]) if chain else "the page root"
 
 
+# Columns the GENERATED RUNTIME fills server-side from the session on create,
+# so a control must never be refused for not collecting them in a Form. This
+# mirrors templates/runtime/data-engine.ts create(): the `_tenancyFks` list
+# (workspace/tenant/org, "no longer a form field") and the owner/actor FK fill
+# (`_LEGACY_OWNER_FKS` + audit columns). A workflow that declares one of these
+# as a required input is describing a value the runtime supplies, not one a
+# person types. Requiring a Form field for it refused the whole page, and a
+# refused page is dropped with no schema written (DEFECT: form/action pages
+# blank in the editor, 404 in the preview, and Smith unable to fix them).
+_RUNTIME_FILLED_INPUT_NAMES = frozenset({
+    # tenancy / workspace (data-engine.ts `_tenancyFks`, plus spelling variants)
+    "workspaceid", "tenantid", "orgid", "organizationid", "organisationid",
+    "companyid", "accountid",
+    # actor / owner / audit (data-engine.ts `_LEGACY_OWNER_FKS` + audit columns)
+    "ownerid", "userid", "createdbyid", "createdbyuserid", "createdby",
+    "authorid", "landlordid", "updatedbyid", "updatedby",
+})
+
+
+def _runtime_supplied(name: str, doc: dict) -> bool:
+    """True when the runtime fills this column from the session on create.
+
+    Two sources, both authoritative: the name matches the runtime's own
+    tenancy/owner fill lists, or `security.ownershipRules` declares a column of
+    that name (a scope/attribution column is "set from the session on create").
+    """
+    key = (name or "").strip().lower()
+    if not key:
+        return False
+    if key in _RUNTIME_FILLED_INPUT_NAMES:
+        return True
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and str(rule.get("column") or "").strip().lower() == key:
+            return True
+    return False
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -400,6 +437,10 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
             continue
         name = str(inp.get("name") or "")
         if name in args:
+            continue
+        # A tenant/owner/audit column the runtime fills from the session is not
+        # a field any Form should collect — do not refuse the page for it.
+        if _runtime_supplied(name, doc):
             continue
         if inp.get("kind") == "record":
             entity = str(inp.get("entity") or "")
