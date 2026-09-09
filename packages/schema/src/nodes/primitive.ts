@@ -41,6 +41,14 @@ export const TextNode = z
         as: z
           .enum(["span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "label", "strong", "em"])
           .default("span"),
+        // Text-style hint the a2ui composer emits (its catalog declares this
+        // exact enum on Text). Forge's Text was `content`/`as` + .strict(), so
+        // every composed Text carrying `variant` was rejected here and the page
+        // recomposed — the same drift as Card.density. Accepted as a style hint;
+        // `as` still decides the element.
+        variant: z
+          .enum(["h1", "h2", "h3", "h4", "h5", "caption", "body"])
+          .optional(),
       })
       .strict()
       .optional(),
