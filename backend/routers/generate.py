@@ -366,12 +366,16 @@ async def produce_plan(
         from agents.app_map_agent import run_app_map_planner as _app_map
     if _author_units is None:
         from services.per_unit_authoring import author_all_units as _author_units
+    # Fast profile skips the planner's completeness REVISE re-stream (Task 3).
+    # Bound HERE, before the seam is resolved: `_run_v2_gate` below closes
+    # over it, and a caller that injects its own `_oneshot` skipped the
+    # branch this used to live in — so every such call died with a NameError
+    # at the IRF revise, after the plan had already been produced.
+    _profile_here = _gen_profile(output_dir)
+    _allow_revise = _profile_here.planner_revise if _profile_here else True
+
     if _oneshot is None:
         from agents.planner import run_planner_oneshot
-
-        # Fast profile skips the planner's completeness REVISE re-stream (Task 3).
-        _profile_here = _gen_profile(output_dir)
-        _allow_revise = _profile_here.planner_revise if _profile_here else True
 
         async def _oneshot(_prompt):
             # No timeout override — inherit run_planner_oneshot's 900s budget.

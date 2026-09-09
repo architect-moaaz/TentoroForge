@@ -552,6 +552,9 @@ TOOL_CATALOG: list[dict] = [
              "design as evidence. `token_env` is the NAME of the environment "
              "variable holding the token (e.g. FIGMA_TOKEN); never the token "
              "itself, which must not reach the conversation log.\n"
+             "  connect_uxpilot {uxpilot_ref, key_env} — attach a UX Pilot "
+             "page as evidence. `key_env` is the NAME of the environment "
+             "variable holding the UX Pilot API key; never the key itself.\n"
              "  rebuild       {} — regenerate the whole application from "
              "its definition.\n"
              "Omitting `verb` means rename. If you can't confidently fill "
@@ -1192,6 +1195,10 @@ READONLY_HANDLERS = {
     # JV-8 — read the most recent VerifyRun row's structured report so
     # Smith can answer follow-ups after a verify+fix without re-running.
     "read_last_verify_run":     lambda output_dir, args: _smith_read_last_verify_run(output_dir, args),
+    # SV-9 — in the catalogue since the initial commit, dispatchable since
+    # 2026-09-10. Without this the model was coached to call a tool that
+    # fell through to "unknown tool" every time.
+    "verify_app":               lambda output_dir, args: _smith_verify_app(output_dir, args),
     "add_role":                 lambda output_dir, args: _smith_add_role(output_dir, args),
     "remove_role":              lambda output_dir, args: _smith_remove_role(output_dir, args),
     "restrict_page_to_role":    lambda output_dir, args: _smith_restrict_page_to_role(output_dir, args),
@@ -2301,6 +2308,72 @@ def _smith_generate_mobile_app(output_dir: str, args: dict) -> dict:
             f"surface the exact gap there."
         ),
     }
+
+
+async def _project_id_for_output_dir(db, output_dir: str):
+    """The Project row that owns ``output_dir``, or None.
+
+    Exact resolved path first; then by directory name, because some projects
+    store relative paths and the mismatch must not read as "no project".
+    """
+    from pathlib import Path
+
+    from sqlalchemy import select as _select
+
+    from models.project import Project as _Project
+
+    resolved = str(Path(output_dir).resolve())
+    project = (await db.execute(
+        _select(_Project).where(_Project.output_dir == resolved),
+    )).scalar_one_or_none()
+    if project is None:
+        projects = (await db.execute(_select(_Project))).scalars().all()
+        project = next(
+            (p for p in projects if p.output_dir
+             and Path(p.output_dir).name == Path(resolved).name),
+            None,
+        )
+    return project.id if project is not None else None
+
+
+def _smith_verify_app(output_dir: str, args: dict) -> dict:
+    """Run the Self-Verify Pass (SV-9) on the app in ``output_dir``.
+
+    The same pass the plain-language route fires from ``routers.generate``
+    when a message reads as a verify intent; this is the in-loop path, for
+    when Smith decides to verify. ``fix`` defaults to true as the catalogue
+    promises. Sync wrapper, same shape as :func:`_smith_read_last_verify_run`:
+    the SDK dispatches tools synchronously from a threadpool, so a loop is
+    created here and driven to completion.
+    """
+    import asyncio
+
+    from database import async_session
+
+    scope = str(args.get("scope") or "*")
+    target = "deploy" if str(args.get("target") or "preview") == "deploy" else "preview"
+    fix = args.get("fix", True)
+    fix = fix if isinstance(fix, bool) else str(fix).strip().lower() not in ("false", "0", "no")
+
+    async def _run() -> dict:
+        from services.self_verify_pass import run_self_verify
+
+        async with async_session() as db:
+            project_id = await _project_id_for_output_dir(db, output_dir)
+        if project_id is None:
+            return {"error": "project_not_found_for_output_dir"}
+        return await run_self_verify(
+            project_id, target=target, scope=scope, fix=fix,
+            invoked_by="user_chat",
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            raise RuntimeError("nested loop")
+    except RuntimeError:
+        pass
+    return asyncio.run(_run())
 
 
 def _smith_read_last_verify_run(output_dir: str, args: dict) -> dict:

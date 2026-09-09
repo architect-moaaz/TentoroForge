@@ -129,6 +129,10 @@ def test_a_fanning_out_node_records_each_subject(svc):
     """"Which of the eighteen stopped it" is unanswerable from one aggregate
     line, and eighteen model calls with no lines between them is a silence the
     office cannot draw progress through."""
+    # The standing fixture already carries every layout, and resume is
+    # continue-not-redo: a composed page is not a subject. Uncompose them.
+    svc.doc["pageLayouts"] = []
+    svc.save()
     seen = watch(svc, ok, plan=["page_layouts"])
 
     start = next(line for line in seen if line["event"] == "node:start")
@@ -136,7 +140,9 @@ def test_a_fanning_out_node_records_each_subject(svc):
 
     assert start["subjects"] > 1
     assert len(subjects) == start["subjects"]
-    assert [line["index"] for line in subjects] == list(range(1, len(subjects) + 1))
+    # Results apply as they arrive (the scheduler is event-driven), so the
+    # lines are not in subject order — but every position is recorded once.
+    assert sorted(line["index"] for line in subjects) == list(range(1, len(subjects) + 1))
     assert all(line["total"] == len(subjects) for line in subjects)
     assert all(line["ok"] for line in subjects)
 
