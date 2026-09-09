@@ -1479,7 +1479,40 @@ async def smith_chat(
 
         try:
             emit("started", {"projectId": str(project_id)})
-            emit("done", await loop.run_in_executor(None, work))
+            # DEFECT-CHANGE-STREAM-STALL: a compose/change turn that HANGS on a
+            # stuck stage never returns, so no `done`/`error` is ever emitted;
+            # sse_starlette keeps the connection alive with pings, and the panel
+            # loops on those forever with its input locked, until the user
+            # reloads. Bound the turn and emit a terminal event so the panel
+            # always unlocks. The work runs in a thread we cannot cancel, so it
+            # keeps going and commits its result to the Blueprint in the
+            # background (a reload then shows it) — the same recovery the panel
+            # already relies on, made automatic. A build (`approved`) genuinely
+            # runs for many minutes behind a steady stream of stage events, so
+            # it gets a far longer bound; a compose/define/answer does not.
+            # A build is a very long turn with its own steady progress stream,
+            # so its bound is generous (a genuinely dead build, not a slow one);
+            # a compose/define/answer that runs past ten minutes is stuck.
+            _turn_timeout = 3600.0 if req.approved else 600.0
+            # Shielded so the timeout does not cancel the executor future — the
+            # background thread cannot be cancelled anyway, and shielding lets it
+            # set its result cleanly (no "set result on cancelled future" noise).
+            _fut = asyncio.shield(loop.run_in_executor(None, work))
+            try:
+                emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "smith turn exceeded %.0fs for %s — releasing the panel; "
+                    "the work continues in the background",
+                    _turn_timeout, project_id,
+                )
+                emit("message", {
+                    "text": "This is taking longer than expected. It is still "
+                            "running and will finish in the background — reload "
+                            "in a moment to see the result.",
+                    "status": "needs_user",
+                })
+                emit("done", {"status": "timeout"})
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("smith turn failed for %s", project_id)
             emit("error", {"message": str(exc)})
