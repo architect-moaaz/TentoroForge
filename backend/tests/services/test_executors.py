@@ -1355,7 +1355,8 @@ def test_other_nodes_still_answer_in_the_envelope():
     from services.blueprint.executors import (PROPOSAL_SCHEMA, SCHEMA_BY_NODE,
                                               parse_envelope)
 
-    assert set(SCHEMA_BY_NODE) == {"data_model"}
+    assert set(SCHEMA_BY_NODE) == {"data_model", "entity_fields"}, (
+        "the entity declaration and the per-entity author share the shape")
     assert SCHEMA_BY_NODE["data_model"] is not PROPOSAL_SCHEMA
 
     result = parse_envelope(
@@ -1571,16 +1572,16 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("data_model", "database", "security"):
+    for node in ("database", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
     # The declarations are what remain of the calls that hit 32k writing
-    # every step and every contract; those are authored one workflow and one
-    # feature per call inside the default.
-    assert r.for_task("workflows", "x").max_tokens == 32000
-    assert r.for_task("page_contracts", "x").max_tokens == 32000
+    # every field, every step and every contract; those are authored one
+    # entity, one workflow and one feature per call inside the default.
+    for node in ("data_model", "workflows", "page_contracts"):
+        assert r.for_task(node, "x").max_tokens == 32000, node
     for node in ("requirements", "ux_architecture", "integrations",
                  "page_layouts", "design_system", "testing", "workflow_steps",
-                 "page_details"):
+                 "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "database", "security", "workflows"}
@@ -1786,3 +1787,106 @@ def test_the_contract_authors_reply_updates_the_declared_pages_and_only_those(tm
     assert applied.applied
     assert len(svc.doc["pages"]) == 3, "a second page was allocated"
     assert next(p for p in svc.doc["pages"] if p["route"] == "/cases/[id]")["states"]
+
+
+# ---------------------------------------------------------------------------
+# Entities: named once, detailed one at a time
+# ---------------------------------------------------------------------------
+
+
+def _named_entities(tmp_path):
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    for name in ("Job", "PartUsage"):
+        svc.upsert("data.entities", {"name": name, "table": name.lower() + "s",
+                                     "description": "x", "fields": []},
+                   natural_key=name)
+    job, part = (e["id"] for e in svc.doc["data"]["entities"])
+    svc.doc["data"]["relationships"] = [
+        {"from": part, "to": job, "kind": "one_to_many", "fromField": "jobId"}]
+    svc.validate()
+    svc.save()
+    return svc, job, part
+
+
+def test_the_entity_declaration_is_asked_for_names_and_relationships_not_fields():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "fields: []" in NODE_TASKS["data_model"]
+    assert "relationships" in NODE_TASKS["data_model"]
+    assert "sensitive: true" not in NODE_TASKS["data_model"]
+    assert "ONE entity" in NODE_TASKS["entity_fields"]
+    assert "sensitive: true" in NODE_TASKS["entity_fields"]
+
+
+def test_the_declaration_keeps_no_field_and_no_constraint():
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+    from services.blueprint.executors import pin_entity_set
+
+    result = AgentResult(task_id="t", agent="data_model", proposals=[
+        ArtifactProposal(section="data.entities", natural_key="Job",
+                         body={"name": "Job", "table": "jobs", "labelField": "ref",
+                               "fields": [{"name": "ref", "type": "string"}]}),
+        ArtifactProposal(section="data.relationships", natural_key="r",
+                         body={"from": "PartUsage", "to": "Job", "kind": "one_to_many"}),
+        ArtifactProposal(section="data.constraints", natural_key="c",
+                         body={"entity": "Job", "kind": "unique", "expression": "ref"}),
+    ])
+    pin_entity_set(result)
+    assert [p.section for p in result.proposals] == ["data.entities", "data.relationships"]
+    assert result.proposals[0].body["fields"] == []
+    assert "labelField" not in result.proposals[0].body
+
+
+def test_the_field_author_is_handed_its_entity_and_the_relationships_that_touch_it(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc, job, part = _named_entities(tmp_path)
+    system, user = build_prompt(svc.doc, "entity_fields", subject=part,
+                                output_dir=svc.output_dir)
+    assert "ONE entity" in system
+    assert "Return `entities`" in system, "the compact reply shape is shared"
+    assert "named exactly PartUsage" in user
+    assert '"fromField": "jobId"' in user
+    assert '"name": "Job"' in user, "every entity by name, for the foreign keys"
+
+
+def test_the_field_authors_reply_updates_the_named_entity_whatever_it_called_it(tmp_path):
+    """A respelled name would be a second entity: one named with no fields,
+    one detailed that no relationship points at."""
+    import json
+
+    from services.blueprint.agent_contract import apply_agent_result
+    from services.blueprint.executors import parse_envelope, pin_entity_identity
+
+    svc, job, part = _named_entities(tmp_path)
+    reply = parse_envelope(json.dumps({
+        "entities": [
+            {"name": "Part usage", "table": "part_usage", "labelField": "quantity",
+             "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                        {"name": "jobId", "type": "uuid", "required": True},
+                        {"name": "quantity", "type": "integer"}]},
+            {"name": "Supplier", "table": "suppliers",
+             "fields": [{"name": "id", "type": "uuid"}]},
+        ],
+        # names an entity the document holds, not this batch
+        "constraints": [{"entity": "PartUsage", "kind": "check",
+                         "expression": "quantity > 0"}],
+        "confidence": 0.9, "assumptions": [], "issues": [], "change_requests": [],
+    }), task_id="t", agent="data_model", node="entity_fields")
+    pin_entity_identity(svc, part, reply)
+
+    entities = [p for p in reply.proposals if p.section == "data.entities"]
+    assert len(entities) == 1, "an invented entity got through"
+    assert entities[0].natural_key == "PartUsage"
+    assert entities[0].body["id"] == part and entities[0].body["table"] == "partusages"
+    assert len(entities[0].body["fields"]) == 3
+
+    applied = apply_agent_result(svc, reply, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["data"]["entities"]) == 2, "a second entity was allocated"
+    detailed = next(e for e in svc.doc["data"]["entities"] if e["id"] == part)
+    assert len(detailed["fields"]) == 3 and detailed["labelField"] == "quantity"
+    assert svc.doc["data"]["constraints"][0]["entity"] == part, (
+        "a constraint naming an entity the document already holds resolves")

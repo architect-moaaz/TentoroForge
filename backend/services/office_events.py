@@ -89,7 +89,8 @@ ROOM_OF: dict[str, str] = {
 NODE_LABEL: dict[str, str] = {
     "requirements": "Writing down what this app is for",
     "application_model": "Working out the product shape",
-    "data_model": "Designing the entities",
+    "data_model": "Naming the entities",
+    "entity_fields": "Detailing each entity's fields",
     "database": "Laying out the schema",
     "apis": "Deriving the endpoints",
     "backend": "Projecting the data layer",

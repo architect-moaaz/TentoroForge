@@ -214,8 +214,20 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("requirements", "figma_intelligence"), ("product",)),
 
     # left branch — data
-    _n("data_model", "data_model", ("application_model",), ("data.entities",)),
-    _n("database", "data_model", ("data_model",), ("database",)),
+    # ENTITIES ARE NAMED ONCE AND DETAILED ONE AT A TIME. This node names the
+    # entities and states the relationships between them — the part that
+    # needs every entity in view — and no fields. Measured, the single call
+    # that also wrote every field was 88s median and 276s with 28k output
+    # tokens on a 21-entity model, and it is the second node on the critical
+    # path: everything about data waits on it.
+    _n("data_model", "data_model", ("application_model",), ("data.entities",),
+       note="the entity set and its relationships; fields come per entity"),
+    # One call per declared entity, in parallel, each given the whole entity
+    # set by name so a foreign key can name what it points at.
+    _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
+       fanout="entities",
+       note="fields, keys, enums, sensitivity and constraints, per entity"),
+    _n("database", "data_model", ("entity_fields",), ("database",)),
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
     _n("apis", "api", ("database", "workflow_steps", "page_details"), ("apis",),
@@ -241,7 +253,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # A workflow needs a page's id and route to say where it launches; a
     # contract's tasks and states it never reads. So `workflows` depends on
     # this node and runs beside `page_details`.
-    _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",),
+    _n("page_contracts", "page_design", ("ux_architecture", "entity_fields"), ("pages",),
        note="the page set: filled or declined per feature, routes decided"),
     # One call per feature — an entity's pages together, so a list and its
     # detail are written as one flow — each given the declared page set so
@@ -313,7 +325,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("data_model", "page_contracts"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -323,9 +335,9 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
-    _n("business_rules", "business_rules", ("data_model",), ("businessRules",),
+    _n("business_rules", "business_rules", ("entity_fields",), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
-    _n("security", "security", ("data_model",), ("security", "roles", "permissions"),
+    _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
 
@@ -382,6 +394,11 @@ FANOUT: dict[str, Any] = {
     "workflows": lambda doc: [
         w["id"] for w in (doc.get("workflows") or [])
         if w.get("id") and w.get("status") != "DEPRECATED"
+    ],
+    # One call per declared entity.
+    "entities": lambda doc: [
+        e["id"] for e in ((doc.get("data") or {}).get("entities") or [])
+        if isinstance(e, dict) and e.get("id") and e.get("status") != "DEPRECATED"
     ],
     # One call per feature: an entity's pages together, and a page that
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
@@ -808,6 +825,15 @@ def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
                for row in doc.get("pageLayouts") or [])
 
 
+def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
+    """A named entity is detailed once it carries fields. `data_model` and
+    `entity_fields` both write `data.entities`; the declaration names and
+    relates, the author fills in, and an entity with no fields is one the
+    author has not reached."""
+    return any(isinstance(e, dict) and e.get("id") == entity_id and bool(e.get("fields"))
+               for e in (doc.get("data") or {}).get("entities") or [])
+
+
 def _contracts_present(doc: Mapping[str, Any], subject: str) -> bool:
     """A declared page is authored once it carries its `states`: the
     declaration decides that a page exists and where, the contract says what
@@ -836,6 +862,7 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "pages": _layout_present,
     "workflows": _steps_present,
     "page_features": _contracts_present,
+    "entities": _fields_present,
 }
 
 

@@ -1112,10 +1112,10 @@ def test_a_wave_never_starts_a_node_whose_dependency_failed(svc):
             raise RuntimeError("entity agent is down")
         return _wave_result(spec)
 
-    report = run(svc, executor, plan=_WAVE + ["database"], max_attempts=1)
-    assert "database" in report.skipped
-    assert report.skipped_because["database"] == "data_model"
-    assert "database" not in attempted
+    report = run(svc, executor, plan=_WAVE + ["entity_fields"], max_attempts=1)
+    assert "entity_fields" in report.skipped
+    assert report.skipped_because["entity_fields"] == "data_model"
+    assert "entity_fields" not in attempted
 
 
 def test_one_node_cannot_spend_the_whole_wave_budget(svc):
@@ -1207,10 +1207,10 @@ def test_a_fanout_resume_reruns_only_the_uncomposed_subjects():
 
 
 def test_a_node_starts_the_moment_its_own_dependency_is_done(svc):
-    """`database` depends on `data_model` and on nothing else at that level.
-    The wave loop made it wait for `design_system` too, because they shared a
-    topological level. Here `design_system` is the long pole and `database`
-    must not be behind it."""
+    """`page_contracts` depends on `ux_architecture` and, in this plan, on
+    nothing else. The wave loop made it wait for `design_system` too, because
+    they shared a topological level. Here `design_system` is the long pole
+    and `page_contracts` must not be behind it."""
     import threading
     import time
 
@@ -1223,21 +1223,18 @@ def test_a_node_starts_the_moment_its_own_dependency_is_done(svc):
             started[spec.node] = time.monotonic()
         if spec.node == "design_system":
             time.sleep(0.3)
-        elif spec.node == "database":
-            return AgentResult(
-                task_id=spec.task_id, agent=spec.agent, confidence=0.95,
-                proposals=[ArtifactProposal(
-                    section="database", natural_key="database",
-                    body={"engine": "postgres", "provider": "neon"})])
+        elif spec.node == "page_contracts":
+            return page_agent_result(spec)
         with lock:
             returned[spec.node] = time.monotonic()
         return _wave_result(spec)
 
-    report = run(svc, executor, plan=["data_model", "design_system", "database"],
+    report = run(svc, executor,
+                 plan=["ux_architecture", "design_system", "page_contracts"],
                  max_attempts=1)
     assert report.ok, report.failed_because
-    assert started["database"] < returned["design_system"], (
-        "database waited for a node it does not depend on")
+    assert started["page_contracts"] < returned["design_system"], (
+        "page_contracts waited for a node it does not depend on")
 
 
 def test_a_rejected_subject_is_retried_while_its_siblings_are_still_running(svc):
@@ -1273,8 +1270,8 @@ def test_a_rejected_subject_is_retried_while_its_siblings_are_still_running(svc)
 
 def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
     """The whole point, end to end: `page_layouts` is wide and slow, and
-    `security` needs only `data_model`. `security` must run while pages are
-    still composing rather than after the last one lands."""
+    `page_contracts` needs only `ux_architecture` here. It must run while
+    pages are still composing rather than after the last one lands."""
     import threading
     import time
 
@@ -1289,12 +1286,8 @@ def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
         if spec.node == "page_layouts":
             time.sleep(0.25)
             out = _layout_result(spec)
-        elif spec.node == "security":
-            out = AgentResult(
-                task_id=spec.task_id, agent=spec.agent, confidence=0.95,
-                proposals=[ArtifactProposal(
-                    section="roles", natural_key="Admin",
-                    body={"name": "Admin", "description": "x"})])
+        elif spec.node == "page_contracts":
+            out = page_agent_result(spec)
         else:
             out = _wave_result(spec)
         with lock:
@@ -1302,12 +1295,13 @@ def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
         return out
 
     # page_layouts' own dependencies are not in this plan, so it is ready at
-    # once; security is ready as soon as data_model applies.
-    report = run(svc, executor, plan=["page_layouts", "data_model", "security"],
+    # once; page_contracts is ready as soon as ux_architecture applies.
+    report = run(svc, executor,
+                 plan=["page_layouts", "ux_architecture", "page_contracts"],
                  max_attempts=1)
     assert report.ok, report.failed_because
-    assert started["security"] < finished["page_layouts"], (
-        "security waited for a fan-out it does not depend on")
+    assert started["page_contracts"] < finished["page_layouts"], (
+        "page_contracts waited for a fan-out it does not depend on")
 
 
 def test_the_scheduler_holds_the_document_lock_while_applying(svc):
@@ -1617,3 +1611,74 @@ def test_each_feature_is_written_by_its_own_call_onto_the_declared_pages(svc):
     assert report.ok, report.failed_because
     assert len(seen) == 3 and len(svc.doc["pages"]) == 4, "authoring changed the page set"
     assert all(p["states"] and p["purpose"] == "written" for p in svc.doc["pages"])
+
+
+# ---------------------------------------------------------------------------
+# Entities are named once and detailed one at a time
+# ---------------------------------------------------------------------------
+
+
+def _declared_entities(svc, names=("Job", "PartUsage")):
+    for name in names:
+        svc.upsert("data.entities", {"name": name, "table": name.lower() + "s",
+                                     "description": "x", "fields": []},
+                   natural_key=name)
+    svc.validate()
+    svc.save()
+    return [e["id"] for e in svc.doc["data"]["entities"]]
+
+
+def test_everything_about_data_waits_for_the_fields_not_the_names():
+    """A declaration names the entities and relates them; the fields, keys
+    and enums every downstream node reads are authored per entity."""
+    assert DAG["entity_fields"].depends_on == frozenset({"data_model"})
+    assert DAG["entity_fields"].fanout == "entities"
+    for consumer in ("database", "page_contracts", "security", "business_rules",
+                     "workflows"):
+        assert "entity_fields" in DAG[consumer].depends_on, consumer
+        assert "data_model" not in DAG[consumer].depends_on, consumer
+    at = {k: i for i, level in enumerate(levels()) for k in level}
+    assert at["data_model"] == at["ux_architecture"]
+    assert at["entity_fields"] == at["data_model"] + 1
+
+
+def test_the_field_author_fans_out_over_the_named_entities(svc):
+    from services.blueprint.orchestrator import pending_subjects, subjects_for
+
+    ids = _declared_entities(svc)
+    assert subjects_for(DAG["entity_fields"], svc.doc) == ids
+    assert pending_subjects(DAG["entity_fields"], svc.doc) == ids
+
+
+def test_resuming_the_field_author_reruns_only_the_entities_without_fields(svc):
+    from services.blueprint.orchestrator import pending_subjects
+
+    ids = _declared_entities(svc)
+    svc.doc["data"]["entities"][0]["fields"] = [{"name": "id", "type": "uuid"}]
+    assert pending_subjects(DAG["entity_fields"], svc.doc) == [ids[1]]
+    assert "data_model" in completed_nodes(svc.doc)
+    assert "entity_fields" not in completed_nodes(svc.doc)
+    svc.doc["data"]["entities"][1]["fields"] = [{"name": "id", "type": "uuid"}]
+    assert "entity_fields" in completed_nodes(svc.doc)
+
+
+def test_each_entity_is_detailed_by_its_own_call_onto_the_named_row(svc):
+    ids = _declared_entities(svc)
+    seen: list[str] = []
+
+    def executor(spec):
+        seen.append(spec.subject)
+        row = next(e for e in svc.doc["data"]["entities"] if e["id"] == spec.subject)
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="data.entities", natural_key=row["name"],
+                body={"name": row["name"], "table": row["table"],
+                      "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                                 {"name": "label", "type": "string"}]})])
+
+    report = run(svc, executor, plan=["entity_fields"], max_attempts=1)
+    assert report.ok, report.failed_because
+    assert sorted(seen) == sorted(ids)
+    assert len(svc.doc["data"]["entities"]) == 2, "detailing created a second entity"
+    assert all(len(e["fields"]) == 2 for e in svc.doc["data"]["entities"])

@@ -41,6 +41,7 @@ network call.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 import logging
@@ -941,17 +942,32 @@ NODE_TASKS: dict[str, str] = {
         "English, and defaulting is the right answer far more often than not."
     ),
     "data_model": (
-        "Model the entities behind the requirements: fields with real types, which "
-        "field is the human-readable label, and which fields hold sensitive data. "
-        "Mark `sensitive: true` on anything personal or financial — downstream "
-        "agents rely on that flag and cannot see this section to second-guess it. "
-        "Declare every association with `references` on the field, naming the "
-        "entity it points at. Not the description: `jobId: uuid` explained in "
+        "Name the entities behind the requirements and state how they relate. "
+        "For each entity give `name`, `table`, a one-sentence `description` "
+        "and `fields: []` — EMPTY. Do not write fields: each entity's fields, "
+        "keys, enums, sensitivity and constraints are authored afterwards, one "
+        "entity per call, against the set you name here, and any field you "
+        "write is dropped. What that pass cannot decide alone is what you "
+        "decide now: which entities exist, what each is for, and every "
+        "association between them in `relationships` by entity name with its "
+        "`kind`, `fromField` and `toField` — `jobId: uuid` explained in "
         "English as \"Job the part was consumed on\" is a relationship no "
-        "later stage can read. The page planner could not tell a row only ever "
-        "written while looking at a job from a top-level record, and gave both "
-        "a full list, detail and create page. Add constraints for uniqueness "
-        "and checks the columns cannot express on their own."
+        "later stage can read, and the page planner could not tell a row only "
+        "ever written while looking at a job from a top-level record."
+    ),
+    "entity_fields": (
+        "Author the fields of ONE entity, the one given below. Its `name` and "
+        "`table` are decided and every other entity is named beside it; keep "
+        "them exactly as given and return exactly one entry in `entities`, "
+        "for this entity. Fields with real types, which field is the "
+        "human-readable label (`labelField`), which are required, unique or "
+        "the primary key, which take one of a fixed set of `enumValues`, and "
+        "which hold sensitive data. Mark `sensitive: true` on anything "
+        "personal or financial — downstream agents rely on that flag and "
+        "cannot see this section to second-guess it. The foreign keys are "
+        "the declared relationships: give each one its column here, named as "
+        "the relationship's `fromField`. Add `constraints` for uniqueness and "
+        "checks the columns cannot express on their own, for this entity only."
     ),
     "ux_architecture": (
         "Organise the application into modules and a navigation tree. Every list "
@@ -1319,7 +1335,7 @@ def build_prompt(
     system = SYSTEM.format(
         agent=spec.agent,
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
-        reply_rules=(DATA_MODEL_REPLY_RULES if node == "data_model"
+        reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
@@ -1469,6 +1485,9 @@ def build_prompt(
     if node == "page_details":
         return _page_details_prompt(doc, system, subject, feedback,
                                     output_dir=output_dir)
+
+    if node == "entity_fields":
+        return _entity_fields_prompt(doc, system, subject, feedback)
 
     if node == "page_contracts":
         # The answer space is the slot list, not "whatever pages you think of".
@@ -1825,7 +1844,10 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
 }
 
 #: The reply shape each node is held to. Absent means the §29 envelope.
-SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {"data_model": DATA_MODEL_SCHEMA}
+SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {
+    "data_model": DATA_MODEL_SCHEMA,
+    "entity_fields": DATA_MODEL_SCHEMA,  # one entry, for one entity
+}
 
 
 def declared_workflow(doc: dict, workflow_id: str) -> dict | None:
@@ -1892,6 +1914,126 @@ def _declared_key(output_dir: Any, workflow_id: str) -> str | None:
         return IdAllocator.load(output_dir=output_dir).key_for(workflow_id)
     except Exception:  # noqa: BLE001 — a missing registry is not a prompt error
         return None
+
+
+def declared_entity(doc: dict, entity_id: str) -> dict | None:
+    for row in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(row, dict) and row.get("id") == entity_id:
+            return row
+    return None
+
+
+def pin_entity_set(result: AgentResult) -> None:
+    """Keep the entity declaration to what it declares: names, tables,
+    descriptions and relationships. Fields are the author's, and a
+    declaration that wrote them would read as an authored entity to resume;
+    constraints belong to the entity they constrain and go with the fields.
+    Anything outside this agent's boundary is left for the contract to
+    refuse."""
+    result.proposals = [p for p in result.proposals
+                        if p.section != "data.constraints"]
+    for proposal in result.proposals:
+        if proposal.section == "data.entities":
+            body = dict(proposal.body or {})
+            body["fields"] = []
+            body.pop("labelField", None)  # names a field nobody has written
+            proposal.body = body
+
+
+def _entity_fields_prompt(doc: dict, system: str, subject: str,
+                          feedback: str) -> tuple[str, str]:
+    """One entity in full, every entity by name, and the relationships that
+    touch it — the foreign keys this entity must carry a column for."""
+    row = declared_entity(doc, subject) or {"id": subject}
+    data = doc.get("data") or {}
+    others = [
+        {"id": e.get("id"), "name": e.get("name"), "table": e.get("table"),
+         "description": e.get("description", "")}
+        for e in data.get("entities") or []
+        if isinstance(e, dict) and e.get("status") != "DEPRECATED"
+    ]
+    touching = [
+        r for r in data.get("relationships") or []
+        if isinstance(r, dict) and subject in (r.get("from"), r.get("to"))
+    ]
+    context = context_for(doc, "data_model")
+    context["data"] = {"entities": others, "relationships": touching,
+                       "constraints": []}
+    wanted = set(row.get("requirements") or [])
+    if wanted:
+        context["requirements"] = [
+            r for r in context.get("requirements") or []
+            if isinstance(r, dict) and r.get("id") in wanted
+        ]
+    user = (
+        f"Author the fields of entity {subject} ({row.get('name', '')!s}, "
+        f"table {row.get('table', '')!s}). Return one entry in `entities`, "
+        f"named exactly {row.get('name', '')!s}.\n\n"
+        "Here is the entity as declared.\n\n```json\n"
+        + json.dumps(row, indent=2, sort_keys=True)
+        + "\n```\n\nEvery entity by name, the relationships that touch this "
+        "one, and the Blueprint slice a field may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```"
+    )
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+    return system, user
+
+
+def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
+    """Make the field author's reply update the declared entity, and only it.
+
+    The entity proposal is matched by name, case-insensitively, to the
+    declared row; any other entity in the reply is one the author added to a
+    set it was told was decided, and is dropped. The match takes the
+    declaration's key, id, name and table, so a respelled name cannot
+    allocate a second entity. Relationships and constraints pass through:
+    the batch resolver sees the document's entities by name.
+    """
+    from services.blueprint.ids import IdAllocator
+
+    row = declared_entity(svc.doc, entity_id)
+    if row is None:
+        return
+    try:
+        key = IdAllocator.load(output_dir=svc.output_dir).key_for(entity_id)
+    except Exception:  # noqa: BLE001 — fall back to the name, which bound it
+        key = None
+    key = key or str(row.get("name") or entity_id)
+
+    def loose(name: Any) -> str:
+        # "Part usage", "part_usage" and "PartUsage" are one entity to an
+        # author asked for exactly one; `_norm` keeps them apart on purpose
+        # for allocation, which is why the match is made here and the
+        # declared spelling is what gets written.
+        return re.sub(r"[^a-z0-9]", "", str(name or "").casefold())
+
+    wanted = loose(row.get("name"))
+    entity_proposals = [p for p in result.proposals if p.section == "data.entities"]
+
+    kept: list[Any] = []
+    for proposal in result.proposals:
+        if proposal.section != "data.entities":
+            kept.append(proposal)
+            continue
+        body = dict(proposal.body or {})
+        named = loose(body.get("name") or proposal.natural_key)
+        # A reply with one entity is a reply about this entity, whatever it
+        # called it; with several, the one that names it is.
+        if not (len(entity_proposals) == 1 or named == wanted
+                or str(body.get("id") or "") == entity_id):
+            logger.warning("[entity_fields] %s: dropped an entity outside the call: %s",
+                           entity_id, body.get("name") or proposal.natural_key)
+            continue
+        proposal.natural_key = key
+        body["id"] = entity_id
+        body["name"] = row.get("name")
+        if row.get("table"):
+            body["table"] = row["table"]
+        proposal.body = body
+        kept.append(proposal)
+    result.proposals = kept
 
 
 #: What the page-set declaration decides. Everything else on a page is the
@@ -2124,7 +2266,7 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
         raise MalformedEnvelope(f"reply was not JSON: {exc}") from exc
 
     proposals: list[ArtifactProposal] = []
-    if node in SCHEMA_BY_NODE and node == "data_model":
+    if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
         if not proposals:
             # A reply that parsed but named nothing is not a data model. Said
@@ -2315,7 +2457,10 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: this is the established headroom rather than a new one. These nodes are
 #: above STREAM_ABOVE either way, so they were already streaming.
 MAX_TOKENS_BY_NODE: dict[str, int] = {
-    "data_model": 64000,
+    # Names the entities and their relationships without a field; the 64k
+    # the single call needed went on fields, which `entity_fields` writes one
+    # entity at a time inside the default.
+    "data_model": 32000,
     # Declares the page set without the contracts; the 64k the single call
     # needed went on contracts, which `page_details` writes per feature.
     "page_contracts": 32000,
@@ -2621,6 +2766,11 @@ def make_executor(
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
+            elif spec.node == "data_model":
+                pin_entity_set(parsed)
+            elif spec.node == "entity_fields":
+                with svc.lock:
+                    pin_entity_identity(svc, spec.subject, parsed)
             return parsed
 
         raise MalformedEnvelope(f"{spec.node}: {last}")
