@@ -161,6 +161,7 @@ PROJECTIONS: dict[str, tuple[str, str]] = {
                  "nav-flow.json; designSystem -> tokens", "@tentoroforge/engine"),
     "integration": ("workflows + businessRules -> workflow definitions and "
                     "route wiring", "workflow engine"),
+    "install": ("scaffold + vendored engines -> node_modules", "npm"),
     "preview": ("runtime config + a running container", "build/preview service"),
 }
 
@@ -313,7 +314,13 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("integration", "backend",
        ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
        (), kind="projection"),
-    _n("testing", "testing", ("integration",), ("tests",), optional=True),
+    # Reads requirements, data, pages, apis, workflows and rules — never a
+    # projected file — so it waits for the producers of those and runs beside
+    # the projections instead of behind them. `apis` carries the data model
+    # and the pages transitively; the other two are named because nothing
+    # between them and this node would.
+    _n("testing", "testing", ("apis", "workflow_steps", "business_rules"),
+       ("tests",), optional=True),
     # §20 + §23 — both read off what the Blueprint already carries, so neither
     # is an agent. Placed after authoring and before verification, so the
     # verification report is made against a document that knows what it assumed.
@@ -321,7 +328,20 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        kind="service",
        note="§20 decision memory + §23 completeness, both derived"),
     _n("verification", "verification", ("memory",), (), kind="service"),
-    _n("preview", "build", ("verification",), ("runtime",), kind="projection"),
+    # `npm install` reads the scaffold's package.json and the vendored
+    # engines, which are the same for every application: it needs nothing an
+    # agent writes. With no dependencies it starts with `requirements` and is
+    # finished long before there is anything to compile. Measured at one to
+    # three minutes, all of which used to sit at the end of the build.
+    _n("install", "build", (), (), kind="projection",
+       note="scaffold + engines + node_modules, before any agent replies"),
+    # The build waits for the join and the install, and for nothing else.
+    # `testing`, `memory` and `verification` write to the Blueprint, not to
+    # the tree being compiled, so a compile that waited for them was waiting
+    # for a report it does not read. §94's state walk still gates PREVIEW on
+    # `verification` having run — see `smith.BUILD_WALK`.
+    _n("preview", "build", ("integration", "install"), ("runtime",),
+       kind="projection"),
 )}
 
 
@@ -1050,11 +1070,18 @@ def _execute(
         capability_for(DAG[key].agent)  # §28: no unregistered agents
         node = DAG[key]
         if node.kind in ("service", "projection"):
-            # Deterministic and cheap, and it mutates the document directly:
-            # run here, on the one writing thread, never on a worker.
+            # Deterministic, and it mutates the document directly: run here,
+            # on the one writing thread, never on a worker. A handler whose
+            # work is a process rather than a computation hands back a future
+            # (`install`), and the node is in flight until it lands.
             with svc.lock:
-                _run_deterministic(svc, key, node, report=report, done=done,
-                                   app_root=app_root, ledger=ledger)
+                pending = _run_deterministic(
+                    svc, key, node, report=report, done=done,
+                    app_root=app_root, ledger=ledger)
+            if pending is not None:
+                futures[pending] = TaskSpec(task_id=f"TASK-{key}", node=key,
+                                            agent=node.agent)
+                return
             finished.add(key)
             settle_optional(key)
             return
@@ -1069,8 +1096,23 @@ def _execute(
             return
         pump(pool, key)
 
+    def settle_deterministic(key: str, outcome: Any) -> None:
+        finished.add(key)
+        if isinstance(outcome, Exception):
+            report.failed.append(key)
+            report.failed_because[key] = _reason(outcome)
+            _note(ledger, "node_failed", key, _reason(outcome))
+        else:
+            report.completed.append(key)
+            _note(ledger, "node_done", key)
+            done.add(key)
+        settle_optional(key)
+
     def settle(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
         key = spec.node
+        if DAG[key].kind != "agent":
+            settle_deterministic(key, outcome)
+            return
         state = runs[key]
         with svc.lock:
             verdict = _apply_subject(
@@ -1115,7 +1157,11 @@ def _execute(
             landed, _ = wait(list(futures), return_when=FIRST_COMPLETED)
             for fut in landed:
                 spec = futures.pop(fut)
-                deferred.append((spec, fut.result()))
+                try:
+                    outcome = fut.result()
+                except Exception as exc:  # noqa: BLE001 — a deterministic node's own failure
+                    outcome = exc
+                deferred.append((spec, outcome))
             flush(pool)
     except BaseException:
         # A crash on this thread (a CapabilityViolation is the one that
@@ -1197,8 +1243,12 @@ def _run_deterministic(
     done: set[str],
     app_root: str | None,
     ledger: Any,
-) -> None:
-    """A service or projection node: deterministic, inline, one writer."""
+) -> "Any":
+    """A service or projection node: deterministic, inline, one writer.
+
+    Returns a :class:`concurrent.futures.Future` when the handler handed one
+    back — its work is still running and the caller must wait for it before
+    the node counts — and None otherwise."""
     # EVERY KIND OF NODE STARTS, not just the ones that call a model.
     # `node:start` was emitted for agent nodes only, so a service or
     # projection node that ran appeared in `done` and never in `started` —
@@ -1234,15 +1284,20 @@ def _run_deterministic(
             _note(ledger, "node_blocked", key, "no projection handler or app_root")
             return
         try:
-            projector(svc, app_root)
+            pending = projector(svc, app_root)
         except Exception as exc:  # noqa: BLE001 - reported, not swallowed
             report.failed.append(key)
             report.failed_because[key] = _reason(exc)
             _note(ledger, "node_failed", key, _reason(exc))
-            return
+            return None
+        from concurrent.futures import Future
+
+        if isinstance(pending, Future):
+            return pending
     report.completed.append(key)
     _note(ledger, "node_done", key)
     done.add(key)
+    return None
 
 
 #: Attempts a node gets before the run gives up on it, where two is not enough.
@@ -1690,6 +1745,30 @@ def _project_integration(svc: BlueprintService, app_root: str) -> None:
 
 #: Projection handlers, by node key. A node with no handler stays blocked —
 #: which is the honest state for the projections not yet ported.
+def _project_install(svc: BlueprintService, app_root: str) -> Any:
+    """Lay down the scaffold and engines and install against them — on its
+    own thread, handed back as a future, because this is minutes of `npm`
+    and the scheduler thread is the document's one writer.
+
+    Reads the document once, here, under the lock the scheduler holds; the
+    thread touches files only.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from services.blueprint.assembly import install_dependencies, prepare_app_root
+
+    short_id = (svc.doc.get("application") or {}).get("id", "forge")
+
+    def work() -> int:
+        prepare_app_root(app_root, project_short_id=short_id)
+        return install_dependencies(app_root)
+
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-install")
+    future = pool.submit(work)
+    pool.shutdown(wait=False)  # the worker finishes the job; nobody blocks here
+    return future
+
+
 def _project_preview(svc: BlueprintService, app_root: str) -> None:
     """Assemble the scaffold and engines around the projected application.
 
@@ -1707,7 +1786,13 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     # Assembly writes a tree; the build is what makes it an application. Kept
     # inside the node so a run that cannot compile fails here, where the reason
     # is a compiler error, rather than later when someone opens the directory.
-    result = verify_build(app_root)
+    # The `install` node already installed when `node_modules` is there; a
+    # missing directory means it did not run (no app_root at the time, a
+    # resumed plan without it) and the build installs for itself.
+    from pathlib import Path as _P
+
+    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
+    result.setdefault("install", 0)
     runtime = dict(svc.doc.get("runtime") or {})
     runtime["build"] = {"install": result["install"], "build": result["build"],
                         "status": "passed"}
@@ -1734,6 +1819,7 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
 
 
 PROJECTION_HANDLERS: dict[str, Any] = {
+    "install": _project_install,
     "backend": _project_data_layer,
     "frontend": _project_frontend,
     "integration": _project_integration,

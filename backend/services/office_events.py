@@ -110,6 +110,7 @@ NODE_LABEL: dict[str, str] = {
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
     "preview": "Building the preview",
+    "install": "Installing the toolchain",
 }
 
 

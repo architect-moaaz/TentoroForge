@@ -85,6 +85,10 @@ def smith(tmp_path, monkeypatch):
         "services.blueprint.assembly.verify_build",
         lambda app_root, **kw: {"install": 0, "build": 0},
     )
+    monkeypatch.setattr(
+        "services.blueprint.assembly.install_dependencies",
+        lambda app_root, **kw: 0,
+    )
     svc = BlueprintService.create(
         output_dir=tmp_path, app_id="a", name="ATS", domain="ATS")
     return Smith(svc, model=Scripted(), executor=authoring_executor,
@@ -518,3 +522,64 @@ def test_the_cli_defaults_the_app_root_beside_the_blueprint():
     src = inspect.getsource(cli.main)
     assert "--app-root" in inspect.getsource(cli)
     assert 'args.output_dir / "app"' in src
+
+
+# --- the live path's state after a build --------------------------------------
+
+def _report(*completed: str):
+    from services.blueprint.orchestrator import RunReport
+
+    r = RunReport()
+    r.completed.extend(completed)
+    return r
+
+
+FULL_BUILD = ("requirements", "application_model", "backend", "integration",
+              "verification", "preview")
+
+
+def test_a_router_build_from_the_review_gate_reaches_preview(tmp_path):
+    """The router runs the graph without `Smith.build`, and nothing after
+    the run moved the state: a compiled, served application read
+    BLUEPRINT_REVIEW forever."""
+    from services.blueprint import approval
+    from services.smith.smith import settle_state_after_build
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.doc["requirements"] = [{"id": "REQ-001", "description": "x"}]
+    svc.doc["state"] = "BLUEPRINT_REVIEW"
+    svc.save()
+
+    assert settle_state_after_build(svc, _report(*FULL_BUILD)) == "PREVIEW"
+    assert svc.doc["state"] == "PREVIEW"
+    assert approval.is_approved(svc.doc, "plan"), "the button was the approval"
+
+
+def test_a_router_build_that_stalled_reads_where_it_stopped(tmp_path):
+    from services.smith.smith import settle_state_after_build
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.doc["requirements"] = [{"id": "REQ-001", "description": "x"}]
+    svc.doc["state"] = "BLUEPRINT_REVIEW"
+    svc.save()
+    # the join ran, verification did not, and preview did — the compile no
+    # longer waits for the report, but the state still reads in §107's order
+    assert settle_state_after_build(svc, _report("backend", "integration", "preview")) == "BUILD"
+
+
+def test_a_router_build_that_defined_nothing_moves_nowhere(tmp_path):
+    from services.smith.smith import settle_state_after_build
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    assert settle_state_after_build(svc, _report()) == "DISCOVERY"
+
+
+def test_a_rebuild_from_a_built_application_goes_through_iteration(tmp_path):
+    from services.smith.smith import settle_state_after_build
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.doc["requirements"] = [{"id": "REQ-001", "description": "x"}]
+    svc.doc["state"] = "PREVIEW"
+    svc.save()
+    assert settle_state_after_build(svc, _report(*FULL_BUILD)) == "PREVIEW"
+    assert settle_state_after_build(svc, _report("backend")) == "DATABASE_PROVISIONING"

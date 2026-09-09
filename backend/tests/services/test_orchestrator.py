@@ -52,7 +52,9 @@ def test_dag_is_acyclic_and_layered():
     # §28's first tier is everything with no upstream. `figma_intelligence`
     # joins it because §51 places design extraction upstream of requirement,
     # entity and page inference — it is evidence those work from.
-    assert set(lv[0]) == {"requirements", "figma_intelligence"}
+    # `install` joins it because `npm install` needs nothing an agent writes
+    # and used to be the last one to three minutes of every build.
+    assert set(lv[0]) == {"requirements", "figma_intelligence", "install"}
     flat = [k for level in lv for k in level]
     assert sorted(flat) == sorted(DAG)
 
@@ -1407,3 +1409,114 @@ def test_each_workflow_is_authored_by_its_own_call(svc):
     assert sorted(seen) == sorted(w["id"] for w in svc.doc["workflows"])
     assert all(w["steps"] for w in svc.doc["workflows"])
     assert len(svc.doc["workflows"]) == 3, "authoring created a second row"
+
+
+# ---------------------------------------------------------------------------
+# The tail: install at second zero, build right after the join
+# ---------------------------------------------------------------------------
+
+
+def test_install_depends_on_nothing_and_the_build_waits_for_it():
+    """`npm install` reads the scaffold's package.json and the vendored
+    engines — the same for every application — so it can start with the
+    first agent and be done before there is anything to compile."""
+    assert DAG["install"].depends_on == frozenset()
+    assert DAG["install"].kind == "projection"
+    assert "install" in DAG["preview"].depends_on
+    assert "integration" in DAG["preview"].depends_on
+    assert "verification" not in DAG["preview"].depends_on, (
+        "the compile waited for a report it does not read")
+    assert "install" in levels()[0]
+
+
+def test_testing_waits_for_what_it_reads_not_for_the_projections():
+    from services.blueprint.agent_contract import capability_for
+
+    reads = capability_for(DAG["testing"].agent).reads
+    assert "codeMap" not in reads
+    assert DAG["testing"].depends_on == frozenset({"apis", "workflow_steps", "business_rules"})
+
+
+def test_a_deterministic_node_may_hand_back_a_future_and_is_done_when_it_lands(svc, tmp_path, monkeypatch):
+    """A handler whose work is a process rather than a computation returns
+    a future; the scheduler counts the node in flight — beside the agent
+    calls, not blocking them — and records it when the process ends."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from services.blueprint import orchestrator
+
+    order: list[str] = []
+    lock = threading.Lock()
+
+    def slow_install(service, app_root):
+        pool = ThreadPoolExecutor(max_workers=1)
+
+        def work():
+            time.sleep(0.2)
+            with lock:
+                order.append("install-landed")
+            return 0
+
+        fut = pool.submit(work)
+        pool.shutdown(wait=False)
+        return fut
+
+    def executor(spec):
+        with lock:
+            order.append(f"{spec.node}-called")
+        return page_agent_result(spec)
+
+    monkeypatch.setitem(orchestrator.PROJECTION_HANDLERS, "install", slow_install)
+    report = run(svc, executor, plan=["install", "page_contracts"],
+                 max_attempts=1, app_root=str(tmp_path / "app"))
+    assert report.ok, report.failed_because
+    assert sorted(report.completed) == ["install", "page_contracts"]
+    assert order.index("page_contracts-called") < order.index("install-landed"), (
+        "the agent call waited for the install to finish")
+
+
+def test_a_failed_install_is_recorded_and_the_build_is_skipped(svc, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from services.blueprint import orchestrator
+
+    def broken_install(service, app_root):
+        pool = ThreadPoolExecutor(max_workers=1)
+
+        def work():
+            raise RuntimeError("npm ERR! ENOTFOUND registry.npmjs.org")
+
+        fut = pool.submit(work)
+        pool.shutdown(wait=False)
+        return fut
+
+    monkeypatch.setitem(orchestrator.PROJECTION_HANDLERS, "install", broken_install)
+    report = run(svc, page_agent_result, plan=["install", "preview"],
+                 max_attempts=1, app_root=str(tmp_path / "app"))
+    assert report.failed == ["install"]
+    assert "ENOTFOUND" in report.failed_because["install"]
+    assert "preview" in report.skipped
+    assert report.skipped_because["preview"] == "install"
+
+
+def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_path, monkeypatch):
+    from services.blueprint import assembly, orchestrator
+
+    app_root = tmp_path / "app"
+    seen: list[dict] = []
+    monkeypatch.setattr(assembly, "verify_build",
+                        lambda root, **kw: seen.append(kw) or {"install": 0, "build": 0})
+    monkeypatch.setattr(assembly, "apply_assembly", lambda *a, **k: {})
+    monkeypatch.setattr(assembly, "page_funnel",
+                        lambda doc, root: {"planned": 0, "served": 0, "missing": []})
+
+    (app_root / "node_modules").mkdir(parents=True)
+    orchestrator._project_preview(svc, str(app_root))
+    assert seen[-1]["install"] is False
+
+    import shutil
+    shutil.rmtree(app_root / "node_modules")
+    orchestrator._project_preview(svc, str(app_root))
+    assert seen[-1]["install"] is True, "no node_modules: the build installs for itself"

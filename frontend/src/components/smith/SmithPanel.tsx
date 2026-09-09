@@ -96,6 +96,7 @@ const STAGE_VERB: Record<string, string> = {
   security: "Checking who may do what",
   verification: "Checking its own work",
   preview: "Starting the preview",
+  install: "Installing dependencies",
   memory: "Remembering the decisions",
   integrations: "Noting the third parties",
 };
@@ -130,6 +131,7 @@ const STAGE_LABEL: Record<string, string> = {
   memory: "Decisions",
   verification: "Verification",
   preview: "Preview",
+  install: "Install",
 };
 
 const labelFor = (key: string) => STAGE_LABEL[key] ?? key;

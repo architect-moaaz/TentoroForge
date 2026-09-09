@@ -687,8 +687,33 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     }
 
 
-def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
+def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge") -> list[str]:
+    """Everything `npm install` needs and nothing the Blueprint decides.
+
+    The scaffold's package.json and the vendored engine packages are the same
+    for every application, so they can be laid down — and the dependencies
+    installed against them — before a single agent has replied. `assemble`
+    lays the same files again later, idempotently, around the projected app.
+    """
+    out = Path(app_root)
+    written = copy_scaffold(out, project_short_id=project_short_id)
+    written += vendor_engines(out)
+    return written
+
+
+def install_dependencies(app_root: str | Path, *, timeout: int = 900) -> int:
+    """`npm install`, on its own, so it can run from second zero of a build
+    rather than at the end of one. Raises :class:`BuildFailed` on a non-zero
+    exit, the same way `verify_build` does."""
+    return verify_build(app_root, timeout=timeout, build=False)["install"]
+
+
+def verify_build(app_root: str | Path, *, timeout: int = 900,
+                 install: bool = True, build: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
+
+    ``install=False`` skips the install when the `install` node already ran
+    it at the start of the build; ``build=False`` is that node's own call.
 
     The `preview` node assembled a tree and reported success without ever
     compiling it, so "an application was generated" meant "files were written".
@@ -704,8 +729,12 @@ def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
     import subprocess
 
     root = Path(app_root)
-    steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
-             ("build", ["npm", "run", "build"]))
+    steps = tuple(
+        step for step, wanted in (
+            (("install", ["npm", "install", "--no-audit", "--no-fund"]), install),
+            (("build", ["npm", "run", "build"]), build),
+        ) if wanted
+    )
     # THE CHECK MUST NOT BREAK THE THING IT CHECKS. `next build` and `next dev`
     # both own `.next`; a verification build in the directory of a running
     # dev server rewrote its manifests under it, and the served app answered
