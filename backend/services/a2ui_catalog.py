@@ -94,7 +94,14 @@ COMPOSITION_SET: dict[str, tuple[str, ...]] = {
 # Components that hold other components. Everything else is a leaf, and saying
 # so keeps the model from nesting a Table inside a Badge.
 CONTAINERS = frozenset(
-    {"Stack", "Row", "Grid", "Card", "Section", "Container", "Cluster", "Split"}
+    {"Stack", "Row", "Grid", "Card", "Section", "Container", "Cluster", "Split",
+     # Dialog/Modal wrap a body and Tabs holds panels — the composer emits
+     # `child`/`children` on them and the projection renders those, but without
+     # CONTAINER membership the catalog declared no child slot and the surface
+     # was rejected. `List` is deliberately NOT here: forge's List is data-bound
+     # (a template over a source), takes no direct children, and adding it made
+     # the composer put children on it that forge then refused.
+     "Dialog", "Modal", "Tabs"}
 )
 
 # Props whose value is a data binding rather than a literal. Typed as unknown so
@@ -175,6 +182,14 @@ _PRIMITIVE_PROPS: dict[str, dict[str, dict]] = {
         "as": {"type": "enum",
                "enum": ["span", "p", "h1", "h2", "h3", "h4", "h5", "h6",
                         "label", "strong", "em"], "optional": True},
+        # Text-style hint the composer naturally emits (h1..h5/caption/body).
+        # This transcribed entry — not the library registry — is what the A2UI
+        # composer authors and validates Text against, so without `variant`
+        # here every composed Text carrying it was rejected and the page
+        # dropped. `as` still picks the element; `variant` is the style band.
+        "variant": {"type": "enum",
+                    "enum": ["h1", "h2", "h3", "h4", "h5", "caption", "body"],
+                    "optional": True},
     },
 }
 
@@ -481,6 +496,14 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
                 "inlined."
             ),
             "$ref": f"{_COMMON}#/$defs/ChildList",
+        }
+        # A single child by id — the composer routinely emits `child` on a
+        # one-child container (a Card wrapping one Column). Without it declared
+        # the surface was rejected as carrying an unknown prop; the projection
+        # already reads `child` as a one-element `children`, so accept it.
+        props["child"] = {
+            "description": "A single child component id (one-child form of `children`).",
+            "type": "string",
         }
 
     body: dict[str, Any] = {

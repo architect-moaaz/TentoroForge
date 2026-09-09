@@ -40,6 +40,7 @@ root as ``blueprint.json``.
 from __future__ import annotations
 
 import json
+import threading
 import os
 import re
 import shutil
@@ -296,6 +297,14 @@ class BlueprintService:
     output_dir: str
     doc: dict = field(default_factory=dict)
     _validator: Draft7Validator | None = field(default=None, repr=False, compare=False)
+    #: THE DOCUMENT HAS ONE WRITER AND MANY READERS. The orchestrator applies
+    #: results on its own thread while a dozen executor threads read `doc` to
+    #: build their prompts; a `json.dumps` walking the document while an
+    #: apply appends to it raises mid-walk, or worse, sends a torn prompt.
+    #: Every apply takes this lock; anything that reads the document to build
+    #: a prompt takes it for the read and releases it before the network call.
+    #: Re-entrant, so a writer that calls its own readers does not deadlock.
+    lock: Any = field(default_factory=threading.RLock, repr=False, compare=False)
 
     # -- paths --------------------------------------------------------------
 

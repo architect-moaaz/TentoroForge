@@ -16,6 +16,15 @@ import { useRouter } from "next/navigation";
  */
 const AUTH_LAYOUT = "__AUTH_LAYOUT__";
 
+type AccountType = { value: string; label: string; description?: string };
+
+// The account types this signup offers. Empty by default (single-account
+// app); the Blueprint assembly step overwrites this line with the derived
+// options when the app models a self-service account-type choice (e.g. crew
+// member vs vessel owner). Keep the shape stable — assembly replaces the whole
+// literal.
+const ACCOUNT_TYPES: AccountType[] = [];
+
 function BrandPanel({ variant }: { variant: "full" | "panel" }) {
   return (
     <div
@@ -51,18 +60,27 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [accountType, setAccountType] = useState(ACCOUNT_TYPES[0]?.value ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (ACCOUNT_TYPES.length > 0 && !accountType) {
+      setError("Please choose an account type");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify(
+          ACCOUNT_TYPES.length > 0
+            ? { name, email, password, accountType }
+            : { name, email, password }
+        ),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -96,6 +114,34 @@ export default function SignupPage() {
             <h1 className="text-2xl font-semibold text-foreground">Create account</h1>
             <p className="text-sm text-muted-foreground">Join __APP_NAME__</p>
           </div>
+          {ACCOUNT_TYPES.length > 0 && (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium text-foreground">I'm signing up as</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {ACCOUNT_TYPES.map((t) => {
+                  const selected = accountType === t.value;
+                  return (
+                    <button
+                      type="button"
+                      key={t.value}
+                      aria-pressed={selected}
+                      onClick={() => setAccountType(t.value)}
+                      className={`rounded-md border p-3 text-left transition focus:outline-none focus:ring-2 focus:ring-ring ${
+                        selected
+                          ? "border-primary bg-primary/5 ring-1 ring-primary"
+                          : "border-input hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-foreground">{t.label}</div>
+                      {t.description && (
+                        <div className="mt-0.5 text-xs text-muted-foreground">{t.description}</div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground" htmlFor="name">Name</label>
             <input id="name" required value={name} onChange={(e) => setName(e.target.value)}

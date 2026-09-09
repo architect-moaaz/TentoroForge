@@ -89,18 +89,21 @@ ROOM_OF: dict[str, str] = {
 NODE_LABEL: dict[str, str] = {
     "requirements": "Writing down what this app is for",
     "application_model": "Working out the product shape",
-    "data_model": "Designing the entities",
+    "data_model": "Naming the entities",
+    "entity_fields": "Detailing each entity's fields",
     "database": "Laying out the schema",
     "apis": "Deriving the endpoints",
     "backend": "Projecting the data layer",
     "ux_architecture": "Mapping modules and navigation",
     "design_system": "Setting the design language",
-    "page_contracts": "Drafting the page contracts",
+    "page_contracts": "Deciding the page set",
+    "page_details": "Writing each feature's page contracts",
     "page_layouts": "Composing page trees",
     "figma_intelligence": "Reading the design out of Figma",
     "figma_design_system": "Turning Figma into design tokens",
     "frontend": "Projecting the page schemas",
-    "workflows": "Wiring up the workflows",
+    "workflows": "Declaring the workflows",
+    "workflow_steps": "Authoring each workflow's steps",
     "business_rules": "Writing the business rules",
     "security": "Setting roles and permissions",
     "integrations": "Connecting the outside services",
@@ -109,6 +112,7 @@ NODE_LABEL: dict[str, str] = {
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
     "preview": "Building the preview",
+    "install": "Installing the toolchain",
 }
 
 

@@ -99,11 +99,37 @@ function minimalRow(
     else if (dt === "number") out[key] = 0;
     else if (dt === "boolean") out[key] = false;
     else if (dt === "date") out[key] = new Date();
+    // A string-mode `date()` / `timestamp()` column (dataType "string") cannot
+    // take "Default label" ("invalid input syntax for date") NOR a Date (see
+    // _driverSafeDates) — give it a valid calendar date / ISO datetime string.
+    else if (dt === "string" && /date|time/.test(ct)) {
+      out[key] = /time/.test(ct) ? new Date().toISOString() : new Date().toISOString().slice(0, 10);
+    }
     else if (dt === "json") out[key] = {};
     else if (/name|title|label|slug/i.test(key)) out[key] = label; // name-like → the label
     else out[key] = `Default ${label}`;
   }
+  _driverSafeDates(table, out);
   return out;
+}
+
+/**
+ * Final safety net for the seed's direct drizzle inserts: postgres-js cannot
+ * serialize a Date for a STRING-typed column and throws, which seedOne swallows
+ * per-row — so a whole app can deploy with an EMPTY database and a green build.
+ * Coerce any Date destined for a string column to text (mirrors the workflow
+ * and data-engine write paths, DEFECT-DEPLOY-CREATE / DEFECT-DEPLOY-SEED).
+ */
+function _driverSafeDates(table: any, row: Record<string, unknown>): void {
+  for (const [k, v] of Object.entries(row)) {
+    if (!(v instanceof Date)) continue;
+    const col = table?.[k];
+    if (!col || String(col.dataType).toLowerCase() !== "string") continue;
+    const ct = String(col.columnType || "");
+    row[k] = /timestamp|date|time/i.test(ct)
+      ? (/time/i.test(ct) ? v.toISOString() : v.toISOString().slice(0, 10))
+      : v.toISOString();
+  }
 }
 
 /** Satisfy required foreign keys on `table` before inserting `row`.
@@ -236,6 +262,7 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
     const pool = ids[stem] || ids[stem + "s"] || ids[stem + "es"];
     if (pool && pool.length) out[k] = pool[i % pool.length];
   }
+  _driverSafeDates(table, out);
   return out;
 }
 

@@ -286,6 +286,57 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
     return touched
 
 
+#: The auth scaffold files whose `ACCOUNT_TYPES` default the signup derivation
+#: overwrites. Each ships with an empty array so a single-account app (and the
+#: legacy pipeline, which never runs this step) builds unchanged; the Blueprint
+#: path replaces the line in place when the app authored an account-type choice.
+_SIGNUP_PAGE = "src/app/signup/page.tsx"
+_SIGNUP_ROUTE = "src/app/api/auth/signup/route.ts"
+
+
+def interpolate_signup_account_types(app_root: str | Path, doc: dict) -> list[str]:
+    """Bake the signup page's account-type choices from the Blueprint.
+
+    The scaffold signup form is name/email/password. When the Blueprint models
+    a self-service account-type choice (crew member vs vessel owner), the app it
+    describes is not that form — a new user picks which kind of account they are
+    opening, and the app stores it. :func:`derive_signup_account_types` reads
+    that choice off the Blueprint (the account entity's enum + the designed
+    signup layout); here we write it into the two files that render and accept
+    it. When there is no such choice the default empty array stands and signup
+    is unchanged.
+    """
+    from services.blueprint.signup_actors import derive_signup_account_types
+
+    options = derive_signup_account_types(doc, cache_dir=app_root)
+    if not options:
+        return []
+
+    out = Path(app_root)
+    touched: list[str] = []
+
+    # The page renders label + description; the route only validates values, and
+    # TS excess-property checks reject the richer object against `{value}[]`.
+    page_literal = json.dumps(options, ensure_ascii=False)
+    route_literal = json.dumps([{"value": o["value"]} for o in options], ensure_ascii=False)
+
+    for rel, needle, literal in (
+        (_SIGNUP_PAGE, "const ACCOUNT_TYPES: AccountType[] = [];",
+         f"const ACCOUNT_TYPES: AccountType[] = {page_literal};"),
+        (_SIGNUP_ROUTE, "const ACCOUNT_TYPES: { value: string }[] = [];",
+         f"const ACCOUNT_TYPES: {{ value: string }}[] = {route_literal};"),
+    ):
+        path = out / rel
+        if not path.is_file():
+            continue
+        text = path.read_text("utf-8")
+        if needle not in text:
+            continue
+        path.write_text(text.replace(needle, literal, 1), "utf-8")
+        touched.append(rel)
+    return touched
+
+
 def inject_runtime_layer(app_root: str | Path, doc: dict) -> dict[str, Any]:
     """Install the embedded runtime — workflows, rules, FEEL-lite, data engine.
 
@@ -410,6 +461,9 @@ def assemble(doc: dict, app_root: str | Path, *,
     out = Path(app_root)
     scaffold = copy_scaffold(out, project_short_id=project_short_id)
     edge = interpolate_edge_pages(out, doc)
+    # Before the runtime layer substitutes its own auth-page tokens: this only
+    # rewrites the ACCOUNT_TYPES default and leaves those tokens untouched.
+    signup_types = interpolate_signup_account_types(out, doc)
     runtime = inject_runtime_layer(out, doc)
     vendored = vendor_engines(out)
     loose = copy_loose_libs(out)
@@ -490,6 +544,7 @@ def assemble(doc: dict, app_root: str | Path, *,
         "vendored": vendored,
         "looseLibs": loose,
         "edgePages": edge,
+        "signupAccountTypes": signup_types,
         "runtimeFiles": len(runtime.get("copied") or []),
         "runtimeErrors": runtime.get("errors") or [],
         "supersededRepairs": sorted(SUPERSEDED_REPAIRS),
@@ -659,8 +714,33 @@ def _fallback_routes(schemas: Path) -> set[str]:
     return out
 
 
-def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
+def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge") -> list[str]:
+    """Everything `npm install` needs and nothing the Blueprint decides.
+
+    The scaffold's package.json and the vendored engine packages are the same
+    for every application, so they can be laid down — and the dependencies
+    installed against them — before a single agent has replied. `assemble`
+    lays the same files again later, idempotently, around the projected app.
+    """
+    out = Path(app_root)
+    written = copy_scaffold(out, project_short_id=project_short_id)
+    written += vendor_engines(out)
+    return written
+
+
+def install_dependencies(app_root: str | Path, *, timeout: int = 900) -> int:
+    """`npm install`, on its own, so it can run from second zero of a build
+    rather than at the end of one. Raises :class:`BuildFailed` on a non-zero
+    exit, the same way `verify_build` does."""
+    return verify_build(app_root, timeout=timeout, build=False)["install"]
+
+
+def verify_build(app_root: str | Path, *, timeout: int = 900,
+                 install: bool = True, build: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
+
+    ``install=False`` skips the install when the `install` node already ran
+    it at the start of the build; ``build=False`` is that node's own call.
 
     The `preview` node assembled a tree and reported success without ever
     compiling it, so "an application was generated" meant "files were written".
@@ -676,8 +756,12 @@ def verify_build(app_root: str | Path, *, timeout: int = 900) -> dict[str, Any]:
     import subprocess
 
     root = Path(app_root)
-    steps = (("install", ["npm", "install", "--no-audit", "--no-fund"]),
-             ("build", ["npm", "run", "build"]))
+    steps = tuple(
+        step for step, wanted in (
+            (("install", ["npm", "install", "--no-audit", "--no-fund"]), install),
+            (("build", ["npm", "run", "build"]), build),
+        ) if wanted
+    )
     # THE CHECK MUST NOT BREAK THE THING IT CHECKS. `next build` and `next dev`
     # both own `.next`; a verification build in the directory of a running
     # dev server rewrote its manifests under it, and the served app answered

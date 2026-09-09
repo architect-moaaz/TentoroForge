@@ -944,14 +944,21 @@ def test_the_two_agents_that_need_everything_still_get_it():
 
 
 def test_the_workflow_task_is_handed_the_node_catalog_and_no_other_is(svc):
-    """The catalog is referred to when the task needs it: the workflow agent
-    authors steps against it, so it sees the nodes and what each needs
-    configured; the data-model agent has no use for it and does not pay."""
-    system, _ = build_prompt(svc.doc, "workflows")
+    """The catalog is referred to when the task needs it: the step author
+    writes against it, so it sees the nodes and what each needs configured;
+    the declaration names workflows without their steps and pays only for
+    the trigger kinds; the data-model agent has no use for it at all."""
+    svc.doc["workflows"] = [{"id": "FLOW-001", "name": "Open a Case",
+                             "trigger": {"kind": "manual"}}]
+    system, _ = build_prompt(svc.doc, "workflow_steps", subject="FLOW-001")
     assert "The workflow nodes you may use" in system
     assert "db_insert" in system and "user_task" in system
     assert "*table" in system  # required config keys are stated, not implied
     assert "then-branch" in system
+
+    declared, _ = build_prompt(svc.doc, "workflows")
+    assert "The workflow nodes you may use" not in declared
+    assert "trigger.kind` is one of" in declared
 
     other, _ = build_prompt(svc.doc, "data_model")
     assert "The workflow nodes you may use" not in other
@@ -1348,7 +1355,8 @@ def test_other_nodes_still_answer_in_the_envelope():
     from services.blueprint.executors import (PROPOSAL_SCHEMA, SCHEMA_BY_NODE,
                                               parse_envelope)
 
-    assert set(SCHEMA_BY_NODE) == {"data_model"}
+    assert set(SCHEMA_BY_NODE) == {"data_model", "entity_fields"}, (
+        "the entity declaration and the per-entity author share the shape")
     assert SCHEMA_BY_NODE["data_model"] is not PROPOSAL_SCHEMA
 
     result = parse_envelope(
@@ -1564,11 +1572,16 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("data_model", "page_contracts", "database", "security",
-                 "workflows"):
+    for node in ("database", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
+    # The declarations are what remain of the calls that hit 32k writing
+    # every field, every step and every contract; those are authored one
+    # entity, one workflow and one feature per call inside the default.
+    for node in ("data_model", "workflows", "page_contracts"):
+        assert r.for_task(node, "x").max_tokens == 32000, node
     for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "testing"):
+                 "page_layouts", "design_system", "testing", "workflow_steps",
+                 "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "database", "security", "workflows"}
@@ -1588,3 +1601,292 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"
+
+
+# ---------------------------------------------------------------------------
+# Workflows: declared once, authored one at a time
+# ---------------------------------------------------------------------------
+
+
+def _declared(tmp_path):
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.doc["pages"] = [{"id": "PAGE-001", "route": "/cases/new", "name": "New",
+                         "purpose": "x"}]
+    for name in ("Open a Case", "Close a Case"):
+        svc.upsert("workflows", {"name": name, "trigger": {"kind": "manual"},
+                                 "launchedFrom": ["PAGE-001"],
+                                 "inputs": [{"name": "title", "kind": "field",
+                                             "type": "string"}]},
+                   natural_key=name)
+    svc.validate()
+    svc.save()
+    return svc
+
+
+def test_the_declaration_is_asked_for_no_steps():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "DO NOT write `steps`" in NODE_TASKS["workflows"]
+    assert "FEEL" not in NODE_TASKS["workflows"], "step rules belong to the author"
+    assert "FEEL" in NODE_TASKS["workflow_steps"]
+    assert "ONE workflow" in NODE_TASKS["workflow_steps"]
+
+
+def test_the_author_is_handed_one_workflow_the_catalog_and_its_key(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc = _declared(tmp_path)
+    wid = svc.doc["workflows"][0]["id"]
+    system, user = build_prompt(svc.doc, "workflow_steps", subject=wid,
+                                output_dir=svc.output_dir)
+    assert "required config key" in system, "the node catalog is the author's"
+    assert "`natural_key` is exactly: Open a Case" in user
+    assert "Open a Case" in user and "Close a Case" not in user, (
+        "the sibling declarations are noise to an author writing one")
+
+
+def test_the_authors_reply_updates_the_declared_row_whatever_it_called_it(tmp_path):
+    """Identity is the natural key. An author that spells the name its own
+    way would be allocated a second workflow: one declared with no steps,
+    one authored that no page launches."""
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, apply_agent_result,
+    )
+    from services.blueprint.executors import pin_workflow_identity
+
+    svc = _declared(tmp_path)
+    wid = svc.doc["workflows"][0]["id"]
+    result = AgentResult(
+        task_id="t", agent="workflow", confidence=0.9,
+        proposals=[ArtifactProposal(
+            section="workflows", natural_key="open-a-case",
+            body={"name": "Open A Case", "trigger": {"kind": "schedule"},
+                  "inputs": [{"name": "priority", "kind": "field", "type": "string"}],
+                  "steps": [{"key": "end", "name": "End", "type": "end"}]})])
+    pin_workflow_identity(svc, wid, result)
+    body = result.proposals[0].body
+    assert result.proposals[0].natural_key == "Open a Case"
+    assert body["id"] == wid and body["name"] == "Open a Case"
+    assert body["trigger"] == {"kind": "manual"}, "the trigger is declared, not authored"
+    assert [i["name"] for i in body["inputs"]] == ["title"], (
+        "inputs are declared: the pages were composed against them")
+    assert body["steps"]
+
+    applied = apply_agent_result(svc, result, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["workflows"]) == 2, "a second row was allocated"
+    assert svc.doc["workflows"][0]["steps"]
+
+
+# ---------------------------------------------------------------------------
+# Pages: the set is declared once, the contracts written per feature
+# ---------------------------------------------------------------------------
+
+
+def _declared_page_set(tmp_path):
+    from services.blueprint.ids import page_key
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    svc.upsert("data.entities", {"name": "Case", "table": "cases",
+                                 "fields": [{"name": "id", "type": "uuid"}]},
+               natural_key="Case")
+    case = svc.doc["data"]["entities"][0]["id"]
+    for route, name in (("/cases", "Cases"), ("/cases/[id]", "Case")):
+        svc.upsert("pages", {"name": name, "route": route, "purpose": "x",
+                             "pattern": "entity_list", "data": {"primaryEntity": case},
+                             "figmaFrame": "1:1"},
+                   natural_key=page_key(route))
+    svc.upsert("pages", {"name": "Home", "route": "/", "purpose": "x",
+                         "pattern": "dashboard"}, natural_key=page_key("/"))
+    svc.validate()
+    svc.save()
+    return svc, case
+
+
+def test_the_page_set_declaration_is_asked_for_no_contract():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "NOTHING ELSE" in NODE_TASKS["page_contracts"]
+    assert "navigatesTo" not in NODE_TASKS["page_contracts"]
+    assert "ONE feature" in NODE_TASKS["page_details"]
+    assert "navigatesTo" in NODE_TASKS["page_details"]
+
+
+def test_the_declaration_keeps_only_what_it_declares():
+    """Given the whole page shape a model will sometimes fill it, and a
+    declaration carrying `states` reads as a written contract to resume."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+    from services.blueprint.executors import pin_page_set
+
+    result = AgentResult(task_id="t", agent="page_design", proposals=[
+        ArtifactProposal(section="pages", natural_key="/x",
+                         body={"name": "X", "route": "/x", "purpose": "p",
+                               "pattern": "form", "states": ["loading"],
+                               "actions": ["a"], "primaryTasks": ["t"]}),
+        ArtifactProposal(section="widgets", natural_key="w", body={"kind": "metric"}),
+    ])
+    pin_page_set(result)
+    assert [p.section for p in result.proposals] == ["pages"]
+    assert sorted(result.proposals[0].body) == ["name", "pattern", "purpose", "route"]
+
+    # a section this agent may never write is not tidied away: the contract
+    # refuses it, and the refusal is the point
+    from services.blueprint.agent_contract import AgentResult as _R
+
+    rogue = _R(task_id="t", agent="page_design", proposals=[
+        ArtifactProposal(section="businessRules", natural_key="r", body={"name": "x"})])
+    pin_page_set(rogue)
+    assert [p.section for p in rogue.proposals] == ["businessRules"]
+
+
+def test_the_contract_author_is_handed_its_feature_and_the_whole_set_by_id(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc, case = _declared_page_set(tmp_path)
+    system, user = build_prompt(svc.doc, "page_details", subject=case,
+                                output_dir=svc.output_dir)
+    assert "ONE feature" in system
+    assert "naturalKeys" in user and "PAGE:/cases/[id]" in user
+    # the feature's own pages in full, every page by id for navigatesTo
+    assert user.count('"purpose": "x"') == 2
+    assert '"route": "/"' in user
+
+
+def test_the_contract_authors_reply_updates_the_declared_pages_and_only_those(tmp_path):
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, apply_agent_result,
+    )
+    from services.blueprint.executors import pin_page_identity
+
+    svc, case = _declared_page_set(tmp_path)
+    detail = next(p for p in svc.doc["pages"] if p["route"] == "/cases/[id]")
+    result = AgentResult(task_id="t", agent="page_design", confidence=0.9, proposals=[
+        # route respelled, frame forgotten, entity dropped
+        ArtifactProposal(section="pages", natural_key="/Cases/[ID]",
+                         body={"name": "Case", "route": "/Cases/[ID]", "purpose": "One",
+                               "pattern": "record_workspace", "module": "MODULE-999",
+                               "states": ["loading", "populated"],
+                               "data": {"supportingEntities": []}}),
+        # a page the declaration never decided
+        ArtifactProposal(section="pages", natural_key="/cases/archive",
+                         body={"name": "Archive", "route": "/cases/archive",
+                               "purpose": "invented", "states": ["loading"]}),
+    ])
+    pin_page_identity(svc, case, result)
+    assert len(result.proposals) == 1, "an invented page got through"
+    body = result.proposals[0].body
+    assert result.proposals[0].natural_key == "PAGE:/cases/[id]"
+    assert body["id"] == detail["id"] and body["route"] == "/cases/[id]"
+    assert body["figmaFrame"] == "1:1" and "module" not in body
+    assert body["data"]["primaryEntity"] == case
+
+    applied = apply_agent_result(svc, result, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["pages"]) == 3, "a second page was allocated"
+    assert next(p for p in svc.doc["pages"] if p["route"] == "/cases/[id]")["states"]
+
+
+# ---------------------------------------------------------------------------
+# Entities: named once, detailed one at a time
+# ---------------------------------------------------------------------------
+
+
+def _named_entities(tmp_path):
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="A", domain="x")
+    for name in ("Job", "PartUsage"):
+        svc.upsert("data.entities", {"name": name, "table": name.lower() + "s",
+                                     "description": "x", "fields": []},
+                   natural_key=name)
+    job, part = (e["id"] for e in svc.doc["data"]["entities"])
+    svc.doc["data"]["relationships"] = [
+        {"from": part, "to": job, "kind": "one_to_many", "fromField": "jobId"}]
+    svc.validate()
+    svc.save()
+    return svc, job, part
+
+
+def test_the_entity_declaration_is_asked_for_names_and_relationships_not_fields():
+    from services.blueprint.executors import NODE_TASKS
+
+    assert "fields: []" in NODE_TASKS["data_model"]
+    assert "relationships" in NODE_TASKS["data_model"]
+    assert "sensitive: true" not in NODE_TASKS["data_model"]
+    assert "ONE entity" in NODE_TASKS["entity_fields"]
+    assert "sensitive: true" in NODE_TASKS["entity_fields"]
+
+
+def test_the_declaration_keeps_no_field_and_no_constraint():
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+    from services.blueprint.executors import pin_entity_set
+
+    result = AgentResult(task_id="t", agent="data_model", proposals=[
+        ArtifactProposal(section="data.entities", natural_key="Job",
+                         body={"name": "Job", "table": "jobs", "labelField": "ref",
+                               "fields": [{"name": "ref", "type": "string"}]}),
+        ArtifactProposal(section="data.relationships", natural_key="r",
+                         body={"from": "PartUsage", "to": "Job", "kind": "one_to_many"}),
+        ArtifactProposal(section="data.constraints", natural_key="c",
+                         body={"entity": "Job", "kind": "unique", "expression": "ref"}),
+    ])
+    pin_entity_set(result)
+    assert [p.section for p in result.proposals] == ["data.entities", "data.relationships"]
+    assert result.proposals[0].body["fields"] == []
+    assert "labelField" not in result.proposals[0].body
+
+
+def test_the_field_author_is_handed_its_entity_and_the_relationships_that_touch_it(tmp_path):
+    from services.blueprint.executors import build_prompt
+
+    svc, job, part = _named_entities(tmp_path)
+    system, user = build_prompt(svc.doc, "entity_fields", subject=part,
+                                output_dir=svc.output_dir)
+    assert "ONE entity" in system
+    assert "Return `entities`" in system, "the compact reply shape is shared"
+    assert "named exactly PartUsage" in user
+    assert '"fromField": "jobId"' in user
+    assert '"name": "Job"' in user, "every entity by name, for the foreign keys"
+
+
+def test_the_field_authors_reply_updates_the_named_entity_whatever_it_called_it(tmp_path):
+    """A respelled name would be a second entity: one named with no fields,
+    one detailed that no relationship points at."""
+    import json
+
+    from services.blueprint.agent_contract import apply_agent_result
+    from services.blueprint.executors import parse_envelope, pin_entity_identity
+
+    svc, job, part = _named_entities(tmp_path)
+    reply = parse_envelope(json.dumps({
+        "entities": [
+            {"name": "Part usage", "table": "part_usage", "labelField": "quantity",
+             "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                        {"name": "jobId", "type": "uuid", "required": True},
+                        {"name": "quantity", "type": "integer"}]},
+            {"name": "Supplier", "table": "suppliers",
+             "fields": [{"name": "id", "type": "uuid"}]},
+        ],
+        # names an entity the document holds, not this batch
+        "constraints": [{"entity": "PartUsage", "kind": "check",
+                         "expression": "quantity > 0"}],
+        "confidence": 0.9, "assumptions": [], "issues": [], "change_requests": [],
+    }), task_id="t", agent="data_model", node="entity_fields")
+    pin_entity_identity(svc, part, reply)
+
+    entities = [p for p in reply.proposals if p.section == "data.entities"]
+    assert len(entities) == 1, "an invented entity got through"
+    assert entities[0].natural_key == "PartUsage"
+    assert entities[0].body["id"] == part and entities[0].body["table"] == "partusages"
+    assert len(entities[0].body["fields"]) == 3
+
+    applied = apply_agent_result(svc, reply, commit=False, user_request="")
+    assert applied.applied
+    assert len(svc.doc["data"]["entities"]) == 2, "a second entity was allocated"
+    detailed = next(e for e in svc.doc["data"]["entities"] if e["id"] == part)
+    assert len(detailed["fields"]) == 3 and detailed["labelField"] == "quantity"
+    assert svc.doc["data"]["constraints"][0]["entity"] == part, (
+        "a constraint naming an entity the document already holds resolves")

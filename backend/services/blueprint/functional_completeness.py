@@ -291,9 +291,20 @@ def _form_fields_of(form: dict) -> set[str]:
             if isinstance(sub, dict) and sub.get("name"):
                 names.add(str(sub["name"]))
     for inner in _walk(form):
-        name = (inner.get("props") or {}).get("name")
+        props = inner.get("props") or {}
+        name = props.get("name")
         if inner.get("type") in ("Input", "Select", "Textarea", "Checkbox", "DatePicker", "Field", "Combobox", "MultiSelect") and name:
             names.add(str(name))
+        elif inner.get("type") == "FileUpload":
+            # A file input is not typed by hand: a FileUpload provides the URL
+            # column (its `name`, default "file") and, via the companion
+            # fields, the file name and mime type. So a Form holding a
+            # FileUpload named `fileUrl` satisfies `fileUrl`/`fileName`, which a
+            # text field for a URL never should.
+            for key in ("name", "filenameField", "mimeTypeField"):
+                v = props.get(key)
+                if v:
+                    names.add(str(v))
     return names
 
 
