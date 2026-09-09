@@ -286,6 +286,57 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
     return touched
 
 
+#: The auth scaffold files whose `ACCOUNT_TYPES` default the signup derivation
+#: overwrites. Each ships with an empty array so a single-account app (and the
+#: legacy pipeline, which never runs this step) builds unchanged; the Blueprint
+#: path replaces the line in place when the app authored an account-type choice.
+_SIGNUP_PAGE = "src/app/signup/page.tsx"
+_SIGNUP_ROUTE = "src/app/api/auth/signup/route.ts"
+
+
+def interpolate_signup_account_types(app_root: str | Path, doc: dict) -> list[str]:
+    """Bake the signup page's account-type choices from the Blueprint.
+
+    The scaffold signup form is name/email/password. When the Blueprint models
+    a self-service account-type choice (crew member vs vessel owner), the app it
+    describes is not that form — a new user picks which kind of account they are
+    opening, and the app stores it. :func:`derive_signup_account_types` reads
+    that choice off the Blueprint (the account entity's enum + the designed
+    signup layout); here we write it into the two files that render and accept
+    it. When there is no such choice the default empty array stands and signup
+    is unchanged.
+    """
+    from services.blueprint.signup_actors import derive_signup_account_types
+
+    options = derive_signup_account_types(doc, cache_dir=app_root)
+    if not options:
+        return []
+
+    out = Path(app_root)
+    touched: list[str] = []
+
+    # The page renders label + description; the route only validates values, and
+    # TS excess-property checks reject the richer object against `{value}[]`.
+    page_literal = json.dumps(options, ensure_ascii=False)
+    route_literal = json.dumps([{"value": o["value"]} for o in options], ensure_ascii=False)
+
+    for rel, needle, literal in (
+        (_SIGNUP_PAGE, "const ACCOUNT_TYPES: AccountType[] = [];",
+         f"const ACCOUNT_TYPES: AccountType[] = {page_literal};"),
+        (_SIGNUP_ROUTE, "const ACCOUNT_TYPES: { value: string }[] = [];",
+         f"const ACCOUNT_TYPES: {{ value: string }}[] = {route_literal};"),
+    ):
+        path = out / rel
+        if not path.is_file():
+            continue
+        text = path.read_text("utf-8")
+        if needle not in text:
+            continue
+        path.write_text(text.replace(needle, literal, 1), "utf-8")
+        touched.append(rel)
+    return touched
+
+
 def inject_runtime_layer(app_root: str | Path, doc: dict) -> dict[str, Any]:
     """Install the embedded runtime — workflows, rules, FEEL-lite, data engine.
 
@@ -410,6 +461,9 @@ def assemble(doc: dict, app_root: str | Path, *,
     out = Path(app_root)
     scaffold = copy_scaffold(out, project_short_id=project_short_id)
     edge = interpolate_edge_pages(out, doc)
+    # Before the runtime layer substitutes its own auth-page tokens: this only
+    # rewrites the ACCOUNT_TYPES default and leaves those tokens untouched.
+    signup_types = interpolate_signup_account_types(out, doc)
     runtime = inject_runtime_layer(out, doc)
     vendored = vendor_engines(out)
     loose = copy_loose_libs(out)
@@ -490,6 +544,7 @@ def assemble(doc: dict, app_root: str | Path, *,
         "vendored": vendored,
         "looseLibs": loose,
         "edgePages": edge,
+        "signupAccountTypes": signup_types,
         "runtimeFiles": len(runtime.get("copied") or []),
         "runtimeErrors": runtime.get("errors") or [],
         "supersededRepairs": sorted(SUPERSEDED_REPAIRS),
