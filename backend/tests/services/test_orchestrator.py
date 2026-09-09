@@ -800,34 +800,55 @@ def test_the_fanout_runs_subjects_concurrently(svc):
     assert peak <= FANOUT_CONCURRENCY
 
 
-def test_applies_happen_in_the_given_order_whatever_order_calls_return(svc):
-    """The split is the design: calls parallel, applies serial and ordered.
+def test_applies_happen_one_at_a_time_as_results_land(svc):
+    """The split is the design: calls parallel, applies serial.
 
-    `apply_agent_result` allocates ids and saves one shared document, so
-    concurrent applies would race — and id allocation is order-dependent, so a
-    re-projection meant to be byte-identical would stop being one.
+    `apply_agent_result` saves one shared document, so applies never overlap.
+    They no longer wait their turn, though: the page that returns first
+    applies first, so a rejection on page four is known — and its retry is
+    out — while page one is still composing. Holding applies to the given
+    order was what kept a fan-out at one to four calls in flight for the
+    last half of its life.
     """
+    import threading
     import time
+
+    from services.blueprint import orchestrator
 
     _fanout_svc(svc, pages=4)
     applied: list[str] = []
+    inflight, peak = 0, 0
+    lock = threading.Lock()
 
     def executor(spec):
         # later subjects return first, so completion order is reversed
         time.sleep(0.05 * (4 - int(spec.subject[-1])))
         return _layout_result(spec)
 
-    original = svc.upsert
+    real_apply = orchestrator.apply_agent_result
 
-    def tracking(section, body, **kw):
-        if section == "pageLayouts":
-            applied.append(body["page"])
-        return original(section, body, **kw)
+    def tracking(service, result, **kw):
+        nonlocal inflight, peak
+        with lock:
+            inflight += 1
+            peak = max(peak, inflight)
+        try:
+            applied.append(result.proposals[0].body["page"])
+            time.sleep(0.01)
+            return real_apply(service, result, **kw)
+        finally:
+            with lock:
+                inflight -= 1
 
-    svc.upsert = tracking
-    run(svc, executor, plan=["page_layouts"], max_attempts=1)
-    svc.upsert = original
-    assert applied == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
+    orchestrator.apply_agent_result = tracking
+    try:
+        run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    finally:
+        orchestrator.apply_agent_result = real_apply
+
+    assert peak == 1, "two applies overlapped"
+    assert sorted(applied) == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
+    assert applied[0] == "PAGE-004", "the first result to land waited for the slowest"
 
 
 def test_a_retry_still_carries_its_own_feedback(svc):
@@ -949,18 +970,14 @@ def test_a_wave_of_independent_nodes_runs_concurrently(svc):
     assert peak <= WAVE_CONCURRENCY
 
 
-def test_a_wave_applies_node_by_node_whatever_order_calls_return(svc):
+def test_independent_nodes_apply_as_they_land(svc):
     """The node-level half of the same rule the fan-out obeys.
 
-    Four nodes calling at once means four nodes applying into one shared
-    document, and ``apply_agent_result`` allocates stable ids (§12) in the order
-    it is called. If applies interleaved by whichever call returned first, a
-    re-projection meant to be byte-identical would stop being one — and
-    ``project_frontend`` is idempotent by design.
-
-    A lock would not fix this. It would make the applies safe against
-    corruption and leave the order nondeterministic, which is the half that
-    matters.
+    Four nodes writing four different sections have nothing to order between
+    them: `design_system`'s result applying before `data_model`'s changes no
+    id, because ids are numbered per section. So the node that returns first
+    applies first — and its dependents start — while the slowest is still
+    thinking. Holding the four to plan order was one wave's worth of waiting.
     """
     import time
 
@@ -986,7 +1003,67 @@ def test_a_wave_applies_node_by_node_whatever_order_calls_return(svc):
         orchestrator.apply_agent_result = real_apply
 
     assert report.ok
-    assert applied == _WAVE
+    assert applied == list(reversed(_WAVE))
+
+
+def test_two_producers_of_one_section_apply_in_plan_order(svc):
+    """The one place arrival order would show: `requirements` and
+    `figma_intelligence` both write `requirements`, and a fresh document
+    numbers REQ-001 for whichever proposal lands first. The later node in the
+    plan waits for the earlier one to finish, so the numbering is the plan's
+    and not the network's — and nothing else waits on anything."""
+    import time
+
+    from services.blueprint.ids import prose_key
+
+    svc.doc["designSources"] = [{"id": "FIGMA-001", "type": "figma", "fileKey": "abc"}]
+    applied: list[str] = []
+
+    def executor(spec):
+        if spec.node == "requirements":
+            time.sleep(0.1)  # the earlier node is the slower one
+        text = f"From {spec.node}"
+        return AgentResult(
+            task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+            proposals=[ArtifactProposal(
+                section="requirements", natural_key=prose_key("REQ", text),
+                body={"description": text})],
+        )
+
+    from services.blueprint import orchestrator
+
+    real_apply = orchestrator.apply_agent_result
+
+    def tracking(service, result, **kw):
+        applied.append(result.agent)
+        return real_apply(service, result, **kw)
+
+    orchestrator.apply_agent_result = tracking
+    try:
+        report = run(svc, executor, plan=["requirements", "figma_intelligence"],
+                     max_attempts=1)
+    finally:
+        orchestrator.apply_agent_result = real_apply
+
+    assert report.ok, report.failed_because
+    assert applied == ["requirement", "figma_intelligence"]
+    assert svc.doc["requirements"][0]["description"] == "From requirements"
+
+
+def test_yielding_only_runs_forward_in_the_plan():
+    from services.blueprint.orchestrator import _yields_to
+
+    order = ["requirements", "figma_intelligence", "application_model"]
+    # the earlier producer of `requirements` is still running: wait
+    assert _yields_to("figma_intelligence", order, {"requirements"}, set())
+    # it finished: go
+    assert not _yields_to("figma_intelligence", order, {"requirements"},
+                          {"requirements"})
+    # a node never waits on one behind it, so this cannot deadlock
+    assert not _yields_to("requirements", order, {"figma_intelligence"}, set())
+    # a node writing a different section has nothing to wait for
+    assert not _yields_to("application_model", order,
+                          {"requirements", "figma_intelligence"}, set())
 
 
 def test_a_node_retried_inside_a_wave_still_carries_its_feedback(svc):
@@ -1120,3 +1197,134 @@ def test_a_fanout_resume_reruns_only_the_uncomposed_subjects():
     # A fresh document (nothing composed) still runs every subject.
     assert sorted(pending_subjects(node, {"pages": doc["pages"], "pageLayouts": []})) == \
         ["PAGE-1", "PAGE-2", "PAGE-3", "PAGE-4"]
+
+
+# ---------------------------------------------------------------------------
+# Event-driven: a node starts when ITS dependencies are done, not its level's
+# ---------------------------------------------------------------------------
+
+
+def test_a_node_starts_the_moment_its_own_dependency_is_done(svc):
+    """`database` depends on `data_model` and on nothing else at that level.
+    The wave loop made it wait for `design_system` too, because they shared a
+    topological level. Here `design_system` is the long pole and `database`
+    must not be behind it."""
+    import threading
+    import time
+
+    started: dict[str, float] = {}
+    returned: dict[str, float] = {}
+    lock = threading.Lock()
+
+    def executor(spec):
+        with lock:
+            started[spec.node] = time.monotonic()
+        if spec.node == "design_system":
+            time.sleep(0.3)
+        elif spec.node == "database":
+            return AgentResult(
+                task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+                proposals=[ArtifactProposal(
+                    section="database", natural_key="database",
+                    body={"engine": "postgres", "provider": "neon"})])
+        with lock:
+            returned[spec.node] = time.monotonic()
+        return _wave_result(spec)
+
+    report = run(svc, executor, plan=["data_model", "design_system", "database"],
+                 max_attempts=1)
+    assert report.ok, report.failed_because
+    assert started["database"] < returned["design_system"], (
+        "database waited for a node it does not depend on")
+
+
+def test_a_rejected_subject_is_retried_while_its_siblings_are_still_running(svc):
+    """The retry round used to open only when every first attempt in the
+    wave had returned. A page refused in two seconds waited for the slowest
+    page of the run before it was asked again."""
+    import threading
+    import time
+
+    _fanout_svc(svc, pages=3)
+    events: list[tuple[str, str, int, float]] = []
+    lock = threading.Lock()
+
+    def executor(spec):
+        with lock:
+            events.append(("start", spec.subject, spec.attempt, time.monotonic()))
+        if spec.subject == "PAGE-003":
+            time.sleep(0.3)  # the slow sibling
+        elif spec.subject == "PAGE-001" and spec.attempt == 1:
+            raise RuntimeError("refused at once")
+        with lock:
+            events.append(("end", spec.subject, spec.attempt, time.monotonic()))
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["page_layouts"], max_attempts=2)
+    assert report.ok, report.failed_because
+    retry_started = next(t for k, s, a, t in events
+                         if k == "start" and s == "PAGE-001" and a == 2)
+    slow_returned = next(t for k, s, a, t in events
+                         if k == "end" and s == "PAGE-003")
+    assert retry_started < slow_returned, "the retry waited for the slowest sibling"
+
+
+def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
+    """The whole point, end to end: `page_layouts` is wide and slow, and
+    `security` needs only `data_model`. `security` must run while pages are
+    still composing rather than after the last one lands."""
+    import threading
+    import time
+
+    _fanout_svc(svc, pages=4)
+    started: dict[str, float] = {}
+    finished: dict[str, float] = {}
+    lock = threading.Lock()
+
+    def executor(spec):
+        with lock:
+            started.setdefault(spec.node, time.monotonic())
+        if spec.node == "page_layouts":
+            time.sleep(0.25)
+            out = _layout_result(spec)
+        elif spec.node == "security":
+            out = AgentResult(
+                task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+                proposals=[ArtifactProposal(
+                    section="roles", natural_key="Admin",
+                    body={"name": "Admin", "description": "x"})])
+        else:
+            out = _wave_result(spec)
+        with lock:
+            finished[spec.node] = time.monotonic()
+        return out
+
+    # page_layouts' own dependencies are not in this plan, so it is ready at
+    # once; security is ready as soon as data_model applies.
+    report = run(svc, executor, plan=["page_layouts", "data_model", "security"],
+                 max_attempts=1)
+    assert report.ok, report.failed_because
+    assert started["security"] < finished["page_layouts"], (
+        "security waited for a fan-out it does not depend on")
+
+
+def test_the_scheduler_holds_the_document_lock_while_applying(svc):
+    """One writer. Executor threads read the document under `svc.lock` to
+    build their prompts; the scheduler applies under it. An apply outside the
+    lock would race a prompt being built from the same dict."""
+    from services.blueprint import orchestrator
+
+    _fanout_svc(svc, pages=2)
+    owned: list[bool] = []
+    real_apply = orchestrator.apply_agent_result
+
+    def tracking(service, result, **kw):
+        owned.append(service.lock._is_owned())
+        return real_apply(service, result, **kw)
+
+    orchestrator.apply_agent_result = tracking
+    try:
+        run(svc, _layout_result, plan=["page_layouts"], max_attempts=1)
+    finally:
+        orchestrator.apply_agent_result = real_apply
+    assert owned and all(owned)

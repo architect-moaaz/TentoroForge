@@ -2153,8 +2153,9 @@ def make_executor(
         )
         from services.a2ui_ui_composition import shared_context
 
-        page = next((p for p in svc.doc.get("pages") or []
-                     if p.get("id") == spec.subject), None)
+        with svc.lock:
+            page = next((p for p in svc.doc.get("pages") or []
+                         if p.get("id") == spec.subject), None)
         if not page or not page.get("route"):
             return None
 
@@ -2215,12 +2216,17 @@ def make_executor(
                 )],
                 confidence=0.95,
             )
+        # Read under the lock, compose outside it: the context is a slice of
+        # the document, the composition is minutes of network.
+        with svc.lock:
+            context = shared_context(svc.doc)
+            registry = registry_from_blueprint(svc.doc)
         try:
             out = compose_page_via_a2ui(
                 svc.output_dir, page["route"], page.get("pattern") or "",
-                shared_context=shared_context(svc.doc),
+                shared_context=context,
                 page_id=spec.subject,
-                registry=registry_from_blueprint(svc.doc),
+                registry=registry,
                 presentation=page.get("presentation") or "page",
                 progress=reasoning,
                 # The retry's whole point. `spec.feedback` carries the
@@ -2302,12 +2308,13 @@ def make_executor(
             and getattr(client, "accepts_images", False)
             else []
         )
-        system, user = build_prompt(
-            svc.doc, spec.node,
-            inline_schema=not getattr(client, "enforces_schema", True),
-            subject=spec.subject, feedback=spec.feedback, references=shown,
-            output_dir=svc.output_dir,
-        )
+        with svc.lock:  # the read; the call below runs without it
+            system, user = build_prompt(
+                svc.doc, spec.node,
+                inline_schema=not getattr(client, "enforces_schema", True),
+                subject=spec.subject, feedback=spec.feedback, references=shown,
+                output_dir=svc.output_dir,
+            )
         last: Exception | None = None
 
         for attempt in range(repair_attempts + 1):
