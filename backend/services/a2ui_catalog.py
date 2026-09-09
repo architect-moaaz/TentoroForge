@@ -175,6 +175,14 @@ _PRIMITIVE_PROPS: dict[str, dict[str, dict]] = {
         "as": {"type": "enum",
                "enum": ["span", "p", "h1", "h2", "h3", "h4", "h5", "h6",
                         "label", "strong", "em"], "optional": True},
+        # Text-style hint the composer naturally emits (h1..h5/caption/body).
+        # This transcribed entry — not the library registry — is what the A2UI
+        # composer authors and validates Text against, so without `variant`
+        # here every composed Text carrying it was rejected and the page
+        # dropped. `as` still picks the element; `variant` is the style band.
+        "variant": {"type": "enum",
+                    "enum": ["h1", "h2", "h3", "h4", "h5", "caption", "body"],
+                    "optional": True},
     },
 }
 
