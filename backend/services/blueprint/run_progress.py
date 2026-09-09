@@ -29,7 +29,8 @@ import threading
 from typing import Any, Callable
 
 #: Ledger events passed through untouched, for the activity list.
-_FORWARDED = ("node:retry", "node:failed", "node:blocked", "node:skipped")
+_FORWARDED = ("node:retry", "node:failed", "node:blocked", "node:skipped",
+              "observer:verdict", "observer:repair", "observer:unrepaired")
 
 
 class Progress:

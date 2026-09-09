@@ -77,6 +77,9 @@ ROOM_OF: dict[str, str] = {
     # Verification — the §75 matrix, the tests, and what the run remembers
     "testing": "qa",
     "verification": "qa",
+    # The observer (§73) sits with verification: it judges each node as it
+    # lands and sends the incomplete ones back to their author.
+    "observer": "qa",
     "memory": "qa",
     # Shipping — the runtime and the deploy (§56–§62)
     "build": "shipping",

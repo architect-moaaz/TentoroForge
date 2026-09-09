@@ -616,6 +616,13 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
             for n in report.failed
         ],
         "unbuilt": _unbuilt_pages(doc),
+        # §73 closed at the node: what the observer sent back and got right,
+        # and what it flagged because no round brought it round.
+        "repaired": list(getattr(report, "repaired", []) or []),
+        "unrepaired": [
+            {"node": n, "why": why}
+            for n, why in (getattr(report, "unrepaired", {}) or {}).items()
+        ],
     }
 
 
@@ -674,6 +681,7 @@ async def generate_via_blueprint(
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
+    from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import (
         DAG, completed_nodes, levels, run)
     from services.blueprint.service import BlueprintService
@@ -780,7 +788,12 @@ async def generate_via_blueprint(
             # in a constrained shape does not need a frontier thinking budget.
             # The nodes everything downstream derives from stay at `high`.
             usage = RunUsage()
-            executor = make_executor(svc, tiered_router(), usage=usage)
+            router = tiered_router()
+            executor = make_executor(svc, router, usage=usage)
+            # §73 — the observer judges each node as it lands and sends what
+            # is incomplete back to its author before dependents run. Its
+            # spend is in the same ledger, under observer:<node>.
+            watcher = anthropic_observer(router, usage=usage)
             # Progress is read off the run ledger — the account the
             # orchestrator keeps anyway — rather than counted around the
             # executor. Counting calls marked a fan-out node done at its
@@ -790,7 +803,7 @@ async def generate_via_blueprint(
 
             report = run(svc, executor, plan=plan, commit=True,
                          user_request=req.description, app_root=app_root,
-                         observer=progress)
+                         observer=progress, observer_agent=watcher)
 
             # §26 — what the finished application should contain, so the run
             # can be checked against the plan rather than only watched.
@@ -1559,6 +1572,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     """Invoke §28's graph and narrate it. Never reorders it (§116)."""
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
+    from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import completed_nodes, levels, run
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
@@ -1622,12 +1636,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                   "awaitingApproval": not approved})
 
     usage = RunUsage()
-    executor = make_executor(svc, tiered_router(), usage=usage)
+    router = tiered_router()
+    executor = make_executor(svc, router, usage=usage)
+    watcher = anthropic_observer(router, usage=usage)
     progress = Progress(emit, total=len(plan))
 
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
-                 observer=progress)
+                 observer=progress, observer_agent=watcher)
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
     # approve/build gates were unreachable. A define that produced requirements

@@ -37,6 +37,7 @@ placements are marked and are the parts to argue with.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -794,6 +795,17 @@ class RunReport:
     #: failure there (a low credit balance, a transient fault) is recorded here
     #: rather than in `failed`, and does not hold a built application in `draft`.
     degraded: dict[str, str] = field(default_factory=dict)
+    #: Node -> the observer's verdict on it (§73, closed at the node). Every
+    #: agent node the observer watched has an entry, passing or not, so a
+    #: report can be read for what was judged and not only for what failed.
+    observed: dict[str, dict] = field(default_factory=dict)
+    #: Labels the observer sent back to their author and then passed.
+    repaired: list[str] = field(default_factory=list)
+    #: Label -> what stayed wrong after every repair round. The artifact is
+    #: flagged OUT_OF_SYNC (§76) and left as its author last wrote it; it is
+    #: not a failure of the run, because nothing was lost — it is a divergence
+    #: the report names rather than a repair the platform hid.
+    unrepaired: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -848,6 +860,7 @@ def run(
     user_request: str = "",
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -864,6 +877,14 @@ def run(
     reaches disk reaches the observer first. That is how the virtual office
     animates: it reads this same account rather than keeping its own, so a node
     outcome recorded here cannot be missing from the picture.
+
+    ``observer_agent`` is a :class:`services.blueprint.observer.Observer`, or
+    nothing. With one, every agent node's outcome is judged as soon as its
+    subjects land — on the observer's thread, while the wave carries on — and
+    a node the observer fails is sent back to its author with the findings
+    before anything downstream runs (§73). Injected for the same reason the
+    executor is: with no critic it costs nothing and calls no model, so the
+    loop is testable; with one it is the same loop with a judgement in it.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
     in_plan = set(order)
@@ -888,7 +909,8 @@ def run(
     try:
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
-                        user_request=user_request, app_root=app_root)
+                        user_request=user_request, app_root=app_root,
+                        observer_agent=observer_agent)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -912,6 +934,7 @@ def _execute(
     commit: bool,
     user_request: str,
     app_root: str | None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """The wave loop. Split from `run` so the ledger can record a crash."""
     remaining = list(order)
@@ -928,6 +951,7 @@ def _execute(
             svc, executor, wave, report=report, done=done,
             max_attempts=max_attempts, commit=commit,
             user_request=user_request, app_root=app_root, ledger=ledger,
+            observer_agent=observer_agent, in_plan=in_plan,
         )
         # AN OPTIONAL NODE NEVER HOLDS THE APPLICATION IN DRAFT. If it failed,
         # count it done anyway — its dependents (the deterministic tail: memory,
@@ -1051,6 +1075,8 @@ def _run_wave(
     user_request: str,
     app_root: str | None,
     ledger: Any = None,
+    observer_agent: Any = None,
+    in_plan: set[str] | None = None,
 ) -> None:
     """Run one wave: model calls wide, applies narrow and ordered.
 
@@ -1069,6 +1095,14 @@ def _run_wave(
     Service and projection nodes stay serial throughout. They are deterministic
     and fast, and they mutate the document directly, so there is nothing to win
     and a race to lose.
+
+    The observer runs beside all of this. The moment a node's last subject is
+    applied it is handed a snapshot and judged on the observer's own thread
+    while the wave's remaining rounds continue; at the end of the wave the
+    verdicts are collected and every failed node is repaired — re-authored by
+    its own agent with the findings as feedback — before ``done`` admits it.
+    The wave boundary is the barrier because §28 is: a dependent must not run
+    on an outcome the observer is about to send back.
     """
     import threading
 
@@ -1140,6 +1174,7 @@ def _run_wave(
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects))
 
     limits = {key: threading.Semaphore(FANOUT_CONCURRENCY) for key in runs}
+    submitted: set[str] = set()
 
     wave_attempts = max(
         (ATTEMPTS_BY_NODE.get(k, max_attempts) for k in wave),
@@ -1161,6 +1196,19 @@ def _run_wave(
                 commit=commit,
                 user_request=user_request, report=report, ledger=ledger,
             )
+        if observer_agent is not None:
+            _submit_completed(
+                observer_agent, svc, wave, runs, submitted,
+                in_plan=in_plan or set(wave), done=done,
+                user_request=user_request,
+            )
+
+    if observer_agent is not None:
+        _observe_and_repair(
+            svc, executor, wave, runs, observer_agent, submitted,
+            limits=limits, report=report, ledger=ledger, commit=commit,
+            user_request=user_request, in_plan=in_plan or set(wave), done=done,
+        )
 
     for key in wave:
         state = runs.get(key)
@@ -1180,6 +1228,206 @@ def _run_wave(
         report.completed.append(key)
         _note(ledger, "node_done", key, len(state.subjects or []))
         done.add(key)
+
+
+def _applied(state: _NodeRun) -> list[str]:
+    """The subjects a node actually authored this wave: given, not pending,
+    not failed. A blocked subject is in ``failed`` too."""
+    return [s for s in state.subjects if s not in state.pending
+            and s not in state.failed]
+
+
+def _pending_sections(in_plan: set[str], settled: set[str]) -> set[str]:
+    """Sections a node still to run in this plan will write."""
+    return {
+        s for k in in_plan if k not in settled
+        for s in DAG[k].produces
+    }
+
+
+def _planned_sections(in_plan: set[str]) -> set[str]:
+    return {s for k in in_plan for s in DAG[k].produces}
+
+
+def _submit_completed(
+    observer_agent: Any,
+    svc: BlueprintService,
+    wave: Sequence[str],
+    runs: dict[str, _NodeRun],
+    submitted: set[str],
+    *,
+    in_plan: set[str],
+    done: set[str],
+    user_request: str,
+) -> None:
+    """Hand every node that has just finished its subjects to the observer.
+
+    Called after each round's applies, so a node that completes in round one
+    is being judged while its wave-mates go round again. A node that authored
+    nothing this run (every subject already present, or every subject failed)
+    is not judged: there is no outcome of this run to judge.
+    """
+    finished = {k for k, st in runs.items() if not st.pending}
+    settled = done | finished
+    for key in wave:
+        state = runs.get(key)
+        if state is None or key in submitted or state.pending:
+            continue
+        submitted.add(key)
+        applied = _applied(state)
+        if not applied:
+            continue
+        observer_agent.submit(
+            key, agent=DAG[key].agent, subjects=applied, doc=svc.doc,
+            pending=_pending_sections(in_plan, settled),
+            planned=_planned_sections(in_plan), user_request=user_request,
+        )
+
+
+def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
+    report.observed[obs.node] = obs.summary()
+    for subject in obs.subjects:
+        hits = obs.findings.get(subject, [])
+        _note(ledger, "observed", obs.node, subject, not hits, len(hits),
+              obs.critic)
+
+
+def _repair_apply(
+    svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
+) -> str | None:
+    """Apply one repair. ``None`` when it landed; otherwise why it was refused.
+
+    A refused repair leaves the original artifact exactly as it was — apply
+    validates before it commits — so what the observer then flags is the
+    author's last accepted answer, never a half-applied fix.
+    """
+    if isinstance(outcome, Exception):
+        return _reason(outcome)
+    if outcome is None:
+        return "the executor returned nothing"
+    try:
+        application = apply_agent_result(
+            svc, outcome, commit=commit, user_request=user_request,
+        )
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep,
+            InvalidBusinessRule) as exc:
+        return _reason(exc)
+    if application.applied:
+        return None
+    return _asked(application)
+
+
+def _observe_and_repair(
+    svc: BlueprintService,
+    executor: Executor,
+    wave: Sequence[str],
+    runs: dict[str, _NodeRun],
+    observer_agent: Any,
+    submitted: set[str],
+    *,
+    limits: dict[str, Any],
+    report: RunReport,
+    ledger: Any,
+    commit: bool,
+    user_request: str,
+    in_plan: set[str],
+    done: set[str],
+) -> None:
+    """The wave boundary: collect the verdicts, repair what failed, verify again.
+
+    §73's loop, per node, bounded by ``observer_agent.rounds``. Each round
+    re-runs the owning node for exactly the subjects the observer failed, with
+    the brief as feedback, through the same executor and the same apply as the
+    original — then judges the result again. A subject that passes leaves the
+    loop; one still failing goes round with a fresh brief; one whose repair
+    was refused goes round told why. When the rounds are spent, what is left
+    is flagged OUT_OF_SYNC with the findings and named in the report.
+    Repairs run wide like a wave round; applies stay in wave order.
+    """
+    from services.blueprint.observer import RepairTask, flag_unrepaired
+
+    # Nodes whose subjects all landed in the final round were submitted by
+    # the last `_submit_completed`; a node that never had pending subjects
+    # was never submitted and has nothing to judge.
+    observations = observer_agent.collect([k for k in wave if k in submitted])
+    open_tasks: dict[tuple[str, str], RepairTask] = {}
+    last: dict[tuple[str, str], Any] = {}
+    for key in wave:
+        obs = observations.get(key)
+        if obs is None:
+            continue
+        _record_observation(report, ledger, obs)
+        for task in observer_agent.repairs(obs):
+            open_tasks[(task.node, task.subject)] = task
+            last[(task.node, task.subject)] = obs
+    if not open_tasks:
+        return
+
+    rounds = int(getattr(observer_agent, "rounds", 1) or 1)
+    settled = done | set(wave)
+    for round_ in range(1, rounds + 1):
+        specs = [
+            TaskSpec(
+                task_id=f"TASK-{task.label}-observer{round_}",
+                node=task.node, agent=task.agent, attempt=round_,
+                subject=task.subject, feedback=task.feedback,
+            )
+            for task in open_tasks.values()
+        ]
+        for spec in specs:
+            _note(ledger, "repair", spec.node, spec.subject, round_, rounds,
+                  spec.feedback)
+        results = _gather(executor, specs, limits=limits)
+
+        landed: dict[str, list[str]] = {}
+        for (node, subject), task in list(open_tasks.items()):
+            refused = _repair_apply(
+                svc, results.get((node, subject)),
+                commit=commit, user_request=user_request,
+            )
+            if refused is not None:
+                open_tasks[(node, subject)] = RepairTask(
+                    node=node, agent=task.agent, subject=subject,
+                    feedback=f"{task.feedback}\n\nYour previous repair was "
+                             f"rejected: {refused}",
+                )
+                continue
+            landed.setdefault(node, []).append(subject)
+
+        # Verify again — the second half of the loop, and the half that
+        # decides. Synchronous: the wave is over and nothing overlaps it.
+        for node in wave:
+            subjects = landed.get(node)
+            if not subjects:
+                continue
+            obs = observer_agent.observe(
+                node, agent=DAG[node].agent, subjects=subjects,
+                doc=copy.deepcopy(svc.doc),
+                pending=_pending_sections(in_plan, settled),
+                planned=_planned_sections(in_plan), user_request=user_request,
+            )
+            _record_observation(report, ledger, obs)
+            for subject in subjects:
+                if obs.findings.get(subject):
+                    open_tasks[(node, subject)] = RepairTask(
+                        node=node, agent=DAG[node].agent, subject=subject,
+                        feedback=obs.brief(subject),
+                    )
+                    last[(node, subject)] = obs
+                else:
+                    task = open_tasks.pop((node, subject))
+                    report.repaired.append(task.label)
+        if not open_tasks:
+            return
+
+    for (node, subject), task in open_tasks.items():
+        obs = last[(node, subject)]
+        flag_unrepaired(svc, obs, subject)
+        why = "; ".join(
+            f"{f.edge}: {f.detail}" for f in obs.findings.get(subject, [])
+        )[:600]
+        report.unrepaired[task.label] = why
+        _note(ledger, "unrepaired", node, subject, why)
 
 
 def _round_specs(

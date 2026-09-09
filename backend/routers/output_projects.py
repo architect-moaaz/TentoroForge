@@ -366,11 +366,16 @@ class SmithTurnRequest(BaseModel):
                      "Off means the Blueprint is updated and the plan reported, "
                      "but nothing is regenerated."),
     )
-    model: str = Field("claude-opus-5", description="Model for Smith and the agents")
+    #: Smith's model. Empty means the configured default (`SMITH_MODEL`,
+    #: Opus 5). The specialists and the observer are not on this field: they
+    #: run on `tiered_router()` — `AGENT_MODEL`, Sonnet 5 — whatever Smith
+    #: is on, because interpreting the user and filling a constrained shape
+    #: are different jobs at different prices.
+    model: str = Field("", description="Model for Smith (default: the configured SMITH_MODEL)")
 
 
-def _smith_model(model_name: str):
-    """The model Smith and its agents run on, or a 503 explaining why not."""
+def _smith_model(model_name: str = ""):
+    """The model Smith runs on, or a 503 explaining why not."""
     from config import ANTHROPIC_API_KEY
 
     if not ANTHROPIC_API_KEY:
@@ -378,9 +383,9 @@ def _smith_model(model_name: str):
             status_code=503,
             detail="ANTHROPIC_API_KEY is not configured, so Smith cannot take a turn.",
         )
-    from services.blueprint.executors import AnthropicModel
+    from services.blueprint.executors import SMITH_MODEL, AnthropicModel
 
-    return AnthropicModel(model=model_name)
+    return AnthropicModel(model=model_name or SMITH_MODEL)
 
 
 @router.post("/{project_id}/smith/turn", summary="One conversational turn with Smith")
@@ -421,9 +426,13 @@ async def smith_turn(project_id: str, req: SmithTurnRequest):
     def _run() -> dict:
         smith = Smith.load(root, model=model)
         if req.run_agents:
-            from services.blueprint.executors import make_executor
+            from services.blueprint.executors import make_executor, tiered_router
+            from services.blueprint.observer import anthropic_observer
 
-            smith.executor = make_executor(smith.blueprint, model)
+            # The specialists and the observer: AGENT_MODEL, tiered by node.
+            router = tiered_router()
+            smith.executor = make_executor(smith.blueprint, router)
+            smith.observer_agent = anthropic_observer(router)
         turn = smith.turn(
             req.text, preview=preview, run_agents=req.run_agents,
             observer=sink,

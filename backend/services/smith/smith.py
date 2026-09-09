@@ -458,11 +458,16 @@ class Smith:
         executor: Callable[[Any], Any] | None = None,
         app_root: str | None = None,
         question_limit: int = clarification.DEFAULT_BATCH,
+        observer_agent: Any = None,
     ):
         self.blueprint = blueprint
         self.conversation = Conversation(blueprint.output_dir)
         self.model = model
         self.executor = executor
+        #: §73 closed at the node — see services.blueprint.observer. Injected
+        #: beside the executor for the same reason: without one the DAG runs
+        #: exactly as before, so nothing here depends on a model to be tested.
+        self.observer_agent = observer_agent
         self.app_root = app_root
         self.question_limit = question_limit
 
@@ -650,6 +655,7 @@ class Smith:
                     run_agents=run_agents and self.executor is not None,
                     regenerate=self.defined,
                     observer=observer,
+                    observer_agent=self.observer_agent,
                 )
             except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
                 # The Blueprint refused what the plan proposed. Nothing was
@@ -774,6 +780,7 @@ class Smith:
         return run_dag(
             self.blueprint, self.executor, plan=plan, commit=False,
             user_request=user_request, app_root=self.app_root,
+            observer_agent=self.observer_agent,
         )
 
     def define(self) -> RunReport:
@@ -850,6 +857,7 @@ class Smith:
         report = run_dag(
             self.blueprint, self.executor, plan=build_nodes(), commit=False,
             user_request="build", app_root=app_root or self.app_root,
+            observer_agent=self.observer_agent,
         )
 
         done = set(report.completed)

@@ -233,6 +233,12 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "build": _cap("build", {"runtime"}),
     # Verification reports divergence; it never edits an artifact's content.
     "verification": _cap("verification", set(), may_set_status=True),
+    # The observer (§73's loop, closed at the node). Judges every agent
+    # node's outcome as it lands and commands the repair — which the owning
+    # agent authors. Like verification it may flag and write nothing: an
+    # observer that patched a page directly would be a second author with no
+    # §30 boundary.
+    "observer": _cap("observer", set(), may_set_status=True),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},

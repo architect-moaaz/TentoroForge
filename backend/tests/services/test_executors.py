@@ -99,8 +99,20 @@ def test_bodies_travel_as_strings_because_free_form_objects_cannot_be_constraine
     assert body["type"] == "string"
 
 
-def test_uses_the_current_default_model():
-    assert DEFAULT_MODEL == "claude-opus-5"
+def test_who_runs_on_what():
+    """Two decisions (2026-09-10): the specialists and the observer on Sonnet
+    5, Smith on Opus 5. `DEFAULT_MODEL` is the specialists' model — it is
+    what a bare `AnthropicModel()` and `tiered_router()` run on."""
+    from services.blueprint.executors import (
+        AGENT_MODEL, SMITH_MODEL, AnthropicModel, tiered_router,
+    )
+
+    assert AGENT_MODEL == "claude-sonnet-5"
+    assert SMITH_MODEL == "claude-opus-5"
+    assert DEFAULT_MODEL == AGENT_MODEL
+    assert AnthropicModel().model == AGENT_MODEL
+    assert tiered_router().default.model == AGENT_MODEL
+    assert set(tiered_router().assignments().values()) == {AGENT_MODEL}
 
 
 # --- §101: capability-scoped context ---------------------------------------
@@ -328,7 +340,7 @@ def test_router_sends_each_node_to_its_assigned_model():
 
     router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
     assert router.for_task("testing", "testing").model == "kimi-k2-0711-preview"
-    assert router.for_task("data_model", "data_model").model == "claude-opus-5"
+    assert router.for_task("data_model", "data_model").model == DEFAULT_MODEL
 
 
 def test_router_can_route_by_agent_as_well_as_node():
@@ -353,7 +365,7 @@ def test_assignments_report_what_runs_where():
     router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
     a = router.assignments()
     assert a["testing"] == "kimi-k2-0711-preview"
-    assert a["data_model"] == "claude-opus-5"
+    assert a["data_model"] == DEFAULT_MODEL
     assert set(a) == set(DAG), "every node must have a declared model"
 
 
@@ -506,7 +518,7 @@ def test_a_run_can_mix_anthropic_gemini_and_an_openai_compatible_provider(svc):
         },
     )
     a = router.assignments()
-    assert a["data_model"] == "claude-opus-5"
+    assert a["data_model"] == DEFAULT_MODEL
     assert a["testing"] == "kimi-k2-0711-preview"
     assert a["business_rules"] == "gemini-2.5-pro"
     assert len(set(a.values())) >= 3
@@ -1588,3 +1600,23 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"
+
+
+def test_the_client_timeout_is_the_sdks_own_type(monkeypatch):
+    """`anthropic.Timeout` is whichever httpx the installed SDK speaks. Probing
+    for httpx2 built the wrong Timeout whenever that package was merely
+    present, and the SDK surfaced the type error as a connection error."""
+    import anthropic
+
+    from services.blueprint.executors import AnthropicModel
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
+    AnthropicModel()._anthropic()
+    assert isinstance(captured["timeout"], anthropic.Timeout)
+    assert captured["default_headers"] == {"accept-encoding": "gzip"}

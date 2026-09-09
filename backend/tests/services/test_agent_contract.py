@@ -90,7 +90,12 @@ def test_figma_intelligence_is_registered_from_section_101():
     # answer to. It is in the registry anyway so that its writes go through the
     # same check_capability as theirs. A coordinator exempt from the boundary
     # check is how §28's "uncontrolled swarm" gets in wearing a badge.
-    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith"}
+    #
+    # The observer (§73) is the fifth: registered flag-only, like verification,
+    # so the check that stops it authoring is the same check that stops
+    # everyone else — see test_observer.py.
+    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith",
+                     "observer"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
