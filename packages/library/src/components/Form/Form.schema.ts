@@ -50,6 +50,10 @@ const fieldBase = {
   required: z.boolean().optional(),
   // Short helper text shown under the control (not the rules-engine hint).
   hint: z.string().optional(),
+  // Placeholder text. Belongs on every kind, not only text/email/number: the
+  // composer routinely puts one on a textarea or select, and a strict field
+  // schema without it here rejected the whole field and dropped the page.
+  placeholder: z.string().optional(),
   interaction: Interaction.optional(),
 } as const;
 

@@ -5739,6 +5739,9 @@
                     "hint": {
                       "type": "string"
                     },
+                    "placeholder": {
+                      "type": "string"
+                    },
                     "interaction": {
                       "type": "object",
                       "properties": {
@@ -5839,9 +5842,6 @@
                         }
                       },
                       "additionalProperties": false
-                    },
-                    "placeholder": {
-                      "type": "string"
                     }
                   },
                   "required": [
@@ -5868,6 +5868,9 @@
                       "type": "boolean"
                     },
                     "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
                       "type": "string"
                     },
                     "interaction": {
@@ -5999,6 +6002,9 @@
                       "type": "boolean"
                     },
                     "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
                       "type": "string"
                     },
                     "interaction": {
@@ -6149,6 +6155,9 @@
                     "hint": {
                       "type": "string"
                     },
+                    "placeholder": {
+                      "type": "string"
+                    },
                     "interaction": {
                       "type": "object",
                       "properties": {
@@ -6277,6 +6286,9 @@
                     "hint": {
                       "type": "string"
                     },
+                    "placeholder": {
+                      "type": "string"
+                    },
                     "interaction": {
                       "type": "object",
                       "properties": {
@@ -6403,6 +6415,9 @@
                       "type": "boolean"
                     },
                     "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
                       "type": "string"
                     },
                     "interaction": {
@@ -6553,6 +6568,9 @@
                     "hint": {
                       "type": "string"
                     },
+                    "placeholder": {
+                      "type": "string"
+                    },
                     "interaction": {
                       "type": "object",
                       "properties": {
@@ -6679,6 +6697,9 @@
                       "type": "boolean"
                     },
                     "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
                       "type": "string"
                     },
                     "interaction": {
@@ -6818,6 +6839,9 @@
                       "type": "boolean"
                     },
                     "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
                       "type": "string"
                     },
                     "interaction": {
