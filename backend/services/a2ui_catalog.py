@@ -490,6 +490,14 @@ def _component_schema(name: str, entry: dict, contracts: dict) -> dict:
             ),
             "$ref": f"{_COMMON}#/$defs/ChildList",
         }
+        # A single child by id — the composer routinely emits `child` on a
+        # one-child container (a Card wrapping one Column). Without it declared
+        # the surface was rejected as carrying an unknown prop; the projection
+        # already reads `child` as a one-element `children`, so accept it.
+        props["child"] = {
+            "description": "A single child component id (one-child form of `children`).",
+            "type": "string",
+        }
 
     body: dict[str, Any] = {
         "type": "object",
