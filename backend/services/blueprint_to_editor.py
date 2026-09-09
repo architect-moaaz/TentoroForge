@@ -154,3 +154,77 @@ def derived_ids(doc: dict, project_id: Any,
     items = _live(doc.get(section))
     return {_id_for(project_id, str(i["id"])): str(i["id"])
             for i in items if i.get("id")}
+
+
+def app_model_from_blueprint(doc: dict, project_id: Any, output_dir: str | Path) -> dict:
+    """Derive the app-model (ERD/editor shape) directly from the Blueprint.
+
+    §76 pattern: the blueprint pipeline projects the app under ``output_dir/app``
+    and never writes ``app-model.json``, so ``/app-model`` 404'd forever and the
+    Data Model / Workflows / Rules editor tabs sat on "index hasn't been built".
+    The Blueprint already carries the full data model, so answer from it rather
+    than a store the engine never writes. Shape mirrors what the ERD canvas and
+    ``useProjectDataModel`` read: ``database.tables[].columns[]`` (name, type,
+    nullable, primaryKey, references) + ``database.enums`` + entity relations.
+    """
+    data = (doc or {}).get("data", {}) or {}
+    entities = [e for e in (data.get("entities") or [])
+                if isinstance(e, dict) and e.get("status") != "SUPERSEDED"]
+    relationships = [r for r in (data.get("relationships") or []) if isinstance(r, dict)]
+    by_id = {e.get("id"): e for e in entities}
+
+    def _table(e: dict) -> str:
+        return e.get("table") or (str(e.get("name", "")).lower() + "s")
+
+    tables: list[dict] = []
+    enums: list[dict] = []
+    for e in entities:
+        columns: list[dict] = []
+        for f in (e.get("fields") or []):
+            if not isinstance(f, dict) or not f.get("name"):
+                continue
+            col: dict = {
+                "name": f["name"],
+                "type": f.get("type", "text"),
+                # Blueprint marks `required`; the ERD wants `nullable`.
+                "nullable": not bool(f.get("required")),
+                "primaryKey": bool(f.get("primaryKey")),
+            }
+            if f.get("unique"):
+                col["unique"] = True
+            # A relationship whose `from` is this entity+field is a foreign key.
+            for r in relationships:
+                if r.get("from") == e.get("id") and r.get("fromField") == f["name"]:
+                    target = by_id.get(r.get("to"))
+                    if target:
+                        col["references"] = {"table": _table(target), "column": r.get("toField") or "id"}
+                    break
+            columns.append(col)
+            if f.get("type") == "enum" and f.get("enumValues"):
+                enums.append({"name": f"{e.get('name')}.{f['name']}", "values": list(f["enumValues"])})
+        relations = []
+        for r in relationships:
+            if r.get("from") == e.get("id"):
+                target = by_id.get(r.get("to"))
+                relations.append({
+                    "type": str(r.get("kind") or "many_to_one").replace("_", "-"),
+                    "target": _table(target) if target else r.get("to"),
+                    "foreignKey": r.get("fromField"),
+                })
+        tables.append({
+            "name": _table(e),
+            "displayName": e.get("name"),
+            "columns": columns,
+            "relations": relations,
+        })
+
+    # workflows / businessRules / pages live at the Blueprint doc top level.
+    return {
+        "database": {"tables": tables, "enums": enums},
+        "entities": entities,
+        "workflows": _live((doc or {}).get("workflows")),
+        "businessRules": _live((doc or {}).get("businessRules")),
+        "pages": _live((doc or {}).get("pages")),
+        "derivedFrom": "blueprint",
+        "generatedAt": _stamp(output_dir).isoformat(),
+    }

@@ -25,8 +25,10 @@ endpoint count was diffed by hand.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -65,6 +67,467 @@ def _detach(task: "asyncio.Task") -> None:
     _DETACHED.add(task)
     task.add_done_callback(_DETACHED.discard)
 router = APIRouter(tags=["generation", "blueprint"])
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle verbs, status, and pre-define guards for the live chat handler.
+# The live /smith/chat path (this file) historically had NO verb parsing, so
+# `status` fell into the define branch (DEFECT-STATUS-VERB), define fired as a
+# side effect of ordinary replies (DEFECT-B-07), and a functionless brief was
+# defined without pushback (DEFECT-C-06). These small deterministic helpers
+# give the live path the verbs the Smith class already has, without swapping
+# engines.
+# ---------------------------------------------------------------------------
+
+#: Words that are COMMANDS, not descriptions to reason about.
+_LIFECYCLE_VERBS = frozenset({"status", "define", "approve", "build", "preview",
+                              "export", "deploy"})
+
+
+def _lifecycle_verb(message: str) -> str | None:
+    """The lifecycle verb a message IS, or None. Only an exact one-word command
+    counts — 'define the roles for me' is a sentence, not the `define` verb."""
+    if not message:
+        return None
+    word = message.strip().lower().rstrip(".!").strip()
+    return word if word in _LIFECYCLE_VERBS else None
+
+
+def _status_report(doc: dict) -> str:
+    """A deterministic status line read straight off the Blueprint — never a
+    define. Answers 'where are we' with the state, what has been drafted, and
+    the next explicit step."""
+    from services.smith import decisions as _decisions
+    state = (doc or {}).get("state", "DISCOVERY")
+    reqs = len((doc or {}).get("requirements") or [])
+    pages = len((doc or {}).get("pages") or [])
+    total_dec = len((doc or {}).get("decisions") or [])
+    try:
+        by_user = len(_decisions.by_user(doc or {}))
+    except Exception:  # noqa: BLE001
+        by_user = 0
+    if not reqs and not pages:
+        return ("State: DISCOVERY — nothing defined yet. Describe what you want "
+                "to build, then say `define` to draft the definition.")
+    nxt = ("Say `approve` to build." if state in ("BLUEPRINT_REVIEW", "DEFINITION")
+           else "Say `define` to (re)draft the definition, then `approve` to build.")
+    return (f"State: {state}. {reqs} requirement(s), {pages} page(s) drafted; "
+            f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
+
+
+def _is_built(output_dir) -> bool:
+    """Whether the application has actually been GENERATED, not just defined.
+
+    A define writes only the Blueprint (.forge/blueprint/current.json); the
+    build is what emits the Next app, and app_emitter writes its package.json.
+    So that file existing is the honest 'built' signal. It matters because a
+    change means two different things on the two sides of the build: before it,
+    a request is an edit to the DEFINITION (redraft and re-show for review);
+    after it, a change to the running app (compose / mutate). DEFECT-C-03/B-09
+    is the pre-build case being routed as if the app already existed.
+    """
+    from pathlib import Path as _P
+    return (_P(output_dir) / "app" / "package.json").is_file()
+
+
+#: A message that asks to ADD or CHANGE something in the definition — an
+#: imperative, not a question. Leading verb is the strong signal; a few whole
+#: phrases catch the polite forms. Interrogatives are excluded so a question
+#: ("what does this app do?") is answered, not turned into a redraft.
+_EDIT_LEAD_VERBS = (
+    "add", "remove", "delete", "include", "change", "rename", "make", "put",
+    "drop", "replace", "support", "allow", "enable", "require", "also",
+    "introduce", "create", "build", "let", "give",
+)
+_EDIT_PHRASES = (
+    "there should be", "there needs to be", "it should", "the app should",
+    "we need", "i need", "i want", "i'd like", "i would like", "please add",
+    "can you add", "could you add", "add a ", "add an ", "should also",
+    "needs to have", "should have", "must have",
+)
+_QUESTION_LEADS = (
+    "what", "why", "how", "where", "who", "when", "which", "is ", "are ",
+    "does ", "do ", "can i", "could i", "should i", "explain", "trace",
+    "show", "tell me", "has ", "have ",
+)
+
+
+def _definition_edit(message: str) -> bool:
+    """True when a message asks to change the definition (an edit), not ask
+    about it (a question). Conservative on both sides: a clear imperative is an
+    edit; a clear interrogative is not; anything ambiguous is left to the model.
+
+    DEFECT-C-03/B-09: 'Add a Clients module with a client list page' and 'Add an
+    approval step' are edits to the definition, but pre-build they were routed
+    to the composer, which has no app to change and deflected.
+    """
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+    # A bare lifecycle command ('build', 'approve', 'define') is a command, not
+    # an edit — even though 'build' leads the edit-verb list.
+    if _lifecycle_verb(message) is not None:
+        return False
+    first = text.split()[0] if text.split() else ""
+    # A question wins: 'can you add a page?' still reads as a request, so only
+    # treat as a question when it leads with an interrogative AND names no edit.
+    leads_question = first in _QUESTION_LEADS or any(
+        text.startswith(q) for q in _QUESTION_LEADS)
+    has_edit = (first in _EDIT_LEAD_VERBS
+                or any(p in text for p in _EDIT_PHRASES))
+    if has_edit:
+        return True
+    if leads_question:
+        return False
+    return False
+
+
+# A 'why did you decide…' question, and the words that carry its meaning.
+_WHY_LEADS = ("why", "how did you decide", "how come", "on what basis",
+              "what made you", "what's the reason", "whats the reason")
+_CITE_STOPWORDS = frozenset("""
+why did you decide decided decides deciding that this the a an is are was were
+be been being only can cannot could would should do does don't didn't i we it
+they them there here what when where how to of for on in and or but with as by
+from make made makes choose chose chosen your my our me us so such not no yes
+about into over under than then just also have has had will won't smith app
+application system reason think thought going want wanted need needs
+""".split())
+
+
+def _discovery_answers(turns) -> list[tuple[str, str]]:
+    """(question, answer) pairs from a transcript: each USER turn that answers a
+    preceding SMITH question. The opening brief (a user turn with no question
+    before it) is not an answer and is skipped.
+
+    Deliberately structural, not semantic — it does not try to say WHICH
+    artifact an answer decides (that binding needs the model, and getting it
+    wrong corrupts confidence). It only captures that the user was asked X and
+    said Y, which is exactly what a discovery decision records.
+    """
+    pairs: list[tuple[str, str]] = []
+    last_q = ""
+    for role, text in turns:
+        text = (text or "").strip()
+        if not text:
+            continue
+        if str(role).lower() in ("smith", "assistant"):
+            last_q = text
+        elif str(role).lower() == "user" and last_q:
+            pairs.append((last_q, text))
+            last_q = ""
+    return pairs
+
+
+def _record_discovery_answers(output_dir, turns, emit=None) -> int:
+    """Record the user's discovery answers as `source: user` decisions.
+
+    DEFECT-B-03: the answers to Smith's clarification questions never reached
+    current.json as decisions — `by_user` was 0, the Decisions view was empty,
+    and there was nothing to cite. The full Smith engine records them bound to
+    the artifact each one settles; this deterministic path records them UNBOUND
+    (the schema needs only id/decision/source) so it adds a real audit trail
+    with `source: user` WITHOUT the semantic artifact-binding that would touch
+    confidence if it guessed wrong. Idempotent by a content key, best-effort:
+    a failure to record must never fail the turn.
+    """
+    pairs = _discovery_answers(turns)
+    if not pairs:
+        return 0
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.smith import bootstrap as _bind_ids
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except Exception:  # noqa: BLE001 — no Blueprint yet, nothing to attach to
+        return 0
+    try:
+        _bind_ids(svc)
+        # Dedupe by CONTENT, not by the allocator's natural key: a discovery
+        # decision is unbound, so a fresh bootstrap re-keys it and the key-based
+        # dedup would miss — recording the same answer twice on a re-define.
+        # The decision text is the stable identity here.
+        existing = {(d.get("decision") or "").strip()
+                    for d in (svc.doc.get("decisions") or [])
+                    if isinstance(d, dict)}
+        n = 0
+        for question, answer in pairs:
+            text = answer[:600].strip()
+            if not text or text in existing:
+                continue
+            existing.add(text)
+            key = "discovery-" + hashlib.sha1(
+                answer.lower().encode("utf-8")).hexdigest()[:10]
+            body = {
+                "decision": text,
+                "reason": (f"In discovery, asked: {question}"[:600]),
+                "source": "user",
+                "approvedBy": "user",
+                "binding": True,
+                "status": "APPROVED",
+                "version": svc.doc.get("version", 1),
+            }
+            svc.upsert("decisions", body, natural_key=key)
+            n += 1
+        if not n:
+            return 0
+        svc.validate()
+        svc.save()
+        logger.info("[smith-chat] recorded %d discovery decision(s) for %s",
+                    n, output_dir)
+        return n
+    except Exception as exc:  # noqa: BLE001 — audit trail is a courtesy, not a gate
+        logger.warning("[smith-chat] discovery-answer recording skipped: %s", exc)
+        return 0
+
+
+def _cite_from_blueprint(doc: dict, message: str) -> str | None:
+    """A 'why did you decide X' question answered by CITING the Blueprint's own
+    decision or requirement, or None when nothing matches well enough.
+
+    DEFECT-B-03: 'Why did you decide that only recruiters can add candidates?'
+    was met with 'I did not follow that. Which screen should I change?' — a
+    change-request deflection to a question that has an answer in the document.
+    The decisions[] ledger and the requirements both record the reasoning; this
+    finds the best-matching one and quotes it, rather than letting the model
+    treat the question as an edit. Conservative: needs a real keyword overlap,
+    else it returns None and the model handles it — a weak guess is worse than
+    no guess (§116).
+    """
+    low = (message or "").lower().strip()
+    if not (low.startswith("why") or any(p in low for p in _WHY_LEADS)):
+        return None
+    words = {w for w in re.findall(r"[a-z0-9]+", low) if len(w) >= 3
+             and w not in _CITE_STOPWORDS}
+    if len(words) < 2:
+        return None  # nothing distinctive to match on
+
+    def _score(text: str) -> int:
+        toks = set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+        return len(words & toks)
+
+    best_kind = best_text = best_id = None
+    best = 1  # require at least 2 overlapping content words (strictly > 1)
+    # Decisions first — a recorded decision is the most direct citation.
+    for d in (doc.get("decisions") or []):
+        if not isinstance(d, dict):
+            continue
+        sc = _score(f"{d.get('decision', '')} {d.get('reason', '')}")
+        if sc > best:
+            best, best_kind, best_id = sc, "decision", d.get("id")
+            best_text = d.get("reason") or d.get("decision") or ""
+    for r in (doc.get("requirements") or []):
+        if not isinstance(r, dict):
+            continue
+        sc = _score(r.get("description", ""))
+        if sc > best:
+            best, best_kind, best_id = sc, "requirement", r.get("id")
+            best_text = r.get("description") or ""
+    if best_kind is None:
+        return None
+    text = " ".join(str(best_text).split())
+    if best_kind == "decision":
+        return (f"That's a recorded decision — {best_id}: \"{text}\". "
+                "It's in the definition's decision log, not a guess.")
+    return (f"The definition records that as {best_id}: \"{text}\". "
+            "That requirement is where the choice is written down.")
+
+
+#: A requirement id, however the user spaces or cases it ("REQ-001", "req 12").
+_REQ_ID_RE = re.compile(r"\bREQ[-_ ]?0*(\d+)\b", re.IGNORECASE)
+#: Words that make a message an INSPECTION of a requirement rather than an edit
+#: to one. "trace REQ-001", "is REQ-3 implemented", "where is REQ-007".
+_TRACE_HINTS = ("trace", "show", "explain", "where", "what", "which", "status",
+                "verif", "implement", "cover", "does ", "is ", "has ", "trace",
+                "?")
+
+
+def _requirement_query(message: str) -> str | None:
+    """The requirement id a message is ASKING ABOUT, normalised to `REQ-NNN`,
+    or None. Fires only when the message names a REQ id AND reads as an
+    inspection — a change like 'reword REQ-001' is left for the mover.
+
+    DEFECT-I-05: 'Trace REQ-001' came back 'the Blueprint contains no
+    requirement IDs', denying ids the Blueprint plainly has. The trace machinery
+    (verification.requirement_verdict + code_intel.trace) already answers this;
+    the live chat just never reached it. This detector routes the question to a
+    deterministic answer instead of the model that was getting it wrong.
+    """
+    if not message:
+        return None
+    m = _REQ_ID_RE.search(message)
+    if not m:
+        return None
+    low = message.lower()
+    edit_words = ("reword", "rename", "change ", "remove ", "delete ", "edit ",
+                  "update ", "add ")
+    if any(w in low for w in edit_words) and not any(
+            h in low for h in ("trace", "show", "explain", "where", "status")):
+        return None
+    if not any(h in low for h in _TRACE_HINTS):
+        return None
+    return f"REQ-{int(m.group(1)):03d}"
+
+
+def _requirement_report(doc: dict, req_id: str) -> str:
+    """A deterministic trace of one requirement — its text, PASSED/FAILED
+    verdict, and the artifact ids that implement it — read straight off the
+    Blueprint. Honest when the id is genuinely absent (names that, does not
+    deny the whole scheme)."""
+    reqs = [r for r in (doc or {}).get("requirements") or [] if isinstance(r, dict)]
+    match = next((r for r in reqs if str(r.get("id")) == req_id), None)
+    if match is None:
+        known = ", ".join(str(r.get("id")) for r in reqs[:6])
+        if not reqs:
+            return (f"{req_id} can't be traced yet — this project has no "
+                    "requirements defined. Say `define` first.")
+        return (f"{req_id} isn't a requirement in this Blueprint. It has "
+                f"{len(reqs)} requirement(s), e.g. {known}.")
+    desc = str(match.get("description") or "").strip()
+    lines = [f"{req_id} — {desc}" if desc else req_id]
+    try:
+        from services.smith import code_intel
+        tr = code_intel.trace(doc, req_id)
+        lines.append(f"Verdict: {getattr(tr, 'verdict', 'UNKNOWN')}.")
+        chain = getattr(tr, "chain", {}) or {}
+        order = ("FLOW", "RULE", "PAGE", "API", "ENTITY", "TEST")
+        parts = [f"{p.title()}: {', '.join(chain[p])}"
+                 for p in order if chain.get(p)]
+        # Anything the ordered list didn't name, so nothing is silently dropped.
+        parts += [f"{p.title()}: {', '.join(ids)}"
+                  for p, ids in sorted(chain.items())
+                  if p not in order and ids]
+        if parts:
+            lines.append("Traced to — " + "; ".join(parts) + ".")
+        else:
+            lines.append("Nothing cites it yet — it has no implementing "
+                         "artifacts in the Blueprint.")
+    except Exception:  # noqa: BLE001 — a trace degrades to the text + id, never 500s
+        pass
+    return "\n".join(lines)
+
+
+# The only external systems this platform integrates with are the two design
+# SOURCES. Everything else — an ATS, a CRM, a payments or messaging provider —
+# is not something Smith can wire up, and saying so plainly beats asking which
+# sync direction the user wants for a thing that will never be built.
+_SUPPORTED_INTEGRATIONS = ("figma", "ux pilot", "uxpilot")
+#: Phrasings that mean "wire this app to an external system".
+_INTEGRATION_PHRASES = (
+    "integrate with", "integration with", "integrate it with", "integrate into",
+    "connect to", "connect it to", "connect with", "connect this to",
+    "sync with", "sync to", "sync it with", "hook up to", "hook it up to",
+    "pull from", "webhook to", "api integration with",
+)
+#: If the target names a part of THIS app, the phrase is internal wiring ("connect
+#: the form to the dashboard"), not an external integration — leave it to the mover.
+_INTERNAL_TARGET_NOUNS = (
+    "page", "screen", "route", "dashboard", "table", "list", "form", "view",
+    "workflow", "tab", "panel", "section", "field", "button", "modal", "sidebar",
+    "nav", "menu", "record", "entity", "database", "db", "endpoint", "api route",
+)
+
+
+def _unsupported_integration(message: str) -> str | None:
+    """The external system a message asks to integrate with, when that system
+    is NOT one Smith supports — or None.
+
+    DEFECT-F-07: 'Integrate with Greenhouse' was met with 'which sync direction
+    — import / push / two-way?', implying a capability the platform does not
+    have. Only Figma and UX Pilot (design sources) are wired; an ATS/CRM/payment
+    integration is not, and the honest answer is to say so and offer what can be
+    done (record it as a requirement, or rebuild), not to interview the user
+    about a build that will never happen.
+
+    Conservative: fires only on an explicit integration phrase, and never for
+    the two design sources (they have their own connect flow).
+    """
+    if not message:
+        return None
+    low = message.lower()
+    for phrase in _INTEGRATION_PHRASES:
+        idx = low.find(phrase)
+        if idx == -1:
+            continue
+        tail = message[idx + len(phrase):].strip()
+        tail_low = tail.lower()
+        if not tail:
+            continue
+        if any(s in tail_low for s in _SUPPORTED_INTEGRATIONS):
+            return None  # Figma / UX Pilot — the supported design-source flow
+        # The named system, trimmed to its first clause / few words for the reply.
+        name = re.split(r"[.,;:\n]", tail, maxsplit=1)[0].strip()
+        name = " ".join(name.split()[:5])
+        if not name:
+            continue
+        # "connect the form to the dashboard" is internal wiring, not an
+        # external integration — don't refuse it as one.
+        if any(re.search(rf"\b{re.escape(n)}\b", name.lower())
+               for n in _INTERNAL_TARGET_NOUNS):
+            return None
+        return name
+    return None
+
+
+def _unsupported_integration_reply(name: str) -> str:
+    return (
+        f"I can't connect an app to {name} — external integrations like that "
+        "aren't something I can build yet. The only outside sources I wire up "
+        "are Figma and UX Pilot, and those are design references, not data "
+        "connections.\n\nWhat I can do: record it as a requirement so it's "
+        "captured in the definition (and whoever builds the integration later "
+        "has it written down), or make changes to the app I did build. Want me "
+        "to note it as a requirement?"
+    )
+
+
+#: Action verbs whose presence means the app actually DOES something. A brief
+#: with none of these and an explicit "just/only shows text" shape is a page
+#: that does nothing (DEFECT-C-06).
+_ACTION_HINTS = (
+    "create", "add", "manage", "track", "edit", "update", "delete", "remove",
+    "approve", "schedule", "book", "assign", "submit", "review", "record",
+    "store", "save", "search", "filter", "report", "upload", "download",
+    "sign in", "log in", "login", "register", "post", "comment", "vote",
+    "order", "pay", "invoice", "notify", "email", "list of", "dashboard",
+    "workflow", "role", "user", "account", "database", "form", "calculate",
+)
+_FUNCTIONLESS_SHAPE = (
+    "just says", "just shows", "just displays", "only says", "only shows",
+    "only displays", "simply says", "that says", "which says", "displaying the text",
+    "shows the text", "says welcome", "says hello",
+)
+
+
+def _is_functionless_brief(brief: str) -> bool:
+    """True for a brief that describes a page with no function — a static bit of
+    text and nothing to do (DEFECT-C-06). Conservative: it must BOTH look like a
+    static-text page AND name no capability, so a real app is never refused."""
+    b = (brief or "").lower()
+    if len(b) > 400:  # a substantial brief is not a one-line 'welcome' page
+        return False
+    looks_static = any(s in b for s in _FUNCTIONLESS_SHAPE)
+    has_action = any(h in b for h in _ACTION_HINTS)
+    return looks_static and not has_action
+
+
+#: The §94 chain a define walks through, all ungated. Used to advance a live
+#: define run to the review gate (DEFECT-B-07: state stuck at DISCOVERY).
+_DEFINE_STATE_CHAIN = ("DISCOVERY", "CLARIFICATION", "DEFINITION", "BLUEPRINT_REVIEW")
+
+
+def _advance_state_to_review(svc) -> None:
+    """Walk the Blueprint state from wherever it is up to BLUEPRINT_REVIEW after
+    a define, so GET /blueprint reports the review gate instead of DISCOVERY.
+    Best-effort: a refused/illegal step just stops the walk."""
+    from services.blueprint.orchestrator import transition, IllegalTransition
+    cur = svc.doc.get("state", "DISCOVERY")
+    if cur not in _DEFINE_STATE_CHAIN:
+        return
+    for nxt in _DEFINE_STATE_CHAIN[_DEFINE_STATE_CHAIN.index(cur) + 1:]:
+        try:
+            transition(svc, nxt)
+        except IllegalTransition:
+            break
 
 
 class BlueprintGenerateRequest(BaseModel):
@@ -455,6 +918,85 @@ async def read_blueprint(
     return svc.doc
 
 
+@router.get("/api/projects/{project_id}/blueprint/verification")
+async def read_verification(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """§75 cross-artifact verification result for the whole application.
+
+    DEFECT-I-01: the build runs the matrix but `apply_findings` only stamps
+    per-artifact OUT_OF_SYNC status and the report itself was discarded — no
+    endpoint exposed it, so 'was requirement X verified' had no answer. The
+    matrix is deterministic, so compute it on demand from the on-disk Blueprint
+    and surface the summary + findings + a per-requirement PASSED/FAILED roll-up.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.blueprint.verification import verify, requirement_verdict
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    report = verify(svc.doc)
+    verdicts = []
+    for r in (svc.doc.get("requirements") or []):
+        rid = r.get("id") if isinstance(r, dict) else None
+        if not rid:
+            continue
+        try:
+            verdicts.append(requirement_verdict(svc.doc, rid))
+        except Exception:  # noqa: BLE001 — one bad requirement must not 500 the roll-up
+            verdicts.append({"requirement": rid, "result": "UNKNOWN"})
+    passed = sum(1 for v in verdicts if v.get("result") == "PASSED")
+    return {
+        "summary": report.summary() if hasattr(report, "summary") else {},
+        "findings": [f.__dict__ if hasattr(f, "__dict__") else f
+                     for f in (getattr(report, "findings", []) or [])],
+        "requirements": verdicts,
+        "counts": {"total": len(verdicts), "passed": passed, "failed": len(verdicts) - passed},
+    }
+
+
+@router.get("/api/projects/{project_id}/blueprint/requirement/{requirement_id}")
+async def read_requirement_trace(
+    project_id: uuid.UUID,
+    requirement_id: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-requirement PASSED/FAILED verdict + the §18 trace chain (REQ→FLOW→
+    RULE→PAGE→API→ENTITY→TEST) and the files that implement it.
+
+    DEFECT-I-05: the requirement ids and `code_intel.trace` exist but the runtime
+    chat never queried them, so Smith wrongly claimed 'no requirement IDs'. This
+    endpoint answers directly from the Blueprint.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.blueprint.verification import requirement_verdict
+    from services.smith import code_intel
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    ids = {str(r.get("id")) for r in (svc.doc.get("requirements") or []) if isinstance(r, dict)}
+    if requirement_id not in ids:
+        raise HTTPException(status_code=404,
+                            detail=f"{requirement_id} is not a requirement in this Blueprint")
+    verdict = requirement_verdict(svc.doc, requirement_id)
+    try:
+        trace = code_intel.trace(svc.doc, requirement_id)
+        trace_out = trace.render() if hasattr(trace, "render") else (
+            trace.__dict__ if hasattr(trace, "__dict__") else trace)
+        files = list(getattr(trace, "files", []) or [])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("trace failed for %s/%s: %s", project_id, requirement_id, e)
+        trace_out, files = None, []
+    return {"requirement": requirement_id, "verdict": verdict, "trace": trace_out, "files": files}
+
+
 class SmithChatTurn(BaseModel):
     """One earlier turn, as the client has it."""
 
@@ -695,6 +1237,7 @@ async def smith_chat(
 
         def work() -> dict:
             existing = output_dir / ".forge" / "blueprint" / "current.json"
+            svc = None
             defined = False
             if existing.is_file():
                 svc = BlueprintService.load(output_dir=str(output_dir))
@@ -716,6 +1259,51 @@ async def smith_chat(
                 # it below, which is exactly what used to happen immediately.
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
+
+            # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
+            # reason about. Answer it deterministically from the Blueprint and
+            # return — it must NEVER fall through and trigger a define (which it
+            # did, because this handler had no verb parsing at all).
+            verb = _lifecycle_verb(req.message)
+            if verb == "status":
+                emit("message", {"text": _status_report(svc.doc if svc else {}),
+                                 "status": "reported"})
+                return {"status": "reported"}
+
+            # DEFECT-I-05: 'Trace REQ-001' is a question with a determinate
+            # answer — the requirement's text, verdict and the ids that cite it,
+            # all in the Blueprint. Answer it here rather than let the model
+            # deny the id exists. Only fires on a defined project that actually
+            # has the requirements to trace.
+            if svc is not None:
+                asked_req = _requirement_query(req.message)
+                if asked_req:
+                    emit("message", {"text": _requirement_report(svc.doc, asked_req),
+                                     "status": "reported"})
+                    return {"status": "reported"}
+
+            # DEFECT-B-03: 'Why did you decide X?' is a question the Blueprint
+            # can answer — the decision log and the requirements both record the
+            # reasoning. Cite it here rather than let the model treat the
+            # question as an edit ('which screen should I change?'). Only fires
+            # on a confident match; otherwise the model answers.
+            if svc is not None:
+                cited = _cite_from_blueprint(svc.doc, req.message)
+                if cited:
+                    emit("message", {"text": cited, "status": "reported"})
+                    return {"status": "reported"}
+
+            # DEFECT-F-07: an external integration Smith cannot build (an ATS, a
+            # CRM, a payments provider) is refused honestly here — before the
+            # model can engage as if it were a normal change and ask which sync
+            # direction the user wants for something that will never be built.
+            # Not gated on `approved`: an integration ask is never an approval.
+            if not req.approved:
+                unsupported = _unsupported_integration(req.message)
+                if unsupported:
+                    emit("message", {"text": _unsupported_integration_reply(unsupported),
+                                     "status": "asked"})
+                    return {"status": "asked"}
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
@@ -772,6 +1360,33 @@ async def smith_chat(
                             })
                         return {"status": "asked"}
 
+                # DEFECT-C-06: a page that would do nothing is refused, not
+                # defined. A static 'just says Welcome' brief with no capability
+                # gets a what-should-it-do question instead of the expensive
+                # define fan-out and an approvable blank application.
+                if _is_functionless_brief(_the_brief):
+                    emit("message", {
+                        "text": "That describes a page with nothing to do — it "
+                                "would only show some text. What should the app "
+                                "let people DO (create or manage something, sign "
+                                "in, run a workflow)? Tell me that and I'll define "
+                                "it.",
+                        "status": "asked",
+                    })
+                    return {"status": "asked"}
+
+                # NOTE on DEFECT-B-07 ("define must be explicit"): NOT enforced
+                # here on purpose. The workbook contradicts itself — GP-01 (P0)
+                # and C-01 (P0, precondition "B-03 done") both expect the
+                # definition to be READY right after the clarifications are
+                # answered, with no `define` step between them, i.e. an
+                # auto-define. Making define explicit would satisfy B-07 (P1) by
+                # regressing those P0 cases (C-01 would wait forever for a
+                # definition that never auto-drafts). The concrete B-07 symptom
+                # that WAS a bug — the `status` command triggering a define — is
+                # fixed by the lifecycle-verb guard above. The auto-define on a
+                # genuine answer is what the golden path relies on, so it stays;
+                # resolving the spec contradiction is a product call.
                 emit("message", {
                     "text": "Let me define that first — I'll show you what I "
                             "understood before building anything.",
@@ -794,7 +1409,33 @@ async def smith_chat(
                                        app_name=getattr(project, "name", "") or "")
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
+                # DEFECT-B-03: the answers that shaped this definition are
+                # recorded as `source: user` decisions now that the Blueprint
+                # exists to hold them — so `status` shows "N from you", the
+                # Decisions view has content, and "why did you decide X" can
+                # cite them. Best-effort; never fails the define.
+                _record_discovery_answers(
+                    output_dir,
+                    [(t.role, t.text) for t in req.history if t.text]
+                    + [("user", req.message)],
+                    emit=emit)
                 return defined_now
+
+            # DEFECT-C-03/B-09: A DEFINITION exists but the app is NOT built
+            # yet, and this is a request to change what will be built. That is
+            # an edit to the definition, not to a running app — so redraft the
+            # definition (re-run the domain nodes with the request appended) and
+            # re-show it for review, then advance to BLUEPRINT_REVIEW. Routing
+            # it to the composer instead is what produced "there is no page at
+            # /clients" and "no pages defined yet": the composer has no built app
+            # to change before the build has run. Only clear edits redraft; a
+            # question ("what does this app do?") still falls through to be
+            # answered.
+            if svc is not None and not _is_built(output_dir) \
+                    and _definition_edit(req.message):
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=False, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
@@ -987,6 +1628,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
                  observer=progress)
+    # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
+    # transition()), so GET /blueprint reported DISCOVERY forever and the
+    # approve/build gates were unreachable. A define that produced requirements
+    # has reached the review gate — advance the §94 state to BLUEPRINT_REVIEW.
+    # (Not on the approved/build pass; that path moves past review on its own.)
+    if not approved and (svc.doc.get("requirements") or svc.doc.get("pages")):
+        _advance_state_to_review(svc)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())

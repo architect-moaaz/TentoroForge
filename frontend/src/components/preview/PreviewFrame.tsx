@@ -23,16 +23,6 @@ const DEVICE_SIZES = {
 
 type Device = keyof typeof DEVICE_SIZES;
 
-// The preview dev server is started behind a basePath of
-// `/api/projects/<id>/preview/serve` (see backend/preview.py) and reached
-// through the proxy at that path — never the raw dev-server port. A bare
-// `http://localhost:<port>` only works when the browser and the server share a
-// machine; on a hosted deploy it is the SERVER's localhost, so the iframe
-// failed with "unable to connect to localhost". Route through the same origin
-// the API client uses (empty on a hosted deploy → relative, so the platform's
-// reverse proxy forwards it; the dev host locally).
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
-
 interface PreviewFrameProps {
   projectId: string;
   project: Project | null;
@@ -41,19 +31,26 @@ interface PreviewFrameProps {
 export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
   const [device, setDevice] = useState<Device>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
-  const { port, isStarting, error, startPreview, stopPreview, checkStatus } =
+  const { port, servePath, isStarting, error, startPreview, stopPreview, checkStatus } =
     usePreview(projectId);
 
   useEffect(() => {
     checkStatus();
   }, [checkStatus]);
 
-  // Reach the dev server through the backend proxy, which fronts it at the
-  // basePath the preview was started under. `port` is what tells us a preview
-  // is actually running; the browser never connects to it directly.
-  const previewUrl = port
-    ? `${API_BASE}/api/projects/${projectId}/preview/serve/`
-    : null;
+  // Load the app through the backend PROXY path, not the backend's internal
+  // localhost port (DEFECT-E-01: blank on hosted). The generated Next app is
+  // started with NEXT_BASE_PATH = this serve path, so its pages and assets are
+  // emitted under it and the proxy forwards them verbatim; the proxy is
+  // auth-free by design (an iframe can't send the platform bearer token). Same
+  // pattern as CanvasFrame / the Blueprint page's LiveApplication. Prefix with
+  // the API origin when set (hosted split origin), else the relative path
+  // resolves via next.config's /api/projects rewrite.
+  const previewUrl = servePath
+    ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${servePath}`
+    : port
+      ? `http://localhost:${port}`
+      : null;
   const deviceSize = DEVICE_SIZES[device];
 
   return (

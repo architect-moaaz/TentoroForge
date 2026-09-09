@@ -22,8 +22,23 @@ describe("taskFormSpec", () => {
     expect(spec.fields).toEqual([{ name: "amount", type: "number", required: false }]);
   });
 
-  it("falls back to a raw JSON form when nothing is declared", () => {
-    const spec = taskFormSpec(task("assignment"));
+  it("returns the approval form when the original node type is approval (backend collapses to user_task)", () => {
+    const spec = taskFormSpec(task("user_task", { node_type: "approval" }));
+    expect(spec.kind).toBe("approval");
+    expect(spec.fields.map((f) => f.name)).toEqual(["decision", "comment"]);
+  });
+
+  it("renders typed fields from a node's form binding (expectedOutputs)", () => {
+    const spec = taskFormSpec(task("user_task", {
+      node_type: "user_task",
+      expectedOutputs: [{ name: "visitNote", type: "string" }, { name: "weight", type: "number" }],
+    }));
+    expect(spec.kind).toBe("fields");
+    expect(spec.fields.map((f) => f.name)).toEqual(["visitNote", "weight"]);
+  });
+
+  it("falls back to a raw JSON form only when nothing is declared", () => {
+    const spec = taskFormSpec(task("user_task", { node_type: "user_task" }));
     expect(spec.kind).toBe("json");
   });
 });

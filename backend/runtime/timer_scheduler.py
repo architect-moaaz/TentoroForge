@@ -177,8 +177,18 @@ class TimerScheduler:
 
             # Import here to avoid circular imports
             from runtime.engine import WorkflowRuntimeEngine
+            from models.workflow_instance import WorkflowInstanceStatus
 
             engine = WorkflowRuntimeEngine(db)
+
+            # Mirror complete_task on resume: the timer node is no longer active,
+            # and a `waiting` instance must return to `running` before the drain
+            # so the completion guard can fire (else the run stays waiting forever).
+            if task.node_id:
+                remaining = [nid for nid in (instance.current_node_ids or []) if nid != task.node_id]
+                await engine.state.update_current_nodes(instance, remaining)
+            if instance.status == WorkflowInstanceStatus.waiting:
+                await engine.state.transition_instance(instance, WorkflowInstanceStatus.running)
 
             # Load definition to get edges
             # We need the output_dir from the project — use a helper query

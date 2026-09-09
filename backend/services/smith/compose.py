@@ -79,6 +79,67 @@ def _page_for_route(doc: dict, route: str) -> dict | None:
     return None
 
 
+def _name_from_route(route: str) -> str:
+    """A human page name from a route: '/client-invoices' -> 'Client Invoices'."""
+    tail = (route or "").rstrip("/").rsplit("/", 1)[-1]
+    tail = tail.strip("/[]").replace("-", " ").replace("_", " ").strip()
+    if not tail:
+        return "Home"
+    return " ".join(w.capitalize() for w in tail.split())
+
+
+def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
+    """The page contract for `route`, CREATING a minimal one when the
+    definition does not have it yet.
+
+    compose_route's own contract is a route that "renders nothing, is empty, or
+    404s", and a route the Blueprint has never heard of is the purest case of
+    that. The implementation nonetheless REFUSED it (DEFECT C-03/B-09/F-07):
+    someone asking for a Clients screen got "there is no page at '/clients' in
+    this application" and no way forward, because the only screens Smith could
+    compose were the ones the definition already listed. A definition is allowed
+    to grow — asking for a screen that isn't there yet is how it grows.
+
+    Deterministic: no model, no LLM. It writes only the four fields the PAGE
+    contract requires (`id` is allocated by `upsert`); the composition that
+    follows is what gives the page its layout, exactly as it does for a page the
+    definition already had. Idempotent — a route that already exists is returned
+    untouched, so this never duplicates a page or overwrites its contract.
+    """
+    existing = _page_for_route(svc.doc, route)
+    if existing is not None:
+        return existing
+
+    want = (route or "").strip()
+    if not want:
+        raise ComposeError("no route was named, so there is nothing to compose.")
+    if not want.startswith("/"):
+        want = "/" + want
+
+    name = _name_from_route(want)
+    body = {
+        "name": name,
+        "route": want,
+        # Business-terms purpose is a required field; the request is the closest
+        # thing to a stated reason we have, and it reads back sensibly in the
+        # definition ("add a screen for clients") until the user refines it.
+        "purpose": (request.strip() or f"The {name} screen.")[:280],
+        "primaryTasks": [],
+    }
+    # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
+    # add_widgets only ever UPDATE a page already in the definition. A new id
+    # collides if the allocator registry has fallen behind the document (a
+    # Blueprint loaded without its ids.json — an import or a restore). bootstrap
+    # binds the document's ids into the registry first; it is idempotent, so it
+    # is free when the registry is already in step.
+    from services.smith.smith import bootstrap as _bind_ids
+    _bind_ids(svc)
+    page = svc.upsert("pages", body, natural_key=want)
+    svc.save()
+    logger.info("[smith] add_page %s -> %s", want, page.get("id"))
+    return page
+
+
 #: How many times a conversational compose may be asked, matching the DAG's
 #: `max_attempts`. One is not enough and the reason is measured: on this
 #: application A2UI composed a dashboard carrying `density` on Card — a prop
@@ -119,13 +180,12 @@ def compose_route(
     from services.blueprint.service import BlueprintInvalid
     from services.smith.change import apply_change
 
-    page = _page_for_route(svc.doc, route)
-    if page is None:
-        known = [p.get("route") for p in (svc.doc.get("pages") or [])][:8]
-        raise ComposeError(
-            f"there is no page at {route!r} in this application. "
-            f"Routes it does have include: {', '.join(filter(None, known))}"
-        )
+    # A route the definition does not have yet is created rather than refused —
+    # composing a screen that "renders nothing or 404s" is what this verb is
+    # FOR (DEFECT C-03/B-09/F-07). `_ensure_page` is idempotent, so an existing
+    # route is returned unchanged and only a genuinely new one grows the
+    # definition before it is laid out.
+    page = _ensure_page(svc, route, request)
 
     # The composition is the slow part of the turn — around a minute behind a
     # single message. `reasoning` is how that minute becomes legible: the
@@ -231,13 +291,16 @@ def add_widgets(
     """
     from services.blueprint.service import ARTIFACT_SECTIONS  # noqa: F401
 
-    page = _page_for_route(svc.doc, route)
-    if page is None:
-        raise ComposeError(f"there is no page at {route!r} in this application.")
-
+    # Checked before the page is touched: an empty request must not grow the
+    # definition with a page nobody asked to fill.
     wanted = [str(w).strip() for w in (widgets or []) if str(w).strip()]
     if not wanted:
         raise ComposeError("no widgets were named, so there is nothing to add.")
+
+    # A route that isn't in the definition is created (with these widgets as its
+    # first tasks) rather than refused — same DEFECT C-03/B-09/F-07 fix as
+    # compose_route. Idempotent for a route that already exists.
+    page = _ensure_page(svc, route, request)
 
     tasks = list(page.get("primaryTasks") or [])
     added = [w for w in wanted if w not in tasks]

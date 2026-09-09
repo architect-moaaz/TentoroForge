@@ -33,14 +33,34 @@ function createEmptyTable(): DecisionTableDefinition {
   };
 }
 
+/**
+ * The backend stores node config without validating it (config-guards.ts), and
+ * decisionTable is LLM-generated, so `config.decisionTable` can be a truthy but
+ * non-conforming shape ({}, [], a string, or an object missing outputs). This
+ * panel then did `table.outputs.map(...)` and threw, unmounting the ONLY UI that
+ * could repair the node. Returns a valid table (or null when nothing usable is
+ * stored) so `.outputs`/`.rules` are always arrays.
+ */
+function normalizeTable(raw: unknown): DecisionTableDefinition | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const t = raw as Partial<DecisionTableDefinition>;
+  if (!Array.isArray(t.inputs) || !Array.isArray(t.outputs) || !Array.isArray(t.rules)) {
+    return null;
+  }
+  return t as DecisionTableDefinition;
+}
+
 export function DecisionNodeProps({
   config,
   onUpdate,
 }: DecisionNodePropsComponentProps) {
   const [showTest, setShowTest] = useState(false);
 
+  // Always a valid table: a malformed stored value falls back to an empty one
+  // so the editor renders (and the user's next edit overwrites the bad config)
+  // instead of crashing the panel.
   const table: DecisionTableDefinition =
-    config.decisionTable || createEmptyTable();
+    normalizeTable(config.decisionTable) ?? createEmptyTable();
 
   const updateTable = useCallback(
     (updated: DecisionTableDefinition) => {

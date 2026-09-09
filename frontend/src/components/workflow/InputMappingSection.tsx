@@ -726,6 +726,11 @@ export function defaultSource(param: ParamContract): MappingSource {
   // custom all have a param called `expression`, so authoring any of them
   // through the editor's own default silently did nothing.
   if (param.name === "expression") return "expression";
+  // A NEW variable NAME the user types (set_variable.variableName,
+  // custom.assignTo) must default to "literal" — otherwise it renders as a
+  // dropdown over EXISTING variables ("No values available yet…"), making the
+  // obvious action (type a new name) impossible until the user flips the source.
+  if (param.name === "variableName" || param.name === "assignTo") return "literal";
   return "variable";
 }
 

@@ -147,6 +147,34 @@ export function WorkflowCanvas({
     }
   }, [layoutVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Adopt node DATA edits made in the Properties panel (label / config /
+  // nodeType) onto the live canvas nodes. useNodesState seeds from
+  // rfInitialNodes only ONCE, and no other effect re-synced it, so a panel
+  // edit updated the parent (and thus Save) but the node on the canvas kept
+  // its old label until a full remount. We merge by id, overlaying the parent
+  // data while preserving the LIVE position/selection/status the canvas owns —
+  // and return the same array reference when nothing changed so this never
+  // fights an in-progress drag (position-only parent updates are a no-op here).
+  useEffect(() => {
+    if (nodeStatuses) return; // simulator mode manages node data via the status effect
+    setNodes((cur) => {
+      const byId = new Map(initialNodes.map((n) => [n.id, n]));
+      let changed = false;
+      const next = cur.map((n) => {
+        const src = byId.get(n.id);
+        if (!src) return n;
+        const dataDiffers =
+          n.type !== src.type ||
+          n.data.label !== src.data.label ||
+          JSON.stringify(n.data.config) !== JSON.stringify(src.data.config);
+        if (!dataDiffers) return n;
+        changed = true;
+        return { ...n, type: src.type, data: { ...n.data, ...src.data, status: n.data.status } };
+      });
+      return changed ? next : cur;
+    });
+  }, [initialNodes, nodeStatuses, setNodes]);
+
   // C1: Sync simulator node statuses onto live nodes without disturbing positions.
   // Early-returns when nodeStatuses is undefined (editor mode) → zero effect on drag state.
   useEffect(() => {
@@ -187,7 +215,7 @@ export function WorkflowCanvas({
 
       const newEdge: Edge = {
         ...params,
-        id: `edge_${params.source}_${params.target}`,
+        id: `edge_${params.source}_${params.sourceHandle ?? "out"}_${params.target}`,
         type: "conditional",
         data: { edgeType } as WorkflowEdgeData,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
@@ -206,6 +234,34 @@ export function WorkflowCanvas({
       });
     },
     [setEdges, nodes, onEdgeAdded],
+  );
+
+  // A user can drag from any handle to any handle — reject the connections that
+  // produce an invalid graph so the editor never persists a misconfiguration:
+  //   • self-loops (a node wired to itself)
+  //   • edges INTO a trigger (a trigger is the entry point; it takes no input)
+  //   • edges OUT of an `end`/terminal node (a terminal has no outgoing flow)
+  //   • duplicate edges from the same source handle to the same target
+  const isValidConnection = useCallback(
+    (conn: Connection | Edge): boolean => {
+      const source = (conn as Connection).source;
+      const target = (conn as Connection).target;
+      const sourceHandle = (conn as Connection).sourceHandle ?? null;
+      if (!source || !target || source === target) return false;
+      const src = nodes.find((n) => n.id === source);
+      const tgt = nodes.find((n) => n.id === target);
+      if (tgt?.type === "trigger") return false;
+      if (src?.type === "end") return false;
+      const dup = edges.some(
+        (e) =>
+          e.source === source &&
+          e.target === target &&
+          (e.sourceHandle ?? null) === sourceHandle,
+      );
+      if (dup) return false;
+      return true;
+    },
+    [nodes, edges],
   );
 
   const onNodeClick = useCallback(
@@ -315,6 +371,7 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={readOnly ? undefined : onConnect}
+        isValidConnection={readOnly ? undefined : isValidConnection}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         onDragOver={readOnly ? undefined : onDragOver}

@@ -131,6 +131,24 @@ class WorkflowRuntimeEngine:
             "output": output_data,
         })
 
+        # This node is no longer "active": drop it from current_node_ids. It was
+        # only ever appended (when the blocking task was created) and never
+        # removed, so every finished human-task node accumulated and stayed
+        # painted amber/active in the simulator — including the final one after
+        # the whole workflow completed.
+        if task.node_id:
+            remaining = [nid for nid in (instance.current_node_ids or []) if nid != task.node_id]
+            await self.state.update_current_nodes(instance, remaining)
+
+        # The blocking task parked the instance in `waiting`; completing it means
+        # the run is moving again, so return it to `running` BEFORE advancing.
+        # Otherwise the downstream drain reaches the completion guard while the
+        # status is still the stale `waiting`, and the guard (which skips a
+        # waiting instance so a genuinely-paused run isn't force-completed) would
+        # leave a resumed human-task workflow stuck in `waiting` forever.
+        if instance.status == WorkflowInstanceStatus.waiting:
+            await self.state.transition_instance(instance, WorkflowInstanceStatus.running)
+
         # Try to advance the workflow
         if output_dir:
             definition = self._load_definition(output_dir, instance.workflow_id)
@@ -195,7 +213,23 @@ class WorkflowRuntimeEngine:
     ) -> None:
         """Execute a set of nodes, handling gateways and task creation."""
         node_map = {n["id"]: n for n in nodes}
+        # DURABLE set of nodes already completed on this instance, loaded from the
+        # execution log. A blocking task splits a run across multiple
+        # `_execute_nodes` passes, so a per-pass set alone cannot see what earlier
+        # passes did: a parallel join whose branches complete in different passes
+        # would deadlock, and a convergent plain node downstream of such a fork
+        # would double-execute. Seeding from the log makes both correct across
+        # passes. `completed_in_this_pass` still tracks THIS pass (for the join
+        # check to react to nodes completed within the same synchronous walk).
+        durable_completed: set[str] = await self._load_completed_node_ids(instance.id)
         completed_in_this_pass: set[str] = set()
+        # Nodes we've already handled. A node reached by two paths (a `then`/`else`
+        # that reconverge, or two branches into a shared "notify"/end node) MUST
+        # NOT execute twice, and a loop-back edge must terminate rather than spin
+        # forever. Seed it with the durable set so a node completed in an EARLIER
+        # pass is not re-run when a later branch reaches it. The one handler that
+        # legitimately re-enters — a parallel join still waiting — discards itself.
+        processed: set[str] = set(durable_completed)
         to_process = list(node_ids)
 
         while to_process:
@@ -204,6 +238,9 @@ class WorkflowRuntimeEngine:
             if not node:
                 logger.warning("Node %s not found in definition", current_id)
                 continue
+            if current_id in processed:
+                continue
+            processed.add(current_id)
 
             node_type = node.get("type", "action")
             node_data = node.get("data", {})
@@ -332,10 +369,18 @@ class WorkflowRuntimeEngine:
                     # Check if this is a join (has multiple incoming edges)
                     incoming = [e for e in edges if e.get("target") == current_id]
                     if len(incoming) > 1:
-                        # Join node — check if all incoming paths are complete
+                        # Join node — all incoming paths complete? Check against
+                        # this pass UNION the durable set, so branches that
+                        # completed in earlier passes (e.g. before a blocking task
+                        # on a sibling branch) still count.
                         if not self.gateway.check_join_condition(
-                            current_id, edges, completed_in_this_pass
+                            current_id, edges, completed_in_this_pass | durable_completed
                         ):
+                            # Not all branches in yet — release the processed
+                            # mark so the join is re-evaluated when the remaining
+                            # branch re-queues it (otherwise the guard above would
+                            # skip it forever and the join would never fire).
+                            processed.discard(current_id)
                             await self.exec_logger.log_skip(
                                 instance.id, current_id, node_type, node_label,
                                 "Waiting for parallel paths to complete",
@@ -418,17 +463,20 @@ class WorkflowRuntimeEngine:
                 # Don't propagate — let other parallel paths continue
                 continue
 
-        # Check if workflow has reached all end nodes
+        # Completion: the pass drained with no pending tasks and nothing is
+        # blocking. Complete regardless of whether an explicit end/end_event
+        # node was hit — a fully-automated workflow (trigger → service action,
+        # no end node) used to satisfy every completion precondition except the
+        # end-node check and so stayed "running" forever, making the simulator
+        # poll indefinitely. We still require that at least one node ran and the
+        # instance isn't parked in `waiting` (a blocking task keeps a pending
+        # task, so this branch isn't even entered in that case).
         if not await self.state.list_pending_tasks_for_instance(instance.id):
-            if completed_in_this_pass:
-                # Check if any completed node is an end node
-                for nid in completed_in_this_pass:
-                    n = node_map.get(nid)
-                    if n and n.get("type") in ("end", "end_event"):
-                        await self.state.transition_instance(
-                            instance, WorkflowInstanceStatus.completed
-                        )
-                        return
+            if completed_in_this_pass and instance.status != WorkflowInstanceStatus.waiting:
+                await self.state.transition_instance(
+                    instance, WorkflowInstanceStatus.completed
+                )
+                return
 
     async def _check_completion(self, instance: WorkflowInstance) -> None:
         """Check if a workflow instance is complete (no pending tasks)."""
@@ -443,31 +491,81 @@ class WorkflowRuntimeEngine:
     # -----------------------------------------------------------------------
 
     def _load_definition(self, output_dir: str, workflow_id: str) -> dict | None:
-        wf_file = Path(output_dir) / "workflows" / f"{workflow_id}.json"
-        if not wf_file.exists():
-            return None
-        try:
-            return json.loads(wf_file.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
+        # Load from the SAME place the list/editor/apply resolve by
+        # (routers.workflows._workflows_path): the Blueprint projection writes
+        # generated workflows to app/src/lib/workflows/definitions/<id>.json.
+        # The engine previously only looked in the legacy <output_dir>/workflows
+        # dir, so every simulate/start of a generated workflow failed with
+        # "Workflow definition '<id>' not found". Prefer the projected dir; fall
+        # back to the legacy dir for old projects.
+        candidates = [
+            Path(output_dir) / "app" / "src" / "lib" / "workflows"
+                / "definitions" / f"{workflow_id}.json",
+            Path(output_dir) / "workflows" / f"{workflow_id}.json",
+        ]
+        for wf_file in candidates:
+            if wf_file.exists():
+                try:
+                    return json.loads(wf_file.read_text())
+                except (json.JSONDecodeError, OSError):
+                    return None
+        return None
 
     def _find_start_nodes(self, nodes: list[dict], edges: list[dict]) -> list[dict]:
         """Find nodes with no incoming edges or type 'start'/'start_event'."""
-        target_ids = {e["target"] for e in edges}
-        start_nodes = []
-        for node in nodes:
-            if node.get("type") in ("start", "start_event", "trigger"):
-                start_nodes.append(node)
-            elif node["id"] not in target_ids:
-                start_nodes.append(node)
+        target_ids = {e.get("target") for e in edges}
+        # A start node is an ENTRY point: it has no incoming edge. The trigger
+        # TYPE alone is not sufficient — a workflow can have several trigger-typed
+        # nodes chained (Start -> "form submitted" -> ...), and the old OR added
+        # every trigger-typed node even when it had an incoming edge, so the graph
+        # was entered twice and every downstream node executed (and logged) twice.
+        start_nodes = [n for n in nodes if n.get("id") not in target_ids]
         return start_nodes or nodes[:1]
 
     def _get_next_node_ids(self, node_id: str, edges: list[dict]) -> list[str]:
         return [e["target"] for e in edges if e.get("source") == node_id]
 
+    async def _load_completed_node_ids(self, instance_id: uuid.UUID) -> set[str]:
+        """Durable set of node ids that are ACTUALLY done on this instance. Lets
+        join/convergence bookkeeping survive the separate `_execute_nodes` passes
+        a blocking task creates (fork branches that finish in different passes, or
+        a convergent node reached late).
+
+        A blocking task node is logged `completed` at CREATION (it's the node's
+        execution log entry, marked done once the task is dispatched), so the log
+        alone would count a still-pending human task as finished and fire a join
+        early. Subtract any node that still has an open task instance."""
+        from sqlalchemy import select
+        from models.node_execution_log import NodeExecutionLog, NodeExecutionStatus
+        completed_rows = await self.db.execute(
+            select(NodeExecutionLog.node_id).where(
+                NodeExecutionLog.workflow_instance_id == instance_id,
+                NodeExecutionLog.status == NodeExecutionStatus.completed,
+            )
+        )
+        completed = {row[0] for row in completed_rows.all()}
+        open_rows = await self.db.execute(
+            select(TaskInstance.node_id).where(
+                TaskInstance.workflow_instance_id == instance_id,
+                TaskInstance.status.in_([
+                    TaskInstanceStatus.pending,
+                    TaskInstanceStatus.assigned,
+                    TaskInstanceStatus.active,
+                ]),
+            )
+        )
+        still_open = {row[0] for row in open_rows.all()}
+        return completed - still_open
+
     def _get_org_id_from_instance(self, instance: WorkflowInstance) -> uuid.UUID:
         """Get org_id from the project relationship.
         Falls back to a zero UUID if not loaded."""
-        if hasattr(instance, "project") and instance.project:
+        # Only read `project` when it is ALREADY loaded. Touching an unloaded
+        # relationship here triggers a synchronous lazy-load in an async context
+        # (MissingGreenlet). In the request path the project is eager-loaded, so
+        # this returns the real org id; on any other path we fall back rather
+        # than crash — which is exactly what the docstring already promises.
+        from sqlalchemy import inspect as sa_inspect
+        if "project" not in sa_inspect(instance).unloaded and instance.project:
             return instance.project.org_id
         return uuid.UUID(int=0)

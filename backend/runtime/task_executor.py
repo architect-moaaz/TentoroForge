@@ -89,6 +89,26 @@ class TaskExecutor:
 
         input_data = {"variables": variables, "config": config}
 
+        # Form hints for the task UI (simulator + inbox). Every human node
+        # collapses to TaskType.user_task, so without the ORIGINAL node type the
+        # UI cannot tell an approval (approve/reject) from a data-entry task and
+        # falls back to a raw JSON box. Also surface the node's declared form
+        # fields as `expectedOutputs` so a data-entry task renders typed fields.
+        input_data["node_type"] = node_type
+        form_fields = (config.get("formBinding") or {}).get("fields")
+        if not isinstance(form_fields, list):
+            form_fields = config.get("expectedOutputs")
+        if isinstance(form_fields, list) and form_fields:
+            declared = []
+            for f in form_fields:
+                if not isinstance(f, dict):
+                    continue
+                fname = f.get("name") or f.get("key") or f.get("label")
+                if fname:
+                    declared.append({"name": fname, "type": f.get("type") or "string"})
+            if declared:
+                input_data["expectedOutputs"] = declared
+
         # For timer events, compute resume_at
         if task_type == TaskType.timer_event:
             duration_str = config.get("duration", "1 hour")

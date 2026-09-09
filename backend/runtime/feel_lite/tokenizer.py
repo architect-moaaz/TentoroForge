@@ -188,12 +188,19 @@ def tokenize(input_str: str) -> List[Token]:
             continue
 
         # Minus / Wildcard: context-dependent
-        # Minus is a wildcard if it appears as the sole token or after certain tokens
         if ch == "-":
-            # Determine if this is a unary minus, binary minus, or wildcard
-            # Wildcard: "-" is the entire cell expression, typically at start or after comma/bracket
-            # We'll emit Minus and let the parser decide context
-            if _is_wildcard_context(tokens):
+            # A wildcard '-' stands ALONE (it's the whole cell — followed by a
+            # delimiter or end-of-input). A '-' that introduces a value, e.g.
+            # `temp in [-10, -5]` or `-x`, is a minus/negation. Checking only the
+            # preceding token (list/range context) is not enough: `[-5]` then
+            # tokenized '-' as Wildcard and '5' as a stray Number → ParseError →
+            # the whole condition silently fell to the wrong branch. Also require
+            # the next non-space char to be a delimiter, mirroring the TS engine.
+            nxt = pos + 1
+            while nxt < length and input_str[nxt] in (" ", "\t", "\n", "\r"):
+                nxt += 1
+            follows_delim = nxt >= length or input_str[nxt] in (",", ")", "]")
+            if _is_wildcard_context(tokens) and follows_delim:
                 tokens.append(Token(TokenType.Wildcard, "-", pos))
             else:
                 tokens.append(Token(TokenType.Minus, "-", pos))

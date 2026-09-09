@@ -1269,7 +1269,7 @@ function StageList({
  * BUILD PROGRESS show observable status rather than model reasoning, and the
  * stage list still does exactly that; this is the conversation.
  */
-function ThinkingTrail({
+export function ThinkingTrail({
   thoughts,
   busy,
 }: {
@@ -1278,6 +1278,15 @@ function ThinkingTrail({
 }) {
   if (!thoughts.length) return null;
   const last = thoughts[thoughts.length - 1];
+  // §111 — "Do not expose hidden model reasoning." The raw first-person
+  // chain-of-thought ("Let me analyze this: 1. This is a change request…") was
+  // being painted straight into the chat and read as Smith's answer before the
+  // real one arrived (DEFECT-THINKING-LEAK, seen on K-01 `deploy` and L-05).
+  // Deterministic `step` events ARE observable status — the compose stages,
+  // labelled from the same table the build stage list uses — so those stay;
+  // the model's reasoning does not. A pure-reasoning turn then shows only the
+  // "Thinking" header and its spinner, which is the honest busy indicator.
+  const steps = thoughts.filter((t) => t.kind === "step");
   return (
     <div className="max-w-[90%] space-y-1 border-l-2 border-muted pl-3">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1289,20 +1298,14 @@ function ThinkingTrail({
           {last?.kind === "step" ? "Working" : "Thinking"}
         </span>
       </div>
-      {thoughts.map((t, i) =>
-        t.kind === "step" ? (
-          // Deterministic work, so it reads as status rather than thought —
-          // upright, and labelled from the same table the stage list uses.
-          <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Circle className="h-2 w-2 shrink-0 fill-current" />
-            {t.node ? labelFor(t.node) : t.text}
-          </p>
-        ) : (
-          <p key={i} className="whitespace-pre-wrap text-xs italic text-muted-foreground">
-            {t.text}
-          </p>
-        ),
-      )}
+      {steps.map((t, i) => (
+        // Deterministic work, so it reads as status rather than thought —
+        // upright, and labelled from the same table the stage list uses.
+        <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Circle className="h-2 w-2 shrink-0 fill-current" />
+          {t.node ? labelFor(t.node) : t.text}
+        </p>
+      ))}
     </div>
   );
 }

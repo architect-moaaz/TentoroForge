@@ -51,12 +51,31 @@ async def get_app_model(
     # The schema-mode pipeline writes the canonical app-model to
     # src/contracts/app-model.json (alongside the rest of the contracts).
     # Older runs put it at the output-dir root; honour both for compatibility.
+    # The blueprint pipeline projects the app one dir deeper (output_dir/app),
+    # so honour the nested locations too, not just the schema-mode root ones.
+    out = Path(project.output_dir)
     candidates = [
-        Path(project.output_dir) / "src" / "contracts" / "app-model.json",
-        Path(project.output_dir) / "app-model.json",
+        out / "src" / "contracts" / "app-model.json",
+        out / "app-model.json",
+        out / "app" / "src" / "contracts" / "app-model.json",
+        out / "app" / "app-model.json",
     ]
     model_path = next((p for p in candidates if p.exists()), None)
     if model_path is None:
+        # §76: no on-disk index (the blueprint engine never writes one) — derive
+        # the model straight from the Blueprint so the Data Model / Workflows /
+        # Rules editor tabs work instead of 404'ing forever. Same approach as
+        # /rules and /pages (rules_from_blueprint / pages_from_blueprint).
+        try:
+            from services.blueprint.service import BlueprintService
+            from services.blueprint_to_editor import app_model_from_blueprint
+            svc = BlueprintService.load(output_dir=str(project.output_dir))
+            if svc.doc and (svc.doc.get("data", {}) or {}).get("entities"):
+                return app_model_from_blueprint(svc.doc, project.id, project.output_dir)
+        except FileNotFoundError:
+            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("app-model blueprint fallback failed for %s: %s", project_id, e)
         raise HTTPException(status_code=404, detail="app-model.json not found — run indexer first")
 
     try:
