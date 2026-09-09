@@ -539,6 +539,12 @@ def check_pattern_templates(result: AgentResult,
                 "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
                 "workflows": doc.get("workflows") or [],
                 "data": doc.get("data") or {},
+                # `security` carries the ownershipRules that mark inputs the
+                # runtime fills from the session (organisationId, createdBy…).
+                # Without it here the completeness check saw an empty manifest
+                # and demanded a Form field for the caller's own tenant, so a
+                # composed create page was refused for not collecting it.
+                "security": doc.get("security") or {},
                 "businessRules": [],
                 "pageLayouts": [proposal.body],
             })
