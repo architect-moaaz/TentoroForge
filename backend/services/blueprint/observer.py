@@ -259,6 +259,12 @@ def owned_sections(agent: str) -> tuple[str, ...]:
 
 def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
     value = _section(doc, section)
+    if isinstance(value, list):
+        # Retired rows are not the node's answer. Shown to the critic they
+        # read as duplicates left lying around — measured: a repaired module
+        # was flagged for the DEPRECATED one it had replaced, and the next
+        # round churned on that instead of the real finding.
+        value = _live(value)
     if not subject or not isinstance(value, list):
         return value
     # A fan-out subject is an artifact id (a page); its own row, and any row
@@ -507,6 +513,11 @@ def flag_unrepaired(svc: Any, obs: Observation, subject: str) -> list[str]:
             continue
         seen.add(art)
         try:
+            _, row = svc.find(art)
+            if row.get("status") == "DEPRECATED":
+                # Retired is retired. A finding that still names it does not
+                # revive it as a live divergence.
+                continue
             svc.mark_out_of_sync(
                 art, "; ".join(f"{i.edge}: {i.detail}" for i in
                                obs.findings.get(subject, [])

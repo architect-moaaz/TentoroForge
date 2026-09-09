@@ -542,3 +542,28 @@ def test_proposed_identities_cover_ids_and_keyed_rows():
         ("id", "data.entities", "ENTITY-001"),
         ("keyed", "data.constraints", ("ENTITY-001", "index", "memberId")),
     }
+
+
+def test_the_critic_is_not_shown_retired_rows(svc):
+    svc.upsert("pages", {"name": "Old", "route": "/old", "purpose": "p"},
+               natural_key=page_key("/old"))
+    svc.upsert("pages", {"name": "New", "route": "/new", "purpose": "p"},
+               natural_key=page_key("/new"))
+    old = next(p for p in svc.doc["pages"] if p["route"] == "/old")
+    svc.set_status(old["id"], "DEPRECATED", note="retired")
+    ctx = observation_context(svc.doc, agent="page_design")
+    assert [p["route"] for p in ctx["output"]["pages"]] == ["/new"]
+
+
+def test_flagging_never_revives_a_retired_artifact(svc):
+    from services.blueprint.observer import flag_unrepaired
+
+    svc.upsert("pages", {"name": "Old", "route": "/old", "purpose": "p"},
+               natural_key=page_key("/old"))
+    old = next(p for p in svc.doc["pages"] if p["route"] == "/old")
+    svc.set_status(old["id"], "DEPRECATED", note="retired")
+    obs = Observation(node="page_contracts", agent="page_design", subjects=[""])
+    obs.findings[""] = [Finding(CRITIC_EDGE, section="pages",
+                                artifact_id=old["id"], detail="leftover")]
+    assert flag_unrepaired(svc, obs, "") == []
+    assert svc.doc["pages"][0]["status"] == "DEPRECATED"
