@@ -7211,6 +7211,9 @@
           "autoSave": {
             "type": "object",
             "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
               "debounceMs": {
                 "type": "integer",
                 "minimum": 200,

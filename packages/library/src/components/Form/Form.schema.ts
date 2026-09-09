@@ -188,6 +188,10 @@ export const FormProps = z.object({
    */
   autoSave: z
     .object({
+      // Presence of the block already turns autosave on; the composer also
+      // emits an explicit `enabled` flag, so accept it rather than reject the
+      // whole Form. `false` opts back out without dropping the config.
+      enabled:          z.boolean().optional(),
       debounceMs:       z.number().int().min(200).max(60_000).default(1500),
       conflictStrategy: z.enum(["overwrite", "merge", "prompt"]).default("merge"),
     })
