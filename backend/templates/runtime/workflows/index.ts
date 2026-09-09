@@ -788,9 +788,22 @@ export function _finalizeInsert(
       }
       continue;
     }
-    if (dataType === "string" && isDateName && v instanceof Date) {
-      // `$now` on a string-mode date column: the calendar date, as text.
-      out[k] = /time/i.test(col.columnType) ? v.toISOString() : v.toISOString().slice(0, 10);
+    if (dataType === "string" && v instanceof Date) {
+      // postgres-js CANNOT serialize a Date for ANY string-typed column — it
+      // throws `The "string" argument must be of type string ... Received an
+      // instance of Date` and fails the whole INSERT. The workflow then returns
+      // {status:"failed"} but the HTTP is 200, so the UI reported false success
+      // and the record was silently lost (DEFECT-DEPLOY-CREATE). A Date reaches
+      // a string column two ways: a `date()`/`timestamp()` column in string
+      // mode (its `$now`/coerced value), OR a text/varchar column that received
+      // an input value `_resolveMap` coerced from an ISO-date string. BOTH must
+      // be stringified here — the earlier fix only caught the date/time-named
+      // columns and left text/varchar to crash. A date/time-named column takes
+      // the calendar date or the ISO datetime; any other string column takes
+      // the full ISO string (what the driver silently stored before).
+      out[k] = isDateName
+        ? (/time/i.test(col.columnType) ? v.toISOString() : v.toISOString().slice(0, 10))
+        : v.toISOString();
       continue;
     }
     out[k] = v;
@@ -1058,6 +1071,19 @@ export function registerDefaultActions(): void {
     if (!table) { console.warn("[workflow] db_update: unknown table", (config as any).table); return { error: "unknown table" }; }
     try {
       const raw = _resolveValueMap((config as any).values, ctx, table);
+      // Same driver-safety as db_insert (_finalizeInsert): postgres-js cannot
+      // serialize a Date for ANY string-typed column and throws, failing the
+      // whole update. db_update goes straight to .set() without _finalizeInsert,
+      // so stringify any Date here too (DEFECT-DEPLOY-CREATE reaches updates).
+      for (const [uk, uv] of Object.entries(raw)) {
+        const ucol = (table as any)[uk];
+        if (ucol && ucol.dataType === "string" && uv instanceof Date) {
+          const uct = String(ucol.columnType || "");
+          raw[uk] = /timestamp|date|time/i.test(uct)
+            ? (/time/i.test(uct) ? uv.toISOString() : uv.toISOString().slice(0, 10))
+            : uv.toISOString();
+        }
+      }
       try {
         const { evaluateRuleSetForTable } = await import("@/lib/rules");
         const rs = await evaluateRuleSetForTable(
