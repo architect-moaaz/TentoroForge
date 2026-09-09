@@ -50,6 +50,18 @@ eqJson(out.dueDate, "2026-09-12", "a form's date string stays text for a string-
 eqJson(out.openedAt, "2026-09-05", "$now on a string-mode date column becomes the calendar date as text");
 ok(out.createdAt instanceof Date, "a timestamp column receives a Date");
 eqJson(out.title, "Late checkout fee disputed", "text is untouched");
+
+// DEFECT-DEPLOY-CREATE: a Date reaching ANY string-typed column crashes
+// postgres-js ("the string argument ... Received an instance of Date") and
+// silently loses the record. `_resolveMap` coerces a pure ISO-date INPUT value
+// to a Date; if that flows into a text/varchar column it used to pass raw. It
+// must be stringified, not passed as a Date.
+const outText = _finalizeInsert(table, {
+  title: new Date("2026-09-05T10:00:00.000Z"),
+}, ctx);
+ok(typeof outText.title === "string",
+   "a Date into a TEXT column is stringified, never passed raw to the driver");
+eqJson(outText.title, "2026-09-05T10:00:00.000Z", "a text column takes the full ISO string");
 const resolve = mod._resolveRef;
 const a = resolve("$uuid", ctx), b = resolve("$uuid", ctx);
 ok(typeof a === "string" && /^[0-9a-f-]{36}$/.test(a), "$uuid is a fresh identifier");

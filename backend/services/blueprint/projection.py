@@ -418,6 +418,20 @@ def project_frontend(doc: dict, app_root: str | Path,
         rel = f"src/schemas/{name}.json"
         target = root / f"{name}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
+        # A declared page that only has the placeholder fallback must NEVER
+        # overwrite a real layout that was composed on an earlier run — a page
+        # whose composition was withdrawn keeps its last good schema rather than
+        # degrading to "not laid out yet". A page that was already a placeholder
+        # is refreshed. Either way the route keeps a schema; it is never blanked.
+        if (schema.get("meta") or {}).get("fallback") and target.exists():
+            try:
+                prev = json.loads(target.read_text("utf-8"))
+            except Exception:  # noqa: BLE001 — unreadable file, rewrite it
+                prev = None
+            if isinstance(prev, dict) and not (prev.get("meta") or {}).get("fallback"):
+                written.append(rel)                 # keep it, and protect it below
+                code_map.append({"artifact": page_id, "frontend": [rel]})
+                continue
         target.write_text(
             json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
         written.append(rel)
@@ -448,6 +462,10 @@ def project_frontend(doc: dict, app_root: str | Path,
         "removed": stale,
         "skipped": result["skipped"],
         "failed": result["failed"],
+        # Pages that got the honest placeholder because nothing composed them —
+        # surfaced so the build report can say "N screens need composing" rather
+        # than leaving it silent.
+        "fellBack": result.get("fellBack") or [],
         "templates": result["templates"],
         "codeMap": code_map,
     }

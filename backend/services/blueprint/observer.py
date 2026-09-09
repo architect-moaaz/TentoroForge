@@ -11,15 +11,16 @@ flagged artifacts had already been consumed by every node downstream of them.
 
 The observer closes the loop where it is cheapest to close: at the node. It
 runs BESIDE the DAG rather than in it. When an agent node's subjects have all
-been applied, the orchestrator hands the observer a snapshot of the Blueprint
-and carries on with the rest of the wave; the observer validates that node's
-outcome on its own thread — the deterministic edges first, then, when it has a
+been applied, the scheduler hands the observer a snapshot of the Blueprint
+and carries on with the rest of the graph; the observer validates that node's
+outcome on a worker — the deterministic edges first, then, when it has a
 critic, a model's judgement of whether the outcome is complete against the
-requirements it claims and the user's request. At the wave boundary the
-orchestrator collects the verdicts, and every node the observer failed is
-repaired before any dependent runs. That boundary is not a limitation to work
-around: §28's rule is that work runs on complete inputs, and a repair that
-lands after a dependent has consumed the defect is the swarm it forbids.
+requirements it claims and the user's request. The node is *finished* but not
+*done*: nothing that depends on it starts until the verdict is in and every
+subject the observer failed has been re-authored and judged again. That is
+not a limitation to work around: §28's rule is that work runs on complete
+inputs, and a repair that lands after a dependent has consumed the defect is
+the swarm it forbids.
 
 What "repair" means here, exactly
 ---------------------------------
@@ -68,12 +69,10 @@ invented for it.
 """
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -94,10 +93,6 @@ logger = logging.getLogger(__name__)
 #: has ignored the same brief twice is the same failure at higher cost — the
 #: same argument as ``ATTEMPTS_BY_NODE``.
 OBSERVER_ROUNDS = 2
-
-#: Critic calls in flight at once. The observer's own pool, separate from the
-#: wave's, so a slow critique never takes a slot from the wave it is watching.
-OBSERVER_CONCURRENCY = 4
 
 #: Which agent the observer is. Registered with no writable section — its
 #: capability is to flag, never to author.
@@ -267,7 +262,9 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
     # in another owned section that points at it (a page's layout, widgets).
     return [
         row for row in value if isinstance(row, dict)
-        and subject in (row.get("id"), row.get("page"))
+        and subject in (row.get("id"), row.get("page"),
+                        (row.get("data") or {}).get("primaryEntity")
+                        if isinstance(row.get("data"), dict) else None)
     ]
 
 
@@ -356,7 +353,6 @@ class Observer:
         *,
         rounds: int = OBSERVER_ROUNDS,
         usage: Any = None,
-        concurrency: int = OBSERVER_CONCURRENCY,
     ) -> None:
         cap = capability_for(OBSERVER_AGENT)
         assert not cap.writes and cap.may_set_status, (
@@ -365,55 +361,9 @@ class Observer:
         self.critic = critic
         self.rounds = max(1, int(rounds))
         self.usage = usage
-        self._pool = ThreadPoolExecutor(max_workers=max(1, concurrency),
-                                        thread_name_prefix="observer")
-        self._pending: dict[str, Future] = {}
         self._lock = threading.Lock()
         #: Every observation made, in order — the account of what was judged.
         self.history: list[Observation] = []
-
-    # -- beside the DAG ----------------------------------------------------
-
-    def submit(
-        self,
-        key: str,
-        *,
-        agent: str,
-        subjects: Sequence[str],
-        doc: Mapping[str, Any],
-        pending: Iterable[str],
-        planned: Iterable[str],
-        user_request: str = "",
-    ) -> None:
-        """Start judging a node that has just completed. Returns at once.
-
-        ``doc`` is copied here, on the caller's thread, before the orchestrator
-        applies anything else: the observer judges the document as it was
-        when the node finished, not whatever the wave writes next.
-        """
-        snapshot = copy.deepcopy(dict(doc))
-        pending_set = set(pending)
-        planned_set = set(planned)
-        with self._lock:
-            self._pending[key] = self._pool.submit(
-                self.observe, key, agent=agent, subjects=list(subjects),
-                doc=snapshot, pending=pending_set, planned=planned_set,
-                user_request=user_request,
-            )
-
-    def collect(self, keys: Iterable[str]) -> dict[str, Observation]:
-        """Wait for the named nodes' verdicts. The wave boundary."""
-        out: dict[str, Observation] = {}
-        for key in keys:
-            with self._lock:
-                fut = self._pending.pop(key, None)
-            if fut is None:
-                continue
-            out[key] = fut.result()
-        return out
-
-    def close(self) -> None:
-        self._pool.shutdown(wait=True)
 
     # -- judging -----------------------------------------------------------
 
@@ -427,24 +377,32 @@ class Observer:
         pending: Iterable[str] = (),
         planned: Iterable[str] = (),
         user_request: str = "",
+        subject_of: Callable[[str], str | None] | None = None,
     ) -> Observation:
-        """Judge one node's outcome, synchronously. Pure with respect to the
-        Blueprint: reads ``doc``, writes nothing."""
+        """Judge one node's outcome. Pure with respect to the Blueprint: reads
+        ``doc``, writes nothing. Safe to run on any thread — the scheduler
+        hands it a snapshot and runs it on a worker beside the calls.
+
+        ``subject_of`` maps an artifact id to the subject that authored it,
+        for a fan-out whose subjects are not artifact ids (a feature's pages).
+        """
         subjects = list(subjects) or [""]
         edges = ready_edges(doc, pending=pending, planned=planned)
         obs = Observation(node=key, agent=agent, subjects=subjects, edges=edges)
 
         for f in verify(dict(doc), edges=edges).findings:
-            self._file(obs, f)
+            self._file(obs, f, subject_of)
 
         if self.critic is not None:
-            self._consult(obs, doc, user_request=user_request)
+            self._consult(obs, doc, user_request=user_request,
+                          subject_of=subject_of)
 
         with self._lock:
             self.history.append(obs)
         return obs
 
-    def _file(self, obs: Observation, f: Finding) -> None:
+    def _file(self, obs: Observation, f: Finding,
+              subject_of: Callable[[str], str | None] | None = None) -> None:
         """Route one finding: this node's, per subject — or deferred."""
         if SECTION_OWNER.get(f.section or "") != obs.agent:
             obs.deferred.append(f)
@@ -452,8 +410,11 @@ class Observer:
         if obs.subjects == [""]:
             obs.findings.setdefault("", []).append(f)
             return
-        if f.artifact_id in obs.subjects:
-            obs.findings.setdefault(f.artifact_id, []).append(f)
+        subject = f.artifact_id
+        if subject not in obs.subjects and subject_of is not None and subject:
+            subject = subject_of(subject)
+        if subject in obs.subjects:
+            obs.findings.setdefault(subject, []).append(f)
             return
         # A fan-out node, and a finding that names no subject of it: nothing
         # to re-author, so nothing to repair. The terminal verification node
@@ -461,7 +422,8 @@ class Observer:
         obs.deferred.append(f)
 
     def _consult(self, obs: Observation, doc: Mapping[str, Any], *,
-                 user_request: str) -> None:
+                 user_request: str,
+                 subject_of: Callable[[str], str | None] | None = None) -> None:
         """Ask the critic, once per subject. Its findings are filed like any
         other; its verdict is recorded as it was given."""
         verdicts: list[str] = []
@@ -512,7 +474,7 @@ class Observer:
                 finding = Finding(CRITIC_EDGE, detail=detail,
                                   artifact_id=artifact or (subject or None),
                                   section=section or None)
-                self._file(obs, finding)
+                self._file(obs, finding, subject_of)
                 filed += 1
             # A fail that names nothing is an opinion; recorded as what it is.
             verdicts.append("fail" if verdict == "fail" and filed else "pass")

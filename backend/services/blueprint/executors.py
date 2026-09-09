@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 import logging
@@ -969,23 +970,58 @@ NODE_TASKS: dict[str, str] = {
         "English, and defaulting is the right answer far more often than not."
     ),
     "data_model": (
-        "Model the entities behind the requirements: fields with real types, which "
-        "field is the human-readable label, and which fields hold sensitive data. "
-        "Mark `sensitive: true` on anything personal or financial — downstream "
-        "agents rely on that flag and cannot see this section to second-guess it. "
-        "Declare every association with `references` on the field, naming the "
-        "entity it points at. Not the description: `jobId: uuid` explained in "
+        "Name the entities behind the requirements and state how they relate. "
+        "For each entity give `name`, `table`, a one-sentence `description` "
+        "and `fields: []` — EMPTY. Do not write fields: each entity's fields, "
+        "keys, enums, sensitivity and constraints are authored afterwards, one "
+        "entity per call, against the set you name here, and any field you "
+        "write is dropped. What that pass cannot decide alone is what you "
+        "decide now: which entities exist, what each is for, and every "
+        "association between them in `relationships` by entity name with its "
+        "`kind`, `fromField` and `toField` — `jobId: uuid` explained in "
         "English as \"Job the part was consumed on\" is a relationship no "
-        "later stage can read. The page planner could not tell a row only ever "
-        "written while looking at a job from a top-level record, and gave both "
-        "a full list, detail and create page. Add constraints for uniqueness "
-        "and checks the columns cannot express on their own."
+        "later stage can read, and the page planner could not tell a row only "
+        "ever written while looking at a job from a top-level record."
+    ),
+    "entity_fields": (
+        "Author the fields of ONE entity, the one given below. Its `name` and "
+        "`table` are decided and every other entity is named beside it; keep "
+        "them exactly as given and return exactly one entry in `entities`, "
+        "for this entity. Fields with real types, which field is the "
+        "human-readable label (`labelField`), which are required, unique or "
+        "the primary key, which take one of a fixed set of `enumValues`, and "
+        "which hold sensitive data. Mark `sensitive: true` on anything "
+        "personal or financial — downstream agents rely on that flag and "
+        "cannot see this section to second-guess it. The foreign keys are "
+        "the declared relationships: give each one its column here, named as "
+        "the relationship's `fromField`. Add `constraints` for uniqueness and "
+        "checks the columns cannot express on their own, for this entity only."
     ),
     "ux_architecture": (
         "Organise the application into modules and a navigation tree. Every list "
         "and dashboard page must be reachable from navigation."
     ),
     "page_contracts": (
+        "Decide the page set, feature by feature, from the slots below: fill "
+        "a feature completely or decline it completely, and for every page "
+        "you keep give its `name`, `route`, a one-sentence `purpose`, its "
+        "`pattern`, its `module`, `data.primaryEntity` (the entity the page is "
+        "about; omit for a dashboard or a sign-in), `access`, and `figmaFrame` "
+        "where a slot carries one. NOTHING ELSE: no tasks, states, views, "
+        "actions, users or widgets — the contracts are written afterwards, "
+        "one feature per call, against the set you decide here, and anything "
+        "beyond the set is dropped. A page earns its route when it has a "
+        "different job, a different primary entity, or a different audience; "
+        "a different filter over the same list is a view the contract will "
+        "declare, not a page."
+    ),
+    "page_details": (
+        "Write the Page Contracts for the pages of ONE feature, the pages given "
+        "below. The page set is decided: every page you write already exists, "
+        "with its id, route, pattern, module and entity, and you add nothing to "
+        "it and remove nothing from it — a page that seems missing is a "
+        "`change_request`, not a proposal. Keep each page's id, route, "
+        "`figmaFrame`, `module` and `data.primaryEntity` exactly as given.\n\n"
         "Write a Page Contract per page: its purpose in business terms, the roles "
         "it serves, the tasks users come to it for, its pattern, its primary "
         "entity, and the states it must handle. Declare empty and error states up "
@@ -1041,45 +1077,46 @@ NODE_TASKS: dict[str, str] = {
         "hole."
     ),
     "workflows": (
-        "Define the business processes as workflows built from the workflow node "
-        "catalog below. Every step IS one of those nodes: its `type` is a catalog "
-        "node, and its `config` carries what that node declares it needs — the "
-        "`actionType` and table/values of an action, the `expression` of a "
-        "condition, the `assignType` and `assignTarget` of a human task — filled "
-        "in with real values (entity tables, `{{variable}}` bindings, role names), "
-        "not left for someone else. A step missing a required key is refused. "
-        "Connect steps with `next` (a branching node's first target is the "
-        "then-branch, its second the else-branch); the workflow's `trigger` is "
-        "the start, and an `end` step is the terminal. A manually-triggered "
-        "workflow must name the page that launches it, and any step that mutates "
-        "an entity must name a real one.\n\n"
-        "Conditions and gateway expressions are FEEL, read by the engine's "
-        "parser: `=` (never `==`), `and`, `or`, `not`, names without braces "
-        "(`caseType = \"Refund\" and refundAmount > 0`), membership as "
-        "`stage in [\"A\", \"B\"]` with square brackets, never parentheses. "
-        "Values in step "
-        "config are templates over what the engine holds: the trigger's "
-        "input fields by name (`{{title}}`, never `{{input.title}}`), a step's "
-        "output under its key (`{{insert_case.id}}`), a variable a "
-        "set_variable step set by its `variableName`; the current time and "
-        "actor are the whole-value sentinels `$now`, `$today`, `$user.id`. "
-        "There is no `now`, `currentUser`, `vars`, `steps` or `sequence` "
-        "root; a template naming one is refused. The expression functions the "
-        "engine has are sum, count, min, max, avg, abs, floor, ceiling, round, "
-        "contains, starts with, ends with, matches, string, number, date, now, "
-        "duration — nothing else (no concat, substring, uuid, upper, format); "
-        "a reference number nothing supplies is `$uuid`, a fresh identifier, "
-        "written in the insert itself. A db_insert supplies every field the "
-        "data model marks required — an input by name, `$now`, `$user.id`, "
-        "`$uuid`, or a literal starting state; one that omits a required "
-        "field is refused, and a later db_update cannot rescue it.\n\n"
+        "Declare the business processes as workflows: for each, its `name`, "
+        "`purpose`, `trigger`, the page that launches it (`launchedFrom`, "
+        "required for a manual trigger) and its `inputs`. DO NOT write "
+        "`steps` — leave the key out entirely. Each workflow's step graph is "
+        "authored in a separate pass, one workflow per call, against the node "
+        "catalog; what that pass needs from you is a complete and correct "
+        "contract, because the pages are composed against this declaration "
+        "at the same time as the steps are written, and a button wired to a "
+        "workflow whose inputs change afterwards is a button that fails.\n\n"
         "Declare `inputs`: what the workflow needs to start. A workflow that "
         "acts on one record declares `{name, kind: \"record\", entity}`; one "
         "that takes what a person types declares `{name, kind: \"field\", "
         "type}` per field. The control that runs the workflow must supply every "
         "required input from its page — the record a detail page shows, the "
         "fields a form collects — and a control that cannot is refused, so an "
-        "input left undeclared is a button that fails when pressed."
+        "input left undeclared is a button that fails when pressed. Every "
+        "field a step will later read (`{{title}}`) must be declared here as "
+        "a `field` input, and a workflow acting on a record must declare the "
+        "record; the step author cannot add inputs the pages were not told "
+        "about."
+    ),
+    "workflow_steps": (
+        "Author the steps of ONE workflow, the one given below. Its identity "
+        "and contract — `name`, `trigger`, `launchedFrom`, `inputs` — are "
+        "already decided and the pages are being composed against them as "
+        "you work; keep them exactly as given and return them unchanged "
+        "alongside the `steps` you write. Return exactly one proposal, for "
+        "this workflow, under the `natural_key` given below.\n\n"
+        "Every step IS a node from the workflow node catalog below: its "
+        "`type` is a catalog node, and its `config` carries what that node "
+        "declares it needs — the `actionType` and table/values of an action, "
+        "the `expression` of a condition, the `assignType` and `assignTarget` "
+        "of a human task — filled in with real values (entity tables, "
+        "`{{variable}}` bindings, role names), not left for someone else. A "
+        "step missing a required key is refused. Connect steps with `next` "
+        "(a branching node's first target is the then-branch, its second the "
+        "else-branch); the workflow's `trigger` is the start, and an `end` "
+        "step is the terminal. Any step that mutates an entity must name a "
+        "real one.\n\n"
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "
@@ -1326,7 +1363,7 @@ def build_prompt(
     system = SYSTEM.format(
         agent=spec.agent,
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
-        reply_rules=(DATA_MODEL_REPLY_RULES if node == "data_model"
+        reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
@@ -1431,13 +1468,20 @@ def build_prompt(
             )
         return system, user
 
+    if node == "workflow_steps":
+        return _workflow_steps_prompt(doc, system, subject, feedback,
+                                      output_dir=output_dir)
+
     if node == "workflows":
-        # The catalog is pulled in for the one task that authors workflows,
-        # and for no other: the page agents get the component catalog, this
-        # one gets the node catalog. Neither pays for the other's vocabulary.
+        # The node catalog goes to `workflow_steps`, the one task that authors
+        # steps; this one declares and needs only the trigger kinds it may
+        # name. Neither pays for the other's vocabulary.
         from services.catalog import workflow_nodes
 
-        system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+        system += (
+            "\n\nA workflow's `trigger.kind` is one of: "
+            + ", ".join(workflow_nodes().trigger_types) + "."
+        )
         # THE PAGES THAT HAVE NOWHERE TO SUBMIT, named. This agent already
         # reads `pages` (§101) and authored thirty-five good workflows without
         # noticing that eleven create pages had nothing to call: it was asked
@@ -1465,6 +1509,13 @@ def build_prompt(
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
+
+    if node == "page_details":
+        return _page_details_prompt(doc, system, subject, feedback,
+                                    output_dir=output_dir)
+
+    if node == "entity_fields":
+        return _entity_fields_prompt(doc, system, subject, feedback)
 
     if node == "page_contracts":
         # The answer space is the slot list, not "whatever pages you think of".
@@ -1821,7 +1872,354 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
 }
 
 #: The reply shape each node is held to. Absent means the §29 envelope.
-SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {"data_model": DATA_MODEL_SCHEMA}
+SCHEMA_BY_NODE: dict[str, dict[str, Any]] = {
+    "data_model": DATA_MODEL_SCHEMA,
+    "entity_fields": DATA_MODEL_SCHEMA,  # one entry, for one entity
+}
+
+
+def declared_workflow(doc: dict, workflow_id: str) -> dict | None:
+    """The declared row `workflow_steps` is authoring for, or None."""
+    for row in doc.get("workflows") or []:
+        if isinstance(row, dict) and row.get("id") == workflow_id:
+            return row
+    return None
+
+
+#: What the declaration decided and the author may not move. Only `steps` is
+#: the author's. `inputs` stay declared because the pages are composed against
+#: them concurrently: an input the author adds is one no button supplies, and
+#: a step that needs a value nothing declares is refused at apply and re-asked,
+#: which is the right place for that conversation.
+_DECLARED_FIELDS: tuple[str, ...] = (
+    "id", "name", "purpose", "trigger", "launchedFrom", "inputs", "requirements",
+    "status",
+)
+
+
+def _workflow_steps_prompt(doc: dict, system: str, subject: str,
+                           feedback: str, *, output_dir: Any = None) -> tuple[str, str]:
+    """One workflow, the node catalog, and the slice of the Blueprint its
+    steps can name. The full `workflows` section is NOT sent: thirty-four
+    sibling declarations are noise to an author writing the thirty-fifth."""
+    from services.catalog import workflow_nodes
+
+    system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+
+    row = declared_workflow(doc, subject) or {"id": subject}
+    context = context_for(doc, "workflow")
+    context["workflows"] = [row]
+    # The requirements this workflow answers, when it says which; the whole
+    # section otherwise, which is what the declaration was written from.
+    wanted = set(row.get("requirements") or [])
+    if wanted:
+        context["requirements"] = [
+            r for r in context.get("requirements") or []
+            if isinstance(r, dict) and r.get("id") in wanted
+        ]
+    natural_key = _declared_key(output_dir, subject) or str(row.get("name") or subject)
+    user = (
+        f"Author the steps of workflow {subject} ({row.get('name', '')!s}). "
+        f"Its proposal's `natural_key` is exactly: {natural_key}\n\n"
+        "Here is the workflow as declared, and the Blueprint slice its steps "
+        "may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```"
+    )
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+    return system, user
+
+
+def _declared_key(output_dir: Any, workflow_id: str) -> str | None:
+    """The natural key the allocator bound this workflow's id to; None when
+    there is no directory to read the registry from."""
+    if not output_dir:
+        return None
+    from services.blueprint.ids import IdAllocator
+
+    try:
+        return IdAllocator.load(output_dir=output_dir).key_for(workflow_id)
+    except Exception:  # noqa: BLE001 — a missing registry is not a prompt error
+        return None
+
+
+def declared_entity(doc: dict, entity_id: str) -> dict | None:
+    for row in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(row, dict) and row.get("id") == entity_id:
+            return row
+    return None
+
+
+def pin_entity_set(result: AgentResult) -> None:
+    """Keep the entity declaration to what it declares: names, tables,
+    descriptions and relationships. Fields are the author's, and a
+    declaration that wrote them would read as an authored entity to resume;
+    constraints belong to the entity they constrain and go with the fields.
+    Anything outside this agent's boundary is left for the contract to
+    refuse."""
+    result.proposals = [p for p in result.proposals
+                        if p.section != "data.constraints"]
+    for proposal in result.proposals:
+        if proposal.section == "data.entities":
+            body = dict(proposal.body or {})
+            body["fields"] = []
+            body.pop("labelField", None)  # names a field nobody has written
+            proposal.body = body
+
+
+def _entity_fields_prompt(doc: dict, system: str, subject: str,
+                          feedback: str) -> tuple[str, str]:
+    """One entity in full, every entity by name, and the relationships that
+    touch it — the foreign keys this entity must carry a column for."""
+    row = declared_entity(doc, subject) or {"id": subject}
+    data = doc.get("data") or {}
+    others = [
+        {"id": e.get("id"), "name": e.get("name"), "table": e.get("table"),
+         "description": e.get("description", "")}
+        for e in data.get("entities") or []
+        if isinstance(e, dict) and e.get("status") != "DEPRECATED"
+    ]
+    touching = [
+        r for r in data.get("relationships") or []
+        if isinstance(r, dict) and subject in (r.get("from"), r.get("to"))
+    ]
+    context = context_for(doc, "data_model")
+    context["data"] = {"entities": others, "relationships": touching,
+                       "constraints": []}
+    wanted = set(row.get("requirements") or [])
+    if wanted:
+        context["requirements"] = [
+            r for r in context.get("requirements") or []
+            if isinstance(r, dict) and r.get("id") in wanted
+        ]
+    user = (
+        f"Author the fields of entity {subject} ({row.get('name', '')!s}, "
+        f"table {row.get('table', '')!s}). Return one entry in `entities`, "
+        f"named exactly {row.get('name', '')!s}.\n\n"
+        "Here is the entity as declared.\n\n```json\n"
+        + json.dumps(row, indent=2, sort_keys=True)
+        + "\n```\n\nEvery entity by name, the relationships that touch this "
+        "one, and the Blueprint slice a field may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```"
+    )
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+    return system, user
+
+
+def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
+    """Make the field author's reply update the declared entity, and only it.
+
+    The entity proposal is matched by name, case-insensitively, to the
+    declared row; any other entity in the reply is one the author added to a
+    set it was told was decided, and is dropped. The match takes the
+    declaration's key, id, name and table, so a respelled name cannot
+    allocate a second entity. Relationships and constraints pass through:
+    the batch resolver sees the document's entities by name.
+    """
+    from services.blueprint.ids import IdAllocator
+
+    row = declared_entity(svc.doc, entity_id)
+    if row is None:
+        return
+    try:
+        key = IdAllocator.load(output_dir=svc.output_dir).key_for(entity_id)
+    except Exception:  # noqa: BLE001 — fall back to the name, which bound it
+        key = None
+    key = key or str(row.get("name") or entity_id)
+
+    def loose(name: Any) -> str:
+        # "Part usage", "part_usage" and "PartUsage" are one entity to an
+        # author asked for exactly one; `_norm` keeps them apart on purpose
+        # for allocation, which is why the match is made here and the
+        # declared spelling is what gets written.
+        return re.sub(r"[^a-z0-9]", "", str(name or "").casefold())
+
+    wanted = loose(row.get("name"))
+    entity_proposals = [p for p in result.proposals if p.section == "data.entities"]
+
+    kept: list[Any] = []
+    for proposal in result.proposals:
+        if proposal.section != "data.entities":
+            kept.append(proposal)
+            continue
+        body = dict(proposal.body or {})
+        named = loose(body.get("name") or proposal.natural_key)
+        # A reply with one entity is a reply about this entity, whatever it
+        # called it; with several, the one that names it is.
+        if not (len(entity_proposals) == 1 or named == wanted
+                or str(body.get("id") or "") == entity_id):
+            logger.warning("[entity_fields] %s: dropped an entity outside the call: %s",
+                           entity_id, body.get("name") or proposal.natural_key)
+            continue
+        proposal.natural_key = key
+        body["id"] = entity_id
+        body["name"] = row.get("name")
+        if row.get("table"):
+            body["table"] = row["table"]
+        proposal.body = body
+        kept.append(proposal)
+    result.proposals = kept
+
+
+#: What the page-set declaration decides. Everything else on a page is the
+#: contract, written per feature by `page_details`; a declaration that wrote
+#: `states` would read as an authored contract to the resume rule.
+_DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
+    "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
+    "presentation", "figmaFrame", "requirements", "confidence", "status",
+})
+
+#: What the declaration decided and the contract author may not move.
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module")
+
+
+def pin_page_set(result: AgentResult) -> None:
+    """Keep the declaration to what it declares.
+
+    The page-set call is asked for routes and patterns and told to write
+    nothing else, and it is a model: given the whole page shape it will
+    sometimes fill it. A declaration carrying `states` would satisfy the
+    resume rule for a contract nobody wrote, and a widget declared here would
+    sit on a page whose contract is still to come. Dropped here, so the
+    document only ever holds what this call is for.
+
+    Only widgets are dropped. A proposal for a section this agent may not
+    write at all is left for `apply_agent_result` to refuse: a boundary
+    violation is a fact about the model that must surface, not be tidied.
+    """
+    result.proposals = [p for p in result.proposals if p.section != "widgets"]
+    for proposal in result.proposals:
+        if proposal.section != "pages":
+            continue
+        proposal.body = {k: v for k, v in (proposal.body or {}).items()
+                         if k in _DECLARED_PAGE_FIELDS}
+
+
+def _page_details_prompt(doc: dict, system: str, subject: str,
+                         feedback: str, *, output_dir: Any = None) -> tuple[str, str]:
+    """One feature's declared pages, the whole page set by id, and the slice
+    of the Blueprint a contract can name."""
+    from services.blueprint.ids import page_key
+    from services.blueprint.orchestrator import feature_pages
+
+    mine = feature_pages(doc, subject)
+    index = [
+        {"id": p.get("id"), "route": p.get("route"), "name": p.get("name"),
+         "pattern": p.get("pattern"),
+         "entity": (p.get("data") or {}).get("primaryEntity")}
+        for p in doc.get("pages") or []
+        if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+    ]
+    context = context_for(doc, "page_design")
+    context["pages"] = index
+    keys = {
+        str(p.get("id")): _declared_key(output_dir, str(p.get("id")))
+        or page_key(str(p.get("route") or ""))
+        for p in mine
+    }
+    user = (
+        f"Write the contracts for feature {subject}: the {len(mine)} page(s) "
+        "below, each under the `natural_key` listed for it.\n\n```json\n"
+        + json.dumps({"pages": mine, "naturalKeys": keys}, indent=2, sort_keys=True)
+        + "\n```\n\nThe whole page set, by id — `navigatesTo` names any of "
+        "these — and the Blueprint slice a contract may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```"
+    )
+    if feedback:
+        user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+    return system, user
+
+
+def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
+    """Make the contract author's reply update the declared pages, and only
+    those.
+
+    A page proposal is matched to a declared page by id, then by route. One
+    that matches nothing is a page the author added to a set it was told was
+    decided, and is dropped — the declaration is where the page set is argued.
+    A match takes the declaration's key and pinned fields, so a route
+    respelled or a frame forgotten cannot allocate a second page.
+    """
+    from services.blueprint.ids import IdAllocator, page_key
+    from services.blueprint.orchestrator import feature_pages
+
+    declared = feature_pages(svc.doc, subject)
+    by_id = {str(p.get("id")): p for p in declared}
+    by_route = {page_key(str(p.get("route") or "")): p for p in declared}
+    try:
+        alloc = IdAllocator.load(output_dir=svc.output_dir)
+    except Exception:  # noqa: BLE001 — fall back to the route, which bound it
+        alloc = None
+
+    kept: list[Any] = []
+    for proposal in result.proposals:
+        if proposal.section != "pages":
+            kept.append(proposal)
+            continue
+        body = dict(proposal.body or {})
+        row = by_id.get(str(body.get("id") or "")) \
+            or by_route.get(page_key(str(body.get("route") or ""))) \
+            or by_route.get(page_key(str(proposal.natural_key or "").removeprefix("PAGE:")))
+        if row is None:
+            logger.warning("[page_details] %s: dropped a page outside the feature: %s",
+                           subject, body.get("route") or proposal.natural_key)
+            continue
+        key = (alloc.key_for(str(row.get("id"))) if alloc else None) \
+            or page_key(str(row.get("route") or ""))
+        proposal.natural_key = key
+        for field_name in _PINNED_PAGE_FIELDS:
+            if field_name in row:
+                body[field_name] = row[field_name]
+            else:
+                body.pop(field_name, None)
+        declared_entity = (row.get("data") or {}).get("primaryEntity")
+        data = dict(body.get("data") or {})
+        if declared_entity:
+            data["primaryEntity"] = declared_entity
+        if data:
+            body["data"] = data
+        proposal.body = body
+        kept.append(proposal)
+    result.proposals = kept
+
+
+def pin_workflow_identity(svc: Any, workflow_id: str, result: AgentResult) -> None:
+    """Make the author's reply update the declared row, whatever it replied.
+
+    Identity is the natural key (§12). The declaration bound this workflow's
+    id to one key; an author that returns the name spelled differently — or
+    a `natural_key` of its own choosing — would be allocated a second id and
+    the application would carry a declared workflow with no steps beside an
+    authored one nobody's page launches. So the key and the declared fields
+    are put back from the declaration here, before apply, and the reply
+    keeps only what it was asked for: the steps.
+    """
+    row = declared_workflow(svc.doc, workflow_id)
+    if row is None:
+        return
+    from services.blueprint.ids import IdAllocator
+
+    try:
+        key = IdAllocator.load(output_dir=svc.output_dir).key_for(workflow_id)
+    except Exception:  # noqa: BLE001 — fall back to the name, which bound it
+        key = None
+    key = key or str(row.get("name") or workflow_id)
+
+    for proposal in result.proposals:
+        if proposal.section != "workflows":
+            continue
+        proposal.natural_key = key
+        body = dict(proposal.body or {})
+        for field_name in _DECLARED_FIELDS:
+            if field_name in row:
+                body[field_name] = row[field_name]
+            else:
+                body.pop(field_name, None)
+        proposal.body = body
 
 
 def expand_data_model(data: dict) -> list["ArtifactProposal"]:
@@ -1896,7 +2294,7 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
         raise MalformedEnvelope(f"reply was not JSON: {exc}") from exc
 
     proposals: list[ArtifactProposal] = []
-    if node in SCHEMA_BY_NODE and node == "data_model":
+    if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
         if not proposals:
             # A reply that parsed but named nothing is not a data model. Said
@@ -2087,11 +2485,19 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: this is the established headroom rather than a new one. These nodes are
 #: above STREAM_ABOVE either way, so they were already streaming.
 MAX_TOKENS_BY_NODE: dict[str, int] = {
-    "data_model": 64000,
-    "page_contracts": 64000,
+    # Names the entities and their relationships without a field; the 64k
+    # the single call needed went on fields, which `entity_fields` writes one
+    # entity at a time inside the default.
+    "data_model": 32000,
+    # Declares the page set without the contracts; the 64k the single call
+    # needed went on contracts, which `page_details` writes per feature.
+    "page_contracts": 32000,
     "database": 64000,
     "security": 64000,
-    "workflows": 64000,
+    # Declares thirty-odd workflows without their steps; the 64k the single
+    # call needed went on step graphs, which `workflow_steps` now writes one
+    # workflow at a time inside the default.
+    "workflows": 32000,
 }
 
 
@@ -2181,8 +2587,9 @@ def make_executor(
         )
         from services.a2ui_ui_composition import shared_context
 
-        page = next((p for p in svc.doc.get("pages") or []
-                     if p.get("id") == spec.subject), None)
+        with svc.lock:
+            page = next((p for p in svc.doc.get("pages") or []
+                         if p.get("id") == spec.subject), None)
         if not page or not page.get("route"):
             return None
 
@@ -2243,12 +2650,17 @@ def make_executor(
                 )],
                 confidence=0.95,
             )
+        # Read under the lock, compose outside it: the context is a slice of
+        # the document, the composition is minutes of network.
+        with svc.lock:
+            context = shared_context(svc.doc)
+            registry = registry_from_blueprint(svc.doc)
         try:
             out = compose_page_via_a2ui(
                 svc.output_dir, page["route"], page.get("pattern") or "",
-                shared_context=shared_context(svc.doc),
+                shared_context=context,
                 page_id=spec.subject,
-                registry=registry_from_blueprint(svc.doc),
+                registry=registry,
                 presentation=page.get("presentation") or "page",
                 progress=reasoning,
                 # The retry's whole point. `spec.feedback` carries the
@@ -2330,12 +2742,13 @@ def make_executor(
             and getattr(client, "accepts_images", False)
             else []
         )
-        system, user = build_prompt(
-            svc.doc, spec.node,
-            inline_schema=not getattr(client, "enforces_schema", True),
-            subject=spec.subject, feedback=spec.feedback, references=shown,
-            output_dir=svc.output_dir,
-        )
+        with svc.lock:  # the read; the call below runs without it
+            system, user = build_prompt(
+                svc.doc, spec.node,
+                inline_schema=not getattr(client, "enforces_schema", True),
+                subject=spec.subject, feedback=spec.feedback, references=shown,
+                output_dir=svc.output_dir,
+            )
         last: Exception | None = None
 
         for attempt in range(repair_attempts + 1):
@@ -2368,10 +2781,25 @@ def make_executor(
                 )
 
             try:
-                return parse_envelope(text, task_id=spec.task_id,
-                                      agent=spec.agent, node=spec.node)
+                parsed = parse_envelope(text, task_id=spec.task_id,
+                                        agent=spec.agent, node=spec.node)
             except MalformedEnvelope as exc:
                 last = exc
+                continue
+            if spec.node == "workflow_steps":
+                with svc.lock:
+                    pin_workflow_identity(svc, spec.subject, parsed)
+            elif spec.node == "page_contracts":
+                pin_page_set(parsed)
+            elif spec.node == "page_details":
+                with svc.lock:
+                    pin_page_identity(svc, spec.subject, parsed)
+            elif spec.node == "data_model":
+                pin_entity_set(parsed)
+            elif spec.node == "entity_fields":
+                with svc.lock:
+                    pin_entity_identity(svc, spec.subject, parsed)
+            return parsed
 
         raise MalformedEnvelope(f"{spec.node}: {last}")
 

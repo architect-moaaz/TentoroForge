@@ -12,6 +12,12 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   name: text("name"),
+  // The account type the user picked at signup (e.g. the Blueprint's
+  // UserAccount.accountType). Nullable: apps whose signup offers no choice
+  // never write it, and auth folds it into the session role when present so
+  // the menu can gate on which kind of account signed up. Plain text, not a
+  // DB enum — the value set is the app's, not the platform's.
+  accountType: text("account_type"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });

@@ -15,7 +15,6 @@ What these tests hold it to, in order of how much it would cost to get wrong:
   report, never patched.
 """
 import json
-import threading
 
 import pytest
 
@@ -216,27 +215,29 @@ def test_a_failed_node_is_sent_back_to_its_author_with_the_findings(svc):
 
 
 def test_the_repair_lands_before_any_dependent_runs(svc):
-    """§28: a dependent that consumed the defect is the swarm. The wave
-    boundary is where the observer's verdict is applied."""
+    """§28: a dependent that consumed the defect is the swarm. A node under
+    observation is finished but not done, so `workflows` — which depends on
+    `page_contracts` — does not start until the repair has landed."""
     order: list[str] = []
 
     class Both(Ghost):
         def __call__(self, spec: TaskSpec) -> AgentResult:
             order.append(spec.task_id)
-            if spec.node == "page_layouts":
+            if spec.node == "workflows":
                 # Sees the repaired page or it does not run at all.
                 assert svc.doc["pages"][0]["users"] == ["ROLE-001"]
                 return AgentResult(task_id=spec.task_id, agent=spec.agent,
                                    confidence=0.95)
             return Ghost.__call__(self, spec)
 
-    report = run(svc, Both(), plan=["page_contracts", "page_layouts"],
+    assert "page_contracts" in DAG["workflows"].depends_on
+    report = run(svc, Both(), plan=["page_contracts", "workflows"],
                  observer_agent=Observer())
     assert "page_contracts" in report.completed
-    assert "page_layouts" in report.completed
+    assert "workflows" in report.completed
     repair = next(i for i, t in enumerate(order) if "observer" in t)
-    layout = next(i for i, t in enumerate(order) if "page_layouts" in t)
-    assert repair < layout
+    dependent = next(i for i, t in enumerate(order) if "workflows" in t)
+    assert repair < dependent
 
 
 def test_what_cannot_be_brought_round_is_flagged_not_patched(svc):
@@ -296,34 +297,32 @@ def test_without_an_observer_the_run_is_exactly_what_it_was(svc):
     assert svc.doc["pages"][0]["status"] != "OUT_OF_SYNC"
 
 
-def test_the_observer_judges_while_the_wave_carries_on(svc):
-    """A node that finishes in round one is being judged while its wave-mate
-    goes round again: `submit` for the finished node precedes the second
-    round's call for the other."""
-    events: list[str] = []
-    gate = threading.Event()
+def test_the_observer_judges_while_the_graph_carries_on(svc):
+    """A node that finishes is judged on a worker while its neighbour's call
+    is still out: the observation of `page_contracts` starts before
+    `integrations` has even returned its first attempt."""
+    import time
+
+    marks: dict[str, float] = {}
 
     class Watching(Observer):
-        def submit(self, key, **kw):
-            events.append(f"submit:{key}")
-            gate.set()
-            super().submit(key, **kw)
+        def observe(self, key, **kw):
+            marks[f"observe:{key}"] = time.monotonic()
+            return super().observe(key, **kw)
 
     def author(spec: TaskSpec) -> AgentResult:
-        events.append(f"call:{spec.node}:{spec.attempt}")
         if spec.node == "page_contracts":
             return page(spec, users=["ROLE-001"])
-        if spec.node == "integrations" and spec.attempt == 1:
-            raise RuntimeError("first try")
+        time.sleep(0.3)  # integrations is slow; nothing waits for it
+        marks["returned:integrations"] = time.monotonic()
         return AgentResult(task_id=spec.task_id, agent=spec.agent,
                            confidence=0.95)
 
-    # Same wave: both depend only on nodes outside this plan.
+    # Independent nodes: both depend only on nodes outside this plan.
     report = run(svc, author, plan=["page_contracts", "integrations"],
-                 observer_agent=Watching(), max_attempts=2)
+                 observer_agent=Watching())
     assert report.ok
-    assert gate.is_set()
-    assert events.index("submit:page_contracts") < events.index("call:integrations:2")
+    assert marks["observe:page_contracts"] < marks["returned:integrations"]
 
 
 # --- the critic -------------------------------------------------------------

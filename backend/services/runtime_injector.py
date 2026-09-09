@@ -1375,7 +1375,15 @@ export async function POST(
       }
     }
 
-    return NextResponse.json(result);
+    // A workflow that returns status:"failed" is a FAILED run — a rejected
+    // business rule or a thrown action. Returning HTTP 200 for it masked the
+    // failure: the form dispatch treated 200 as success, redirected to the
+    // list as if the record had saved, and the row was silently lost
+    // (DEFECT-DEPLOY-CREATE). Surface it as a non-2xx so the caller shows the
+    // error instead of a false success; the body still carries status + message.
+    const _wfFailed =
+      result && typeof result === "object" && (result as any).status === "failed";
+    return NextResponse.json(result, _wfFailed ? { status: 422 } : undefined);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

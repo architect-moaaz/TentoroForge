@@ -287,3 +287,20 @@ def test_assembly_substitutes_the_interface_language(tmp_path):
     assembly.assemble({"application": {"name": "T"}}, other, project_short_id="t")
     assert '<html lang="en" dir="ltr"' in (
         other / "src" / "app" / "layout.tsx").read_text()
+
+
+def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
+    """`install` runs at second zero of a build and `preview` compiles at the
+    end of it; each issues only its own command."""
+    import subprocess
+
+    from services.blueprint import assembly
+
+    seen: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: seen.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert assembly.install_dependencies(tmp_path) == 0
+    assert [c[:2] for c in seen] == [["npm", "install"]]
+    seen.clear()
+    assembly.verify_build(tmp_path, install=False)
+    assert [c[:3] for c in seen] == [["npm", "run", "build"]]
