@@ -384,6 +384,28 @@ def _ancestry(root: Any, target: dict) -> str:
     return " > ".join(chain[-4:]) if chain else "the page root"
 
 
+def _session_filled_fields(doc: dict) -> set[str]:
+    """Field names the RUNTIME supplies from the session, so a Form must NOT be
+    asked to collect them.
+
+    ``security.ownershipRules`` already declares them, and the projection
+    (``ownership_rules``) + the generated runtime read the same manifest: a
+    ``scope`` rule (``ownerId``, ``organisationId``, …) is filled from the
+    session and becomes a row filter; an ``attribution`` rule
+    (``createdByUserAccountId``, ``signerUserAccountId``, …) stamps who acted,
+    also from the session. A create form that ran ``Create Vessel Profile`` was
+    refused for not collecting ``organisationId`` — the caller's own tenant,
+    which no user types. Consulting the contract's own manifest, rather than a
+    hardcoded field-name allowlist, keeps the check in step with what the
+    runtime actually provides."""
+    sec = doc.get("security") or {}
+    return {
+        str(r.get("column"))
+        for r in (sec.get("ownershipRules") or [])
+        if isinstance(r, dict) and r.get("kind") in ("scope", "attribution") and r.get("column")
+    }
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -393,6 +415,7 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     props = control.get("props") or {}
     args = props.get("args") if isinstance(props.get("args"), dict) else {}
     label = props.get("label") or props.get("submitLabel") or control.get("type")
+    session_filled = _session_filled_fields(doc)
     out: list[str] = []
     fields = None
     for inp in wf.get("inputs") or []:
@@ -400,6 +423,11 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
             continue
         name = str(inp.get("name") or "")
         if name in args:
+            continue
+        if name in session_filled:
+            # The runtime fills this from the session (an ownership `scope` /
+            # `attribution` column); asking a Form to collect the caller's own
+            # organisation or identity is wrong, so it is not "unsatisfied".
             continue
         if inp.get("kind") == "record":
             entity = str(inp.get("entity") or "")

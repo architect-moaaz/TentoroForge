@@ -53,7 +53,12 @@ def test_the_page_author_sees_what_each_workflow_needs():
     doc = _doc("/cases", {"type": "Stack", "props": {}, "children": []})
     brief = page_brief(doc, "PAGE-1")
     submit = next(w for w in brief["workflows"] if w["id"] == "FLOW-008")
-    assert submit["inputs"] == [{"name": "case", "kind": "record", "entity": "ENTITY-002", "required": True}]
+    # `source` marks who provides each input: a plain input the user supplies vs
+    # one the runtime fills from the session (an ownership scope/attribution
+    # column). `case` is user-supplied, so it must show source "user".
+    assert submit["inputs"] == [
+        {"name": "case", "kind": "record", "entity": "ENTITY-002", "required": True, "source": "user"}
+    ]
 
 
 # ---------------------------------------------------------------- the rule
