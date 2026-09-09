@@ -2083,6 +2083,14 @@
             ],
             "default": "sm"
           },
+          "density": {
+            "type": "string",
+            "enum": [
+              "tight",
+              "regular",
+              "loose"
+            ]
+          },
           "style": {
             "type": "object",
             "properties": {
