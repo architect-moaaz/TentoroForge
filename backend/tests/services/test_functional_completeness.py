@@ -1,6 +1,47 @@
 """§73 — would the application described actually work?"""
 
-from services.blueprint.functional_completeness import functional_findings
+from services.blueprint.functional_completeness import (
+    functional_findings,
+    unsatisfied_inputs,
+)
+
+
+def _flow_doc(ownership):
+    """A create flow needing a session-filled field (organisationId) and a
+    genuine user field (name); `ownership` seeds security.ownershipRules."""
+    return {
+        "pages": [{"id": "PAGE-001", "route": "/vessels/new"}],
+        "data": {"entities": []},
+        "security": {"ownershipRules": ownership},
+        "workflows": [{"id": "FLOW-001", "name": "Create Vessel", "inputs": [
+            {"name": "organisationId", "kind": "field", "type": "uuid", "required": True},
+            {"name": "name", "kind": "field", "type": "text", "required": True},
+        ]}],
+    }
+
+
+def test_a_session_filled_field_is_not_demanded_of_a_form():
+    # organisationId is an ownership `scope` column — the runtime fills it from
+    # the session, so a create form need not (and must not) collect it, while a
+    # genuine user field like `name` is still required. Driven by the declared
+    # ownershipRules manifest, not a hardcoded field-name list.
+    doc = _flow_doc([{"column": "organisationId", "entity": "Vessel", "kind": "scope"}])
+    control = {"type": "Button", "props": {"label": "Create", "workflow": "FLOW-001"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-001"))
+    assert "organisationId" not in msgs
+    assert "'name'" in msgs
+
+
+def test_without_the_ownership_rule_the_field_is_demanded():
+    # No provenance declared -> organisationId is an ordinary input the form
+    # must collect, so the check still flags it. Proves the exemption is the
+    # manifest's doing, not a special-cased name.
+    doc = _flow_doc([])
+    control = {"type": "Button", "props": {"label": "Create", "workflow": "FLOW-001"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-001"))
+    assert "organisationId" in msgs
 
 
 def _doc(root, sources=None, workflows=("FLOW-001",)):

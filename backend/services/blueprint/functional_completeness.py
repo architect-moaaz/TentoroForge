@@ -384,41 +384,26 @@ def _ancestry(root: Any, target: dict) -> str:
     return " > ".join(chain[-4:]) if chain else "the page root"
 
 
-# Columns the GENERATED RUNTIME fills server-side from the session on create,
-# so a control must never be refused for not collecting them in a Form. This
-# mirrors templates/runtime/data-engine.ts create(): the `_tenancyFks` list
-# (workspace/tenant/org, "no longer a form field") and the owner/actor FK fill
-# (`_LEGACY_OWNER_FKS` + audit columns). A workflow that declares one of these
-# as a required input is describing a value the runtime supplies, not one a
-# person types. Requiring a Form field for it refused the whole page, and a
-# refused page is dropped with no schema written (DEFECT: form/action pages
-# blank in the editor, 404 in the preview, and Smith unable to fix them).
-_RUNTIME_FILLED_INPUT_NAMES = frozenset({
-    # tenancy / workspace (data-engine.ts `_tenancyFks`, plus spelling variants)
-    "workspaceid", "tenantid", "orgid", "organizationid", "organisationid",
-    "companyid", "accountid",
-    # actor / owner / audit (data-engine.ts `_LEGACY_OWNER_FKS` + audit columns)
-    "ownerid", "userid", "createdbyid", "createdbyuserid", "createdby",
-    "authorid", "landlordid", "updatedbyid", "updatedby",
-})
+def _session_filled_fields(doc: dict) -> set[str]:
+    """Field names the RUNTIME supplies from the session, so a Form must NOT be
+    asked to collect them.
 
-
-def _runtime_supplied(name: str, doc: dict) -> bool:
-    """True when the runtime fills this column from the session on create.
-
-    Two sources, both authoritative: the name matches the runtime's own
-    tenancy/owner fill lists, or `security.ownershipRules` declares a column of
-    that name (a scope/attribution column is "set from the session on create").
-    """
-    key = (name or "").strip().lower()
-    if not key:
-        return False
-    if key in _RUNTIME_FILLED_INPUT_NAMES:
-        return True
-    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
-        if isinstance(rule, dict) and str(rule.get("column") or "").strip().lower() == key:
-            return True
-    return False
+    ``security.ownershipRules`` already declares them, and the projection
+    (``ownership_rules``) + the generated runtime read the same manifest: a
+    ``scope`` rule (``ownerId``, ``organisationId``, …) is filled from the
+    session and becomes a row filter; an ``attribution`` rule
+    (``createdByUserAccountId``, ``signerUserAccountId``, …) stamps who acted,
+    also from the session. A create form that ran ``Create Vessel Profile`` was
+    refused for not collecting ``organisationId`` — the caller's own tenant,
+    which no user types. Consulting the contract's own manifest, rather than a
+    hardcoded field-name allowlist, keeps the check in step with what the
+    runtime actually provides."""
+    sec = doc.get("security") or {}
+    return {
+        str(r.get("column"))
+        for r in (sec.get("ownershipRules") or [])
+        if isinstance(r, dict) and r.get("kind") in ("scope", "attribution") and r.get("column")
+    }
 
 
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
@@ -430,6 +415,7 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     props = control.get("props") or {}
     args = props.get("args") if isinstance(props.get("args"), dict) else {}
     label = props.get("label") or props.get("submitLabel") or control.get("type")
+    session_filled = _session_filled_fields(doc)
     out: list[str] = []
     fields = None
     for inp in wf.get("inputs") or []:
@@ -438,9 +424,10 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
         name = str(inp.get("name") or "")
         if name in args:
             continue
-        # A tenant/owner/audit column the runtime fills from the session is not
-        # a field any Form should collect — do not refuse the page for it.
-        if _runtime_supplied(name, doc):
+        if name in session_filled:
+            # The runtime fills this from the session (an ownership `scope` /
+            # `attribution` column); asking a Form to collect the caller's own
+            # organisation or identity is wrong, so it is not "unsatisfied".
             continue
         if inp.get("kind") == "record":
             entity = str(inp.get("entity") or "")

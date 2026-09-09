@@ -1346,6 +1346,12 @@ def page_brief(doc: dict, page_id: str) -> dict:
     wanted = set(page.get("requirements") or [])
     reqs = [r for r in _live(doc.get("requirements")) if r.get("id") in wanted]
     roles = {r.get("id"): r for r in _live(doc.get("roles"))}
+    # Which workflow inputs the runtime fills from the session (ownership
+    # `scope`/`attribution` columns) — so the author collects the user-supplied
+    # ones and never puts the caller's own org or identity in a form. Same
+    # manifest the completeness check reads, so the two agree.
+    from services.blueprint.functional_completeness import _session_filled_fields
+    session_filled = _session_filled_fields(doc)
 
     brief: dict[str, Any] = {
         "page": page,
@@ -1365,8 +1371,12 @@ def page_brief(doc: dict, page_id: str) -> dict:
              "trigger": (w.get("trigger") or {}).get("detail")
                         or (w.get("trigger") or {}).get("kind"),
              # What the control that runs it must supply: a record the page
-             # shows, or fields a form on the page collects.
-             "inputs": [{k: v for k, v in i.items() if k in ("name", "kind", "entity", "type", "required")}
+             # shows, or fields a form on the page collects. `source` says who
+             # provides each — a "session" input (the caller's own org or
+             # identity) is filled by the runtime and MUST NOT be a form field;
+             # a required "user" input is one the Form has to collect.
+             "inputs": [{**{k: v for k, v in i.items() if k in ("name", "kind", "entity", "type", "required")},
+                         "source": "session" if i.get("name") in session_filled else "user"}
                         for i in (w.get("inputs") or [])]}
             for w in _live(doc.get("workflows")) if w.get("id")
         ],

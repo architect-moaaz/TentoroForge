@@ -1,5 +1,5 @@
 # Auto-TLS via Let's Encrypt. Caddy fetches + renews the cert for
-# forge-uat.tentoro.ai the first time the box is reached on 443.
+# forge-uat1.tentoro.ai the first time the box is reached on 443.
 # The plain-HTTP variant on the same block auto-redirects to HTTPS,
 # which is what the browser needs before crypto.subtle / crypto.randomUUID
 # stop returning undefined.
@@ -10,7 +10,7 @@
     email admin@tentoro.ai
 }
 
-forge-uat.tentoro.ai {
+forge-uat1.tentoro.ai {
     encode zstd gzip
 
     # Render-scaffold: generated-app preview iframe. The scaffold is built

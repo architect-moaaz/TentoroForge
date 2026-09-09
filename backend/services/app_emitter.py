@@ -10,10 +10,18 @@ touches LLM-generated content under src/schemas/ or src/contracts/ or
 src/app/globals.css.
 """
 from __future__ import annotations
+import contextlib
+import hashlib
 import json as _json
 import logging
 import shutil
+import tempfile
 from pathlib import Path
+
+try:
+    import fcntl  # POSIX-only; the backend runs on Linux and dev on macOS
+except ImportError:  # pragma: no cover - non-POSIX has no concurrent vendoring
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -148,21 +156,55 @@ def _vendor_one_package(src: Path, dst: Path) -> None:
         shutil.copytree(src_dist, dst_dist)
 
 
+@contextlib.contextmanager
+def _vendor_lock(output_dir: Path):
+    """Serialize vendoring for one output tree across threads AND processes.
+
+    ``_vendor_one_package`` rmtree's then copytree's into
+    ``vendor/@tentoroforge/<pkg>/dist``. Two vendor passes over the same tree at
+    once — a publish's ``vendor_refresh`` racing a regeneration or a second
+    publish (there is no serialization and three call sites reach here) — had one
+    pass's ``rmtree`` walk a directory the other's ``copytree`` was writing into,
+    which surfaced as ``[Errno 39] Directory not empty`` and failed the emit. An
+    exclusive ``flock`` on a per-tree lockfile makes the passes take turns. The
+    lockfile lives in the system temp dir keyed by the tree's path, not inside
+    the app tree, so it is never copied into a deploy tarball.
+    """
+    if fcntl is None:  # non-POSIX: no concurrent vendoring to guard
+        yield
+        return
+    key = hashlib.sha1(str(output_dir.resolve()).encode()).hexdigest()[:16]
+    lock_path = Path(tempfile.gettempdir()) / f"forge-vendor-{key}.lock"
+    handle = open(lock_path, "w")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
 def _vendor_engine_packages(output_dir: Path) -> None:
     """Copy every engine-stack package's package.json + dist/ into
     output_dir/vendor/{@tentoroforge,@forge}/<pkg>/ so the generated app's
     ``file:./vendor/...`` deps resolve at npm-install time without
     needing a registry.
+
+    Serialized per output tree: a concurrent publish + regeneration used to race
+    the same vendor dir and crash with ``[Errno 39] Directory not empty``.
     """
     workspace_root = Path(__file__).resolve().parents[2]
-    for pkg in _VENDOR_PACKAGES:
-        src = workspace_root / "packages" / pkg
-        if src.exists():
-            _vendor_one_package(src, output_dir / "vendor" / "@tentoroforge" / pkg)
-    for pkg in _VENDOR_FORGE_PACKAGES:
-        src = workspace_root / "packages" / pkg
-        if src.exists():
-            _vendor_one_package(src, output_dir / "vendor" / "@forge" / pkg)
+    with _vendor_lock(output_dir):
+        for pkg in _VENDOR_PACKAGES:
+            src = workspace_root / "packages" / pkg
+            if src.exists():
+                _vendor_one_package(src, output_dir / "vendor" / "@tentoroforge" / pkg)
+        for pkg in _VENDOR_FORGE_PACKAGES:
+            src = workspace_root / "packages" / pkg
+            if src.exists():
+                _vendor_one_package(src, output_dir / "vendor" / "@forge" / pkg)
 
 
 _AUTH_ROUTES = frozenset({"/login", "/signup"})

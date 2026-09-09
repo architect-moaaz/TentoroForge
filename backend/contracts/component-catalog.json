@@ -2083,6 +2083,14 @@
             ],
             "default": "sm"
           },
+          "density": {
+            "type": "string",
+            "enum": [
+              "tight",
+              "regular",
+              "loose"
+            ]
+          },
           "style": {
             "type": "object",
             "properties": {
@@ -15397,6 +15405,18 @@
               "em"
             ],
             "default": "span"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "h1",
+              "h2",
+              "h3",
+              "h4",
+              "h5",
+              "caption",
+              "body"
+            ]
           }
         },
         "additionalProperties": false,
