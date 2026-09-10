@@ -243,7 +243,7 @@ export function AppTile({
 
 function StatusPill({ status }: { status: BlueprintStatus }) {
   const base =
-    "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium";
+    "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium";
   switch (status.kind) {
     case "ready":
       return (
@@ -262,14 +262,14 @@ function StatusPill({ status }: { status: BlueprintStatus }) {
     case "building":
       return (
         <span className={cn(base, "bg-primary/10 text-primary")}>
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Loader2 className="h-3 w-3 animate-spin" />
           Building
         </span>
       );
     case "built":
       return (
         <span className={cn(base, "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300")}>
-          <Check className="h-3.5 w-3.5" />
+          <Check className="h-3 w-3" />
           Built
         </span>
       );
@@ -278,7 +278,7 @@ function StatusPill({ status }: { status: BlueprintStatus }) {
 
 function IconSquare({ icon: Icon, tone, className }: { icon: LucideIcon; tone: Tone; className?: string }) {
   return (
-    <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", TONE[tone].icon, className)}>
+    <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONE[tone].icon, className)}>
       <Icon className="h-4 w-4" />
     </span>
   );
@@ -286,11 +286,11 @@ function IconSquare({ icon: Icon, tone, className }: { icon: LucideIcon; tone: T
 
 function Stat({ icon, tone, count, label }: { icon: LucideIcon; tone: Tone; count: number; label: string }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
+    <div className="flex items-center gap-2.5 px-4 py-2.5">
       <IconSquare icon={icon} tone={tone} />
       <span>
-        <span className="block text-xl font-semibold leading-none tabular-nums">{count}</span>
-        <span className="mt-0.5 block text-sm leading-none text-muted-foreground">{label}</span>
+        <span className="block text-lg font-semibold leading-none tabular-nums">{count}</span>
+        <span className="mt-0.5 block text-xs leading-none text-muted-foreground">{label}</span>
       </span>
     </div>
   );
@@ -322,7 +322,7 @@ function Section({
       >
         <span className={cn("h-2 w-2 rounded-full", TONE[tone].dot)} />
         <span className="text-sm font-semibold">{title}</span>
-        {!open && <span className="text-sm text-muted-foreground tabular-nums">{count}</span>}
+        {!open && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
         <ChevronDown
           className={cn(
             "ml-auto h-4 w-4 text-muted-foreground transition-transform",
@@ -342,7 +342,7 @@ function ShowMore({ hidden, onClick }: { hidden: number; onClick: () => void }) 
     <button
       type="button"
       onClick={onClick}
-      className="mt-1.5 text-sm font-medium text-primary hover:underline"
+      className="mt-1.5 text-xs font-medium text-primary hover:underline"
     >
       Show {hidden} more
     </button>
@@ -423,29 +423,29 @@ export function BlueprintSummary({
           {/* Identity — the one block that says what this is. */}
           <div className="p-4">
             <div className="flex items-start gap-3">
-              <AppTile doc={doc} className="h-12 w-12 text-xl" />
+              <AppTile doc={doc} className="h-11 w-11 text-lg" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-baseline gap-2">
-                    <h2 className="truncate text-lg font-semibold leading-tight">
+                    <h2 className="truncate text-base font-semibold leading-tight">
                       {blueprintName(doc)}
                     </h2>
                     {version !== null && (
-                      <span className="shrink-0 font-mono text-xs text-muted-foreground">v{version}</span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">v{version}</span>
                     )}
                   </div>
                   <StatusPill status={status} />
                 </div>
                 {text(app.description) && (
-                  <p className="mt-0.5 line-clamp-2 text-sm leading-snug text-muted-foreground">
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
                     {text(app.description)}
                   </p>
                 )}
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm leading-none">
-                <Globe className="h-4 w-4 text-muted-foreground" />
+              <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs leading-none">
+                <Globe className="h-3.5 w-3.5 text-muted-foreground" />
                 {languageName(locale)}
               </span>
               {palette.length > 0 && (
@@ -457,7 +457,7 @@ export function BlueprintSummary({
                     <span
                       key={s.value}
                       className={cn(
-                        "h-5 w-5 rounded-full border border-black/10 dark:border-white/10",
+                        "h-4 w-4 rounded-full border border-black/10 dark:border-white/10",
                         s.brand && "ring-2 ring-offset-1 ring-offset-card",
                       )}
                       style={{ backgroundColor: s.value, ...(s.brand ? { ["--tw-ring-color" as string]: s.value } : {}) }}
@@ -496,11 +496,11 @@ export function BlueprintSummary({
                       <IconSquare icon={Icon} tone="sky" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline gap-2">
-                          <span className="truncate text-sm font-medium">{text(p.name) || route}</span>
-                          <span className="truncate font-mono text-xs text-muted-foreground">{route}</span>
+                          <span className="truncate text-sm font-medium leading-tight">{text(p.name) || route}</span>
+                          <span className="truncate font-mono text-[11px] text-muted-foreground">{route}</span>
                         </span>
                         {text(p.purpose) && (
-                          <span className="line-clamp-2 text-sm leading-snug text-muted-foreground">
+                          <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
                             {text(p.purpose)}
                           </span>
                         )}
@@ -540,7 +540,7 @@ export function BlueprintSummary({
                         <IconSquare icon={Database} tone="violet" />
                         <span className="flex items-baseline gap-2">
                           <span className="text-sm font-medium">{text(e.name)}</span>
-                          <span className="text-sm text-muted-foreground">
+                          <span className="text-xs text-muted-foreground">
                             {fields.length} field{fields.length === 1 ? "" : "s"}
                           </span>
                         </span>
@@ -549,7 +549,7 @@ export function BlueprintSummary({
                         <ul className="mt-2 flex flex-wrap gap-1.5">
                           {fields.map((f) => (
                             <li key={f}>
-                              <code className="rounded-md border bg-muted/50 px-1.5 py-0.5 font-mono text-xs">{f}</code>
+                              <code className="rounded-md border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px]">{f}</code>
                             </li>
                           ))}
                         </ul>
@@ -571,7 +571,7 @@ export function BlueprintSummary({
                     <span className="min-w-0">
                       <span className="block text-sm font-medium">{c.name}</span>
                       {c.detail && (
-                        <span className="line-clamp-2 text-sm leading-snug text-muted-foreground">{c.detail}</span>
+                        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{c.detail}</span>
                       )}
                     </span>
                   </li>
@@ -585,8 +585,8 @@ export function BlueprintSummary({
             <Section title="Requirements" tone="orange" count={requirements.length} open={!!open.requirements} onToggle={() => toggle("requirements")}>
               <ul className="divide-y">
                 {visibleReqs.map((r, i) => (
-                  <li key={text(r.id) || i} className="flex items-start gap-2.5 py-1.5 text-sm leading-snug">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <li key={text(r.id) || i} className="flex items-start gap-2.5 py-1.5 text-xs leading-snug">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                     <span>{text(r.description) || text(r.name) || text(r.id)}</span>
                   </li>
                 ))}
@@ -597,7 +597,7 @@ export function BlueprintSummary({
 
           {/* §25 — the decision. Nothing further is spent until this is answered. */}
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-4 py-3">
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
               {status.kind === "built" && (
                 <>
                   <Check className="h-4 w-4 text-emerald-600" />
@@ -618,19 +618,19 @@ export function BlueprintSummary({
               <button
                 type="button"
                 onClick={onEdit}
-                className="flex items-center gap-2 rounded-lg border bg-card px-3.5 py-2 text-sm font-medium hover:bg-muted"
+                className="flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
               >
-                <Pencil className="h-4 w-4" />
+                <Pencil className="h-3.5 w-3.5" />
                 Edit blueprint
               </button>
               {(status.kind === "ready" || status.kind === "partial") && (
                 <button
                   type="button"
                   onClick={onBuild}
-                  className="flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                 >
                   {status.kind === "partial" ? "Finish the missing pages" : "Build app"}
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

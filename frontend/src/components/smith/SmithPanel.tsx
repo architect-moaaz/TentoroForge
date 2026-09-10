@@ -1017,7 +1017,13 @@ export function SmithPanel({
       a 380px sidebar on the Blueprint page, and two columns in that is two
       unreadable ones. There the plan opens in place, as it did before.
     */}
-    <aside className="hidden w-[420px] shrink-0 flex-col border-l bg-muted/30 lg:flex xl:w-[460px]">
+    {/*
+      A SHARE OF THE WIDTH, NOT A FIXED ONE. At 460px the column took more
+      than a third of a 1280px workspace and squeezed the conversation into
+      less than the Blueprint; below 360px the card's two-column rows broke.
+      So it takes just over a third of what is available, between those bounds.
+    */}
+    <aside className="hidden w-[clamp(360px,36%,440px)] shrink-0 flex-col border-l bg-muted/30 lg:flex">
       {sidePlan &&
       !(sidePlan.awaitingApproval && sidePlan.status === "complete") ? (
         // A RUN IN PROGRESS, OR ONE PICKED FROM THE TRANSCRIPT: its stages.
