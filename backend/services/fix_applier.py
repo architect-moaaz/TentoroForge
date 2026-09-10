@@ -69,6 +69,8 @@ def apply_fix(output_dir: str, diagnosis: dict, *, git: bool = True) -> dict:
         return _apply_add_workflow(output_dir, diagnosis, git=git)
     if seam == "add_entity":
         return _apply_add_entity(output_dir, diagnosis, git=git)
+    if seam == "add_field":
+        return _apply_add_field(output_dir, diagnosis, git=git)
     if seam == "code_edit":
         return {
             "applied": False,
@@ -751,6 +753,74 @@ def _apply_add_entity(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
             "resolved": bool(result.applied),
             "remaining": [] if result.applied else [
                 {"reason": result.reason or "add_entity rolled back"}
+            ],
+        },
+        "committed": bool(result.commit_hash),
+        "commit_hash": result.commit_hash,
+        "reason": result.reason,
+    }
+
+
+def _apply_add_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``add_field`` proposal — one column onto an EXISTING entity.
+
+    Diagnosis shape::
+
+        proposedFix: {
+          seam: "add_field",
+          patch: {
+            entity: "Offer",
+            field:  {name: "discount", type: "decimal"}
+          }
+        }
+
+    The new column is always nullable, so applying it downstream is a
+    non-destructive ``drizzle-kit push`` — the incremental path a field-add is
+    supposed to take (never a reset + reseed + full rebuild).
+    """
+    from services.add_field_seam import build_add_field_bundle, AddFieldError
+    from services.atomic_apply import apply_bundle
+
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    field = params.get("field") if isinstance(params.get("field"), dict) else {}
+
+    try:
+        ops = build_add_field_bundle(output_dir, entity=entity, field=field)
+    except AddFieldError as exc:
+        return _noop(str(exc), seam="add_field")
+
+    field_name = str(field.get("name") or "").strip()
+
+    def _verify(root: Path) -> dict:
+        try:
+            reg = json.loads((root / "contracts/resource-registry.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return {"ok": False, "reason": f"registry re-read failed: {e}"}
+        ent = next((e for e in reg.get("entities") or []
+                    if isinstance(e, dict) and str(e.get("name") or "").lower() == entity.lower()),
+                   None)
+        if ent is None or not any(
+            isinstance(f, dict) and str(f.get("name") or "").lower() == field_name.lower()
+            for f in ent.get("fields") or []
+        ):
+            return {"ok": False, "reason": "new field not present in registry after write"}
+        return {"ok": True}
+
+    result = apply_bundle(
+        output_dir, ops, verify=_verify,
+        commit_message=f"smith: add field — {entity}.{field_name}", git=git,
+    )
+
+    return {
+        "applied": bool(result.applied),
+        "seam": "add_field",
+        "changes": [{"path": p, "kind": "edit"} for p in (result.ops_written or [])],
+        "verify": {
+            "resolved": bool(result.applied),
+            "remaining": [] if result.applied else [
+                {"reason": result.reason or "add_field rolled back"}
             ],
         },
         "committed": bool(result.commit_hash),
