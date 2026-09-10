@@ -161,6 +161,7 @@ PROJECTIONS: dict[str, tuple[str, str]] = {
                  "nav-flow.json; designSystem -> tokens", "@tentoroforge/engine"),
     "integration": ("workflows + businessRules -> workflow definitions and "
                     "route wiring", "workflow engine"),
+    "install": ("scaffold + vendored engines -> node_modules", "npm"),
     "preview": ("runtime config + a running container", "build/preview service"),
 }
 
@@ -213,11 +214,23 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("requirements", "figma_intelligence"), ("product",)),
 
     # left branch — data
-    _n("data_model", "data_model", ("application_model",), ("data.entities",)),
-    _n("database", "data_model", ("data_model",), ("database",)),
+    # ENTITIES ARE NAMED ONCE AND DETAILED ONE AT A TIME. This node names the
+    # entities and states the relationships between them — the part that
+    # needs every entity in view — and no fields. Measured, the single call
+    # that also wrote every field was 88s median and 276s with 28k output
+    # tokens on a 21-entity model, and it is the second node on the critical
+    # path: everything about data waits on it.
+    _n("data_model", "data_model", ("application_model",), ("data.entities",),
+       note="the entity set and its relationships; fields come per entity"),
+    # One call per declared entity, in parallel, each given the whole entity
+    # set by name so a foreign key can name what it points at.
+    _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
+       fanout="entities",
+       note="fields, keys, enums, sensitivity and constraints, per entity"),
+    _n("database", "data_model", ("entity_fields",), ("database",)),
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("database", "workflows", "page_contracts"), ("apis",),
+    _n("apis", "api", ("database", "workflow_steps", "page_details"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -231,7 +244,26 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # which is also what blocks the theme-token projection.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
-    _n("page_contracts", "page_design", ("ux_architecture", "data_model"), ("pages",)),
+    # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
+    # This node answers the slot question — which features exist, which are
+    # declined, and for each page its route, pattern, module and entity —
+    # and nothing more. Measured, the single call that also wrote every
+    # contract was the longest declaration of a build (120s median, 486s and
+    # 52k output tokens on a 53-page app), and everything after it waited.
+    # A workflow needs a page's id and route to say where it launches; a
+    # contract's tasks and states it never reads. So `workflows` depends on
+    # this node and runs beside `page_details`.
+    _n("page_contracts", "page_design", ("ux_architecture", "entity_fields"), ("pages",),
+       note="the page set: filled or declined per feature, routes decided"),
+    # One call per feature — an entity's pages together, so a list and its
+    # detail are written as one flow — each given the declared page set so
+    # `navigatesTo` can name any page by an id that already exists.
+    # Produces `pages`, as the single node did; it writes widgets too, but a
+    # produced section is what resume and impact analysis read, and an
+    # application with no dashboard has none.
+    _n("page_details", "page_design", ("page_contracts",), ("pages",),
+       fanout="page_features",
+       note="the contracts: tasks, states, views, actions, widgets, per feature"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
     # colour system and type scale, so a model asked to "extract" them can only
@@ -269,7 +301,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # waves earlier, into the same wave as `workflows` — concurrent with the
     # thing it reads.
     _n("page_layouts", "a2ui_pages",
-       ("page_contracts", "design_system", "figma_design_system", "workflows"),
+       ("page_details", "design_system", "figma_design_system", "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),
@@ -284,19 +316,42 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # *from* workflows — and the derivation is the correct direction: a
     # workflow describes what the business does, an endpoint is how it is
     # reached.
-    _n("workflows", "workflow", ("data_model", "page_contracts"), ("workflows",),
+    # WORKFLOWS ARE DECLARED ONCE AND AUTHORED ONE AT A TIME. This node names
+    # them — id, trigger, the page that launches each, the inputs it needs —
+    # and nothing else. Measured, the single call that also wrote every step
+    # was the longest node of a build (106s median, 576s worst, 42k output
+    # tokens on a 35-workflow app) and sat on the critical path twice: pages
+    # could not compose until it returned, and it could not start until
+    # everything at its level had. A page needs a workflow's identity and
+    # contract to wire a button, never its steps; `page_layouts` depends on
+    # this node and not on `workflow_steps` for exactly that reason.
+    _n("workflows", "workflow", ("entity_fields", "page_contracts"), ("workflows",),
+       note="§107 step 16; declares each workflow's identity and contract"),
+    # One call per declared workflow, in parallel, each given the node
+    # catalog and one workflow to fill in. A step is a catalog node carrying
+    # what that node declares it needs, refused at apply otherwise — the same
+    # gate as before, now per workflow, so one refused workflow re-asks for
+    # one workflow rather than for all thirty-five.
+    _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
+       fanout="workflows",
+       note="§107 step 16; one authored step graph per declared workflow"),
+    _n("business_rules", "business_rules", ("entity_fields",), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
-    _n("business_rules", "business_rules", ("data_model",), ("businessRules",),
-       note="§107 step 16; not a distinct box in §28"),
-    _n("security", "security", ("data_model",), ("security", "roles", "permissions"),
+    _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
 
     # join
     _n("integration", "backend",
-       ("backend", "frontend", "workflows", "business_rules", "security", "integrations"),
+       ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
        (), kind="projection"),
-    _n("testing", "testing", ("integration",), ("tests",), optional=True),
+    # Reads requirements, data, pages, apis, workflows and rules — never a
+    # projected file — so it waits for the producers of those and runs beside
+    # the projections instead of behind them. `apis` carries the data model
+    # and the pages transitively; the other two are named because nothing
+    # between them and this node would.
+    _n("testing", "testing", ("apis", "workflow_steps", "business_rules"),
+       ("tests",), optional=True),
     # §20 + §23 — both read off what the Blueprint already carries, so neither
     # is an agent. Placed after authoring and before verification, so the
     # verification report is made against a document that knows what it assumed.
@@ -304,7 +359,20 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        kind="service",
        note="§20 decision memory + §23 completeness, both derived"),
     _n("verification", "verification", ("memory",), (), kind="service"),
-    _n("preview", "build", ("verification",), ("runtime",), kind="projection"),
+    # `npm install` reads the scaffold's package.json and the vendored
+    # engines, which are the same for every application: it needs nothing an
+    # agent writes. With no dependencies it starts with `requirements` and is
+    # finished long before there is anything to compile. Measured at one to
+    # three minutes, all of which used to sit at the end of the build.
+    _n("install", "build", (), (), kind="projection",
+       note="scaffold + engines + node_modules, before any agent replies"),
+    # The build waits for the join and the install, and for nothing else.
+    # `testing`, `memory` and `verification` write to the Blueprint, not to
+    # the tree being compiled, so a compile that waited for them was waiting
+    # for a report it does not read. §94's state walk still gates PREVIEW on
+    # `verification` having run — see `smith.BUILD_WALK`.
+    _n("preview", "build", ("integration", "install"), ("runtime",),
+       kind="projection"),
 )}
 
 
@@ -322,7 +390,45 @@ FANOUT: dict[str, Any] = {
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
     ],
+    # §107 step 16 — one call per declared workflow.
+    "workflows": lambda doc: [
+        w["id"] for w in (doc.get("workflows") or [])
+        if w.get("id") and w.get("status") != "DEPRECATED"
+    ],
+    # One call per declared entity.
+    "entities": lambda doc: [
+        e["id"] for e in ((doc.get("data") or {}).get("entities") or [])
+        if isinstance(e, dict) and e.get("id") and e.get("status") != "DEPRECATED"
+    ],
+    # One call per feature: an entity's pages together, and a page that
+    # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
+    # primary record) on its own.
+    "page_features": lambda doc: page_features(doc),
 }
+
+
+def page_features(doc: Mapping[str, Any]) -> list[str]:
+    """The subjects `page_details` fans out over, in first-seen order."""
+    seen: list[str] = []
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or not page.get("id") \
+                or page.get("status") == "DEPRECATED":
+            continue
+        subject = str((page.get("data") or {}).get("primaryEntity") or "") \
+            or str(page["id"])
+        if subject not in seen:
+            seen.append(subject)
+    return seen
+
+
+def feature_pages(doc: Mapping[str, Any], subject: str) -> list[dict]:
+    """The declared pages one `page_details` subject is asked to write."""
+    return [
+        p for p in doc.get("pages") or []
+        if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+        and ((str((p.get("data") or {}).get("primaryEntity") or "") or str(p.get("id")))
+             == subject)
+    ]
 
 
 def subjects_for(node: "DagNode", doc: dict) -> list[str]:
@@ -348,15 +454,10 @@ def pending_subjects(node: "DagNode", doc: dict) -> list[str]:
     run starts from an empty document, so nothing is present and every subject
     runs; a node that writes once (no per-subject row key) is unaffected."""
     subjects = subjects_for(node, doc)
-    key = _SUBJECT_ROW_KEY.get(node.fanout)
-    if not key:
+    authored = _SUBJECT_AUTHORED.get(node.fanout)
+    if authored is None:
         return subjects
-    section, field = key
-    present = {
-        str(row.get(field) or "")
-        for row in (doc.get(section) or []) if isinstance(row, dict)
-    }
-    return [s for s in subjects if s not in present]
+    return [s for s in subjects if not authored(doc, s)]
 
 
 class CyclicDag(ValueError):
@@ -711,24 +812,57 @@ def completed_nodes(
         # Checked against the rows themselves rather than a count, because a
         # deprecated page leaves a layout behind and a count would call that
         # complete too.
-        subject_key = _SUBJECT_ROW_KEY.get(node.fanout)
-        if node.fanout and subject_key:
-            section, field = subject_key
-            present = {str(row.get(field) or "")
-                       for row in (doc.get(section) or []) if isinstance(row, dict)}
-            if any(subject not in present for subject in subjects_for(node, doc)):
+        authored = _SUBJECT_AUTHORED.get(node.fanout)
+        if node.fanout and authored is not None:
+            if any(not authored(doc, subject) for subject in subjects_for(node, doc)):
                 continue
         done.add(key)
     return done
 
 
-#: For a fan-out node, which produced section names the subject a row was
-#: written for, and under which field. Only fan-outs whose rows carry their
-#: subject can be judged per subject; one that does not (a design source's
-#: requirements carry `evidence`, not a source id) keeps the section-level
-#: rule above, which is the behaviour every run had before this existed.
-_SUBJECT_ROW_KEY: dict[str, tuple[str, str]] = {
-    "pages": ("pageLayouts", "page"),
+def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
+    return any(isinstance(row, dict) and str(row.get("page") or "") == page_id
+               for row in doc.get("pageLayouts") or [])
+
+
+def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
+    """A named entity is detailed once it carries fields. `data_model` and
+    `entity_fields` both write `data.entities`; the declaration names and
+    relates, the author fills in, and an entity with no fields is one the
+    author has not reached."""
+    return any(isinstance(e, dict) and e.get("id") == entity_id and bool(e.get("fields"))
+               for e in (doc.get("data") or {}).get("entities") or [])
+
+
+def _contracts_present(doc: Mapping[str, Any], subject: str) -> bool:
+    """A declared page is authored once it carries its `states`: the
+    declaration decides that a page exists and where, the contract says what
+    it must handle, and `states` is the one field every contract declares
+    ("empty and error states up front") that no declaration writes."""
+    pages = feature_pages(doc, subject)
+    return bool(pages) and all(bool(p.get("states")) for p in pages)
+
+
+def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
+    """A declared workflow is authored once it carries steps. `workflows`
+    and `workflow_steps` both write the `workflows` section, so "the section
+    has content" is true the moment the first has run; what the second owes
+    is the step graph, and that is what is checked."""
+    return any(isinstance(row, dict) and row.get("id") == workflow_id
+               and bool(row.get("steps"))
+               for row in doc.get("workflows") or [])
+
+
+#: For a fan-out node, whether one subject's artifact has been authored. Only
+#: fan-outs that can be judged per subject are listed; one that cannot (a
+#: design source's requirements carry `evidence`, not a source id) keeps the
+#: section-level rule above, which is the behaviour every run had before this
+#: existed.
+_SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
+    "pages": _layout_present,
+    "workflows": _steps_present,
+    "page_features": _contracts_present,
+    "entities": _fields_present,
 }
 
 
@@ -879,12 +1013,10 @@ def run(
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
 
-    # §28's graph declares which nodes are independent; running them one after
-    # another threw that declaration away. A *wave* is the set of nodes whose
-    # in-plan dependencies are all complete — the same shape `levels` computes
-    # for the whole DAG, recomputed here because a plan is a subset and because
-    # a node that failed must not let its dependents into a later wave.
-    remaining = list(order)
+    # §28's graph declares which nodes are independent; `_execute` starts a
+    # node the moment its in-plan dependencies are complete, recomputed there
+    # because a plan is a subset and because a node that failed must never
+    # release its dependents.
     try:
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
@@ -913,54 +1045,226 @@ def _execute(
     user_request: str,
     app_root: str | None,
 ) -> RunReport:
-    """The wave loop. Split from `run` so the ledger can record a crash."""
-    remaining = list(order)
-    while remaining:
-        wave = [
-            key for key in remaining
-            if {d for d in DAG[key].depends_on if d in in_plan} <= done
-        ]
-        if not wave:
-            break
-        for key in wave:
-            capability_for(DAG[key].agent)  # §28: no unregistered agents
-        _run_wave(
-            svc, executor, wave, report=report, done=done,
-            max_attempts=max_attempts, commit=commit,
-            user_request=user_request, app_root=app_root, ledger=ledger,
-        )
-        # AN OPTIONAL NODE NEVER HOLDS THE APPLICATION IN DRAFT. If it failed,
-        # count it done anyway — its dependents (the deterministic tail: memory,
-        # verification, preview) run, the run stays `ok`, and the built app
-        # reaches `ready`. The failure is not hidden: it moves to `degraded`,
-        # which the report still carries. `testing` is the case that matters —
-        # verification, not the running app, and the last node to spend the API.
-        for key in wave:
-            if DAG[key].optional and key not in done:
-                labels = [key] + [
-                    lbl for lbl in list(report.failed)
-                    if lbl.startswith(f"{key}:")
-                ]
-                for lbl in labels:
-                    if lbl in report.failed:
-                        report.failed.remove(lbl)
-                        report.degraded[lbl] = report.failed_because.pop(lbl, "")
-                done.add(key)
-                logger.warning(
-                    "[%s] optional node failed and was shipped without: %s",
-                    key, "; ".join(report.degraded.get(lbl, "")
-                                   for lbl in labels)[:200],
-                )
-        ran = set(wave)
-        remaining = [key for key in remaining if key not in ran]
+    """The scheduler. Split from `run` so the ledger can record a crash.
 
-    # Whatever never made a wave is waiting on something that never completed.
+    EVENT-DRIVEN, NOT WAVES. A node starts the moment its own in-plan
+    dependencies are done, and a subject goes round again the moment its
+    proposal is rejected. The wave loop this replaces grouped nodes into
+    topological levels and waited for the slowest call in a level before
+    anything in the next level began — and, inside a level, held every retry
+    until every first attempt had returned. Measured on a 23-page build, that
+    left `page_layouts` at one to four calls in flight for the last 400 of its
+    727 seconds: the width was 12, the shape of the loop spent it.
+
+    Two things stay exactly as they were. Calls run on worker threads and
+    NOTHING ELSE does: every apply, and every deterministic node, runs on this
+    thread under the document's lock, so the Blueprint has one writer. And a
+    node whose dependency did not complete is skipped, never attempted (§28).
+
+    What changes is apply ORDER: results apply as they arrive. Ids come from
+    natural keys (§12), so a re-run returns the same id whatever the order;
+    what a fresh document numbers first is now whichever proposal landed
+    first. The one place order still carries meaning is two nodes writing the
+    same section — `requirements` and `figma_intelligence` both write
+    `requirements` — and for those, :func:`_yields_to` holds the later node's
+    results until the earlier one has finished, so their numbering is the
+    plan's, not the network's.
+    """
+    from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+
+    started: set[str] = set()
+    finished: set[str] = set()
+    runs: dict[str, _NodeRun] = {}
+    futures: dict[Future, TaskSpec] = {}
+    #: Results held back by :func:`_yields_to`, in arrival order.
+    deferred: list[tuple[TaskSpec, Any]] = []
+
+    def ready() -> list[str]:
+        return [
+            key for key in order
+            if key not in started
+            and {d for d in DAG[key].depends_on if d in in_plan} <= done
+        ]
+
+    def settle_optional(key: str) -> None:
+        # AN OPTIONAL NODE NEVER HOLDS THE APPLICATION IN DRAFT. If it failed,
+        # count it done anyway — its dependents (the deterministic tail:
+        # memory, verification, preview) run, the run stays `ok`, and the
+        # built app reaches `ready`. The failure is not hidden: it moves to
+        # `degraded`, which the report still carries. `testing` is the case
+        # that matters — verification, not the running app, and the last node
+        # to spend the API.
+        if not DAG[key].optional or key in done:
+            return
+        labels = [key] + [
+            lbl for lbl in list(report.failed) if lbl.startswith(f"{key}:")
+        ]
+        for lbl in labels:
+            if lbl in report.failed:
+                report.failed.remove(lbl)
+                report.degraded[lbl] = report.failed_because.pop(lbl, "")
+        done.add(key)
+        logger.warning(
+            "[%s] optional node failed and was shipped without: %s",
+            key, "; ".join(report.degraded.get(lbl, "") for lbl in labels)[:200],
+        )
+
+    def finish(key: str) -> None:
+        state = runs[key]
+        finished.add(key)
+        # Only a node that authored nothing at all has genuinely failed;
+        # anything less is a partial result its dependents can still use.
+        if state.subjects and len(state.failed) == len(state.subjects):
+            # Every subject failed: the node authored nothing. Recorded with
+            # the reasons, because "which of the eighteen stopped it, and why"
+            # is the question the ledger exists to answer.
+            reasons = [
+                report.failed_because.get(f"{key}:{s}" if s else key, "")
+                for s in state.failed
+            ]
+            _note(ledger, "node_failed", key,
+                  "; ".join(r for r in reasons if r)[:600]
+                  or f"all {len(state.subjects)} subjects failed")
+        else:
+            report.completed.append(key)
+            _note(ledger, "node_done", key, len(state.subjects or []))
+            done.add(key)
+        settle_optional(key)
+
+    def pump(pool: ThreadPoolExecutor, key: str) -> None:
+        """Submit queued subjects up to the node's own width."""
+        state = runs[key]
+        while state.queue and len(state.in_flight) < FANOUT_CONCURRENCY:
+            subject = state.queue.pop(0)
+            attempt = state.attempts.get(subject, 0) + 1
+            state.attempts[subject] = attempt
+            state.in_flight.add(subject)
+            spec = TaskSpec(
+                task_id=f"TASK-{key}{':' + subject if subject else ''}-{attempt}",
+                node=key,
+                agent=DAG[key].agent,
+                attempt=attempt,
+                subject=subject,
+                feedback=state.feedback.get(subject, ""),
+            )
+            futures[pool.submit(_call, executor, spec)] = spec
+
+    def start(pool: ThreadPoolExecutor, key: str) -> None:
+        started.add(key)
+        capability_for(DAG[key].agent)  # §28: no unregistered agents
+        node = DAG[key]
+        if node.kind in ("service", "projection"):
+            # Deterministic, and it mutates the document directly: run here,
+            # on the one writing thread, never on a worker. A handler whose
+            # work is a process rather than a computation hands back a future
+            # (`install`), and the node is in flight until it lands.
+            with svc.lock:
+                pending = _run_deterministic(
+                    svc, key, node, report=report, done=done,
+                    app_root=app_root, ledger=ledger)
+            if pending is not None:
+                futures[pending] = TaskSpec(task_id=f"TASK-{key}", node=key,
+                                            agent=node.agent)
+                return
+            finished.add(key)
+            settle_optional(key)
+            return
+        # Only the subjects not already authored — a resume finishes the pages
+        # a prior run dropped, not the ones it composed (see pending_subjects).
+        subjects = pending_subjects(node, svc.doc)
+        _note(ledger, "node_start", key, len(subjects))
+        runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
+                             queue=list(subjects))
+        if not subjects:
+            finish(key)
+            return
+        pump(pool, key)
+
+    def settle_deterministic(key: str, outcome: Any) -> None:
+        finished.add(key)
+        if isinstance(outcome, Exception):
+            report.failed.append(key)
+            report.failed_because[key] = _reason(outcome)
+            _note(ledger, "node_failed", key, _reason(outcome))
+        else:
+            report.completed.append(key)
+            _note(ledger, "node_done", key)
+            done.add(key)
+        settle_optional(key)
+
+    def settle(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
+        key = spec.node
+        if DAG[key].kind != "agent":
+            settle_deterministic(key, outcome)
+            return
+        state = runs[key]
+        with svc.lock:
+            verdict = _apply_subject(
+                svc, key, state, spec.subject, outcome,
+                attempt=spec.attempt,
+                max_attempts=ATTEMPTS_BY_NODE.get(key, max_attempts),
+                commit=commit, user_request=user_request,
+                report=report, ledger=ledger,
+            )
+        state.in_flight.discard(spec.subject)
+        if verdict == "retry":
+            state.queue.append(spec.subject)
+        pump(pool, key)
+        if not state.in_flight and not state.queue:
+            finish(key)
+
+    def flush(pool: ThreadPoolExecutor) -> None:
+        """Apply what arrived, holding back what must wait its turn."""
+        nonlocal deferred
+        again: list[tuple[TaskSpec, Any]] = []
+        for spec, outcome in deferred:
+            if _yields_to(spec.node, order, started, finished):
+                again.append((spec, outcome))
+            else:
+                settle(pool, spec, outcome)
+        deferred = again
+
+    pool = ThreadPoolExecutor(max_workers=WAVE_CONCURRENCY)
+    try:
+        while True:
+            # Start everything that can start, to a fixpoint: a service node
+            # completes inline and may have readied its dependents.
+            while True:
+                due = ready()
+                if not due:
+                    break
+                for key in due:
+                    start(pool, key)
+            flush(pool)
+            if not futures:
+                break
+            landed, _ = wait(list(futures), return_when=FIRST_COMPLETED)
+            for fut in landed:
+                spec = futures.pop(fut)
+                try:
+                    outcome = fut.result()
+                except Exception as exc:  # noqa: BLE001 — a deterministic node's own failure
+                    outcome = exc
+                deferred.append((spec, outcome))
+            flush(pool)
+    except BaseException:
+        # A crash on this thread (a CapabilityViolation is the one that
+        # surfaces by design) must not sit behind a dozen model calls still
+        # in flight before `run` can record it: drop what is queued, leave
+        # what is running to finish on its own, and let the ledger speak.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+
+    # Whatever never started is waiting on something that never completed.
     # Say which dependency stopped it. A plan that quietly drops eight of
     # eighteen nodes reads exactly like one that ran them: the `apis` node was
     # skipped for an unmet dependency during an incremental change and the
     # Blueprint simply kept the endpoints it already had, with nothing to
     # indicate the derivation never ran.
-    for key in remaining:
+    for key in order:
+        if key in started:
+            continue
         unmet = {d for d in DAG[key].depends_on if d in in_plan and d not in done}
         report.skipped.append(key)
         report.skipped_because[key] = ", ".join(sorted(unmet))
@@ -970,23 +1274,116 @@ def _execute(
     return report
 
 
-#: How many model calls one fanning-out node keeps in flight. Pages are
-#: genuinely independent — each call is given one page's brief and produces one
-#: tree, reading nothing another page wrote — and a serial fan-out was the
-#: dominant cost of a run: twenty-four pages at roughly seventy-five seconds
-#: each is half an hour inside a single node.
-#:
-#: Raised from 6 on measurement. `page_layouts` averages 102s a page, and a
-#: legislative platform declared 44 of them: at 6 wide that is 8 rounds and
-#: ~14 minutes, the single largest block in a 40-minute build. At 12 it is 4
-#: rounds and ~7.
-#:
-#: Not raised further, and this is the ceiling worth defending rather than the
-#: number: past a dozen in flight the limit stops being this machine and starts
-#: being the provider's, and a rate-limited page fails as an UNBUILT ROUTE —
-#: `_unbuilt_pages` reports it, the run still succeeds, and the app 404s where
-#: a page should be. Trading correctness for minutes is the wrong trade. If
-#: several pages start failing at once, lower this: `RunReport.failed_because`
+def _call(executor: Executor, spec: TaskSpec) -> Any:
+    """One executor call on a worker thread. Calls, and nothing else.
+
+    No apply happens here and no report is touched, which is what makes it
+    safe to run this wide: the half that is network I/O is the half that
+    parallelises, and the half that mutates the Blueprint stays on the
+    scheduler's thread. An exception is a classified outcome (§102), not a
+    crash; the scheduler decides whether it is a retry or a failure.
+    """
+    try:
+        return executor(spec)
+    except Exception as exc:  # §102 — a classified outcome, not a crash
+        return exc
+
+
+def _sections(node: DagNode) -> set[str]:
+    """Top-level sections a node writes — `data.entities` is `data`."""
+    return {p.split(".")[0] for p in node.produces}
+
+
+def _yields_to(key: str, order: Sequence[str], started: set[str],
+               finished: set[str]) -> bool:
+    """Whether ``key``'s results must wait for an earlier node still running.
+
+    Applies land in arrival order except between nodes that write the same
+    section: there the plan's order is kept, because the id allocator numbers
+    a fresh document's artifacts in the order proposals arrive, and two
+    producers of `requirements` interleaving by network latency would number
+    REQ-001 differently on every build. Only the earlier node in plan order
+    holds the later one; a node never waits on something behind it, so this
+    cannot deadlock.
+    """
+    mine = _sections(DAG[key])
+    if not mine:
+        return False
+    for other in order:
+        if other == key:
+            return False
+        if other in started and other not in finished \
+                and _sections(DAG[other]) & mine:
+            return True
+    return False
+
+
+def _run_deterministic(
+    svc: BlueprintService,
+    key: str,
+    node: DagNode,
+    *,
+    report: RunReport,
+    done: set[str],
+    app_root: str | None,
+    ledger: Any,
+) -> "Any":
+    """A service or projection node: deterministic, inline, one writer.
+
+    Returns a :class:`concurrent.futures.Future` when the handler handed one
+    back — its work is still running and the caller must wait for it before
+    the node counts — and None otherwise."""
+    # EVERY KIND OF NODE STARTS, not just the ones that call a model.
+    # `node:start` was emitted for agent nodes only, so a service or
+    # projection node that ran appeared in `done` and never in `started` —
+    # and `explain` therefore listed it as still pending. A node that ran
+    # reading as one that never began is the exact misreading this ledger
+    # exists to prevent.
+    _note(ledger, "node_start", key, 1)
+    if node.kind == "service":
+        handler = SERVICE_HANDLERS.get(key)
+        if handler is None:
+            report.blocked.append(key)
+            _note(ledger, "node_blocked", key, "no service handler")
+            return
+        try:
+            handler(svc)
+        except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+            # A derived node that raises used to take the whole run with
+            # it: the dispatch was unguarded, so one bad projection lost
+            # every node behind it and the report said nothing at all.
+            report.failed.append(key)
+            report.failed_because[key] = _reason(exc)
+            _note(ledger, "node_failed", key, _reason(exc))
+            return
+    else:
+        projector = PROJECTION_HANDLERS.get(key)
+        if projector is None or not app_root:
+            # Deterministic, but not ported into this package yet. Blocked
+            # rather than handed to a model: a model asked to fill codeMap
+            # would invent plausible paths that pass validation, and
+            # Blueprint<->Implementation would go green against files
+            # nobody wrote.
+            report.blocked.append(key)
+            _note(ledger, "node_blocked", key, "no projection handler or app_root")
+            return
+        try:
+            pending = projector(svc, app_root)
+        except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+            report.failed.append(key)
+            report.failed_because[key] = _reason(exc)
+            _note(ledger, "node_failed", key, _reason(exc))
+            return None
+        from concurrent.futures import Future
+
+        if isinstance(pending, Future):
+            return pending
+    report.completed.append(key)
+    _note(ledger, "node_done", key)
+    done.add(key)
+    return None
+
+
 #: Attempts a node gets before the run gives up on it, where two is not enough.
 #:
 #: `data_model` is BIMODAL, measured over six samples on byte-identical prompts:
@@ -1006,244 +1403,147 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 }
 
 
+#: How many model calls one fanning-out node keeps in flight. Pages are
+#: genuinely independent — each call is given one page's brief and produces one
+#: tree, reading nothing another page wrote — and a serial fan-out was the
+#: dominant cost of a run: twenty-four pages at roughly seventy-five seconds
+#: each is half an hour inside a single node.
+#:
+#: Raised from 6 on measurement. `page_layouts` averages 102s a page, and a
+#: legislative platform declared 44 of them: at 6 wide that is 8 rounds and
+#: ~14 minutes, the single largest block in a 40-minute build. At 12 it is 4
+#: rounds and ~7.
+#:
+#: Not raised further, and this is the ceiling worth defending rather than the
+#: number: past a dozen in flight the limit stops being this machine and starts
+#: being the provider's, and a rate-limited page fails as an UNBUILT ROUTE —
+#: `_unbuilt_pages` reports it, the run still succeeds, and the app 404s where
+#: a page should be. Trading correctness for minutes is the wrong trade. If
+#: several pages start failing at once, lower this: `RunReport.failed_because`
 #: names the exception, so the report distinguishes transport from content.
+#:
+#: Enforced by submission, not by a semaphore: the scheduler hands a node its
+#: next subject only when fewer than this many are in flight, so a waiting
+#: subject waits in the node's own queue and never occupies one of the run's
+#: worker threads doing nothing.
 FANOUT_CONCURRENCY = 12
 
-#: How many model calls a whole wave keeps in flight, across every node in it.
-#: A wave of four fanning-out nodes would otherwise open twenty-four
-#: connections at once, which is how you find the provider's rate limit rather
-#: than the machine's. Kept above :data:`FANOUT_CONCURRENCY` so a lone fan-out
-#: still runs at full width, and low enough that four nodes share rather than
-#: multiply. If a run starts failing several nodes at the same level, lower
-#: this: ``RunReport.failed_because`` names the exception, so the report says
+#: How many model calls the whole run keeps in flight, across every node that
+#: is ready at once. Four fanning-out nodes would otherwise open forty-eight
+#: connections, which is how you find the provider's rate limit rather than
+#: the machine's. Kept above :data:`FANOUT_CONCURRENCY` so a lone fan-out
+#: still runs at full width, and low enough that several nodes share rather
+#: than multiply. If a run starts failing several nodes at once, lower this:
+#: ``RunReport.failed_because`` names the exception, so the report says
 #: whether the cause was transport or content.
 #:
-#: Moved with FANOUT_CONCURRENCY to keep the invariant this comment states —
-#: above it, so a lone fan-out still runs at full width. Leaving it at 8 while
-#: the fan-out asked for 12 would have capped `page_layouts` at 8 and made the
-#: raise half a change.
+#: The name predates the event-driven scheduler: there are no waves now, and
+#: this is the size of the run's worker pool. Kept because callers and tests
+#: import it by this name.
 WAVE_CONCURRENCY = 14
 
 
 @dataclass
 class _NodeRun:
-    """One agent node's progress through a wave's retry rounds."""
+    """One agent node's progress: which subjects are queued, in flight, done."""
 
     #: Every subject the node authors for; ``[""]`` when it does not fan out.
     subjects: list[str]
-    #: The subjects still to be called in the next round.
+    #: The subjects still to be called in the next round. Kept for
+    #: :func:`_apply_round`, which applies one round in the given order.
     pending: list[str]
     #: Subject -> why its last attempt was rejected (§102).
     feedback: dict[str, str] = field(default_factory=dict)
     #: Subjects that exhausted their attempts.
     failed: list[str] = field(default_factory=list)
+    #: Subjects waiting for a slot — first attempts and retries alike.
+    queue: list[str] = field(default_factory=list)
+    #: Subjects whose call is out on a worker thread.
+    in_flight: set[str] = field(default_factory=set)
+    #: Subject -> attempts made so far.
+    attempts: dict[str, int] = field(default_factory=dict)
 
 
-def _run_wave(
+def _apply_subject(
     svc: BlueprintService,
-    executor: Executor,
-    wave: Sequence[str],
+    key: str,
+    state: _NodeRun,
+    subject: str,
+    outcome: Any,
     *,
-    report: RunReport,
-    done: set[str],
+    attempt: int,
     max_attempts: int,
     commit: bool,
     user_request: str,
-    app_root: str | None,
+    report: RunReport,
     ledger: Any = None,
-) -> None:
-    """Run one wave: model calls wide, applies narrow and ordered.
+) -> str:
+    """Commit one subject's result. Returns ``"applied"``, ``"retry"``,
+    ``"failed"`` or ``"blocked"``.
 
-    What runs concurrently is the executor and nothing else. ``apply_agent_result``
-    allocates stable ids (§12) into one shared document and saves it, and that
-    allocation is order-dependent — so applies stay on this thread, node by node
-    in wave order and, inside a node, subject by subject in the order the
-    subjects were given.
-
-    A lock around the applies would be safe against corruption and would still
-    be wrong: apply order would become whichever thread arrived first, and a
-    re-projection that is supposed to be byte-identical would stop being one.
-    ``project_frontend`` is idempotent by design and
-    ``test_frontend_projection_is_idempotent`` holds it to that.
-
-    Service and projection nodes stay serial throughout. They are deterministic
-    and fast, and they mutate the document directly, so there is nothing to win
-    and a race to lose.
+    A retry is left in ``state.feedback`` with the reason it was rejected.
+    §102: a retry that is not told what went wrong is just the same request
+    again.
     """
-    import threading
+    total = len(state.subjects or [""])
+    # A node that does not fan out has one empty subject, and its label is
+    # just the node key — callers test membership by it.
+    label = f"{key}:{subject}" if subject else key
 
-    # Deterministic and cheap; done before the wave's model calls so the long
-    # pole is the only thing left to wait on.
-    for key in wave:
-        node = DAG[key]
-        # EVERY KIND OF NODE STARTS, not just the ones that call a model.
-        # `node:start` was emitted for agent nodes only, so a service or
-        # projection node that ran appeared in `done` and never in `started` —
-        # and `explain` therefore listed it as still pending. A node that ran
-        # reading as one that never began is the exact misreading this ledger
-        # exists to prevent.
-        if node.kind in ("service", "projection"):
-            _note(ledger, "node_start", key, 1)
-        if node.kind == "service":
-            handler = SERVICE_HANDLERS.get(key)
-            if handler is None:
-                report.blocked.append(key)
-                _note(ledger, "node_blocked", key, "no service handler")
-                continue
-            try:
-                handler(svc)
-            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
-                # A derived node that raises used to take the whole run with
-                # it: the dispatch was unguarded, so one bad projection lost
-                # every node behind it and the report said nothing at all.
-                report.failed.append(key)
-                report.failed_because[key] = _reason(exc)
-                _note(ledger, "node_failed", key, _reason(exc))
-                continue
-        elif node.kind == "projection":
-            projector = PROJECTION_HANDLERS.get(key)
-            if projector is None or not app_root:
-                # Deterministic, but not ported into this package yet. Blocked
-                # rather than handed to a model: a model asked to fill codeMap
-                # would invent plausible paths that pass validation, and
-                # Blueprint<->Implementation would go green against files
-                # nobody wrote.
-                report.blocked.append(key)
-                _note(ledger, "node_blocked", key, "no projection handler or app_root")
-                continue
-            try:
-                projector(svc, app_root)
-            except Exception as exc:  # noqa: BLE001 - reported, not swallowed
-                report.failed.append(key)
-                report.failed_because[key] = _reason(exc)
-                _note(ledger, "node_failed", key, _reason(exc))
-                continue
-        else:
-            continue
-        report.completed.append(key)
-        _note(ledger, "node_done", key)
-        done.add(key)
+    def _at() -> int:
+        """One-based position in the node's subject list, for the record."""
+        try:
+            return (state.subjects or []).index(subject) + 1
+        except ValueError:  # pragma: no cover — a subject not in its own list
+            return 0
 
-    # Subjects are resolved once, before anything in the wave applies. Nodes in
-    # a wave are independent by construction, so none of them can change
-    # another's subject list — resolving up front just makes that explicit.
-    runs: dict[str, _NodeRun] = {}
-    for _k in wave:
-        if DAG[_k].kind not in ("service", "projection"):
-            _note(ledger, "node_start", _k, len(pending_subjects(DAG[_k], svc.doc)))
-    for key in wave:
-        if DAG[key].kind != "agent":
-            continue
-        # Only the subjects not already authored — a resume finishes the pages
-        # a prior run dropped, not the ones it composed (see pending_subjects).
-        subjects = pending_subjects(DAG[key], svc.doc)
-        runs[key] = _NodeRun(subjects=subjects, pending=list(subjects))
+    def _rejected(reason: str) -> str:
+        """The proposal was refused. Either it goes round again (§103) or
+        this was the last attempt and the subject is lost."""
+        state.feedback[subject] = reason
+        if attempt >= max_attempts:
+            report.failed.append(label)
+            report.failed_because[label] = reason
+            state.failed.append(subject)
+            _note(ledger, "node_subject", key, subject, _at(), total, False)
+            return "failed"
+        _note(ledger, "node_retry", key, subject, attempt + 1, max_attempts, reason)
+        return "retry"
 
-    limits = {key: threading.Semaphore(FANOUT_CONCURRENCY) for key in runs}
+    if isinstance(outcome, Exception):
+        return _rejected(_reason(outcome))
 
-    wave_attempts = max(
-        (ATTEMPTS_BY_NODE.get(k, max_attempts) for k in wave),
-        default=max_attempts,
-    )
-    for attempt in range(1, wave_attempts + 1):
-        specs = _round_specs(wave, runs, attempt)
-        if not specs:
-            break
-        results = _gather(executor, specs, limits=limits)
-        for key in wave:  # apply order is wave order, never completion order
-            state = runs.get(key)
-            if state is None or not state.pending:
-                continue
-            state.pending = _apply_round(
-                svc, key, state, results,
-                attempt=attempt,
-                max_attempts=ATTEMPTS_BY_NODE.get(key, max_attempts),
-                commit=commit,
-                user_request=user_request, report=report, ledger=ledger,
-            )
+    try:
+        application = apply_agent_result(
+            svc, outcome, commit=commit, user_request=user_request,
+        )
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+        # The author's refusals are outcomes here too. InvalidBusinessRule
+        # escaped this path on 2026-09-06 and took a whole build down with
+        # no end event written.
+        return _rejected(_reason(exc))
 
-    for key in wave:
-        state = runs.get(key)
-        if state is None:
-            continue
-        # Only a node that authored nothing at all has genuinely failed;
-        # anything less is a partial result its dependents can still use.
-        if state.subjects and len(state.failed) == len(state.subjects):
-            # Every subject failed: the node authored nothing. Recorded with
-            # the reasons, because "which of the eighteen stopped it, and why"
-            # is the question the ledger exists to answer.
-            _note(ledger, "node_failed", key,
-                  "; ".join(sorted(state.failed.values()))[:600]
-                  if isinstance(state.failed, dict) else
-                  f"all {len(state.subjects)} subjects failed")
-            continue
-        report.completed.append(key)
-        _note(ledger, "node_done", key, len(state.subjects or []))
-        done.add(key)
-
-
-def _round_specs(
-    wave: Sequence[str], runs: dict[str, _NodeRun], attempt: int,
-) -> list[TaskSpec]:
-    """This round's calls, interleaved across the wave's nodes.
-
-    Round-robin rather than node-by-node so :data:`WAVE_CONCURRENCY` is shared
-    out instead of being spent entirely on whichever node happens to be first.
-    Ordering here decides only who gets a slot; it decides nothing about the
-    document, because applies are re-ordered by :func:`_run_wave`.
-    """
-    queues = [(key, list(runs[key].pending)) for key in wave if key in runs]
-    specs: list[TaskSpec] = []
-    for i in range(max((len(q) for _, q in queues), default=0)):
-        for key, pending in queues:
-            if i >= len(pending):
-                continue
-            subject = pending[i]
-            state = runs[key]
-            specs.append(TaskSpec(
-                task_id=f"TASK-{key}{':' + subject if subject else ''}-{attempt}",
-                node=key,
-                agent=DAG[key].agent,
-                attempt=attempt,
-                subject=subject,
-                feedback=state.feedback.get(subject, ""),
-            ))
-    return specs
-
-
-def _gather(
-    executor: Executor,
-    specs: Sequence[TaskSpec],
-    *,
-    limits: dict[str, Any],
-) -> dict[tuple[str, str], Any]:
-    """Call the executor for every spec concurrently. Calls, and nothing else.
-
-    No applies happen here and no report is touched, which is what makes it
-    safe to run this wide: the half that is network I/O is the half that
-    parallelises, and the half that mutates the Blueprint stays on one thread.
-
-    ``limits`` caps each node at :data:`FANOUT_CONCURRENCY` while the pool caps
-    the wave at :data:`WAVE_CONCURRENCY`, so one node cannot spend the whole
-    budget.
-
-    Returns ``{(node, subject): AgentResult | Exception}``. An exception is a
-    classified outcome (§102), not a crash; the caller decides whether it is a
-    retry or a failure.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    def call(spec: TaskSpec) -> tuple[tuple[str, str], Any]:
-        key = (spec.node, spec.subject)
-        with limits[spec.node]:
-            try:
-                return key, executor(spec)
-            except Exception as exc:  # §102 — a classified outcome, not a crash
-                return key, exc
-
-    workers = max(1, min(WAVE_CONCURRENCY, len(specs)))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return dict(pool.map(call, specs))
+    if application.applied:
+        report.artifacts.extend(application.artifacts)
+        report.change_requests.extend(application.change_requests)
+        _note(ledger, "node_subject", key, subject, _at(), total, True)
+        return "applied"
+    if application.needs_clarification or outcome.status == "blocked":
+        if attempt < max_attempts:
+            return _rejected(_asked(application))
+        report.blocked.append(label)
+        report.blocked_because[label] = _asked(application)
+        report.change_requests.extend(application.change_requests)
+        _note(ledger, "node_blocked", key, _asked(application))
+        state.failed.append(subject)
+        return "blocked"
+    if attempt >= max_attempts:
+        report.failed.append(label)
+        report.failed_because.setdefault(
+            label, "the agent returned a result that could not be applied")
+        state.failed.append(subject)
+        return "failed"
+    return "retry"
 
 
 def _apply_round(
@@ -1261,78 +1561,19 @@ def _apply_round(
 ) -> list[str]:
     """Commit one round's results for one node, in the order its subjects were given.
 
-    Records the report entries and returns the subjects to retry, each left in
-    ``state.feedback`` with the reason it was rejected. §102: a retry that is
-    not told what went wrong is just the same request again.
+    The scheduler applies subject by subject as results arrive; this applies a
+    whole round at once and returns the subjects to retry. Kept for callers
+    that have a round in hand rather than a stream.
     """
     retry: list[str] = []
-    total = len(state.subjects or [""])
-
-    def _at(subject: str) -> int:
-        """One-based position in the node's subject list, for the record."""
-        try:
-            return (state.subjects or []).index(subject) + 1
-        except ValueError:  # pragma: no cover — a subject not in its own list
-            return 0
-
-    def _rejected(subject: str, label: str, reason: str) -> None:
-        """One subject's proposal was refused. Either it goes round again
-        (§103) or this was the last attempt and the subject is lost."""
-        state.feedback[subject] = reason
-        if attempt == max_attempts:
-            report.failed.append(label)
-            report.failed_because[label] = reason
-            state.failed.append(subject)
-            _note(ledger, "node_subject", key, subject, _at(subject), total, False)
-        else:
-            retry.append(subject)
-            _note(ledger, "node_retry", key, subject,
-                  attempt + 1, max_attempts, reason)
-
     for subject in state.pending:  # given order, not completion order
-        # A node that does not fan out has one empty subject, and its label is
-        # just the node key — callers test membership by it.
-        label = f"{key}:{subject}" if subject else key
-        outcome = results.get((key, subject))
-
-        if isinstance(outcome, Exception):
-            _rejected(subject, label, _reason(outcome))
-            continue
-
-        try:
-            application = apply_agent_result(
-                svc, outcome, commit=commit, user_request=user_request,
-            )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
-            # The author's refusals are outcomes here too. InvalidBusinessRule
-            # escaped this path on 2026-09-06 and took a whole build down with
-            # no end event written.
-            _rejected(subject, label, _reason(exc))
-            continue
-
-        if application.applied:
-            report.artifacts.extend(application.artifacts)
-            report.change_requests.extend(application.change_requests)
-            _note(ledger, "node_subject", key, subject, _at(subject), total, True)
-            continue
-        if application.needs_clarification or outcome.status == "blocked":
-            if attempt < max_attempts:
-                _rejected(subject, label, _asked(application))
-                continue
-            report.blocked.append(label)
-            report.blocked_because[label] = _asked(application)
-            report.change_requests.extend(application.change_requests)
-            _note(ledger, "node_blocked", key, _asked(application))
-            state.failed.append(subject)
-            continue
-        if attempt == max_attempts:
-            report.failed.append(label)
-            report.failed_because.setdefault(
-                label, "the agent returned a result that could not be applied")
-            state.failed.append(subject)
-        else:
+        verdict = _apply_subject(
+            svc, key, state, subject, results.get((key, subject)),
+            attempt=attempt, max_attempts=max_attempts, commit=commit,
+            user_request=user_request, report=report, ledger=ledger,
+        )
+        if verdict == "retry":
             retry.append(subject)
-
     return retry
 
 
@@ -1588,6 +1829,30 @@ def _project_integration(svc: BlueprintService, app_root: str) -> None:
 
 #: Projection handlers, by node key. A node with no handler stays blocked —
 #: which is the honest state for the projections not yet ported.
+def _project_install(svc: BlueprintService, app_root: str) -> Any:
+    """Lay down the scaffold and engines and install against them — on its
+    own thread, handed back as a future, because this is minutes of `npm`
+    and the scheduler thread is the document's one writer.
+
+    Reads the document once, here, under the lock the scheduler holds; the
+    thread touches files only.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from services.blueprint.assembly import install_dependencies, prepare_app_root
+
+    short_id = (svc.doc.get("application") or {}).get("id", "forge")
+
+    def work() -> int:
+        prepare_app_root(app_root, project_short_id=short_id)
+        return install_dependencies(app_root)
+
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-install")
+    future = pool.submit(work)
+    pool.shutdown(wait=False)  # the worker finishes the job; nobody blocks here
+    return future
+
+
 def _project_preview(svc: BlueprintService, app_root: str) -> None:
     """Assemble the scaffold and engines around the projected application.
 
@@ -1605,7 +1870,13 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     # Assembly writes a tree; the build is what makes it an application. Kept
     # inside the node so a run that cannot compile fails here, where the reason
     # is a compiler error, rather than later when someone opens the directory.
-    result = verify_build(app_root)
+    # The `install` node already installed when `node_modules` is there; a
+    # missing directory means it did not run (no app_root at the time, a
+    # resumed plan without it) and the build installs for itself.
+    from pathlib import Path as _P
+
+    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
+    result.setdefault("install", 0)
     runtime = dict(svc.doc.get("runtime") or {})
     runtime["build"] = {"install": result["install"], "build": result["build"],
                         "status": "passed"}
@@ -1632,6 +1903,7 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
 
 
 PROJECTION_HANDLERS: dict[str, Any] = {
+    "install": _project_install,
     "backend": _project_data_layer,
     "frontend": _project_frontend,
     "integration": _project_integration,

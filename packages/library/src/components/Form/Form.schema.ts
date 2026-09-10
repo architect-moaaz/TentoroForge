@@ -50,6 +50,10 @@ const fieldBase = {
   required: z.boolean().optional(),
   // Short helper text shown under the control (not the rules-engine hint).
   hint: z.string().optional(),
+  // Placeholder text. Belongs on every kind, not only text/email/number: the
+  // composer routinely puts one on a textarea or select, and a strict field
+  // schema without it here rejected the whole field and dropped the page.
+  placeholder: z.string().optional(),
   interaction: Interaction.optional(),
 } as const;
 
@@ -184,6 +188,10 @@ export const FormProps = z.object({
    */
   autoSave: z
     .object({
+      // Presence of the block already turns autosave on; the composer also
+      // emits an explicit `enabled` flag, so accept it rather than reject the
+      // whole Form. `false` opts back out without dropping the config.
+      enabled:          z.boolean().optional(),
       debounceMs:       z.number().int().min(200).max(60_000).default(1500),
       conflictStrategy: z.enum(["overwrite", "merge", "prompt"]).default("merge"),
     })

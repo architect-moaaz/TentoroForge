@@ -1668,8 +1668,23 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     # (Not on the approved/build pass; that path moves past review on its own.)
     if not approved and (svc.doc.get("requirements") or svc.doc.get("pages")):
         _advance_state_to_review(svc)
+    state = str(svc.doc.get("state") or "")
+    if approved:
+        # THE BUILD USED TO LEAVE THE STATE WHERE THE DEFINITION LEFT IT. This
+        # path never called `transition`, so a compiled, served application
+        # read BLUEPRINT_REVIEW and `status` said the definition was waiting
+        # to be accepted. The walk follows what completed (§94), the same
+        # function `Smith.build` uses.
+        from services.smith.smith import settle_state_after_build
+
+        state = settle_state_after_build(svc, report)
+        logger.info("[blueprint] %s built: state=%s completed=%d failed=%s",
+                    Path(output_dir).name, state, len(report.completed),
+                    report.failed or "-")
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
+    emit("state", {"state": state})
     return {"awaitingApproval": not approved, "forecast": counts,
+            "state": state,
             "report": _report_payload(report, svc.doc)}

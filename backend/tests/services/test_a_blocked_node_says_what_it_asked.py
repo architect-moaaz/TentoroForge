@@ -81,7 +81,7 @@ def test_both_paths_record_it():
 
     from services.blueprint import orchestrator
 
-    for fn in (orchestrator._apply_round, orchestrator._run_agent_subject):
+    for fn in (orchestrator._apply_subject, orchestrator._run_agent_subject):
         src = inspect.getsource(fn)
         assert "blocked_because[label] = _asked(application)" in src, fn.__name__
         assert '_note(ledger, "node_blocked"' in src, fn.__name__

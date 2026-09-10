@@ -72,15 +72,15 @@ def test_a_run_announces_its_plan_before_it_starts(svc):
 
 
 def test_each_node_is_bracketed_by_start_and_done(svc):
+    """Both start together — they are independent — and each is done the
+    moment its own result applies, not when the other's does."""
     seen = watch(svc, ok, plan=["business_rules", "workflows"])
 
-    assert kinds(seen) == [
-        "run:start", "plan",
-        "node:start", "node:start",   # one wave: the two are independent
-        "node:subject", "node:subject",
-        "node:done", "node:done",
-        "run:end",
-    ]
+    assert kinds(seen)[:4] == ["run:start", "plan", "node:start", "node:start"]
+    assert kinds(seen)[-1] == "run:end"
+    for node in ("business_rules", "workflows"):
+        mine = [line["event"] for line in seen if line.get("node") == node]
+        assert mine == ["node:start", "node:subject", "node:done"], mine
 
 
 def test_the_observer_and_the_file_agree(svc):

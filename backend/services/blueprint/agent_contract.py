@@ -539,6 +539,12 @@ def check_pattern_templates(result: AgentResult,
                 "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
                 "workflows": doc.get("workflows") or [],
                 "data": doc.get("data") or {},
+                # `security` carries the ownershipRules that mark inputs the
+                # runtime fills from the session (organisationId, createdBy…).
+                # Without it here the completeness check saw an empty manifest
+                # and demanded a Form field for the caller's own tenant, so a
+                # composed create page was refused for not collecting it.
+                "security": doc.get("security") or {},
                 "businessRules": [],
                 "pageLayouts": [proposal.body],
             })
@@ -647,7 +653,19 @@ def apply_agent_result(
     )
     from services.blueprint.ids import IdAllocator, parse_id
 
+    # WHAT THE DOCUMENT ALREADY HOLDS CAN BE NAMED TOO. The resolver used to
+    # see only this batch: an author writing one entity's fields and stating
+    # a foreign key to an entity declared by an earlier node had no way to
+    # point at it but by its id, which it is forbidden to invent. The batch
+    # outranks the document on a clash, so nothing an agent proposes is ever
+    # redirected to something older.
     allocated: dict[str, str] = {}
+    for existing in (svc.doc.get("data") or {}).get("entities") or []:
+        if not isinstance(existing, dict) or not existing.get("id"):
+            continue
+        for alias in (existing.get("name"), existing.get("table")):
+            if isinstance(alias, str) and alias:
+                allocated.setdefault(alias, str(existing["id"]))
     with IdAllocator.session(output_dir=svc.output_dir) as alloc:
         for p in result.proposals:
             prefix = (
@@ -686,7 +704,7 @@ def apply_agent_result(
             for alias in (p.body.get("name"), p.body.get("route"),
                           p.body.get("table")):
                 if isinstance(alias, str) and alias:
-                    allocated.setdefault(alias, artifact_id)
+                    allocated[alias] = artifact_id  # the batch outranks the document
 
     resolve_batch_references(
         [(p.section, p.natural_key, p.body) for p in result.proposals], allocated

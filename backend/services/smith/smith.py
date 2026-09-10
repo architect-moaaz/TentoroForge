@@ -38,6 +38,8 @@ swarm with a nicer name.
 """
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -131,6 +133,9 @@ GATES: frozenset[str] = frozenset({"BLUEPRINT_REVIEW", "PLAN_REVIEW"})
 #: is a judgement about meaning and not a property of the graph.
 DOMAIN_NODES: tuple[str, ...] = ("requirements", "application_model")
 
+
+
+logger = logging.getLogger(__name__)
 
 def domain_nodes() -> list[str]:
     """The domain description — two model calls, and everything inherits them.
@@ -276,6 +281,98 @@ BUILD_WALK: tuple[tuple[str, str], ...] = (
     ("VERIFICATION", "verification"),             # §107 step 20
     ("PREVIEW", "preview"),                       # §107 step 21
 )
+
+
+def _walk_states(svc: BlueprintService, states: Iterable[str]) -> str:
+    """Move through a sequence, stopping at the first step §94 refuses.
+
+    Stopping rather than skipping ahead: a state the machine would not enter
+    is a fact about the application, and jumping over it would make `state`
+    describe a path that was not taken.
+    """
+    for dst in states:
+        try:
+            transition(svc, dst)
+        except IllegalTransition:
+            break
+    return str(svc.doc.get("state") or "")
+
+
+def walk_build_progress(svc: BlueprintService, report: RunReport) -> str:
+    """§94's build states, as far as the run actually got.
+
+    The walk follows what completed rather than what was attempted: asserting
+    VERIFICATION because a run was requested would make the state a wish. The
+    gates are node keys, and the order is §107's — `preview` may well finish
+    before `verification` now that the compile no longer waits for the report,
+    and the state still reads VERIFICATION then PREVIEW, never PREVIEW alone.
+    """
+    done = set(report.completed)
+    reached: list[str] = []
+    for dst, gate in BUILD_WALK:
+        if gate and gate not in done:
+            break
+        if dst != "IMPLEMENTATION":
+            reached.append(dst)
+    return _walk_states(svc, reached)
+
+
+#: The states before a build, in order. A build authorised from any of them
+#: walks the rest of the way first, so the record shows the definition being
+#: accepted and the plan being approved before IMPLEMENTATION — which is what
+#: pressing the button meant.
+_PRE_BUILD_CHAIN: tuple[str, ...] = (
+    "DISCOVERY", "CLARIFICATION", "DEFINITION", "BLUEPRINT_REVIEW",
+    "PLANNING", "PLAN_REVIEW",
+)
+
+#: A build from a built application is a rebuild, which §70 routes through
+#: ITERATION.
+_REBUILD_FROM: frozenset[str] = frozenset({"PREVIEW", "READY", "MAINTENANCE"})
+
+
+def settle_state_after_build(svc: BlueprintService, report: RunReport) -> str:
+    """Leave `state` where a user-authorised build actually got to.
+
+    THE LIVE PATH NEVER MOVED THE STATE. The router runs the graph directly
+    rather than through :meth:`Smith.build`, and nothing after the run called
+    `transition`: a build that compiled and served a preview left the
+    application reading BLUEPRINT_REVIEW forever, and `status` told the user
+    the definition was waiting to be accepted. One function, for both paths.
+
+    Three cases by where the application was when the button was pressed:
+
+    * before the build — walk through the review and planning states, record
+      the plan approval (§25: the button IS the approval, fingerprinted
+      against the document that was built), enter IMPLEMENTATION;
+    * built already — a rebuild, through ITERATION;
+    * mid-build — a previous run stalled; continue from there.
+
+    Then the build walk proper, gated on what completed. Nothing here can
+    raise: a step the machine refuses is where the walk stops, and that stop
+    is the answer.
+    """
+    from services.blueprint import approval as _approval
+
+    state = str(svc.doc.get("state") or "DISCOVERY")
+    doc = svc.doc
+    if state in _PRE_BUILD_CHAIN:
+        if not (doc.get("requirements") or doc.get("pages")):
+            # The run stopped before it defined anything; there is no
+            # definition to have accepted and nothing to be building.
+            return state
+        _walk_states(svc, _PRE_BUILD_CHAIN[_PRE_BUILD_CHAIN.index(state) + 1:])
+        if svc.doc.get("state") == "PLAN_REVIEW":
+            try:
+                _approval.record(svc, "plan")
+            except Exception:  # noqa: BLE001 — the walk below then stops here, honestly
+                logger.exception("[smith] could not record the plan approval")
+            _walk_states(svc, ("IMPLEMENTATION",))
+    elif state in _REBUILD_FROM:
+        _walk_states(svc, ("ITERATION", "IMPLEMENTATION"))
+    elif state == "ITERATION":
+        _walk_states(svc, ("IMPLEMENTATION",))
+    return walk_build_progress(svc, report)
 
 
 def bootstrap(svc: BlueprintService) -> int:
@@ -851,15 +948,7 @@ class Smith:
             self.blueprint, self.executor, plan=build_nodes(), commit=False,
             user_request="build", app_root=app_root or self.app_root,
         )
-
-        done = set(report.completed)
-        reached: list[str] = []
-        for dst, gate in BUILD_WALK:
-            if gate and gate not in done:
-                break
-            if dst != "IMPLEMENTATION":
-                reached.append(dst)
-        self._walk(reached)
+        walk_build_progress(self.blueprint, report)
         return report
 
     def review_rendering(self, shots: Sequence[Any], critic: Any) -> dict[str, Any]:
