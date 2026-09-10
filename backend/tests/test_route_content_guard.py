@@ -8,13 +8,13 @@ from services.route_content_guard import check_route_content
 
 
 def _seed(tmp_path: Path, registry: dict, schemas: dict[str, dict]) -> None:
-    (tmp_path / "registry.json").write_text(json.dumps(registry))
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     for slug, doc in schemas.items():
         p = sdir / (slug + ".json")
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(doc))
+        p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_bug3_notifications_binds_to_users_is_flagged(tmp_path):

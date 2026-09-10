@@ -105,7 +105,7 @@ class TestWrap:
         page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         res = inject_context_panels(str(tmp_path))
         assert res == {"wrapped": 1, "files": 1}
-        after = json.loads(page_path.read_text())
+        after = json.loads(page_path.read_text(encoding="utf-8"))
         assert after["root"]["type"] == "Split"
         assert after["root"]["props"]["ratio"] == "2:1"
         # Original form preserved as the LEFT child; Card as the RIGHT.
@@ -116,7 +116,7 @@ class TestWrap:
         _write(tmp_path, "registry.json", _registry_with_lease())
         page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         inject_context_panels(str(tmp_path))
-        after = json.loads(page_path.read_text())
+        after = json.loads(page_path.read_text(encoding="utf-8"))
         card = after["root"]["children"][1]
         assert card["type"] == "Card"
         dlist = next(c for c in card["children"] if c["type"] == "DescriptionList")
@@ -136,7 +136,7 @@ class TestWrap:
         _write(tmp_path, "registry.json", _registry_with_lease())
         page_path = _write(tmp_path, "src/schemas/payments/edit.json", _form_page_with_lease_fk())
         inject_context_panels(str(tmp_path))
-        after = json.loads(page_path.read_text())
+        after = json.loads(page_path.read_text(encoding="utf-8"))
         dlist = after["root"]["children"][1]["children"][1]
         values = [it["value"] for it in dlist["props"]["items"]]
         assert all(v.startswith("{{form.") and v.endswith("}}") for v in values)
@@ -186,7 +186,7 @@ class TestSkip:
         page_path = _write(tmp_path, "src/schemas/x/edit.json", page)
         res = inject_context_panels(str(tmp_path))
         assert res["wrapped"] == 1
-        after = json.loads(page_path.read_text())
+        after = json.loads(page_path.read_text(encoding="utf-8"))
         # The panel targets Lease (the flagged one), not User.
         card = after["root"]["children"][1]
         assert "Lease" in card["children"][0]["props"]["text"]

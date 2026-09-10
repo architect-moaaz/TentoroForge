@@ -83,7 +83,7 @@ def _load_plan(short_id: str) -> tuple[Path, dict]:
     plan_path = output_dir / "src/contracts/app-model.json"
     if not plan_path.exists():
         raise HTTPException(404, f"plan not found at {plan_path}")
-    return output_dir, json.loads(plan_path.read_text())
+    return output_dir, json.loads(plan_path.read_text(encoding="utf-8"))
 
 
 @router.post("/api/_debug/regen-schemas/{short_id}")
@@ -120,7 +120,10 @@ async def regen_rules(short_id: str):
             project_id = row[0]
 
     rules = await run_rules_agent(str(output_dir), plan, project_id=project_id)
-    _export_rules_to_filesystem(output_dir)
+    # The UUID was resolved four lines up and then dropped here, so the export
+    # fell through to registry.json — which Blueprint projects do not have —
+    # and wrote `[]` over the rules the agent had just synced to the DB.
+    _export_rules_to_filesystem(output_dir, project_id=str(project_id) if project_id else None)
     return {"count": len(rules), "project_id": str(project_id) if project_id else None, "rules": rules}
 
 
@@ -149,7 +152,7 @@ async def recompile_tokens(short_id: str):
         raise HTTPException(404, f"design-spec not found at {spec_path}")
 
     try:
-        design_spec = json.loads(spec_path.read_text())
+        design_spec = json.loads(spec_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise HTTPException(400, "design-spec is not valid JSON")
 
@@ -158,7 +161,7 @@ async def recompile_tokens(short_id: str):
     tokens_path = output_dir / "src" / "theme" / "tokens.custom.json"
     try:
         tokens_path.parent.mkdir(parents=True, exist_ok=True)
-        tokens_path.write_text(json.dumps(tokens, indent=2))
+        tokens_path.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
     except OSError as exc:
         raise HTTPException(500, f"failed to write tokens file: {exc}")
 
@@ -238,12 +241,12 @@ async def update_project_register(short_id: str, payload: UpdateRegisterPayload)
         raise HTTPException(400, f"invalid register: {payload.register}")
 
     try:
-        spec = json.loads(spec_path.read_text())
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise HTTPException(500, "design-spec.json is corrupted")
 
     spec["register"] = payload.register
-    spec_path.write_text(json.dumps(spec, indent=2))
+    spec_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     return {"register": payload.register, "ok": True}
 
 
@@ -436,7 +439,7 @@ async def get_preview_data(short_id: str):
     domain = "general"
     if design_spec_path.exists():
         try:
-            design_spec = json.loads(design_spec_path.read_text())
+            design_spec = json.loads(design_spec_path.read_text(encoding="utf-8"))
             raw_domain = design_spec.get("domain") or design_spec.get("register") or "general"
             # Register names are design registers, not fixture domains — map to closest domain
             register_to_domain = {
@@ -458,7 +461,7 @@ async def get_preview_data(short_id: str):
 
     if app_model_path.exists():
         try:
-            app_model = json.loads(app_model_path.read_text())
+            app_model = json.loads(app_model_path.read_text(encoding="utf-8"))
             app_model_name = app_model.get("name", "") or ""
             app_model_description = app_model.get("description", "") or ""
             raw_entities = app_model.get("entities", {})
@@ -470,7 +473,7 @@ async def get_preview_data(short_id: str):
 
     if registry_path.exists():
         try:
-            registry = json.loads(registry_path.read_text())
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
             reg_entities = registry.get("entities", {})
             if isinstance(reg_entities, dict) and reg_entities:
                 # Registry is more complete (has field defs) — prefer it
@@ -495,7 +498,7 @@ async def get_preview_data(short_id: str):
         blueprint_path = proj / ".forge" / "blueprint" / "current.json"
         if blueprint_path.is_file():
             try:
-                doc = json.loads(blueprint_path.read_text())
+                doc = json.loads(blueprint_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 doc = {}
             app = doc.get("application") or {}
@@ -544,7 +547,7 @@ async def get_preview_data(short_id: str):
         ts_text = None
         for c in candidates:
             if c.exists():
-                ts_text = c.read_text(errors="ignore")
+                ts_text = c.read_text(errors="ignore", encoding="utf-8")
                 break
         if ts_text is None:
             return []
@@ -916,7 +919,7 @@ async def get_project_file(short_id: str, file_path: str):
     if not full.exists():
         raise HTTPException(404, f"file not found: {file_path}")
     try:
-        text = full.read_text()
+        text = full.read_text(encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"read failed: {e}")
     if file_path.endswith(".json"):
@@ -940,6 +943,37 @@ async def write_project_file(short_id: str, file_path: str, request: Request):
     full = (base_dir / file_path).resolve()
     if not str(full).startswith(str(base)):
         raise HTTPException(403, "path traversal blocked")
+
+    # WRITE WHERE THE READ READ FROM. This is the fix for the editor silently
+    # discarding every edit.
+    #
+    # The GET above resolves `<output>/src/...` and, on a miss, FALLS THROUGH to
+    # `<output>/app/src/...` — because the Blueprint engine projects the app into
+    # the `app/` subdirectory. This POST did not mirror that: it always wrote the
+    # root path, and `mkdir(parents=True)` happily CREATED the missing directory.
+    #
+    # So for a Blueprint-generated app the sequence was: the editor GETs a page,
+    # misses at the root, reads the real file from `app/src/schemas/x.json`; the
+    # user edits; the editor POSTs and a brand-new SHADOW file appears at
+    # `src/schemas/x.json`. From then on the GET finds the shadow first, so the
+    # editor shows the user their own edits and the running application never
+    # sees another one. Everything looks healthy — the canvas updates, the
+    # toolbar says "Saved" — while the app is no longer being edited at all.
+    # Observed on project gh0mlpbp: 17 pages in the editor's directory, 1 in the
+    # app's.
+    #
+    # Resolution order, matching the GET and then falling back to layout:
+    #   1. the root path, if that file already exists (older flat projects);
+    #   2. the app/ path, if THAT file exists (the Blueprint layout);
+    #   3. for a file that exists in neither — a page the user has just created —
+    #      follow the project's own shape: if `<output>/app/src` is present this
+    #      is a Blueprint app and new files belong beside its siblings.
+    nested = (base_dir / "app" / file_path).resolve()
+    nested_ok = str(nested).startswith(str((base_dir / "app").resolve()))
+    if not full.exists() and nested_ok:
+        if nested.exists() or (base_dir / "app" / "src").is_dir():
+            full = nested
+
     try:
         body = await request.json()
     except Exception:
@@ -949,7 +983,7 @@ async def write_project_file(short_id: str, file_path: str, request: Request):
         raise HTTPException(400, "body.content (string) required")
     try:
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content)
+        full.write_text(content, encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"write failed: {e}")
-    return {"ok": True, "path": file_path, "bytes": len(content)}
+    return {"ok": True, "path": str(full.relative_to(base)), "bytes": len(content)}

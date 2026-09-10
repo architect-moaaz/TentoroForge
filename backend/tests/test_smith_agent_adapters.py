@@ -123,15 +123,15 @@ def test_generator_files_to_artifact_lists_files_under_output_dir(tmp_path):
     (skips .git, node_modules, .next). Warnings + notes are optional
     inputs the caller supplies from pipeline logs."""
     (tmp_path / "src" / "schemas").mkdir(parents=True)
-    (tmp_path / "src" / "schemas" / "a.json").write_text("{}")
-    (tmp_path / "src" / "schemas" / "b.json").write_text("{}")
+    (tmp_path / "src" / "schemas" / "a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src" / "schemas" / "b.json").write_text("{}", encoding="utf-8")
     (tmp_path / "workflows").mkdir()
-    (tmp_path / "workflows" / "X.json").write_text("{}")
+    (tmp_path / "workflows" / "X.json").write_text("{}", encoding="utf-8")
     # Junk dirs must be ignored.
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".git" / "HEAD").write_text("junk")
+    (tmp_path / ".git" / "HEAD").write_text("junk", encoding="utf-8")
     (tmp_path / "node_modules").mkdir()
-    (tmp_path / "node_modules" / "leftpad.js").write_text("junk")
+    (tmp_path / "node_modules" / "leftpad.js").write_text("junk", encoding="utf-8")
 
     art = generator_files_to_artifact(
         output_dir=str(tmp_path),
@@ -497,7 +497,7 @@ def test_orchestrate_generator_snapshot_is_a_pure_snapshot(tmp_path):
     from services import smith_agent_adapters as adapters
 
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.json").write_text("{}")
+    (tmp_path / "src" / "a.json").write_text("{}", encoding="utf-8")
 
     art = adapters.orchestrate_generator_snapshot(
         output_dir=str(tmp_path),
@@ -525,7 +525,7 @@ def test_orchestrate_generation_brackets_pipeline_with_narrations(tmp_path, monk
         yield {"type": "complete", "data": {}}
 
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "a.json").write_text("{}")
+    (tmp_path / "src" / "a.json").write_text("{}", encoding="utf-8")
 
     async def _collect():
         events = []

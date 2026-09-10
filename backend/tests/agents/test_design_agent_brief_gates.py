@@ -28,7 +28,7 @@ def _write(tmp_path: Path, payload_mutator) -> Path:
     brief = DesignBrief.model_validate(payload)
     contracts = tmp_path / "contracts"
     contracts.mkdir()
-    (contracts / "brief.json").write_text(brief.model_dump_json())
+    (contracts / "brief.json").write_text(brief.model_dump_json(), encoding="utf-8")
     return tmp_path
 
 

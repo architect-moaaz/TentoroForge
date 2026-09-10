@@ -13,7 +13,7 @@ from services.peer_shape_analyzer import find_peer_shape_inconsistencies, to_dic
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_drive_detail_bug_shape_detected(tmp_path):

@@ -108,7 +108,7 @@ def test_record_writes_open_decisions_json(tmp_path: Path):
     assert written is not None
     assert written.exists()
 
-    on_disk = json.loads(written.read_text())
+    on_disk = json.loads(written.read_text(encoding="utf-8"))
     assert "generated_at" in on_disk
     assert on_disk["decisions"][0]["target_picked"] == "SaveWorkflow"
     assert on_disk["decisions"][0]["confidence"] == BAND_HIGH

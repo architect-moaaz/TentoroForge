@@ -194,7 +194,8 @@ class PipelineState:
                         "total_seconds": round(total, 2),
                     },
                     indent=2,
-                )
+                ),
+                encoding="utf-8",
             )
         except Exception:  # noqa: BLE001
             pass

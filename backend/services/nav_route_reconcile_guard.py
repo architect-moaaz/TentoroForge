@@ -86,14 +86,14 @@ def _materialize_route_group_landing(root: Path, landing: str) -> bool:
     # match the new URL. A regex is used so authoring drift (extra spaces,
     # single quotes, template literals) still matches.
     try:
-        src = dst_page.read_text()
+        src = dst_page.read_text(encoding="utf-8")
         new_src = re.sub(
             r'renderSchemaPage\(\s*["\'`]/["\'`]',
             f'renderSchemaPage("{landing}"',
             src,
         )
         if new_src != src:
-            dst_page.write_text(new_src)
+            dst_page.write_text(new_src, encoding="utf-8")
     except OSError:  # pragma: no cover — filesystem edge; the move still happened
         pass
     return True
@@ -165,12 +165,12 @@ def _fix_root_redirect(root: Path, landing: str | None) -> bool:
     # route group root, materialize it into a real folder before leaving the
     # redirect in place — otherwise the redirect target is a phantom.
     _materialize_route_group_landing(root, landing)
-    text = page.read_text()
+    text = page.read_text(encoding="utf-8")
     m = re.search(r'redirect\(\s*[`"\']([^`"\']*)[`"\']\s*\)', text)
     if not m or m.group(1) == landing:
         return False
     new_text = text[:m.start(1)] + landing + text[m.end(1):]
-    page.write_text(new_text)
+    page.write_text(new_text, encoding="utf-8")
     return True
 
 
@@ -214,7 +214,7 @@ def align_schema_keys_to_routes(output_dir: str) -> dict[str, Any]:
         if not url or url == "/":
             continue             # the group root really does serve "/"
         try:
-            src = page.read_text()
+            src = page.read_text(encoding="utf-8")
         except OSError:
             continue
         new = re.sub(r'renderSchemaPage\(\s*["\'`]/["\'`]',
@@ -222,7 +222,7 @@ def align_schema_keys_to_routes(output_dir: str) -> dict[str, Any]:
         if new == src:
             continue
         try:
-            page.write_text(new)
+            page.write_text(new, encoding="utf-8")
         except OSError:          # pragma: no cover — filesystem edge
             continue
         fixed.append(url)
@@ -240,7 +240,7 @@ def reconcile_nav_routes(output_dir: str) -> dict[str, Any]:
         return {"remapped": 0, "pages": 0, "landing": None}
 
     try:
-        nav = json.loads(nav_path.read_text())
+        nav = json.loads(nav_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"remapped": 0, "pages": 0, "landing": None}
 
@@ -301,7 +301,7 @@ def reconcile_nav_routes(output_dir: str) -> dict[str, Any]:
         nav["post_login_redirect"] = landing
 
     if remapped:
-        nav_path.write_text(json.dumps(nav, indent=2))
+        nav_path.write_text(json.dumps(nav, indent=2), encoding="utf-8")
 
     # Fix the root redirect to land on a real route.
     root_fixed = False

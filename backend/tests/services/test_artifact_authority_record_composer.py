@@ -75,7 +75,7 @@ class TestFlagOnBootstrap:
         result = apply_maquettes_to_records(str(tmp_path))
         assert result["applied"] == 1
         assert target.is_file()
-        out = json.loads(target.read_text())
+        out = json.loads(target.read_text(encoding="utf-8"))
         assert out.get("meta", {}).get("record_maquette_composed") is True
 
 
@@ -118,7 +118,7 @@ class TestFlagOnRecipeFallback:
             ("bookings/[id]/edit", True),
             ("bookings/[id]", False),
         ]:
-            doc = json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text())
+            doc = json.loads((tmp_path / "src" / "schemas" / f"{slug}.json").read_text(encoding="utf-8"))
             body = json.dumps(doc)
             has_form = '"type": "Form"' in body or '"Form"' in body
             if expect_form:

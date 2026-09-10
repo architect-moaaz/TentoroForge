@@ -152,7 +152,7 @@ def _line_based_reorder(
     if not filepath.exists():
         return False
 
-    lines = filepath.read_text().splitlines()
+    lines = filepath.read_text(encoding="utf-8").splitlines()
 
     # Find the range of the source element
     source_range = _find_jsx_element_range(lines, source_line)
@@ -189,5 +189,5 @@ def _line_based_reorder(
 
     # Insert source lines at the new position
     new_lines = remaining[:insert_idx] + source_lines + remaining[insert_idx:]
-    filepath.write_text("\n".join(new_lines))
+    filepath.write_text("\n".join(new_lines), encoding="utf-8")
     return True

@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { resolveNodeBox } from "./layout-box";
 import type { ReorderIndicatorState } from "./hooks/useReorder";
 
 /**
@@ -26,20 +27,7 @@ export function ReorderIndicator({
       setRect(null);
       return;
     }
-    let el: HTMLElement | null = canvasRef.current.querySelector(
-      `[data-node-id="${indicator.targetId}"]`,
-    );
-    if (el && getComputedStyle(el).display === "contents") {
-      const walker = (e: HTMLElement): HTMLElement | null => {
-        for (const child of Array.from(e.children) as HTMLElement[]) {
-          if (getComputedStyle(child).display !== "contents") return child;
-          const inner = walker(child);
-          if (inner) return inner;
-        }
-        return null;
-      };
-      el = walker(el);
-    }
+    const el = resolveNodeBox(canvasRef.current, indicator.targetId);
     setRect(el ? el.getBoundingClientRect() : null);
   }, [indicator, canvasRef]);
 

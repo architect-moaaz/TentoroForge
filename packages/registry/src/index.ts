@@ -1,5 +1,5 @@
 export type {
-  ControlType, PropDescriptor, SlotRule,
+  ControlType, ImageShape, PropDescriptor, SlotRule,
   RegistryEntry, Registry,
 } from "./types";
 

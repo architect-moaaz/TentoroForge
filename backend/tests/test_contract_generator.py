@@ -52,7 +52,7 @@ def test_event_bindings_from_data_models(tmp_path):
 
     path = tmp_path / "src" / "contracts" / "event-bindings.json"
     assert path.exists()
-    cfg = json.loads(path.read_text())
+    cfg = json.loads(path.read_text(encoding="utf-8"))
     bindings = cfg["bindings"]
     assert bindings, "event bindings must be non-empty"
 
@@ -69,7 +69,7 @@ def test_seed_plan_from_data_models(tmp_path):
 
     path = tmp_path / "contracts" / "seed-plan.json"
     assert path.exists()
-    seed = json.loads(path.read_text())
+    seed = json.loads(path.read_text(encoding="utf-8"))
     tables = seed["tables"]
     assert tables, "seed tables must be non-empty"
     names = {t["name"] for t in tables}
@@ -89,10 +89,10 @@ def test_legacy_dict_data_models(tmp_path):
     res = generate_contracts(str(tmp_path), plan)
     assert not res["errors"], res["errors"]
 
-    seed = json.loads((tmp_path / "contracts" / "seed-plan.json").read_text())
+    seed = json.loads((tmp_path / "contracts" / "seed-plan.json").read_text(encoding="utf-8"))
     assert {t["name"] for t in seed["tables"]} >= {"User", "Order"}
 
-    app_model = json.loads((tmp_path / "src" / "contracts" / "app-model.json").read_text())
+    app_model = json.loads((tmp_path / "src" / "contracts" / "app-model.json").read_text(encoding="utf-8"))
     assert set(app_model["entities"].keys()) >= {"User", "Order"}
 
 
@@ -106,7 +106,7 @@ def test_generate_contracts_emits_app_model(tmp_path):
 
     path = tmp_path / "src" / "contracts" / "app-model.json"
     assert path.exists()
-    model = json.loads(path.read_text())
+    model = json.loads(path.read_text(encoding="utf-8"))
     assert "entities" in model and "pages" in model
     assert set(model["entities"].keys()) >= {"User", "Order"}
     routes = {p["route"] for p in model["pages"]}
@@ -134,7 +134,7 @@ def test_api_client_uses_registry_table_for_hinted_entity(tmp_path):
     ]}
     res = generate_contracts(str(tmp_path), plan)
     assert not res["errors"], res["errors"]
-    api = (tmp_path / "src" / "contracts" / "api-client.ts").read_text()
+    api = (tmp_path / "src" / "contracts" / "api-client.ts").read_text(encoding="utf-8")
     assert "/api/data/equipment" in api
     assert "/api/data/equipments" not in api
 
@@ -148,7 +148,7 @@ def test_navigation_flow_route_uses_registry_slug(tmp_path):
     ]}
     res = generate_contracts(str(tmp_path), plan)
     assert not res["errors"], res["errors"]
-    nav = json.loads((tmp_path / "src" / "contracts" / "navigation-flow.json").read_text())
+    nav = json.loads((tmp_path / "src" / "contracts" / "navigation-flow.json").read_text(encoding="utf-8"))
     crud = nav["flows"]["entity_crud"]["RecruitmentDrive"]
     # kebab PLURAL now (was singular "/recruitment-drive")
     assert crud["list"]["route"] == "/recruitment-drives"
@@ -168,7 +168,7 @@ def test_navigation_flow_hinted_entity_route(tmp_path):
     ]}
     res = generate_contracts(str(tmp_path), plan)
     assert not res["errors"], res["errors"]
-    nav = json.loads((tmp_path / "src" / "contracts" / "navigation-flow.json").read_text())
+    nav = json.loads((tmp_path / "src" / "contracts" / "navigation-flow.json").read_text(encoding="utf-8"))
     crud = nav["flows"]["entity_crud"]["Equipment"]
     assert crud["list"]["route"] == "/equipment"
     assert crud["create"]["route"] == "/equipment/new"

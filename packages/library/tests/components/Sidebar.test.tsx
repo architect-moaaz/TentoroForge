@@ -50,4 +50,37 @@ describe("Sidebar", () => {
     const root = container.querySelector("[data-sidebar-id]") as HTMLElement;
     expect(root.getAttribute("data-motion")).toBe("slide-in");
   });
+  // --- Contract + responsiveness (docs/editor-audit/containment.md).
+  it("folds a third child into the main pane instead of a phantom row", () => {
+    // maxChildren:2 is an editor rule only; a JSON edit or an LLM patch could
+    // write three, and every extra used to get its own [data-sidebar-pane]
+    // labelled "main" in an implicit third grid row.
+    const { container } = render(
+      <Sidebar width="240px">
+        <div>aside</div><div>one</div><div>two</div>
+      </Sidebar>
+    );
+    expect(container.querySelectorAll("[data-sidebar-pane]").length).toBe(2);
+    const main = container.querySelector('[data-sidebar-pane="main"]')!;
+    expect(main.textContent).toBe("onetwo");
+  });
+
+  it("honours the breakpoint prop", () => {
+    const { container } = render(
+      <Sidebar width="200px" breakpoint="lg"><div>a</div><div>b</div></Sidebar>
+    );
+    expect(container.querySelector("style")!.textContent).toMatch(/min-width:\s*1024px/);
+    expect(container.querySelector('[data-sidebar-breakpoint="lg"]')).toBeTruthy();
+  });
+
+  it("breakpoint 'none' emits the two-column rule with no media query", () => {
+    // The stacking point used to be hard-coded at 768px, so a two-column layout
+    // the user arranged was a vertical stack on every phone and tablet.
+    const { container } = render(
+      <Sidebar width="200px" breakpoint="none"><div>a</div><div>b</div></Sidebar>
+    );
+    const css = container.querySelector("style")!.textContent!;
+    expect(css).not.toContain("@media");
+    expect(css).toContain("grid-template-columns: 200px 1fr");
+  });
 });

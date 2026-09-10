@@ -312,7 +312,7 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     for entity in entities:
         mod = _module_name(entity)
         path = root / f"{mod}.ts"
-        path.write_text(emit_entity_module(entity, doc), "utf-8")
+        path.write_text(emit_entity_module(entity, doc), encoding="utf-8")
         rel = f"src/db/schema/{mod}.ts"
         written.append(rel)
         code_map.append({
@@ -349,7 +349,7 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
               "// Generated from the Living Blueprint."]
     barrel += [f'export * from "./{_module_name(e)}";' for e in entities]
     barrel += [f'export * from "./{name}";' for name in platform]
-    (root / "index.ts").write_text("\n".join(barrel) + "\n", "utf-8")
+    (root / "index.ts").write_text("\n".join(barrel) + "\n", encoding="utf-8")
     written.append("src/db/schema/index.ts")
 
     return {"files": written, "entities": len(entities), "codeMap": code_map}
@@ -433,7 +433,7 @@ def project_frontend(doc: dict, app_root: str | Path,
                 code_map.append({"artifact": page_id, "frontend": [rel]})
                 continue
         target.write_text(
-            json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
+            json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         written.append(rel)
         # `frontend`, not `service`: §21's own example files a page's
         # implementation under frontend, and `code_intel.where` is what
@@ -447,9 +447,16 @@ def project_frontend(doc: dict, app_root: str | Path,
     # the directory would still hold eighteen files and read as a complete
     # projection while one of them was silently out of date.
     written_set = set(written)
+    # `as_posix()`, NOT the f-string. `written` holds slugs built with "/"
+    # (`slugify_route`), while formatting a PurePath uses the OS separator —
+    # so on Windows every NESTED schema compared as `src/schemas/items\new.json`
+    # against a set holding `src/schemas/items/new.json`, missed, and was
+    # deleted immediately after being written. Top-level pages have no
+    # separator and survived, which is why the projection reported success
+    # with only `/items` on disk and every sub-route 404ing.
     stale = sorted(
-        str(f.relative_to(root)) for f in root.rglob("*.json")
-        if f"src/schemas/{f.relative_to(root)}" not in written_set
+        f.relative_to(root).as_posix() for f in root.rglob("*.json")
+        if f"src/schemas/{f.relative_to(root).as_posix()}" not in written_set
     )
     for name in stale:
         (root / name).unlink()
@@ -532,7 +539,7 @@ def _write_route_registry(root: Path, written: list[str]) -> None:
     if not load_ts.exists():
         from services.schema_pipeline import _SCHEMA_LOAD_TS
 
-        load_ts.write_text(_SCHEMA_LOAD_TS, "utf-8")
+        load_ts.write_text(_SCHEMA_LOAD_TS, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +726,7 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "gatedEntry": entry_by_access.get("authenticated"),
         "initialPage": slugify_route(entry_by_access["authenticated"])
         if entry_by_access.get("authenticated") else None,
-    }, indent=2, sort_keys=True) + "\n", "utf-8")
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     return {"files": ["src/contracts/nav-flow.json"], "pages": len(entries),
             "guarded": len(guards), "authRoutes": sorted(set(gated_routes)),
@@ -825,6 +832,27 @@ _TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def _css_value_ok(value: str) -> bool:
+    """True when `value` can legally sit inside a CSS declaration.
+
+    THE GENERATED APP DID NOT START BECAUSE OF THIS. `designSystem` is authored
+    by an LLM, and alongside real tokens it carries prose guidance under the
+    same keys — e.g. radius.usageTable = "lg on the outer table container only;
+    rows and cells stay square". Every string was emitted verbatim as a custom
+    property, so that semicolon closed the declaration early and left
+    `rows and cells stay square;` as a stray token. PostCSS reported
+    "Unknown word", `tokens.css` failed to compile, and because `globals.css`
+    imports it unconditionally EVERY route returned 500. Observed on
+    output/gh0mlpbp: `GET /items 500`.
+
+    A declaration value cannot contain `;`, `{`, `}` or a newline. A string that
+    does is not a token — it is documentation that happens to live in the token
+    map — so it is skipped rather than escaped: emitting
+    `--radius-usage-table: <a sentence>` would be valid CSS and still meaningless.
+    """
+    return not any(c in value for c in ";{}\n\r")
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -874,7 +902,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                "muted", "mutedForeground", "destructive", "destructiveForeground",
                "border", "input", "ring", "card", "cardForeground"}
     for role, value in sorted(colors.items()):
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and _css_value_ok(value):
             out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
             lines.append(f"  --{_kebab(role)}: {out_value};")
     for token, candidates in _TOKEN_ALIASES:
@@ -882,13 +910,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
             continue
         for role in candidates:
             raw = colors.get(role)
-            if isinstance(raw, str) and raw:
+            if isinstance(raw, str) and raw and _css_value_ok(raw):
                 triplet = _hsl_triplet(raw)
                 lines.append(f"  {token}: {triplet or raw};")
                 break
 
     radius = design.get("radius")
-    if isinstance(radius, str) and radius:
+    if isinstance(radius, str) and radius and _css_value_ok(radius):
         lines.append(f"  --radius: {radius};")
     elif isinstance(radius, dict):
         for key, value in sorted(radius.items()):
@@ -913,7 +941,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        ("baseSize", "--font-size-base"),
                        ("lineHeightBase", "--line-height-base")):
         value = typography.get(key)
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and _css_value_ok(value):
             lines.append(f"  {token}: {value};")
 
     spacing = design.get("spacing")
@@ -946,7 +974,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
         "   defaults stand rather than inventing a palette here. */\n")
-    (out / "tokens.css").write_text(header + body, "utf-8")
+    (out / "tokens.css").write_text(header + body, encoding="utf-8")
 
     return {"files": ["src/app/tokens.css"], "tokens": len(lines),
             "personality": design.get("visualPersonality")}
@@ -1157,7 +1185,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                            "nodes": nodes, "edges": edges},
         }
         (out / f"{slug}.json").write_text(
-            json.dumps(definition, indent=2, sort_keys=True) + "\n", "utf-8")
+            json.dumps(definition, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         rel = f"src/lib/workflows/definitions/{slug}.json"
         written.append(rel)
         code_map.append({"artifact": wf.get("id"), "service": [rel]})
@@ -1236,7 +1264,7 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
     out = Path(app_root) / "src" / "db"
     out.mkdir(parents=True, exist_ok=True)
     (out / "seed.json").write_text(
-        json.dumps(seed, indent=2, sort_keys=True) + "\n", "utf-8")
+        json.dumps(seed, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {"files": ["src/db/seed.json"], "tables": len(seed),
             "rows": sum(len(v) for v in seed.values())}
 
@@ -1606,7 +1634,7 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out = Path(app_root) / "src" / "lib"
     out.mkdir(parents=True, exist_ok=True)
     (out / "ownership-rules.ts").write_text(
-        render_ownership_rules_module(manifest), "utf-8")
+        render_ownership_rules_module(manifest), encoding="utf-8")
     return {"files": ["src/lib/ownership-rules.ts"],
             "keys": len(manifest),
             "rules": sum(len(v) for v in manifest.values())}
@@ -1731,7 +1759,7 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     ]
     out = Path(app_root) / "src" / "lib"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "public-resources.ts").write_text("\n".join(lines), "utf-8")
+    (out / "public-resources.ts").write_text("\n".join(lines), encoding="utf-8")
     return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
 
 
@@ -1793,7 +1821,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     out = Path(app_root) / "src"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "middleware.ts").write_text("\n".join(lines), "utf-8")
+    (out / "middleware.ts").write_text("\n".join(lines), encoding="utf-8")
     return {
         "files": ["src/middleware.ts"],
         "public": access["public"],
@@ -1908,7 +1936,7 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # not need to own.
     written: list[str] = []
     if not root_page:
-        (out / "page.tsx").write_text(body, "utf-8")
+        (out / "page.tsx").write_text(body, encoding="utf-8")
         written.append("src/app/(dashboard)/page.tsx")
     return {"files": written, "claimedBy": claimed,
             "removedStaleRoot": removed,

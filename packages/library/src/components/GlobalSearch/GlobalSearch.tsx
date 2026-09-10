@@ -22,6 +22,7 @@ export function GlobalSearch({
   placeholder = "Search…", workflow, debounceMs = 200, style,
 }: Props): React.ReactElement {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const motion = useMotion(style?.motion);
   const styleProps = resolveStyle(style);
@@ -29,16 +30,30 @@ export function GlobalSearch({
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
-      if (isCmdK) {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
+      if (!isCmdK) return;
+      // Bail when the keystroke came from outside this component's page.
+      //
+      // In the editor the designed page is rendered inside [data-canvas-root];
+      // everything else on screen (the palette search box, the properties
+      // panel) is editor chrome. This listener was calling preventDefault() and
+      // stealing focus out of that chrome and into a component on the canvas —
+      // a Ctrl+K typed in the palette's own search field landed in GlobalSearch.
+      // In a generated app there is no canvas root, `scope` is null, and Cmd+K
+      // keeps working from anywhere exactly as before.
+      const scope = rootRef.current?.closest("[data-canvas-root]");
+      if (scope && !scope.contains(e.target as Node)) return;
+      e.preventDefault();
+      inputRef.current?.focus();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
   const fire = React.useCallback((q: string) => {
+    // `workflow` is required but the registry seeds it with "", and an empty
+    // string is consumed rather than skipped — an unconfigured GlobalSearch
+    // dispatched a workflow whose NAME was "" on every debounce tick.
+    if (!workflow) return;
     // Dispatch as a DOM event; renderer's workflow-dispatch layer picks it up.
     // (Same convention buttons use via [data-forge-workflow].)
     const el = document.createElement("button");
@@ -58,6 +73,7 @@ export function GlobalSearch({
 
   return (
     <div
+      ref={rootRef}
       data-forge-global-search
       {...motion}
       style={{

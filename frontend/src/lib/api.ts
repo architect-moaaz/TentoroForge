@@ -25,6 +25,16 @@ async function request<T>(
     ...((options.headers as Record<string, string>) || {}),
   };
 
+  // `api.upload` passes `headers: {}` meaning "let the browser set the
+  // multipart Content-Type with its boundary" — but spreading an empty object
+  // over the default cannot remove a key, so the request went out as
+  // `application/json` with a FormData body and no boundary, which FastAPI
+  // rejects with 422 "Expected UploadFile". Deleting it on the body's type is
+  // the only thing that actually clears it.
+  if (typeof FormData !== "undefined" && options.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
+
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }

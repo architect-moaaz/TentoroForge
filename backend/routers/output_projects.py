@@ -70,6 +70,69 @@ async def _resolve_root(project_id: str):
     raise HTTPException(status_code=404, detail="project has no output directory on disk")
 
 
+def _schema_roots(root):
+    """The schema directories of a project, in resolution order.
+
+    ONE PROJECT, TWO SCHEMA ROOTS. The Blueprint projection writes
+    ``output/<id>/app/src/schemas/`` — that is the built artifact, the one
+    ``app/src/schemas/registry.ts`` imports and the only one with a path into
+    the shipped bundle. The legacy/classic pipeline and, until now, every
+    editor write landed in ``output/<id>/src/schemas/``.
+
+    The editor read from one root and the app shipped the other, so a user's
+    edit was written to disk, read by nothing, and reported as saved. Proven
+    on output/gh0mlpbp: the red table background and fade-up motion the user
+    set on `/items` live in ``src/schemas/PAGE-001.json`` and appear in
+    neither ``app/src/schemas/items.json`` nor the rendered preview.
+
+    ``app`` first, for the same reason and in the same order as
+    ``apps/render-scaffold/src/lib/loadSchema.ts`` — the editor and the
+    preview must not disagree about which copy of a route is authoritative.
+    A project that only ever used one root is simply a search that misses in
+    the other, so legacy projects resolve exactly as they did before.
+    """
+    return [root / "app" / "src" / "schemas", root / "src" / "schemas"]
+
+
+def _schema_paths(root) -> list[str]:
+    """Every schema in the project, as extension-less forward-slash paths.
+
+    The union of both roots, de-duplicated with the same precedence as
+    ``_schema_roots``. Taking only the first root that happened to exist —
+    which is what this did — hid every Blueprint-projected page from the
+    editor of any project that also had a legacy ``src/schemas/`` directory.
+    """
+    seen: dict[str, None] = {}
+    for schemas_dir in _schema_roots(root):
+        if not schemas_dir.is_dir():
+            continue
+        for p in sorted(schemas_dir.rglob("*.json")):
+            seen.setdefault(p.relative_to(schemas_dir).with_suffix("").as_posix(), None)
+    return list(seen)
+
+
+def _resolve_schema_file(root, rel_path: str, *, for_write: bool = False):
+    """Locate ``<rel_path>.json`` across both schema roots.
+
+    Reads resolve to wherever the file already is. Writes go back to the file
+    they were read from — never to the other root, which is how the editor
+    came to maintain a private, unshipped copy of a page the app was serving
+    from elsewhere. A genuinely new page is created under the built-artifact
+    root when the project has one, so it is reachable by the route registry.
+    """
+    roots = _schema_roots(root)
+    for schemas_dir in roots:
+        candidate = schemas_dir / f"{rel_path}.json"
+        if candidate.is_file():
+            return candidate
+    if not for_write:
+        return None
+    target_root = next((d for d in roots if d.is_dir()), None)
+    if target_root is None:
+        target_root = roots[0] if (root / "app").is_dir() else roots[1]
+    return target_root / f"{rel_path}.json"
+
+
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
@@ -101,27 +164,7 @@ async def list_schemas(project_id: str):
     because the handler for it was sitting on the other name.
     """
     root = await _resolve_root(project_id)
-
-    # THE GENERATED APP IS A SUBDIRECTORY, same as _debug/project-file next
-    # door. The Blueprint's projections write `app/src/schemas/*.json`; this
-    # looked in `<output_dir>/src/schemas`, which for a Blueprint-built project
-    # does not exist, and returned an empty list rather than saying so.
-    #
-    # The output root is tried first so legacy projects, which are the only
-    # thing that ever wrote there, keep resolving exactly as before.
-    schemas_dir = next(
-        (d for d in (root / "src" / "schemas", root / "app" / "src" / "schemas")
-         if d.is_dir()),
-        None,
-    )
-    if schemas_dir is None:
-        return {"paths": []}
-
-    paths: list[str] = []
-    for p in sorted(schemas_dir.rglob("*.json")):
-        rel = p.relative_to(schemas_dir).with_suffix("")
-        paths.append(str(rel).replace("\\", "/"))
-    return {"paths": paths}
+    return {"paths": _schema_paths(root)}
 
 
 @router.get("/{project_id}/schema-list")
@@ -136,20 +179,17 @@ async def list_schema_routes(project_id: str):
     """
     root = await _resolve_root(project_id)
 
-    schemas_dir = root / "src" / "schemas"
-    if not schemas_dir.exists():
-        return []
-
     entries: list[dict] = []
-    for f in sorted(schemas_dir.rglob("*.json")):
-        if f.name in ("registry.json", "load.json"):
+    # Same union as /schemas: this endpoint returned [] for every Blueprint
+    # project, because those write only `app/src/schemas/`.
+    for slug in _schema_paths(root):
+        f = _resolve_schema_file(root, slug)
+        if f is None or f.name in ("registry.json", "load.json"):
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        rel = f.relative_to(schemas_dir).with_suffix("")
-        slug = str(rel).replace("\\", "/")
         # Derive route, page_type, entity from slug when the schema doesn't
         # carry them explicitly. Legacy entity-trio layouts have slugs like
         # "notes/list" — the first segment is the entity, the last is the
@@ -176,10 +216,10 @@ async def load_schema(project_id: str, path: str):
     """Load a schema JSON by path (no extension)."""
     root = await _resolve_root(project_id)
 
-    target = root / "src" / "schemas" / f"{path}.json"
-    if not target.exists():
+    target = _resolve_schema_file(root, path)
+    if target is None:
         raise HTTPException(status_code=404, detail=f"schema '{path}' not found")
-    return {"schema": json.loads(target.read_text())}
+    return {"schema": json.loads(target.read_text(encoding="utf-8"))}
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +240,15 @@ async def save_schema(project_id: str, body: SaveBody):
     """Atomically save a schema JSON file."""
     root = await _resolve_root(project_id)
 
-    target = root / "src" / "schemas" / f"{body.path}.json"
+    target = _resolve_schema_file(root, body.path, for_write=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(f".tmp.{int(time.time() * 1000)}.json")
-    tmp.write_text(json.dumps(body.schema_data, indent=2))
+    # ENCODING IS NOT OPTIONAL. Without it `write_text` uses the platform
+    # default — cp1252 on Windows — and a single em-dash in a page's content
+    # was written as the lone byte 0x97, so the saved JSON no longer decoded
+    # as UTF-8. The "Detail" page template does exactly that: its file held
+    # 12 nodes on disk and the page rendered ZERO, with no error to anyone.
+    tmp.write_text(json.dumps(body.schema_data, indent=2), encoding="utf-8")
     tmp.replace(target)
     return {"ok": True, "savedSchema": body.schema_data, "suggestions": []}
 
@@ -219,7 +264,7 @@ async def get_theme(project_id: str):
 
     custom_path = root / "src" / "theme" / "tokens.custom.json"
     if custom_path.exists():
-        return {"tokens": json.loads(custom_path.read_text()), "source": "custom"}
+        return {"tokens": json.loads(custom_path.read_text(encoding="utf-8")), "source": "custom"}
     return {"tokens": {}, "source": "default"}
 
 
@@ -231,7 +276,7 @@ async def save_theme(project_id: str, body: dict):
     target = root / "src" / "theme" / "tokens.custom.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     tokens = body.get("tokens", {})
-    target.write_text(json.dumps(tokens, indent=2))
+    target.write_text(json.dumps(tokens, indent=2), encoding="utf-8")
     return {"ok": True}
 
 
@@ -277,7 +322,7 @@ async def get_project_css(project_id: str):
     root = await _resolve_root(project_id)
 
     css_path = root / "src" / "app" / "globals.css"
-    css = css_path.read_text() if css_path.exists() else ""
+    css = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
     return {"css": css, "exists": css_path.exists()}
 
 

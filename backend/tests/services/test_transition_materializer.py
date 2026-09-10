@@ -54,7 +54,7 @@ def _mk_app(
 
 
 def _read_schema(root: Path, rel: str) -> dict:
-    return json.loads((root / "src/schemas" / rel).read_text())
+    return json.loads((root / "src/schemas" / rel).read_text(encoding="utf-8"))
 
 
 def _page(children: list | None = None) -> dict:
@@ -94,7 +94,7 @@ def test_injection_satisfies_delivery_gate(tmp_path: Path):
     """The whole point: after the repair, the gate error clears."""
     root = _mk_app(tmp_path, nav_flow=NAV_BACK,
                    schemas={"documents/[id].json": _page()})
-    nav = json.loads((root / "src/contracts/nav-flow.json").read_text())
+    nav = json.loads((root / "src/contracts/nav-flow.json").read_text(encoding="utf-8"))
     assert check_transition_triggers(nav, _load_page_schemas(root)) != []
     materialize_transitions(root)
     assert check_transition_triggers(nav, _load_page_schemas(root)) == []

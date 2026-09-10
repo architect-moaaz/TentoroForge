@@ -104,11 +104,11 @@ def _fixture_project(tmp_path: Path, *, needs_payment: bool = True) -> Path:
         {"Note": {"fields": {"id": {}}}}
     )
     plan = {"entities": entities}
-    (tmp_path / "plan.json").write_text(json.dumps(plan))
+    (tmp_path / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     # Minimal nav-flow so ensure_payment_surface has something to update.
     (tmp_path / "src" / "contracts" / "nav-flow.json").write_text(json.dumps({
         "pages": [{"id": "home", "route": "/"}],
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -117,7 +117,7 @@ def test_emits_list_page_when_detector_positive(tmp_path):
     r = ensure_payment_surface(str(tmp_path))
     list_path = tmp_path / "src" / "schemas" / "settings" / "payment-methods.json"
     assert list_path.exists()
-    schema = json.loads(list_path.read_text())
+    schema = json.loads(list_path.read_text(encoding="utf-8"))
     # dataSource must bind to the real entity
     assert schema["dataSources"][0]["entity"] == "PaymentMethod"
     assert schema["dataSources"][0]["op"] == "list"
@@ -132,7 +132,7 @@ def test_emits_add_card_form_page(tmp_path):
     ensure_payment_surface(str(tmp_path))
     add_path = tmp_path / "src" / "schemas" / "settings" / "payment-methods" / "new.json"
     assert add_path.exists()
-    schema = json.loads(add_path.read_text())
+    schema = json.loads(add_path.read_text(encoding="utf-8"))
     root_text = json.dumps(schema["root"])
     # Form must dispatch the CreatePaymentMethod workflow (the CRUD gen emits it).
     assert "CreatePaymentMethod" in root_text
@@ -141,7 +141,7 @@ def test_emits_add_card_form_page(tmp_path):
 def test_registers_route_in_nav_flow(tmp_path):
     _fixture_project(tmp_path)
     ensure_payment_surface(str(tmp_path))
-    nav = json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text())
+    nav = json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     routes = [p.get("route") for p in nav.get("pages", [])]
     assert "/settings/payment-methods" in routes
     entry = next(p for p in nav["pages"] if p["route"] == "/settings/payment-methods")
@@ -178,16 +178,16 @@ def test_does_not_stomp_existing_llm_authored_pages(tmp_path):
     settings_dir.mkdir(exist_ok=True)
     settings_dir.joinpath("payment-methods.json").write_text(json.dumps(
         {"root": {"type": "Text", "props": {"text": "custom LLM-authored"}}}
-    ))
+    ), encoding="utf-8")
     ensure_payment_surface(str(tmp_path))
     kept = json.loads(
-        (settings_dir / "payment-methods.json").read_text()
+        (settings_dir / "payment-methods.json").read_text(encoding="utf-8")
     )
     assert kept["root"]["type"] == "Text"
 
 
 def test_handles_missing_nav_flow_gracefully(tmp_path):
-    (tmp_path / "plan.json").write_text(json.dumps({"entities": {"PaymentMethod": {"fields": {}}}}))
+    (tmp_path / "plan.json").write_text(json.dumps({"entities": {"PaymentMethod": {"fields": {}}}}), encoding="utf-8")
     (tmp_path / "src" / "schemas" / "settings").mkdir(parents=True)
     # No nav-flow.json — surface should still emit the schema pages.
     r = ensure_payment_surface(str(tmp_path))

@@ -42,7 +42,7 @@ def _init_repo(tmp_path: Path) -> Path:
                            "config", "user.email", "t@t.t"])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "config", "user.name", "T"])
-    (tmp_path / "seed.txt").write_text("seed")
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "seed.txt"])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "commit", "-qm", "seed"])
@@ -60,10 +60,10 @@ def test_git_status_returns_empty_on_clean_tree(tmp_path):
 
 def test_git_status_lists_modified_and_added_and_untracked(tmp_path):
     _init_repo(tmp_path)
-    (tmp_path / "seed.txt").write_text("changed")           # modified
-    (tmp_path / "new1.json").write_text("{}")               # untracked
+    (tmp_path / "seed.txt").write_text("changed", encoding="utf-8")           # modified
+    (tmp_path / "new1.json").write_text("{}", encoding="utf-8")               # untracked
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "new1.json"])
-    (tmp_path / "new2.txt").write_text("hi")                # untracked
+    (tmp_path / "new2.txt").write_text("hi", encoding="utf-8")                # untracked
 
     paths = set(ground_truth.git_status_modified(str(tmp_path)))
     assert paths == {"seed.txt", "new1.json", "new2.txt"}
@@ -72,7 +72,7 @@ def test_git_status_lists_modified_and_added_and_untracked(tmp_path):
 def test_git_status_ignores_dot_git(tmp_path):
     """A stray file inside .git must not surface as a modified path."""
     _init_repo(tmp_path)
-    (tmp_path / ".git" / "HEAD.tmp").write_text("junk")
+    (tmp_path / ".git" / "HEAD.tmp").write_text("junk", encoding="utf-8")
     assert ".git/HEAD.tmp" not in ground_truth.git_status_modified(str(tmp_path))
 
 
@@ -91,14 +91,14 @@ def test_git_diff_lines_returns_the_actual_changed_lines(tmp_path):
     _init_repo(tmp_path)
     (tmp_path / "schema.json").write_text(json.dumps({
         "field": {"type": "Select", "label": "Upload CV"}
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "schema.json"])
     subprocess.check_call(["git", "-C", str(tmp_path),
                            "commit", "-qm", "add schema"])
 
     (tmp_path / "schema.json").write_text(json.dumps({
         "field": {"type": "FileUpload", "label": "Upload CV"}
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
     diff = ground_truth.git_diff_lines(str(tmp_path), ["schema.json"])
     # Diff must contain BOTH the removed Select line and the added
@@ -168,7 +168,7 @@ def test_probe_form_field_reports_current_component_and_matches_expected(tmp_pat
         },
     }
     p = tmp_path / "new.json"
-    p.write_text(json.dumps(schema))
+    p.write_text(json.dumps(schema), encoding="utf-8")
 
     r = ground_truth.probe_form_field(
         schema_path=str(p),
@@ -188,7 +188,7 @@ def test_probe_form_field_returns_matches_when_component_agrees(tmp_path):
         ]},
     ]}}
     p = tmp_path / "new.json"
-    p.write_text(json.dumps(schema))
+    p.write_text(json.dumps(schema), encoding="utf-8")
     r = ground_truth.probe_form_field(
         schema_path=str(p), field_label="Upload CV",
         expected_component="FileUpload",
@@ -199,7 +199,7 @@ def test_probe_form_field_returns_matches_when_component_agrees(tmp_path):
 def test_probe_form_field_field_not_found(tmp_path):
     schema = {"root": {"children": [{"type": "Form", "children": []}]}}
     p = tmp_path / "new.json"
-    p.write_text(json.dumps(schema))
+    p.write_text(json.dumps(schema), encoding="utf-8")
     r = ground_truth.probe_form_field(
         schema_path=str(p), field_label="Nonexistent Field",
         expected_component="Whatever",
@@ -227,7 +227,7 @@ def test_probe_list_binding_finds_datasource_on_a_table(tmp_path):
         }},
     ]}}
     p = tmp_path / "list.json"
-    p.write_text(json.dumps(schema))
+    p.write_text(json.dumps(schema), encoding="utf-8")
     r = ground_truth.probe_list_binding(
         schema_path=str(p), expected_datasource="candidates",
     )
@@ -239,7 +239,7 @@ def test_probe_list_binding_mismatch(tmp_path):
         {"type": "Table", "props": {"dataSource": "assessments"}},
     ]}}
     p = tmp_path / "list.json"
-    p.write_text(json.dumps(schema))
+    p.write_text(json.dumps(schema), encoding="utf-8")
     r = ground_truth.probe_list_binding(
         schema_path=str(p), expected_datasource="candidates",
     )
@@ -253,7 +253,7 @@ def test_probe_list_binding_mismatch(tmp_path):
 
 def test_snapshot_baseline_captures_status_and_guards(tmp_path):
     _init_repo(tmp_path)
-    (tmp_path / "extra.txt").write_text("pending change")
+    (tmp_path / "extra.txt").write_text("pending change", encoding="utf-8")
 
     def _fake_guards(_out):
         return [{"guard": "g1", "message": "pre-existing"}]

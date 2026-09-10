@@ -85,3 +85,123 @@ describe("resolvePreviewSources", () => {
     expect(out.ghosts).toEqual([]);
   });
 });
+
+/**
+ * B13 — the `expression` metric dialect.
+ *
+ * `output/gh0mlpbp/app/src/schemas/items.json` declared its KPI metrics as
+ * `{"expression": "sum(quantity * price)", "format": "currency"}` while this
+ * resolver (and the generated app's data engine) reads `{fn, field}`. Nothing
+ * parsed the other form, so a correctly-NAMED aggregate source still resolved
+ * to a row count or nothing at all, and the three Inventory KPI tiles were
+ * blank. The generator now normalises the dialect away, but every project
+ * already on disk still carries it — so the resolver has to speak both.
+ */
+const inventory = {
+  Item: [
+    { id: "1", name: "Bolt", quantity: 10, price: 2.5, category: "Parts" },
+    { id: "2", name: "Nut", quantity: 3, price: 1.0, category: "Parts" },
+    { id: "3", name: "Washer", quantity: 4, price: 0.5, category: "Parts" },
+  ],
+};
+
+// Verbatim from the failing artifact, before the generator-side repair.
+const itemsSources = [
+  { name: "items", entity: "Item", op: "list", limit: 500 },
+  {
+    name: "totalInventoryValue", entity: "Item", op: "aggregate",
+    metrics: {
+      itemCount: { expression: "count(id)", format: "number" },
+      totalValue: { expression: "sum(quantity * price)", format: "currency" },
+    },
+  },
+] as any;
+
+describe("aggregate metric dialects", () => {
+  it("resolves the shipped items.json `expression` metrics to real numbers", () => {
+    const out = resolvePreviewSources(itemsSources, inventory);
+    // 10*2.5 + 3*1 + 4*0.5 = 25 + 3 + 2 = 30
+    expect(out.totalInventoryValue).toEqual({ itemCount: 3, totalValue: 30 });
+  });
+
+  it("resolves the normalised `expr` form the generator now emits", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        totalValue: { fn: "sum", expr: "quantity * price" },
+      } }] as any,
+      inventory,
+    );
+    expect(out.kpi).toEqual({ totalValue: 30 });
+  });
+
+  it("reads count(id) as a row count, not a sum of ids", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        n: { expression: "count(id)" },
+      } }] as any,
+      inventory,
+    );
+    expect(out.kpi).toEqual({ n: 3 });
+  });
+
+  it("translates a single-column expression, aliases included", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        stock: { expression: "sum(quantity)" },
+        typical: { expression: "average(price)" },
+        cheapest: { expression: "min(price)" },
+        dearest: { expression: "max(price)" },
+      } }] as any,
+      inventory,
+    );
+    expect(out.kpi).toEqual({ stock: 17, typical: 1.33, cheapest: 0.5, dearest: 2.5 });
+  });
+
+  it("honours operator precedence and parentheses inside an expression", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        a: { fn: "sum", expr: "quantity + price * 2" },
+        b: { fn: "sum", expr: "(quantity + price) * 2" },
+      } }] as any,
+      inventory,
+    );
+    // a: 10+5 + 3+2 + 4+1 = 25 ; b: 2*(12.5 + 4 + 4.5) = 42
+    expect(out.kpi).toEqual({ a: 25, b: 42 });
+  });
+
+  it("prefers a machine-readable fn over the expression beside it", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        stock: { fn: "sum", field: "quantity", expression: "count(id)" },
+      } }] as any,
+      inventory,
+    );
+    expect(out.kpi).toEqual({ stock: 17 });
+  });
+
+  it("degrades an unparseable expression to a count instead of throwing", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        weird: { expression: "percentile(0.9, latency)" },
+        injected: { fn: "sum", expr: "quantity); drop table items --" },
+      } }] as any,
+      inventory,
+    );
+    // `percentile(...)` is not an aggregate call we can vouch for, so the
+    // metric keeps its (absent) fn and falls back to the row count. The
+    // injected `expr` IS on an explicit sum, and every row evaluates to NaN →
+    // 0. Both degrade; neither throws, and nothing from either string is ever
+    // evaluated as code.
+    expect(out.kpi).toEqual({ weird: 3, injected: 0 });
+  });
+
+  it("treats division by zero as 0 rather than Infinity", () => {
+    const out = resolvePreviewSources(
+      [{ name: "kpi", entity: "Item", op: "aggregate", metrics: {
+        ratio: { fn: "sum", expr: "quantity / missing" },
+      } }] as any,
+      inventory,
+    );
+    expect(out.kpi).toEqual({ ratio: 0 });
+  });
+});

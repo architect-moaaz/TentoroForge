@@ -11,7 +11,7 @@ from services.ship_report import REPORT_NAME, build_ship_report
 def _write(root, rel, doc):
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_empty_app_passes(tmp_path):
@@ -68,7 +68,7 @@ def test_malformed_artifact_degrades_to_warning(tmp_path, monkeypatch):
     monkeypatch.delenv("FORGE_SHIP_GATE", raising=False)
     p = tmp_path / "contracts"
     p.mkdir(parents=True)
-    (p / "delivery-report.json").write_text("{not json")
+    (p / "delivery-report.json").write_text("{not json", encoding="utf-8")
     report = build_ship_report(str(tmp_path))
     assert report["verdict"] == "pass" or report["summary"]["warnings"] >= 1
     assert report["sources"]["delivery"]["present"] is True

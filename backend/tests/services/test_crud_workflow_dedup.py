@@ -51,4 +51,4 @@ def test_generate_crud_emits_no_duplicate_files(tmp_path):
     assert set(written) == {"CreateCustomer", "UpdateCustomer", "DeleteCustomer"}
     files = {p.name for p in (tmp_path / "workflows").glob("*.json")}
     assert "CreateCustomers.json" not in files
-    assert json.loads((tmp_path / "workflows" / "CreateCustomer.json").read_text())["name"] == "CreateCustomer"
+    assert json.loads((tmp_path / "workflows" / "CreateCustomer.json").read_text(encoding="utf-8"))["name"] == "CreateCustomer"

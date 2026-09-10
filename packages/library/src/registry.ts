@@ -74,13 +74,35 @@ const PROP_REMAP: Record<string, RemapFn> = {
   Select: unifyValidators,
   Tabs: (p) => {
     // LLM emits Tabs as `{ defaultValue, variant }` — completely different
-    // from the v2 contract `{ tabs: [{id,label}], value }`. Without enough
-    // info to synthesise a real tabs array, fall back to a single placeholder
-    // tab so the canvas renders rather than showing an "invalid props"
-    // marker. The user can then rebuild Tabs in the editor.
+    // from the v2 contract `{ tabs: [{id,label}], value }`, and a palette drop
+    // materialises the registry default `tabs: null` (its only control,
+    // actionPicker, cannot author an array at all).
+    //
+    // This used to return `{ tabs: [{id:"tab1",label:"Tab"}], value:"tab1" }`
+    // — a whole new props object. That did two kinds of damage: the single
+    // hard-coded def capped the render at ONE panel (Tabs indexed panels by
+    // tabs[i]), and rebuilding the object threw away the `value` the user had
+    // typed in the Properties panel, so a node saying `value: "tab-1"`
+    // rendered a strip whose only button was `data-tab-id="tab1"`
+    // (docs/editor-audit/containment.md, probe T5).
+    //
+    // Tabs now derives one tab per CHILD, so the right repair here is to leave
+    // an empty array and keep every other prop: `tabs: []` says "nothing
+    // declared", and the panel count decides the strip.
     if (Array.isArray((p as any).tabs)) return p;
-    const v = typeof p.defaultValue === "string" ? p.defaultValue : "tab1";
-    return { tabs: [{ id: v, label: "Tab" }], value: v };
+    const out = { ...p };
+    out.tabs = [];
+    if (typeof out.value !== "string" || !out.value) {
+      if (typeof out.defaultValue === "string") out.value = out.defaultValue;
+    }
+    delete out.defaultValue;
+    return out;
+  },
+  // Same defect, same shape: TabPanelWithDeepLink.tabs is an actionPicker
+  // array that defaults to null, and its component drives the strip from it.
+  TabPanelWithDeepLink: (p) => {
+    if (Array.isArray((p as any).tabs)) return p;
+    return { ...p, tabs: [] };
   },
   Badge: (p) => {
     const out = { ...p };
@@ -253,6 +275,20 @@ function setAtPath(obj: any, path: Array<string | number>, value: unknown): void
   }
   cur[path[path.length - 1]] = value;
 }
+function deleteAtPath(obj: any, path: Array<string | number>): void {
+  let cur = obj;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (cur == null || typeof cur !== "object") return;
+    cur = cur[path[i]];
+  }
+  if (cur == null || typeof cur !== "object") return;
+  // `delete` on an array index leaves a hole rather than re-indexing, so the
+  // remaining error paths in the same pass stay pointing at the right elements.
+  delete cur[path[path.length - 1] as any];
+}
+function samePath(a: Array<string | number>, b: Array<string | number>): boolean {
+  return a.length === b.length && a.every((s, i) => s === b[i]);
+}
 function getAtPath(obj: any, path: Array<string | number>): unknown {
   let cur = obj;
   for (const k of path) {
@@ -260,6 +296,77 @@ function getAtPath(obj: any, path: Array<string | number>): unknown {
     cur = (cur as any)[k];
   }
   return cur;
+}
+
+/**
+ * Peel the wrappers a props schema may be declared behind (`.strict()` is still
+ * a ZodObject; `.superRefine`/`.transform` produce ZodEffects; `.pipe` produces
+ * ZodPipeline) to reach the object shape underneath. Returns null when there
+ * isn't one — a non-object props schema simply has no top-level defaults.
+ */
+function objectShapeOf(schema: any): Record<string, any> | null {
+  let s = schema;
+  for (let i = 0; i < 10 && s?._def; i++) {
+    const t = s._def.typeName;
+    if (t === "ZodObject") return s.shape ?? s._def.shape?.() ?? null;
+    if (t === "ZodEffects") { s = s._def.schema; continue; }
+    if (t === "ZodPipeline") { s = s._def.out ?? s._def.in; continue; }
+    if (t === "ZodOptional" || t === "ZodNullable" || t === "ZodReadonly" ||
+        t === "ZodBranded" || t === "ZodCatch" || t === "ZodDefault") {
+      s = s._def.innerType ?? s._def.type;
+      continue;
+    }
+    if (t === "ZodLazy") { s = s._def.getter(); continue; }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * THE DEFAULTS A FAILED PARSE THROWS AWAY.
+ *
+ * Zod applies `.default()` as part of a SUCCESSFUL parse and in no other way.
+ * So when `validateProps` exhausts its coercions and falls through to
+ * "render with what we have", the component receives raw props with **every
+ * `.default()` it declares skipped** — because of one unrelated key. That is
+ * what the IllustratedEmpty audit entry actually found: `title: ""` failed
+ * `too_small` and `action: ""` failed `invalid_union`, neither had a coercion
+ * branch, and the fallthrough handed the component props in which `kind` was
+ * also missing its `.default("list")`.
+ *
+ * The failure is invisible and it is general: it hits whichever component
+ * happens to have one unfixable key, and the symptom shows up on the OTHER
+ * props. Restoring the declared top-level defaults for keys that are absent
+ * makes the fallback path degrade to "this one prop is wrong" instead of
+ * "this component has no props at all".
+ *
+ * Only absent keys are filled, so nothing a caller actually supplied is ever
+ * overwritten, and only top-level keys — a nested default belongs to a nested
+ * parse that did not happen.
+ */
+function fillDeclaredDefaults(schema: any, target: Record<string, unknown>): void {
+  const shape = objectShapeOf(schema);
+  if (!shape) return;
+  for (const key of Object.keys(shape)) {
+    if (target[key] !== undefined) continue;
+    let f: any = shape[key];
+    // `.default()` can sit under `.optional()` / `.nullable()` wrappers.
+    for (let i = 0; i < 6 && f?._def; i++) {
+      const t = f._def.typeName;
+      if (t === "ZodDefault") {
+        try {
+          target[key] = f._def.defaultValue();
+        } catch { /* a throwing default is no default */ }
+        break;
+      }
+      if (t === "ZodOptional" || t === "ZodNullable" || t === "ZodReadonly" ||
+          t === "ZodBranded") {
+        f = f._def.innerType ?? f._def.type;
+        continue;
+      }
+      break;
+    }
+  }
 }
 
 export function createRegistry() {
@@ -349,6 +456,7 @@ export function createRegistry() {
       } catch {
         coerced = { ...stripped };
       }
+      const nulled: Array<Array<string | number>> = [];
       for (const er of r.error.errors) {
         if (!er.path.length) continue;
         const exp = (er as any).expected;
@@ -368,10 +476,88 @@ export function createRegistry() {
             er.path,
             exp === "array" ? [] : exp === "object" ? {} : exp === "number" ? 0 : exp === "boolean" ? false : "",
           );
+        } else if (er.code === "invalid_type" && rec === "null") {
+          // `null` on a field whose own schema REJECTS null. This is the
+          // registry's `default: null` convention (binding/action descriptors)
+          // copied onto a node and persisted in project schemas already on
+          // disk. `null` is not `undefined`, so it fails an `.optional()`
+          // field — and because one bad key fails the WHOLE object parse, it
+          // silently skipped every `.default()` the component declares, which
+          // is why such nodes rendered as if they had no props at all.
+          // Dropping the key lets absence do its job. A field that is
+          // genuinely `.nullable()` accepts null and therefore never produces
+          // this error, so a legitimate null is preserved untouched.
+          deleteAtPath(coerced, er.path);
+          nulled.push(er.path);
+        } else if (
+          // THE THREE WAYS "THE AUTHOR LEFT THIS BLANK" ARRIVES AS A HARD ERROR.
+          //
+          // All three used to have no branch at all, so they aborted the whole
+          // parse and every `.default()` on the component went with them:
+          //
+          //   too_small on a string        — `""` against `z.string().min(1)`.
+          //     The registry's own seed for a required headline, and the
+          //     properties panel's value for "the user cleared the box".
+          //   invalid_union with `""`/null — a structured prop (an action, an
+          //     illustration) whose control wrote a blank string.
+          //   invalid_enum_value           — a free-text box against an enum,
+          //     or a typo in one (`bottom-centre`). Passing the raw string
+          //     through is what put UndoManager's toast stack in the top-left
+          //     corner: `POSITION_STYLES[position]` came back `undefined`.
+          //
+          // In every case the honest reading is "unset", and deleting the key
+          // lets the schema's own `.default()` — or its optionality — do the
+          // job the blank value was standing in the way of. `nulled` is reused
+          // so the existing "turned out to be required after all" retry below
+          // covers these too.
+          //
+          // Deliberately NOT extended to arrays: a `.min(2)` array that is
+          // short because it is bound at runtime must still reach the
+          // component, which is the case the step-3 comment above calls out.
+          (er.code === "too_small" && (er as any).type === "string" &&
+            getAtPath(coerced, er.path) === "") ||
+          er.code === "invalid_enum_value" ||
+          (er.code === "invalid_union" &&
+            (getAtPath(coerced, er.path) === "" || getAtPath(coerced, er.path) == null))
+        ) {
+          // Dropped, but deliberately NOT added to `nulled`. The retry below
+          // re-fills a dropped-and-still-required key with an empty value —
+          // which for these three codes is the value that was just rejected.
+          // Re-inserting `""` into a `z.string().min(1)` reproduces the error
+          // exactly and hands the component a blank pretending to be content.
+          // Absence is the honest outcome: "no title set" renders no heading.
+          deleteAtPath(coerced, er.path);
         }
       }
       const r2 = e.propsSchema.safeParse(coerced);
       if (r2.success) return finish(r2.data);
+      if (nulled.length) {
+        // The dropped key turned out to be REQUIRED, not optional — absence is
+        // no better than null there. Fall back to the same empty value the
+        // `undefined` branch above uses and try once more.
+        let filled = false;
+        for (const er of r2.error.errors) {
+          if (er.code !== "invalid_type" || (er as any).received !== "undefined") continue;
+          if (!nulled.some((p) => samePath(p, er.path))) continue;
+          const exp2 = (er as any).expected;
+          setAtPath(
+            coerced,
+            er.path,
+            exp2 === "array" ? [] : exp2 === "object" ? {} : exp2 === "number" ? 0 : exp2 === "boolean" ? false : "",
+          );
+          filled = true;
+        }
+        if (filled) {
+          const r3 = e.propsSchema.safeParse(coerced);
+          if (r3.success) return finish(r3.data);
+        }
+      }
+      // Step 4: no parse succeeded, so Zod never applied a single `.default()`.
+      // Put the declared ones back before handing the props over — see
+      // fillDeclaredDefaults. Without this the fallback path silently strips a
+      // component down to whatever the author happened to type, and the visible
+      // damage lands on props that were never wrong.
+      fillDeclaredDefaults(e.propsSchema, coerced);
       return finish(coerced);
     },
   };

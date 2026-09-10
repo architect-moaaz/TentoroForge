@@ -230,7 +230,7 @@ def test_report_written_to_contracts(tmp_path: Path):
                        [{"name": "documents", "entity": "Document", "op": "list"}],
                        binding="documents")})
     run_binding_smoke(root, mode="warn")
-    rep = json.loads((root / "contracts" / "binding-smoke.json").read_text())
+    rep = json.loads((root / "contracts" / "binding-smoke.json").read_text(encoding="utf-8"))
     assert rep["summary"]["error"] == 1
 
 

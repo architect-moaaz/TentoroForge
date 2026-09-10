@@ -49,8 +49,8 @@ def _write_project(tmp_path: Path, schemas: dict[str, dict], registry=_REGISTRY)
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True, exist_ok=True)
     for name, doc in schemas.items():
-        (sdir / name).write_text(json.dumps(doc))
-    (tmp_path / "registry.json").write_text(json.dumps(registry))
+        (sdir / name).write_text(json.dumps(doc), encoding="utf-8")
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
     return str(tmp_path)
 
 
@@ -285,7 +285,7 @@ def test_missing_registry_still_scans_and_reports(tmp_path):
     doesn't crash."""
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
-    (sdir / "mrr.json").write_text(json.dumps(_mrr_page_missing_metrics()))
+    (sdir / "mrr.json").write_text(json.dumps(_mrr_page_missing_metrics()), encoding="utf-8")
     # NO registry.json written.
     res = guard_aggregate_metrics(str(tmp_path))
     assert res["injected"] == 0

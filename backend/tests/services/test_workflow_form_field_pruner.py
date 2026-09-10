@@ -52,7 +52,7 @@ def _wf(process_vars: list[str], values: dict) -> dict:
 
 def _write_wf(root: Path, name: str, wf: dict) -> None:
     (root / "workflows").mkdir(exist_ok=True)
-    (root / "workflows" / f"{name}.json").write_text(json.dumps(wf))
+    (root / "workflows" / f"{name}.json").write_text(json.dumps(wf), encoding="utf-8")
 
 
 def _write_action_contract(root: Path, actions: list[dict]) -> None:
@@ -95,7 +95,7 @@ def test_drops_plain_string_value_not_in_form_input_map(tmp_path):
     )
 
     result = prune_workflow_form_fields(str(tmp_path))
-    written = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text())
+    written = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text(encoding="utf-8"))
     values = written["definition"]["nodes"][1]["data"]["config"]["values"]
     assert "isVerified" not in values
     assert "verifiedAt" not in values
@@ -119,7 +119,7 @@ def test_keeps_value_when_form_collects_it(tmp_path):
         ],
     )
     result = prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values == {"email": "email"}
@@ -136,7 +136,7 @@ def test_keeps_literal_value_not_a_process_var(tmp_path):
         [{"file": "carers/new.json", "kind": "form_submit", "workflow_id": "create-carer", "resolved": True, "input_map": {"userId": "userId"}}],
     )
     prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values["role"] == "carer"
@@ -152,7 +152,7 @@ def test_keeps_mustache_bindings_untouched(tmp_path):
         [{"file": "users/new.json", "kind": "form_submit", "workflow_id": "create-user", "resolved": True, "input_map": {"email": "email"}}],
     )
     prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values["junk"] == "{{junk}}"
@@ -172,7 +172,7 @@ def test_unions_input_maps_across_multiple_forms(tmp_path):
         ],
     )
     prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert set(values.keys()) == {"email", "name", "userId"}
@@ -184,7 +184,7 @@ def test_no_action_contract_is_safe_noop(tmp_path):
     # No action-contract file at all.
     result = prune_workflow_form_fields(str(tmp_path))
     assert result["values_removed"] == 0
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert values == {"email": "email", "phantom": "phantom"}
@@ -202,7 +202,7 @@ def test_workflow_with_no_dispatching_form_is_untouched(tmp_path):
         ],
     )
     prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateUser.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert "isVerified" in values  # left alone
@@ -231,7 +231,7 @@ def test_matches_workflow_by_normalized_id(tmp_path):
         [{"file": "carers/new.json", "kind": "form_submit", "workflow_id": "createcarer", "resolved": True, "input_map": {"userId": "userId"}}],
     )
     result = prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "CreateCarer.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert "isVerified" not in values
@@ -252,7 +252,7 @@ def test_updates_db_update_values_too(tmp_path):
         [{"file": "carers/[id]/edit.json", "kind": "form_submit", "workflow_id": "update-carer", "resolved": True, "input_map": {"userId": "userId"}}],
     )
     prune_workflow_form_fields(str(tmp_path))
-    values = json.loads((tmp_path / "workflows" / "UpdateCarer.json").read_text())[
+    values = json.loads((tmp_path / "workflows" / "UpdateCarer.json").read_text(encoding="utf-8"))[
         "definition"
     ]["nodes"][1]["data"]["config"]["values"]
     assert "isVerified" not in values

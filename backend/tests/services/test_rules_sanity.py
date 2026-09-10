@@ -16,7 +16,7 @@ def _mk(tmp_path: Path, rules: list) -> Path:
 
 
 def _rules(root: Path) -> list:
-    return json.loads((root / "src" / "rules" / "index.json").read_text())
+    return json.loads((root / "src" / "rules" / "index.json").read_text(encoding="utf-8"))
 
 
 _CLOBBER = {

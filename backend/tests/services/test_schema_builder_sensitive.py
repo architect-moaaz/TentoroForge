@@ -59,7 +59,7 @@ def test_sensitive_column_renamed_to_encrypted(tmp_path):
           "mask": "last4", "nullable": False}],
         readers=["bank_admin"],
     ), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     # The plaintext column is GONE.
     # Match the drizzle column line (`  accountNumber: text(...)`) to avoid
     # false positives from comment mentions or column bodies referencing it.
@@ -77,7 +77,7 @@ def test_sensitive_column_emits_mask_sibling(tmp_path):
           "mask": "last4", "nullable": False}],
         readers=["bank_admin"],
     ), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     # Mask sibling: text (nullable — a freshly-inserted row without a set
     # sensitive value has no mask).
     assert 'accountNumber_mask: text("account_number_mask")' in src
@@ -102,7 +102,7 @@ def test_sensitive_header_comment_stamps_original_names(tmp_path):
         ],
         readers=["bank_admin"],
     ), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     # The header should name the ORIGINAL columns, not the encrypted ones.
     header_line = next(ln for ln in src.splitlines() if "SENSITIVE COLUMNS" in ln)
     assert "accountNumber" in header_line
@@ -117,7 +117,7 @@ def test_sensitive_is_idempotent_when_plan_predeclares_encrypted(tmp_path):
           "mask": "last4"}],
         readers=["bank_admin"],
     ), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "accounts.ts").read_text(encoding="utf-8")
     assert "accountNumber_encrypted_encrypted" not in src
     # And the mask column is named against the ORIGINAL (stripped) name.
     assert 'accountNumber_mask: text("account_number_mask")' in src
@@ -136,7 +136,7 @@ def test_manifest_emitted_with_column_specs(tmp_path):
         ],
         readers=["bank_admin", "compliance"],
     ), str(tmp_path))
-    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text(encoding="utf-8")
     assert "SENSITIVE_COLUMNS" in manifest
     assert "hasSensitiveColumns" in manifest
     assert "sensitiveColumnsFor" in manifest
@@ -160,7 +160,7 @@ def test_manifest_still_emitted_when_no_sensitive_columns(tmp_path):
     ), str(tmp_path))
     manifest_path = tmp_path / "src" / "lib" / "sensitive-columns.ts"
     assert manifest_path.is_file()
-    manifest = manifest_path.read_text()
+    manifest = manifest_path.read_text(encoding="utf-8")
     assert "SENSITIVE_COLUMNS" in manifest
     assert "SENSITIVE_COLUMNS: Record<" in manifest
     assert '"accountNumber":' not in manifest
@@ -173,7 +173,7 @@ def test_manifest_empty_readers_are_preserved(tmp_path):
         [{"name": "ssn", "type": "text", "sensitive": True, "mask": "full"}],
         readers=[],
     ), str(tmp_path))
-    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text(encoding="utf-8")
     assert 'readers: []' in manifest
 
 
@@ -185,7 +185,7 @@ def test_manifest_mask_defaults_to_last4_when_field_omits_it(tmp_path):
         [{"name": "accountNumber", "type": "text", "sensitive": True}],
         readers=["bank_admin"],
     ), str(tmp_path))
-    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text()
+    manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text(encoding="utf-8")
     assert '"accountNumber": { mask: "last4"' in manifest
 
 
@@ -204,12 +204,12 @@ def test_sensitive_plays_nice_with_append_only(tmp_path):
     plan["data_models"][0]["name"] = "Transaction"
     plan["data_models"][0]["table"] = "transactions"
     build_schema_files(plan, str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert "APPEND-ONLY LEDGER" in src
     assert "updatedAt" not in src
     assert "accountNumber_encrypted:" in src
     assert "accountNumber_mask:" in src
-    ao_manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text()
+    ao_manifest = (tmp_path / "src" / "lib" / "append-only-entities.ts").read_text(encoding="utf-8")
     assert '"Transaction"' in ao_manifest
-    s_manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text()
+    s_manifest = (tmp_path / "src" / "lib" / "sensitive-columns.ts").read_text(encoding="utf-8")
     assert '"Transaction":' in s_manifest

@@ -1,5 +1,7 @@
 "use client";
 import * as React from "react";
+import { useRuntimeArmed, useDesignTime } from "@tentoroforge/renderer";
+import { resolveStyle } from "../../style/resolveStyle";
 import type { FocusTrapPropsType } from "./FocusTrap.schema";
 
 export interface FocusTrapProps extends FocusTrapPropsType {
@@ -48,14 +50,26 @@ function _focusables(root: HTMLElement): HTMLElement[] {
 }
 
 export function FocusTrap({
-  active = true,
+  active: activeProp = true,
   autoFocus = true,
   restoreFocus = true,
   className,
+  style,
   children,
 }: FocusTrapProps): React.ReactElement {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const designTime = useDesignTime();
   const previouslyFocused = React.useRef<HTMLElement | null>(null);
+  // A TRAP MUST NOT ARM AROUND THE PERSON BUILDING IT.
+  //
+  // On the editor canvas this took `document.activeElement` on mount — with no
+  // focusable descendant it stamped `tabindex="-1"` on its own root and focused
+  // that — and then `preventDefault()`ed every Tab, so the editor's Tab key was
+  // dead for as long as a FocusTrap sat on the page. `restoreFocus` made it
+  // worse in the other direction, yanking focus back to a palette item on every
+  // unmount. Turning `active` off is not the fix: that is the RUNTIME setting,
+  // so it would ship a trap that does not trap. See useRuntimeArmed.
+  const active = useRuntimeArmed(activeProp);
 
   // Initial focus + restore on unmount / deactivate.
   React.useEffect(() => {
@@ -127,8 +141,20 @@ export function FocusTrap({
     <div
       ref={rootRef}
       data-forge-focus-trap={active ? "active" : "inactive"}
+      data-forge-focus-trap-authored={activeProp ? "active" : "inactive"}
       onKeyDown={onKeyDown}
       className={className}
+      style={{
+        // An EMPTY TRAP MEASURED 960x0 — a bare `<div>` with no padding, no
+        // min-height and no border, so the only evidence one was on the page at
+        // all was the hint overlay. A minimum height on an authoring surface
+        // makes it a box the author can see, select and drop into; outside one
+        // the element keeps its previous zero-height, no-op geometry, so no
+        // shipped page moves by a pixel. Authored style comes LAST and wins,
+        // which is the point of finally having a style slot to author.
+        ...(designTime ? { minHeight: 44, outline: "1px dashed var(--border, hsl(0 0% 82%))", outlineOffset: -1 } : null),
+        ...resolveStyle(style),
+      }}
     >
       {children}
     </div>

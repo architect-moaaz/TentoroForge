@@ -20,7 +20,7 @@ def test_fixture_exists():
 
 
 def test_emits_expected_component_types():
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     types = _walk_types({"children": result.page["children"]})
     # Login page MUST have these in any sane mapping:
@@ -35,14 +35,14 @@ def test_emits_expected_component_types():
 
 
 def test_idempotent_ids():
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     a = build_page_schema(doc)
     b = build_page_schema(doc)
     assert json.dumps(a.page) == json.dumps(b.page)
 
 
 def test_extracts_emerald_primary_from_button():
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     primary_500 = result.tokens["color"]["primary"].get("500", "").lower()
     # Emerald-ish — first hex digit pair starts with 0 or 1
@@ -52,7 +52,7 @@ def test_extracts_emerald_primary_from_button():
 
 def test_complete_flag_true_when_no_box_nodes():
     """If the classifier handles every node, complete is True."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     # Allow a small number of Box fall-throughs from edge cases, but most
     # should be classified. complete will be True iff zero Boxes.
@@ -76,7 +76,7 @@ def test_id_derived_from_figma_id():
 def test_emits_typography_tokens():
     """Fixture's TEXT nodes carry style — typography block must populate."""
     import json
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     typo = result.tokens.get("typography") or {}
     # Top-level keys present
@@ -124,7 +124,7 @@ def _collect_nodes(node, acc=None):
 
 
 def test_leaf_nodes_have_no_children():
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     nodes = _collect_nodes({"children": result.page["children"]})
     offenders = [
@@ -140,7 +140,7 @@ def test_leaf_nodes_have_no_children():
 def test_heading_carries_folded_content():
     """Heading wrappers around TEXT children must surface the descendant
     text as props.content — not as a nested Heading child."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     nodes = _collect_nodes({"children": result.page["children"]})
     headings = [n for n in nodes if n.get("type") == "Heading"]
@@ -157,7 +157,7 @@ def test_text_color_propagated_into_leaf_wrapper():
     """A Heading wrapper whose inner TEXT has a fill must carry that colour
     as a `text-[#hex]` utility on its own className — otherwise the visible
     text colour is lost when the inner TEXT child is dropped."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     nodes = []
     def go(n):
@@ -182,7 +182,7 @@ def test_text_color_propagated_into_leaf_wrapper():
 def test_text_font_size_propagated_into_leaf_wrapper():
     """Inner TEXT's font-size must surface on the leaf wrapper's className
     so headings render at the size the designer set in Figma."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     def all_nodes(n, acc=None):
         if acc is None: acc = []
@@ -209,7 +209,7 @@ def test_background_fill_emits_bg_utility():
     """A frame with a non-white solid fill must surface as a `bg-[#hex]`
     utility on its className. This is the mechanism the brand-red panel
     of the design relies on to render its colour."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     result = build_page_schema(doc)
     def all_nodes(n, acc=None):
         if acc is None: acc = []
@@ -716,7 +716,7 @@ def test_asset_paths_threaded_into_icon_image_props():
     """When asset_paths is supplied, matching Figma node ids get a `src` on
     the resulting Image / Icon node. This is the hook the asset-export
     pipeline plugs into to display Figma icons/logos instead of nothing."""
-    doc = json.loads(FIXTURE.read_text())
+    doc = json.loads(FIXTURE.read_text(encoding="utf-8"))
     # First pass — discover the Figma node ids that classify as Image/Icon
     no_assets = build_page_schema(doc)
     image_or_icon = [

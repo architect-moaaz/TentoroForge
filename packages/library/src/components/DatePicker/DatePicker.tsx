@@ -4,6 +4,7 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { DatePickerPropsType } from "./DatePicker.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { useFieldValue } from "../../util/useFieldValue";
 import { useDensity, useRadiusScale } from "../../theme/tokens-context";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 
@@ -38,8 +39,14 @@ const INPUT_STATIC =
   "disabled:opacity-50";
 
 export function DatePicker({ name, label, min, max, validators, bind: _bind,
-                            style, value, onChange }: DatePickerProps) {
+                            style, value, defaultValue, onChange }: DatePickerProps) {
   const id = useDatePickerId(name);
+  // Same quiet split as TimePicker: uncontrolled with no `value`, frozen with a
+  // `value` and no handler. Form's declarative mode wraps this in a Controller
+  // that supplies BOTH, so that path stays controlled and is unaffected.
+  const [current, commit] = useFieldValue<string>(
+    value, onChange, defaultValue as string | undefined, "",
+  );
   const required = validators?.required === true;
   const radiusScale = useRadiusScale();
   const density = useDensity();
@@ -63,8 +70,8 @@ export function DatePicker({ name, label, min, max, validators, bind: _bind,
         min={min}
         max={max}
         required={required}
-        value={value}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        value={current}
+        onChange={(e) => commit(e.target.value)}
       />
     </div>
   );

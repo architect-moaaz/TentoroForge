@@ -77,10 +77,10 @@ def test_list_pages_with_schemas(client):
     tc, tmp = client
     schemas = tmp / "demo" / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "home.json").write_text("{}")
+    (schemas / "home.json").write_text("{}", encoding="utf-8")
     products_dir = schemas / "products"
     products_dir.mkdir(parents=True, exist_ok=True)
-    (products_dir / "list.json").write_text("{}")
+    (products_dir / "list.json").write_text("{}", encoding="utf-8")
     r = tc.get("/api/projects/demo/schemas")
     assert r.status_code == 200
     paths = r.json()["paths"]
@@ -102,7 +102,7 @@ def test_load_existing_schema(client):
         "route": "/",
         "root": {"id": "r", "type": "Box", "children": []},
     }
-    (project / "src" / "schemas" / "page1.json").write_text(json.dumps(schema_data))
+    (project / "src" / "schemas" / "page1.json").write_text(json.dumps(schema_data), encoding="utf-8")
     r = tc.get("/api/projects/demo/load?path=page1")
     assert r.status_code == 200
     assert r.json()["schema"]["id"] == "p"

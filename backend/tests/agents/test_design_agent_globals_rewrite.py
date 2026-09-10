@@ -57,7 +57,7 @@ body { color: hsl(var(--foreground)); }
     }
     _rewrite_globals_root(globals_path, palette)
 
-    rewritten = globals_path.read_text()
+    rewritten = globals_path.read_text(encoding="utf-8")
     # New value present and matches the colorPalette truth, NOT the LLM's stale value
     assert "--background: 204 100% 97%" in rewritten
     # Old default for --primary should be REPLACED in the main :root (not appended)
@@ -83,13 +83,13 @@ def test_rewrite_globals_root_is_idempotent(tmp_path: Path):
     from agents.design_agent import _rewrite_globals_root
 
     globals_path = tmp_path / "globals.css"
-    globals_path.write_text(":root { --background: 0 0% 100%; }")
+    globals_path.write_text(":root { --background: 0 0% 100%; }", encoding="utf-8")
     palette = {"background": "#F0F9FF"}
 
     _rewrite_globals_root(globals_path, palette)
-    first = globals_path.read_text()
+    first = globals_path.read_text(encoding="utf-8")
     _rewrite_globals_root(globals_path, palette)
-    second = globals_path.read_text()
+    second = globals_path.read_text(encoding="utf-8")
     assert first == second
 
 
@@ -98,10 +98,10 @@ def test_rewrite_globals_root_creates_block_when_missing(tmp_path: Path):
     from agents.design_agent import _rewrite_globals_root
 
     globals_path = tmp_path / "globals.css"
-    globals_path.write_text("@tailwind base;\n@tailwind utilities;\n")
+    globals_path.write_text("@tailwind base;\n@tailwind utilities;\n", encoding="utf-8")
     _rewrite_globals_root(globals_path, {"background": "#F0F9FF", "primary": "#0284C7"})
 
-    rewritten = globals_path.read_text()
+    rewritten = globals_path.read_text(encoding="utf-8")
     assert ":root {" in rewritten
     assert "--background: 204 100% 97%" in rewritten
     assert "--primary:" in rewritten
@@ -123,7 +123,7 @@ def test_rewrite_globals_root_ignores_non_hex_values(tmp_path: Path):
     from agents.design_agent import _rewrite_globals_root
 
     globals_path = tmp_path / "globals.css"
-    globals_path.write_text(":root { --background: 0 0% 100%; }")
+    globals_path.write_text(":root { --background: 0 0% 100%; }", encoding="utf-8")
     # mix of valid + various junk
     palette = {
         "background": "#F0F9FF",
@@ -133,7 +133,7 @@ def test_rewrite_globals_root_ignores_non_hex_values(tmp_path: Path):
     }
     _rewrite_globals_root(globals_path, palette)
 
-    rewritten = globals_path.read_text()
+    rewritten = globals_path.read_text(encoding="utf-8")
     assert "--background: 204 100% 97%" in rewritten
     # Non-hex values should not show up as broken declarations
     assert "tokens.color" not in rewritten
@@ -162,7 +162,7 @@ def test_save_design_spec_rewrites_globals_from_palette(tmp_path: Path):
     }
     save_design_spec(str(tmp_path), spec)
 
-    rewritten = globals_path.read_text()
+    rewritten = globals_path.read_text(encoding="utf-8")
     assert "--background: 204 100% 97%" in rewritten
     # The wrong LLM default `221 83% 53%` should be gone
     assert "221 83% 53%" not in rewritten
@@ -218,11 +218,11 @@ class TestVisualLockFontInjection:
     def test_inject_is_idempotent(self, tmp_path):
         from agents.design_agent import _inject_font_import_from_typography
         p = tmp_path / "globals.css"
-        p.write_text("@tailwind base;\n:root { --x: 1; }\n")
+        p.write_text("@tailwind base;\n:root { --x: 1; }\n", encoding="utf-8")
         _inject_font_import_from_typography(p, self._typography_visual_lock())
-        once = p.read_text()
+        once = p.read_text(encoding="utf-8")
         _inject_font_import_from_typography(p, self._typography_visual_lock())
-        assert p.read_text() == once, "font injection must be idempotent"
+        assert p.read_text(encoding="utf-8") == once, "font injection must be idempotent"
         # @import lives at the very top so the browser fetches it before
         # any @tailwind directive parses.
         assert once.splitlines()[0].startswith("@import url('https://fonts.googleapis.com/css2?family=Fraunces")
@@ -230,12 +230,12 @@ class TestVisualLockFontInjection:
     def test_rewrite_globals_root_typography_arg_injects_import(self, tmp_path):
         from agents.design_agent import _rewrite_globals_root
         p = tmp_path / "globals.css"
-        p.write_text("@tailwind base;\n:root { --x: 1; }\n")
+        p.write_text("@tailwind base;\n:root { --x: 1; }\n", encoding="utf-8")
         _rewrite_globals_root(
             p, palette={"primary": "#5A6B4A"}, radius_md="12px",
             typography=self._typography_visual_lock(),
         )
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         assert "Fraunces" in text and "Inter" in text
         assert "@import url('https://fonts.googleapis.com/css2" in text
         # --font-display / --font-body reach the :root so the vendored
@@ -246,8 +246,8 @@ class TestVisualLockFontInjection:
     def test_rewrite_globals_root_without_typography_leaves_fonts_alone(self, tmp_path):
         from agents.design_agent import _rewrite_globals_root
         p = tmp_path / "globals.css"
-        p.write_text("@tailwind base;\n:root { --x: 1; }\n")
+        p.write_text("@tailwind base;\n:root { --x: 1; }\n", encoding="utf-8")
         _rewrite_globals_root(p, palette={"primary": "#5A6B4A"}, radius_md="12px")
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         # No typography passed → no Google Fonts @import injected.
         assert "fonts.googleapis.com" not in text

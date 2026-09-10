@@ -37,9 +37,9 @@ def _make_project(tmp_path: Path, *, plan: dict | None = None,
     out.mkdir()
     if plan is not None:
         (out / "contracts").mkdir()
-        (out / "contracts" / "plan.json").write_text(json.dumps(plan))
+        (out / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     if design_spec is not None:
-        (out / "design_spec.json").write_text(json.dumps(design_spec))
+        (out / "design_spec.json").write_text(json.dumps(design_spec), encoding="utf-8")
     return out
 
 
@@ -57,7 +57,7 @@ class TestSubstitution:
             brand_hex="#FF5722",
         )
         # app.json — every substitution shows up.
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         expo = app_json["expo"]
         assert expo["name"] == "Recipe Collection"
         assert expo["slug"] == "recipe-collection"
@@ -85,7 +85,7 @@ class TestSubstitution:
         `eas build` doesn't crash on parse."""
         out = _make_project(tmp_path)
         scaffold_mobile(str(out), app_name="X", deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["extra"]["appUrl"] == ""
 
 
@@ -97,9 +97,9 @@ class TestIdempotency:
     def test_second_run_is_stable(self, tmp_path):
         out = _make_project(tmp_path)
         scaffold_mobile(str(out), app_name="X", deployed_url="https://x.io")
-        first = (out / "mobile" / "app.json").read_text()
+        first = (out / "mobile" / "app.json").read_text(encoding="utf-8")
         scaffold_mobile(str(out), app_name="X", deployed_url="https://x.io")
-        second = (out / "mobile" / "app.json").read_text()
+        second = (out / "mobile" / "app.json").read_text(encoding="utf-8")
         assert first == second
 
     def test_rebrand_updates_color_and_url(self, tmp_path):
@@ -109,7 +109,7 @@ class TestIdempotency:
                         brand_hex="#000000")
         scaffold_mobile(str(out), app_name="X", deployed_url="https://new.io",
                         brand_hex="#FFFFFF")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["extra"]["appUrl"] == "https://new.io"
         assert app_json["expo"]["splash"]["backgroundColor"] == "#FFFFFF"
 
@@ -120,13 +120,13 @@ class TestIdempotency:
         # First scaffold, then simulate `eas init` writing a real id.
         scaffold_mobile(str(out), app_name="X", deployed_url="https://x.io")
         app_json_path = out / "mobile" / "app.json"
-        data = json.loads(app_json_path.read_text())
+        data = json.loads(app_json_path.read_text(encoding="utf-8"))
         data["expo"]["extra"]["eas"]["projectId"] = "abc-123-def-456"
-        app_json_path.write_text(json.dumps(data))
+        app_json_path.write_text(json.dumps(data), encoding="utf-8")
 
         # Re-scaffold.
         scaffold_mobile(str(out), app_name="X", deployed_url="https://x.io")
-        after = json.loads(app_json_path.read_text())
+        after = json.loads(app_json_path.read_text(encoding="utf-8"))
         assert after["expo"]["extra"]["eas"]["projectId"] == "abc-123-def-456"
 
 
@@ -141,13 +141,13 @@ class TestBrandDerivation:
             design_spec={"colorPalette": {"primary": "#EF4444"}},
         )
         scaffold_mobile(str(out), app_name="X", deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["splash"]["backgroundColor"] == "#EF4444"
 
     def test_falls_back_to_default_when_no_spec(self, tmp_path):
         out = _make_project(tmp_path)  # no design_spec.json
         scaffold_mobile(str(out), app_name="X", deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["splash"]["backgroundColor"] == _DEFAULT_BRAND_HEX
 
     def test_explicit_brand_wins_over_spec(self, tmp_path):
@@ -158,7 +158,7 @@ class TestBrandDerivation:
         )
         scaffold_mobile(str(out), app_name="X", deployed_url="",
                         brand_hex="#22FF22")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["splash"]["backgroundColor"] == "#22FF22"
 
     def test_normalize_hex_short_form(self):
@@ -179,14 +179,14 @@ class TestAppNameInference:
     def test_reads_plan_name(self, tmp_path):
         out = _make_project(tmp_path, plan={"name": "Planters Nursery"})
         scaffold_mobile(str(out), deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["name"] == "Planters Nursery"
         assert app_json["expo"]["slug"] == "planters-nursery"
 
     def test_falls_back_to_module_name(self, tmp_path):
         out = _make_project(tmp_path, plan={"module_name": "recipes"})
         scaffold_mobile(str(out), deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["name"] == "recipes"
 
 
@@ -248,14 +248,14 @@ class TestBundleIdShape:
         out = _make_project(tmp_path)
         scaffold_mobile(str(out), app_name="Recipe Collection",
                         deployed_url="")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["ios"]["bundleIdentifier"] == "com.tentoro.recipecollection"
 
     def test_explicit_bundle_id_overrides(self, tmp_path):
         out = _make_project(tmp_path)
         scaffold_mobile(str(out), app_name="X", deployed_url="",
                         bundle_id="com.acme.customapp")
-        app_json = json.loads((out / "mobile" / "app.json").read_text())
+        app_json = json.loads((out / "mobile" / "app.json").read_text(encoding="utf-8"))
         assert app_json["expo"]["ios"]["bundleIdentifier"] == "com.acme.customapp"
         assert app_json["expo"]["android"]["package"] == "com.acme.customapp"
 
@@ -266,7 +266,7 @@ class TestMobileTemplateCameraFixes:
     def _template(self):
         from pathlib import Path
         return (Path(__file__).resolve().parents[2] / "templates" / "mobile"
-                / "App.tsx").read_text()
+                / "App.tsx").read_text(encoding="utf-8")
 
     def test_no_scrollview_around_webview(self):
         # A WebView nested in a ScrollView breaks Android's video-surface

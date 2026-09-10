@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { BackgroundT } from "@tentoroforge/schema";
-import { backgroundCss } from "../../style/resolveStyle";
+import { backgroundCss, colorValue } from "../../style/resolveStyle";
 
 type GradientBg = {
   type: "linear";
@@ -55,7 +55,16 @@ export function SurfaceBackground({ background, style, children, ...rest }: Prop
   } else if (isSchemaBackground(background)) {
     bgStyle = { background: backgroundCss(background) };
   } else if (typeof background === "string") {
-    bgStyle = { background };
+    // Through `colorValue`, NOT verbatim. The Style tab's Background dropdown
+    // writes bare token refs ("color.primary.500"), and passing one straight to
+    // CSS produced `background: color.primary.500` — not valid CSS, discarded
+    // by the browser, fill never painted, nothing in the console. The two
+    // object branches above already resolve tokens via backgroundCss; this
+    // branch was the one that did not, which is why Background looked dead on
+    // exactly the three SurfaceBackground consumers: Card, Hero and Section
+    // (docs/editor-audit/panels.md, "Style — Background is DEAD on
+    // Card / Hero / Section").
+    bgStyle = { background: colorValue(background) };
   }
   return (
     <div style={{ ...bgStyle, ...style }} {...rest}>

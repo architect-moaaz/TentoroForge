@@ -45,14 +45,14 @@ def test_guard_rewrites_schema_files(tmp_path):
         '{"type":"Button","props":{"label":"Edit","navigate":"/guests/{{item.id}}/edit"}},' +
         '{"type":"Button","props":{"label":"Approvals","navigate":"/rate-change-requests"}},' +
         '{"type":"Button","props":{"label":"Calendar","navigate":"/calendar"}},' +
-        '{"type":"Button","props":{"label":"Guests","navigate":"/guests"}}]}}')
+        '{"type":"Button","props":{"label":"Guests","navigate":"/guests"}}]}}', encoding="utf-8")
     (root / "guests/[id].json").parent.mkdir(parents=True, exist_ok=True)
-    (root / "guests/[id].json").write_text('{"root":{"type":"Stack"}}')
-    (root / "rate-changes.json").write_text('{"root":{"type":"Stack"}}')
+    (root / "guests/[id].json").write_text('{"root":{"type":"Stack"}}', encoding="utf-8")
+    (root / "rate-changes.json").write_text('{"root":{"type":"Stack"}}', encoding="utf-8")
 
     res = guard_nav_targets(tmp_path)
     import json
-    out = json.loads((root / "guests.json").read_text())
+    out = json.loads((root / "guests.json").read_text(encoding="utf-8"))
     btns = out["root"]["children"]
     assert btns[0]["props"]["navigate"] == "/guests/{{item.id}}"   # edit→detail
     assert btns[1]["props"]["navigate"] == "/rate-changes"          # drift→repoint

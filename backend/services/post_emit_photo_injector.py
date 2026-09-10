@@ -120,13 +120,13 @@ def inject_photos_into_dir(output_dir: str, entity_photos: dict[str, str]) -> in
     mutated = 0
     for json_file in schemas_dir.rglob("*.json"):
         try:
-            page = json.loads(json_file.read_text())
+            page = json.loads(json_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         before = json.dumps(page, sort_keys=True)
         inject_photos(page, entity_photos)
         after = json.dumps(page, sort_keys=True)
         if before != after:
-            json_file.write_text(json.dumps(page, indent=2))
+            json_file.write_text(json.dumps(page, indent=2), encoding="utf-8")
             mutated += 1
     return mutated

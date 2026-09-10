@@ -43,7 +43,7 @@ def _mk_app(tmp_path: Path, pages: dict[str, dict]) -> Path:
     sdir.mkdir(parents=True)
     for fname, root_node in pages.items():
         (sdir / fname).write_text(json.dumps(
-            {"id": fname, "route": "/" + fname[:-5], "root": root_node}))
+            {"id": fname, "route": "/" + fname[:-5], "root": root_node}), encoding="utf-8")
     return root
 
 

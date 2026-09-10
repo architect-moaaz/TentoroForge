@@ -13,8 +13,11 @@ import { StyleSlot } from "@tentoroforge/schema";
  */
 export const LinkProps = z.object({
   label:     z.string().default("Link"),
-  navigate:  z.string().default("#"),
+  navigate:  z.string().default(""),
   workflow:  z.string().optional(),
+  /** Where to open the destination. "_blank" also emits rel="noopener
+   *  noreferrer" and is left to the browser rather than soft-navigated. */
+  target:    z.enum(["_self", "_blank"]).optional(),
   args:      z.record(z.unknown()).optional(),
   style:     StyleSlot.optional(),
   className: z.string().optional(),

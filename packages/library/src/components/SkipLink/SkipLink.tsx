@@ -37,6 +37,40 @@ const VISIBLE: React.CSSProperties = {
 };
 
 /**
+ * Find the landmark this link should jump to.
+ *
+ * THE ID IS A HINT, NOT A CONTRACT.
+ * ---------------------------------
+ * `target` defaults to "main" because the app shell template stamps
+ * `id="main"` on its landmark — but nothing enforces that, and the hosts that
+ * do not stamp it are exactly the ones nobody checks. Measured on the preview
+ * renderer: `<main>` carries `style`, `data-project-id`, `data-page-path`,
+ * `data-register` and **no id**, so `document.getElementById("main")` was null,
+ * the handler did nothing, and pressing Enter on the skip link moved neither
+ * focus nor scroll. An accessibility component failing silently is the worst
+ * failure mode there is — nobody who needs it is in a position to notice.
+ *
+ * So: look the id up, and when it is not there fall back to the landmark the
+ * id was standing in for. The element found by fallback is then STAMPED with
+ * the id, so the anchor's own `href="#main"` — and the browser's native
+ * fragment behaviour, and any other link pointing at it — starts working too,
+ * rather than only this component's click handler.
+ */
+export function resolveLandmark(id: string): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  const byId = document.getElementById(id);
+  if (byId) return byId;
+  // Only the conventional main-content ids fall back to <main>; a link
+  // pointing at some other id must not silently retarget somewhere else.
+  if (id !== "main" && id !== "main-content" && id !== "content") return null;
+  const landmark =
+    document.querySelector<HTMLElement>("main") ??
+    document.querySelector<HTMLElement>("[role='main']");
+  if (landmark && !landmark.id) landmark.id = id;
+  return landmark;
+}
+
+/**
  * SkipLink — Spec E Wave 2. Renders an anchor that stays hidden until
  * the user tabs to it, at which point it becomes a visible "Skip to
  * main content" button. Activating it jumps focus to the target
@@ -56,8 +90,7 @@ export function SkipLink({
   // move keyboard focus to the target in every browser.
   const onClick = React.useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
-      const el =
-        typeof document !== "undefined" ? document.getElementById(id) : null;
+      const el = resolveLandmark(id);
       if (el) {
         e.preventDefault();
         // Make the landmark focusable if it isn't already (main isn't

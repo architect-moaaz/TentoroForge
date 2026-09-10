@@ -28,7 +28,7 @@ def _shell_menu_routes(output_dir: str) -> set[str]:
     if not shell_path.is_file():
         return routes
     try:
-        shell = json.loads(shell_path.read_text())
+        shell = json.loads(shell_path.read_text(encoding="utf-8"))
     except Exception:
         return routes
 
@@ -70,7 +70,7 @@ def strip_figma_overlay(output_dir: str) -> dict:
         if path.name == "shell.json":
             continue
         try:
-            page = json.loads(path.read_text())
+            page = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
         if not isinstance(page, dict) or not page.get("_figmaDerived"):
@@ -86,7 +86,7 @@ def strip_figma_overlay(output_dir: str) -> dict:
         if route not in menu_routes:
             continue
         page.pop("_figmaDerived", None)
-        path.write_text(json.dumps(page, indent=2) + "\n")
+        path.write_text(json.dumps(page, indent=2) + "\n", encoding="utf-8")
         stripped.append(str(path.relative_to(output_dir)))
 
     return {"stripped": len(stripped), "files": stripped}

@@ -138,7 +138,7 @@ def find_nonexecutable(output_dir: str | Path) -> list[tuple[str, dict]]:
     out: list[tuple[str, dict]] = []
     for f in sorted(wf_dir.glob("*.json")):
         try:
-            d = json.loads(f.read_text())
+            d = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             continue
         if is_valid_workflow(d) and not is_executable_workflow(d):
@@ -194,7 +194,7 @@ async def ensure_workflow_executability(
             # preserve identity so dispatch/binding keep working
             rebuilt["id"] = wf.get("id", rebuilt.get("id"))
             rebuilt["name"] = wf.get("name", rebuilt.get("name"))
-            (wf_dir / fname).write_text(json.dumps(rebuilt, indent=2))
+            (wf_dir / fname).write_text(json.dumps(rebuilt, indent=2), encoding="utf-8")
             report["repaired"].append(fname)
             logger.info("[Workflows] regenerated executable workflow %s", fname)
         else:

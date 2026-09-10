@@ -91,7 +91,7 @@ def test_refuses_unknown_entity(tmp_path):
 
 def test_refuses_existing_workflow_file(tmp_path):
     app = _seed_app(tmp_path, "Candidate")
-    (app / "workflows" / "CreateCandidate.json").write_text("{}")
+    (app / "workflows" / "CreateCandidate.json").write_text("{}", encoding="utf-8")
     with pytest.raises(AddWorkflowError, match=r"already exists"):
         build_add_workflow_bundle(str(app), op="create", entity="Candidate")
 

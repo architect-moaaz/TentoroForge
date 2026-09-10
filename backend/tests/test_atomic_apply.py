@@ -46,7 +46,7 @@ def repo(tmp_path: Path) -> Path:
     """A fresh git repo with one initial commit so `git stash`/`git rev-parse
     HEAD` work as they do in a real generated app."""
     _git(tmp_path, "init", "-b", "main")
-    (tmp_path / ".gitignore").write_text("")
+    (tmp_path / ".gitignore").write_text("", encoding="utf-8")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-m", "initial")
     return tmp_path
@@ -77,7 +77,7 @@ def test_happy_path_writes_all_files_and_makes_one_commit(repo: Path):
                                         "contracts/registry.json",
                                         "nav-flow.json"}
     # Files on disk match the ops.
-    assert (repo / "src/schemas/pipeline.json").read_text().startswith('{"route"')
+    assert (repo / "src/schemas/pipeline.json").read_text(encoding="utf-8").startswith('{"route"')
     assert (repo / "contracts/registry.json").exists()
     assert (repo / "nav-flow.json").exists()
     # One commit — the bundle is atomic in git too.
@@ -94,7 +94,7 @@ def test_no_verify_still_commits(repo: Path):
     result = apply_bundle_no_verify(str(repo), ops, commit_message="just a note")
     assert result.applied is True
     assert result.commit_hash is not None
-    assert (repo / "notes.md").read_text() == "hi"
+    assert (repo / "notes.md").read_text(encoding="utf-8") == "hi"
 
 
 def test_result_reports_ops_written_in_order(repo: Path):
@@ -114,7 +114,7 @@ def test_result_reports_ops_written_in_order(repo: Path):
 def test_verify_fail_rolls_back_every_write(repo: Path):
     # A pre-existing file we're going to overwrite. Rollback must restore
     # its original contents.
-    (repo / "existing.txt").write_text("ORIGINAL")
+    (repo / "existing.txt").write_text("ORIGINAL", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "seed")
 
@@ -129,7 +129,7 @@ def test_verify_fail_rolls_back_every_write(repo: Path):
     assert result.applied is False
     assert result.verify == {"ok": False, "reason": "test-forced fail"}
     # Rollback restored the pre-call state precisely.
-    assert (repo / "existing.txt").read_text() == "ORIGINAL"
+    assert (repo / "existing.txt").read_text(encoding="utf-8") == "ORIGINAL"
     assert not (repo / "new-file.txt").exists()
     # And no orphan commit landed.
     log = subprocess.check_output(
@@ -141,7 +141,7 @@ def test_verify_fail_rolls_back_every_write(repo: Path):
 def test_verify_crash_is_treated_as_fail(repo: Path):
     """A verifier that throws must not poison the applier — treated as an
     ok=False and triggering a rollback."""
-    (repo / "old.txt").write_text("keep")
+    (repo / "old.txt").write_text("keep", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "seed")
 
@@ -153,7 +153,7 @@ def test_verify_crash_is_treated_as_fail(repo: Path):
     )
     assert result.applied is False
     assert "verify crashed" in (result.reason or "")
-    assert (repo / "old.txt").read_text() == "keep"
+    assert (repo / "old.txt").read_text(encoding="utf-8") == "keep"
 
 
 def test_rejects_unsafe_paths(repo: Path):
@@ -177,7 +177,7 @@ def test_creates_missing_parent_dirs(repo: Path):
     ops = [BundleOp(path="a/b/c/deep.json", content="{}", kind="nested")]
     result = apply_bundle(str(repo), ops, verify=lambda _: {"ok": True})
     assert result.applied is True
-    assert (repo / "a/b/c/deep.json").read_text() == "{}"
+    assert (repo / "a/b/c/deep.json").read_text(encoding="utf-8") == "{}"
 
 
 def test_rollback_removes_created_parent_files_but_not_dirs(repo: Path):
@@ -206,11 +206,11 @@ def test_no_git_still_applies_and_verifies(tmp_path: Path):
     )
     assert result.applied is True
     assert result.commit_hash is None
-    assert (tmp_path / "thing.json").read_text() == '{"x":1}'
+    assert (tmp_path / "thing.json").read_text(encoding="utf-8") == '{"x":1}'
 
 
 def test_no_git_verify_fail_still_rolls_back(tmp_path: Path):
-    (tmp_path / "seed.txt").write_text("SEED")
+    (tmp_path / "seed.txt").write_text("SEED", encoding="utf-8")
     ops = [BundleOp(path="seed.txt", content="MUTATED")]
     result = apply_bundle(
         str(tmp_path), ops,
@@ -218,7 +218,7 @@ def test_no_git_verify_fail_still_rolls_back(tmp_path: Path):
         git=False,
     )
     assert result.applied is False
-    assert (tmp_path / "seed.txt").read_text() == "SEED"
+    assert (tmp_path / "seed.txt").read_text(encoding="utf-8") == "SEED"
 
 
 # --------------------------------------------------------------------------- #
@@ -230,11 +230,11 @@ def test_dirty_tree_is_stashed_and_restored_on_rollback(repo: Path):
     verify fails and rolls back. The applier stashes on entry and pops
     on exit."""
     # Seed a tracked file so we can dirty it.
-    (repo / "user-work.txt").write_text("initial")
+    (repo / "user-work.txt").write_text("initial", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "seed")
     # Now the user makes uncommitted edits.
-    (repo / "user-work.txt").write_text("USER-IN-PROGRESS")
+    (repo / "user-work.txt").write_text("USER-IN-PROGRESS", encoding="utf-8")
 
     ops = [BundleOp(path="smith-writes.txt", content="smith")]
     result = apply_bundle(
@@ -245,7 +245,7 @@ def test_dirty_tree_is_stashed_and_restored_on_rollback(repo: Path):
     # Smith's write was rolled back.
     assert not (repo / "smith-writes.txt").exists()
     # User's in-progress edits survived.
-    assert (repo / "user-work.txt").read_text() == "USER-IN-PROGRESS"
+    assert (repo / "user-work.txt").read_text(encoding="utf-8") == "USER-IN-PROGRESS"
 
 
 def test_missing_output_dir_is_a_clean_fail(tmp_path: Path):

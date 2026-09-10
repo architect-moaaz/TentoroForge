@@ -18,7 +18,7 @@ def _clear_flag(monkeypatch):
 
 def test_skipped_when_flag_off(tmp_path):
     # Even with a real start.sh present, no flag → skip (no Docker).
-    (tmp_path / "start.sh").write_text("#!/bin/bash\necho hi\n")
+    (tmp_path / "start.sh").write_text("#!/bin/bash\necho hi\n", encoding="utf-8")
     res = seed_smoke.run_seed_smoke(str(tmp_path))
     assert res["skipped"] is True
     assert res["ok"] is None

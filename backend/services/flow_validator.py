@@ -38,7 +38,7 @@ def validate_navigation_flow(output_dir: str) -> dict:
                 "stats": {"checked": 0, "passed": 0, "failed": 0}}
 
     try:
-        flow = json.loads(flow_file.read_text())
+        flow = json.loads(flow_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         return {"passed": False, "issues": [f"Invalid navigation-flow.json: {e}"],
                 "fix_prompt": None, "stats": {"checked": 0, "passed": 0, "failed": 0}}
@@ -270,7 +270,7 @@ def _find_api_route(api_dir: Path, route_dir: str) -> bool:
 def _read_file(path: Path) -> str:
     """Read file content, return empty string on error."""
     try:
-        return path.read_text()
+        return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return ""
 

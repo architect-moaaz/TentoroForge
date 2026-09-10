@@ -24,7 +24,7 @@ export function ValidationChecklist({
     <div
       data-validation-checklist=""
       data-orientation={orientation}
-      className={rootCls}
+      className={className ? `${rootCls} ${className}` : rootCls}
       style={resolveStyle(style)}
       {...useMotion((style as any)?.motion)}
     >

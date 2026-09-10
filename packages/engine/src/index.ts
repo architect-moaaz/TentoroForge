@@ -12,6 +12,9 @@ export type {
 } from "./types";
 
 export { interpolateString, interpolateDeep } from "./data/interpolate";
+export { computeAggregate, aggValue, parseExpression, evalExpr, rowsFor, matchesFilter } from "./data/aggregate";
+export type { AggregateSource, AggregateMetric } from "./data/aggregate";
+
 export { evalExpression } from "./data/expressions";
 export { fetchDataSources } from "./data/loader";
 
@@ -36,6 +39,9 @@ export {
   NavigatorContext,
   NavigatorProvider,
   useNavigator,
+  useHref,
+  createBasePathNavigator,
+  resolveWithBasePath,
 } from "@tentoroforge/renderer";
 export type { Navigator } from "@tentoroforge/renderer";
 

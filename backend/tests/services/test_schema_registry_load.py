@@ -10,8 +10,8 @@ from services.schema_pipeline import _regenerate_route_registry
 def _app(tmp_path: Path) -> Path:
     sd = tmp_path / "src" / "schemas"
     sd.mkdir(parents=True)
-    (sd / "home.json").write_text(json.dumps({"id": "home", "route": "/"}))
-    (sd / "tasks.json").write_text(json.dumps({"id": "tasks", "route": "/tasks"}))
+    (sd / "home.json").write_text(json.dumps({"id": "home", "route": "/"}), encoding="utf-8")
+    (sd / "tasks.json").write_text(json.dumps({"id": "tasks", "route": "/tasks"}), encoding="utf-8")
     return tmp_path
 
 
@@ -21,17 +21,17 @@ def test_emits_load_ts_next_to_registry(tmp_path):
     assert (sd / "registry.ts").exists()
     load = sd / "load.ts"
     assert load.exists(), "registry.ts imports ./load — load.ts must be emitted"
-    txt = load.read_text()
+    txt = load.read_text(encoding="utf-8")
     assert "export function loadSchema" in txt
     # registry's import resolves to this file
-    assert 'from "./load"' in (sd / "registry.ts").read_text()
+    assert 'from "./load"' in (sd / "registry.ts").read_text(encoding="utf-8")
 
 
 def test_does_not_clobber_existing_load(tmp_path):
     app = _app(tmp_path)
-    (app / "src" / "schemas" / "load.ts").write_text("// custom\nexport function loadSchema(){}\n")
+    (app / "src" / "schemas" / "load.ts").write_text("// custom\nexport function loadSchema(){}\n", encoding="utf-8")
     _regenerate_route_registry(str(app))
-    assert "// custom" in (app / "src" / "schemas" / "load.ts").read_text()
+    assert "// custom" in (app / "src" / "schemas" / "load.ts").read_text(encoding="utf-8")
 
 
 def test_load_ts_is_lenient_not_throwing(tmp_path):

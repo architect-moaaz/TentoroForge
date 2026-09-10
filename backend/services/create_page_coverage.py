@@ -314,7 +314,7 @@ async def ensure_create_pages_llm(
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(json.dumps(
-                    build_create_page(route, entity, cols, f"Create{entity}", reg_entities, output_dir=out), indent=2))
+                    build_create_page(route, entity, cols, f"Create{entity}", reg_entities, output_dir=out), indent=2), encoding="utf-8")
                 if _page_has_fields(target):
                     logger.info("[Schema] ⚡ deterministic create page (no LLM): %s", route)
                     return route
@@ -331,7 +331,7 @@ async def ensure_create_pages_llm(
                 # only synthesize deterministically when nothing exists yet.
                 if not target.exists() and cols:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(json.dumps(build_create_page(route, entity, cols, f"Create{entity}", reg_entities, output_dir=out), indent=2))
+                    target.write_text(json.dumps(build_create_page(route, entity, cols, f"Create{entity}", reg_entities, output_dir=out), indent=2), encoding="utf-8")
         return route if (target.exists() and _page_has_fields(target)) else None
 
     results = await asyncio.gather(*[_gen(*w) for w in work])

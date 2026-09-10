@@ -14,7 +14,7 @@ def test_sync_writes_executable_domain_workflows(tmp_path):
     assert len(files) == 6
     execu = 0
     for f in files:
-        d = json.loads(f.read_text())
+        d = json.loads(f.read_text(encoding="utf-8"))
         if is_executable_workflow(d):
             execu += 1
     assert execu == 6, f"only {execu}/6 domain workflows executable"
@@ -44,7 +44,7 @@ def test_all_six_domain_workflows_intelligent(tmp_path):
     wf_dir = tmp_path / "workflows"
     by_name = {}
     for f in wf_dir.glob("*.json"):
-        d = json.loads(f.read_text())
+        d = json.loads(f.read_text(encoding="utf-8"))
         by_name[d["name"]] = d
 
     # 1) every domain workflow is executable (no no-op custom chains)
@@ -87,7 +87,7 @@ def test_sync_wires_db_insert_after_extract_without_persist(tmp_path):
     _sync_workflows_from_plan(str(tmp_path), plan)
     files = list((tmp_path / "workflows").glob("*.json"))
     assert len(files) == 1
-    d = json.loads(files[0].read_text())
+    d = json.loads(files[0].read_text(encoding="utf-8"))
     nodes = d["definition"]["nodes"]
     insert_nodes = [n for n in nodes
                     if n["type"] == "action"

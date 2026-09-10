@@ -65,7 +65,7 @@ def emit_generation_dossier(
         "plan": plan,
         "generatedAt": generated_at,
     }
-    path.write_text(json.dumps(dossier, indent=2))
+    path.write_text(json.dumps(dossier, indent=2), encoding="utf-8")
     return str(path)
 
 
@@ -218,7 +218,7 @@ def assemble_recall(
 def _read_json(path: Path) -> Optional[Any]:
     try:
         if path.exists():
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("app_recall: could not read %s: %s", path, exc)
     return None

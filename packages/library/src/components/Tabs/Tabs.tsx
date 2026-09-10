@@ -5,12 +5,31 @@ import type { TabsPropsType } from "./Tabs.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { useDensity } from "../../theme/tokens-context";
+import { InsideTabsContext } from "../TabPanel/TabPanel";
 
 /**
  * Tabs — indexed-children tab container. children[i] is the panel for
  * tabs[i]. Optional onChange callback for controlled use; without it Tabs
  * maintains its own internal state and the schema's `value` is just the
  * initial value. Renders with shadcn-style underlined-tabs chrome.
+ *
+ * THE PANEL COUNT NOW COMES FROM THE CHILDREN, not from `props.tabs`.
+ *
+ * Before this change both the strip and the panel list were `tabs.map(...)`
+ * indexing `panels[i]`, and `Tabs.tabs` defaults to `null` in the registry
+ * with `actionPicker` as its only control — a control that cannot author an
+ * array of `{id,label}` at all. The render-time fallback in
+ * packages/library/src/registry.ts substituted a single hard-coded tab, so a
+ * user who dropped Tabs and then dropped three TabPanels saw ONE tab called
+ * "Tab" and panels two and three vanished with everything inside them
+ * (docs/editor-audit/containment.md, probe zzprobe-tabsn: `T3, T3_p0, T3_p0_h`
+ * with `T3_p1` and `T3_p2` absent). The content was still in the schema, so it
+ * read as silent data loss.
+ *
+ * Deriving the count from the children makes a dropped Tabs work with nothing
+ * but drag-and-drop, and keeps every existing schema byte-identical: when
+ * `tabs` already has one entry per child, every id and label still comes from
+ * `tabs[i]`.
  */
 export interface TabsProps extends TabsPropsType {
   style?: StyleSlotT;
@@ -32,17 +51,76 @@ const TAB_BASE =
   "focus-visible:ring-ring focus-visible:ring-offset-2";
 const TAB_ACTIVE = "text-foreground border-primary";
 
+/**
+ * Best-effort read of a `label` / `value` a TabPanel child declared for itself.
+ *
+ * Dispatch renders every child BEFORE handing it to <Tabs>, so by the time we
+ * see one the schema node is behind the renderer's wrappers
+ * (<NodeErrorBoundary><LibraryDispatcher node validatedProps>…). Without this
+ * a user who names their panels "Details" and "History" gets a strip reading
+ * "Tab 1" / "Tab 2" — the labels they typed would be authorable and still
+ * unreachable, which is the same class of bug as the one above.
+ *
+ * Nothing here is load-bearing: every lookup is optional and the caller falls
+ * back to a positional label, so a renderer refactor that changes the wrapper
+ * shape costs a nicer label and nothing else.
+ */
+function readPanelProp(child: unknown, key: "label" | "value", depth = 0): string | undefined {
+  if (depth > 4 || !React.isValidElement(child)) return undefined;
+  const p = (child.props ?? {}) as Record<string, any>;
+  if (typeof p[key] === "string" && p[key]) return p[key];
+  if (p.validatedProps && typeof p.validatedProps[key] === "string" && p.validatedProps[key]) {
+    return p.validatedProps[key];
+  }
+  if (p.node?.props && typeof p.node.props[key] === "string" && p.node.props[key]) {
+    return p.node.props[key];
+  }
+  return readPanelProp(p.children, key, depth + 1);
+}
+
+type TabDef = { id: string; label: string; icon?: string };
+
+function buildTabDefs(tabs: unknown, panels: React.ReactNode[]): TabDef[] {
+  const declared = Array.isArray(tabs) ? (tabs as Array<Partial<TabDef>>) : [];
+  const count = Math.max(declared.length, panels.length);
+  const out: TabDef[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = declared[i] ?? {};
+    const id = d.id || readPanelProp(panels[i], "value") || `tab-${i}`;
+    const label = d.label || readPanelProp(panels[i], "label") || `Tab ${i + 1}`;
+    out.push(d.icon ? { id, label, icon: d.icon } : { id, label });
+  }
+  return out;
+}
+
 export function Tabs({ tabs, value, style, children, onChange }: TabsProps) {
-  const [internalValue, setInternalValue] = React.useState(value);
-  const active = onChange ? value : internalValue;
   const density = useDensity();
+  const panels = React.Children.toArray(children);
+  const defs = buildTabDefs(tabs, panels);
+
+  // `value` is the author's choice of opening tab and it must survive. The
+  // registry's LLM-compat remap used to overwrite it with a synthesised id
+  // ("tab1"), so a node saying `value: "tab-1"` rendered a strip whose only
+  // button was `data-tab-id="tab1"` (probe T5). Honour it whenever it names a
+  // real tab; otherwise open the first one rather than opening nothing.
+  const initial = (typeof value === "string" && defs.some((d) => d.id === value))
+    ? value
+    : defs[0]?.id ?? "";
+  const [internalValue, setInternalValue] = React.useState(initial);
+  const active = onChange ? value : internalValue;
+
+  // A tab added or removed while the page is open must not leave the strip
+  // pointing at an id that no longer exists — that renders every panel hidden.
+  React.useEffect(() => {
+    if (!onChange && internalValue && !defs.some((d) => d.id === internalValue)) {
+      setInternalValue(defs[0]?.id ?? "");
+    }
+  }, [onChange, internalValue, defs.map((d) => d.id).join("\u0000")]);
 
   function handleSelect(id: string) {
     if (onChange) onChange(id);
     else setInternalValue(id);
   }
-
-  const panels = React.Children.toArray(children);
 
   return (
     <div className="w-full" style={resolveStyle(style)} {...useMotion(style?.motion)}>
@@ -50,7 +128,7 @@ export function Tabs({ tabs, value, style, children, onChange }: TabsProps) {
         className={`flex flex-wrap items-center border-b border-border ${TAB_STRIP_GAP[density]}`}
         role="tablist"
       >
-        {tabs.map((t) => {
+        {defs.map((t) => {
           const isActive = active === t.id;
           return (
             <button
@@ -61,7 +139,7 @@ export function Tabs({ tabs, value, style, children, onChange }: TabsProps) {
               role="tab"
               aria-selected={isActive}
               type="button"
-              onClick={() => handleSelect(t.id ?? t.label)}
+              onClick={() => handleSelect(t.id)}
             >
               {t.label}
             </button>
@@ -69,18 +147,23 @@ export function Tabs({ tabs, value, style, children, onChange }: TabsProps) {
         })}
       </div>
       <div className="pt-4">
-        {tabs.map((t, i) => (
-          <div
-            key={t.id}
-            className="focus:outline-none"
-            data-tab-panel={t.id}
-            data-tab-active={active === t.id ? "true" : "false"}
-            role="tabpanel"
-            hidden={active !== t.id}
-          >
-            {panels[i]}
-          </div>
-        ))}
+        {/* The panel already has a tab button carrying its label, so the child
+            TabPanel must not draw its own bordered card and heading on top of
+            it — see TabPanel.tsx. */}
+        <InsideTabsContext.Provider value={true}>
+          {defs.map((t, i) => (
+            <div
+              key={t.id}
+              className="focus:outline-none"
+              data-tab-panel={t.id}
+              data-tab-active={active === t.id ? "true" : "false"}
+              role="tabpanel"
+              hidden={active !== t.id}
+            >
+              {panels[i]}
+            </div>
+          ))}
+        </InsideTabsContext.Provider>
       </div>
     </div>
   );

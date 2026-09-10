@@ -19,7 +19,7 @@ from services.fix_probe import probe
 def test_probe_logs_reads_capped(tmp_path: Path):
     log = tmp_path / "logs" / "server.log"
     log.parent.mkdir(parents=True)
-    log.write_text("\n".join(f"line-{i}" for i in range(500)) + "\n")
+    log.write_text("\n".join(f"line-{i}" for i in range(500)) + "\n", encoding="utf-8")
 
     res = probe(str(tmp_path), {"kind": "logs"}, max_lines=100)
 
@@ -35,7 +35,7 @@ def test_probe_logs_reads_capped(tmp_path: Path):
 
 def test_probe_logs_explicit_path(tmp_path: Path):
     log = tmp_path / "my-dev.log"
-    log.write_text("hello\nworld\n")
+    log.write_text("hello\nworld\n", encoding="utf-8")
 
     res = probe(str(tmp_path), {"kind": "logs", "path": "my-dev.log"}, max_lines=50)
 
@@ -54,7 +54,7 @@ def test_probe_logs_missing_is_unavailable(tmp_path: Path):
 def test_probe_logs_byte_capped(tmp_path: Path):
     log = tmp_path / "logs" / "console.log"
     log.parent.mkdir(parents=True)
-    log.write_text("x" * 200_000 + "\ntail-line\n")
+    log.write_text("x" * 200_000 + "\ntail-line\n", encoding="utf-8")
 
     res = probe(str(tmp_path), {"kind": "logs"}, max_bytes=1024, max_lines=100)
 

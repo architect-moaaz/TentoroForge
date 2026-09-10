@@ -155,13 +155,13 @@ def _schema_sources(out: Path) -> list[tuple[str, str]]:
             if f.name == "index.ts":
                 continue
             try:
-                sources.append((f"./schema/{f.stem}", f.read_text()))
+                sources.append((f"./schema/{f.stem}", f.read_text(encoding="utf-8")))
             except Exception:
                 continue
     single = out / "src" / "db" / "schema.ts"
     if single.exists():
         try:
-            sources.append(("./schema", single.read_text()))
+            sources.append(("./schema", single.read_text(encoding="utf-8")))
         except Exception:
             pass
     return sources
@@ -227,5 +227,5 @@ def ensure_seed_file(output_dir: str | Path) -> str | None:
     auth_var, cols, import_module = found
 
     seed_path.parent.mkdir(parents=True, exist_ok=True)
-    seed_path.write_text(render_admin_seed(auth_var, cols, import_module))
+    seed_path.write_text(render_admin_seed(auth_var, cols, import_module), encoding="utf-8")
     return str(seed_path)

@@ -25,7 +25,7 @@ def sample_critiques(output_root: Path, limit: int = 20) -> list[dict[str, Any]]
         if not log_path.exists():
             continue
         try:
-            log = json.loads(log_path.read_text())
+            log = json.loads(log_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
         for page_path, entry in log.items():

@@ -59,7 +59,7 @@ def _seed_app(tmp_path: Path, entity: str = "Application") -> Path:
         "transitions": [],
         "guards": {},
         "initialPage": "home",
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     return tmp_path
 
 
@@ -135,7 +135,7 @@ def test_nav_flow_dedup_on_second_call(tmp_path):
                                    entity="Application", route="/pipeline")
     # Apply the first bundle's nav update to simulate landing on disk.
     nav_op1 = next(o for o in ops1 if o.path.endswith("nav-flow.json"))
-    (app / "src" / "contracts" / "nav-flow.json").write_text(nav_op1.content)
+    (app / "src" / "contracts" / "nav-flow.json").write_text(nav_op1.content, encoding="utf-8")
     # Second call — nav-flow shouldn't gain a duplicate.
     ops2 = build_add_page_bundle(str(app), archetype="kanban",
                                    entity="Application", route="/pipeline")

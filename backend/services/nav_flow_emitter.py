@@ -86,7 +86,7 @@ def _collect_transitions(output_dir: Path, page_ids: set[str]) -> list[NavFlowTr
         return transitions
     for schema_file in sorted(schemas_dir.rglob("*.json")):
         try:
-            schema = json.loads(schema_file.read_text())
+            schema = json.loads(schema_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         from_id = schema.get("id") or schema_file.stem
@@ -203,7 +203,7 @@ def emit_nav_flow(output_dir: str, plan: dict) -> None:
     _existing: dict = {}
     if nav_path.exists():
         try:
-            _existing = json.loads(nav_path.read_text()) or {}
+            _existing = json.loads(nav_path.read_text(encoding="utf-8")) or {}
         except Exception:  # noqa: BLE001 — a corrupt file gets replaced
             _existing = {}
 
@@ -215,4 +215,4 @@ def emit_nav_flow(output_dir: str, plan: dict) -> None:
         if _key in _existing and _key not in serialized:
             serialized[_key] = _existing[_key]
 
-    nav_path.write_text(json.dumps(serialized, indent=2) + "\n")
+    nav_path.write_text(json.dumps(serialized, indent=2) + "\n", encoding="utf-8")

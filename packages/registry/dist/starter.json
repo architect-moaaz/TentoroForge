@@ -13,12 +13,12 @@
   "Grid": {
     "props": {
       "columns": {},
-      "rowGap": {},
-      "columnGap": {},
-      "padding": {},
-      "align": {},
+      "rows": {},
       "gap": {}
     }
+  },
+  "GridCell": {
+    "props": {}
   },
   "Card": {
     "props": {
@@ -70,100 +70,128 @@
   },
   "Input": {
     "props": {
+      "name": {},
       "label": {},
       "placeholder": {},
       "type": {},
-      "binding": {},
-      "validation": {}
+      "bind": {},
+      "validators": {}
     }
   },
   "Textarea": {
     "props": {
+      "name": {},
       "label": {},
       "placeholder": {},
       "rows": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "Select": {
     "props": {
+      "name": {},
       "label": {},
       "options": {},
-      "binding": {},
-      "multiple": {}
+      "bind": {}
     }
   },
   "Checkbox": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "Switch": {
     "props": {
+      "name": {},
       "label": {},
-      "checked": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "NumberInput": {
     "props": {
+      "name": {},
       "label": {},
       "min": {},
       "max": {},
       "step": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "MoneyInput": {
     "props": {
+      "name": {},
       "label": {},
       "currency": {},
       "currencyEditable": {},
+      "currencies": {},
       "min": {},
       "step": {},
-      "placeholder": {},
-      "binding": {}
+      "placeholder": {}
     }
   },
   "MoneyDisplay": {
     "props": {
+      "value": {},
+      "bind": {},
       "currency": {},
       "locale": {},
       "compact": {},
       "showSymbol": {},
-      "align": {},
-      "binding": {}
+      "align": {}
     }
   },
   "RadioGroup": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "options": {},
+      "orientation": {},
+      "required": {},
+      "disabled": {},
+      "bind": {}
     }
   },
   "Slider": {
     "props": {
+      "name": {},
       "label": {},
       "min": {},
       "max": {},
       "range": {},
-      "binding": {}
+      "step": {},
+      "showValue": {},
+      "defaultValue": {},
+      "validators": {},
+      "bind": {}
     }
   },
   "FileUpload": {
     "props": {
+      "name": {},
       "label": {},
       "accept": {},
       "multiple": {},
-      "binding": {}
+      "bind": {},
+      "maxSizeMb": {},
+      "hint": {},
+      "filenameField": {},
+      "mimeTypeField": {},
+      "resumable": {},
+      "retryOn5xx": {},
+      "chunkSizeMb": {}
     }
   },
   "Combobox": {
     "props": {
+      "name": {},
       "label": {},
       "placeholder": {},
-      "binding": {}
+      "options": {},
+      "filterable": {},
+      "clearable": {},
+      "bind": {}
     }
   },
   "Button": {
@@ -174,14 +202,26 @@
       "disabled": {},
       "onClick": {},
       "clearsFilters": {},
-      "opensDialog": {}
+      "opensDialog": {},
+      "navigate": {},
+      "workflow": {},
+      "args": {},
+      "submit": {},
+      "loading": {},
+      "icon": {},
+      "iconSrc": {},
+      "iconPosition": {},
+      "togglesSidebar": {},
+      "aria-label": {},
+      "dataJourney": {}
     }
   },
   "Heading": {
     "props": {
       "content": {},
       "level": {},
-      "weight": {}
+      "weight": {},
+      "id": {}
     }
   },
   "MetricTile": {
@@ -192,7 +232,10 @@
       "importance": {},
       "icon": {},
       "delta": {},
-      "trend": {}
+      "trend": {},
+      "breakdown": {},
+      "threshold": {},
+      "trendWindow": {}
     }
   },
   "Avatar": {
@@ -207,14 +250,14 @@
   "NavLink": {
     "props": {
       "label": {},
-      "target": {},
-      "icon": {}
+      "navigate": {}
     }
   },
   "Breadcrumb": {
     "props": {
       "items": {},
-      "separator": {}
+      "separator": {},
+      "currentPageAuto": {}
     }
   },
   "Section": {
@@ -241,7 +284,17 @@
   "Table": {
     "props": {
       "columns": {},
-      "caption": {}
+      "caption": {},
+      "rows": {},
+      "emptyText": {},
+      "emptyDescription": {},
+      "title": {},
+      "searchable": {},
+      "pageSize": {},
+      "striped": {},
+      "stickyHeader": {},
+      "density": {},
+      "rowHref": {}
     }
   },
   "Badge": {
@@ -269,6 +322,9 @@
       "workflow": {},
       "fields": {},
       "submitLabel": {},
+      "onSuccess": {},
+      "onError": {},
+      "autoSave": {},
       "defaultValues": {}
     }
   },
@@ -279,12 +335,17 @@
       "variant": {},
       "size": {},
       "disabled": {},
-      "workflow": {}
+      "workflow": {},
+      "args": {},
+      "navigate": {},
+      "loading": {},
+      "iconSrc": {}
     }
   },
   "Sidebar": {
     "props": {
-      "width": {}
+      "width": {},
+      "breakpoint": {}
     }
   },
   "Cluster": {
@@ -307,14 +368,16 @@
       "sidebar": {},
       "topbar": {},
       "actions": {},
-      "rightRail": {}
+      "rightRail": {},
+      "breakpoint": {}
     }
   },
   "InspectorPanel": {
     "props": {
       "paramKey": {},
       "title": {},
-      "width": {}
+      "width": {},
+      "defaultOpen": {}
     }
   },
   "TabPanelWithDeepLink": {
@@ -328,6 +391,12 @@
     "props": {
       "chartType": {},
       "data": {},
+      "title": {},
+      "help": {},
+      "overlay": {},
+      "encoding": {},
+      "viewToggles": {},
+      "semanticColor": {},
       "xKey": {},
       "series": {},
       "height": {},
@@ -378,14 +447,14 @@
     "props": {
       "columns": {},
       "caption": {},
-      "onSort": {}
+      "rows": {},
+      "emptyText": {}
     }
   },
   "ApprovalStepper": {
     "props": {
       "steps": {},
-      "orientation": {},
-      "onStepClick": {}
+      "orientation": {}
     }
   },
   "PersonCard": {
@@ -397,6 +466,7 @@
       "avatarInitials": {},
       "email": {},
       "status": {},
+      "manager": {},
       "layout": {}
     }
   },
@@ -404,7 +474,8 @@
     "props": {
       "chips": {},
       "savedViews": {},
-      "showSearch": {}
+      "showSearch": {},
+      "bind": {}
     }
   },
   "CommandPalette": {
@@ -419,7 +490,9 @@
       "entries": {},
       "title": {},
       "showFilter": {},
-      "maxHeight": {}
+      "maxHeight": {},
+      "limit": {},
+      "fields": {}
     }
   },
   "EmptyStateRich": {
@@ -440,7 +513,8 @@
       "endDate": {},
       "presets": {},
       "minDate": {},
-      "maxDate": {}
+      "maxDate": {},
+      "bind": {}
     }
   },
   "MultiSelect": {
@@ -450,7 +524,10 @@
       "placeholder": {},
       "options": {},
       "selected": {},
-      "showSearch": {}
+      "showSearch": {},
+      "optionsFrom": {},
+      "maxSelectionLabel": {},
+      "bind": {}
     }
   },
   "FeatureCard": {
@@ -491,48 +568,69 @@
       "label": {},
       "bind": {},
       "min": {},
-      "max": {}
+      "max": {},
+      "validators": {}
     }
   },
   "TimePicker": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "min": {},
+      "max": {},
+      "step": {},
+      "disabled": {},
+      "defaultValue": {},
+      "validators": {},
+      "bind": {}
     }
   },
   "ColorPicker": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "disabled": {},
+      "defaultValue": {},
+      "validators": {},
+      "bind": {}
     }
   },
   "InputOTP": {
     "props": {
+      "name": {},
       "label": {},
       "length": {},
-      "binding": {}
+      "validators": {},
+      "bind": {}
     }
   },
   "Rating": {
     "props": {
+      "name": {},
       "label": {},
       "max": {},
-      "binding": {}
+      "disabled": {},
+      "defaultValue": {},
+      "validators": {},
+      "bind": {}
     }
   },
   "MaskedInput": {
     "props": {
+      "name": {},
       "label": {},
       "mask": {},
-      "binding": {}
+      "defaultValue": {},
+      "bind": {}
     }
   },
   "KeyValueInput": {
     "props": {
+      "name": {},
       "label": {},
       "description": {},
       "valueType": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "Gauge": {
@@ -542,7 +640,10 @@
       "max": {},
       "label": {},
       "unit": {},
-      "binding": {}
+      "thresholds": {},
+      "size": {},
+      "showValue": {},
+      "bind": {}
     }
   },
   "SplitArc": {
@@ -553,29 +654,44 @@
       "size": {},
       "showLegend": {},
       "showEndLabels": {},
-      "binding": {}
+      "stroke": {},
+      "bind": {}
     }
   },
   "Heatmap": {
     "props": {
+      "data": {},
+      "xKey": {},
+      "yKey": {},
+      "valueKey": {},
       "color": {},
+      "min": {},
+      "max": {},
+      "cellSize": {},
       "showValues": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "Schematic": {
     "props": {
       "width": {},
       "height": {},
+      "markers": {},
+      "regions": {},
+      "statusColors": {},
+      "grid": {},
+      "heightPx": {},
       "showLabels": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "Stepper": {
     "props": {
+      "steps": {},
       "orientation": {},
       "activeStep": {},
-      "binding": {}
+      "activeId": {},
+      "bind": {}
     }
   },
   "Tag": {
@@ -596,76 +712,114 @@
   },
   "DescriptionList": {
     "props": {
-      "orientation": {},
-      "binding": {}
+      "items": {},
+      "emptyText": {},
+      "dataSource": {},
+      "itemMode": {},
+      "orientation": {}
     }
   },
   "List": {
     "props": {
+      "items": {},
       "divided": {},
-      "binding": {}
+      "limit": {}
     }
   },
   "SegmentedControl": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "options": {},
+      "bind": {}
     }
   },
   "Tree": {
     "props": {
-      "binding": {}
+      "items": {}
     }
   },
   "Transfer": {
     "props": {
-      "binding": {}
+      "options": {},
+      "titles": {},
+      "selected": {},
+      "bind": {}
     }
   },
   "Cascader": {
     "props": {
-      "placeholder": {},
-      "binding": {}
+      "options": {},
+      "bind": {}
     }
   },
   "Calendar": {
     "props": {
-      "binding": {}
+      "name": {},
+      "events": {},
+      "view": {},
+      "dateField": {},
+      "endDateField": {},
+      "titleField": {},
+      "colorField": {},
+      "eventHref": {},
+      "detailFields": {},
+      "emptyText": {},
+      "value": {},
+      "bind": {}
     }
   },
   "Kanban": {
     "props": {
-      "binding": {}
+      "columns": {},
+      "data": {},
+      "groupBy": {},
+      "columnOrder": {},
+      "cardTitle": {},
+      "emptyText": {},
+      "bind": {}
     }
   },
   "ResourceTimeline": {
     "props": {
       "resources": {},
       "items": {},
+      "resourceIdField": {},
+      "resourceLabelField": {},
+      "resourceSubField": {},
       "itemResourceField": {},
       "startField": {},
       "endField": {},
       "titleField": {},
+      "subtitleField": {},
       "statusField": {},
       "resourceGroupField": {},
+      "rangeStart": {},
       "days": {},
-      "itemHref": {}
+      "emptyText": {},
+      "itemHref": {},
+      "bind": {}
     }
   },
   "RichTextEditor": {
     "props": {
+      "name": {},
       "label": {},
-      "binding": {}
+      "value": {},
+      "placeholder": {},
+      "mentions": {},
+      "embeds": {},
+      "bind": {}
     }
   },
   "Carousel": {
     "props": {
-      "binding": {}
+      "items": {}
     }
   },
   "Lightbox": {
     "props": {
-      "binding": {}
+      "images": {}
     }
   },
   "CodeBlock": {
@@ -679,14 +833,15 @@
     "props": {
       "value": {},
       "size": {},
-      "binding": {}
+      "label": {}
     }
   },
   "CameraCapture": {
     "props": {
+      "name": {},
       "label": {},
       "captureLabel": {},
-      "binding": {}
+      "bind": {}
     }
   },
   "BarcodeScanner": {
@@ -694,7 +849,9 @@
       "name": {},
       "label": {},
       "hint": {},
-      "binding": {}
+      "autoSubmit": {},
+      "formats": {},
+      "bind": {}
     }
   },
   "Scanner": {
@@ -702,13 +859,16 @@
       "label": {},
       "deviceType": {},
       "status": {},
-      "binding": {}
+      "scanLabel": {},
+      "value": {},
+      "statusMessage": {},
+      "bind": {}
     }
   },
   "ValidationChecklist": {
     "props": {
-      "orientation": {},
-      "binding": {}
+      "items": {},
+      "orientation": {}
     }
   },
   "FadeIn": {
@@ -739,7 +899,9 @@
   },
   "DataBoundary": {
     "props": {
-      "fallback": {}
+      "fallback": {},
+      "bind": {},
+      "source": {}
     }
   },
   "Slot": {
@@ -751,20 +913,26 @@
     "props": {
       "label": {},
       "value": {},
-      "variant": {}
+      "variant": {},
+      "max": {},
+      "showValue": {},
+      "bind": {}
     }
   },
   "Spinner": {
     "props": {
       "label": {},
-      "size": {}
+      "size": {},
+      "variant": {},
+      "color": {}
     }
   },
   "Banner": {
     "props": {
       "variant": {},
       "title": {},
-      "message": {}
+      "message": {},
+      "dismissible": {}
     }
   },
   "Redirect": {
@@ -783,20 +951,26 @@
   },
   "DropdownMenu": {
     "props": {
-      "trigger": {}
+      "trigger": {},
+      "items": {},
+      "triggerIcon": {},
+      "align": {}
     }
   },
   "Popover": {
     "props": {
       "trigger": {},
       "title": {},
-      "content": {}
+      "content": {},
+      "align": {}
     }
   },
   "Tooltip": {
     "props": {
       "label": {},
-      "content": {}
+      "content": {},
+      "side": {},
+      "delayMs": {}
     }
   },
   "Drawer": {
@@ -804,23 +978,31 @@
       "trigger": {},
       "title": {},
       "side": {},
-      "content": {}
+      "content": {},
+      "description": {}
     }
   },
   "ContextMenu": {
     "props": {
-      "label": {}
+      "label": {},
+      "items": {}
     }
   },
   "HoverCard": {
     "props": {
       "label": {},
       "title": {},
-      "content": {}
+      "content": {},
+      "side": {},
+      "align": {},
+      "openDelay": {},
+      "closeDelay": {}
     }
   },
   "Menubar": {
-    "props": {}
+    "props": {
+      "menus": {}
+    }
   },
   "AddToCart": {
     "props": {
@@ -848,6 +1030,7 @@
       "emptyState": {},
       "currency": {},
       "checkoutLabel": {},
+      "paymentMethods": {},
       "onCheckoutNavigate": {}
     }
   },
@@ -856,6 +1039,7 @@
       "title": {},
       "currency": {},
       "checkoutLabel": {},
+      "paymentMethods": {},
       "onCheckoutNavigate": {}
     }
   },
@@ -982,7 +1166,8 @@
       "syncKey": {},
       "masterWidth": {},
       "emptyText": {},
-      "responsive": {}
+      "responsive": {},
+      "requireSelection": {}
     }
   },
   "FilterBuilder": {

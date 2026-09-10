@@ -14,7 +14,7 @@ def _setup(tmp_path):
         "field_generators": {"rentals": {
             "status": "faker:helpers:arrayElement[Reserved, Picked Up, Returned, Cancelled]",
         }},
-    }))
+    }), encoding="utf-8")
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {
             "Rental": {"fields": {
@@ -34,7 +34,7 @@ def _setup(tmp_path):
             {"from_entity": "Rental", "to_entity": "Customer", "type": "many-to-one"},
             {"from_entity": "Rental", "to_entity": "Equipment", "type": "many-to-one"},
         ],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     return sdir
@@ -101,12 +101,12 @@ def test_scaffolds_all_missing_editable_columns(tmp_path):
     sdir = _setup(tmp_path)
     # Form starts with only ONE field (startDate); everything else is missing.
     (sdir / "rentals-new.json").write_text(json.dumps(
-        _form({"type": "DatePicker", "props": {"name": "startDate", "label": "Start date"}})))
+        _form({"type": "DatePicker", "props": {"name": "startDate", "label": "Start date"}})), encoding="utf-8")
 
     res = scaffold_forms(str(tmp_path))
     assert res["added"] >= 5
 
-    schema = json.loads((sdir / "rentals-new.json").read_text())
+    schema = json.loads((sdir / "rentals-new.json").read_text(encoding="utf-8"))
     by_name = {}
     def walk(n):
         if isinstance(n, dict):
@@ -142,7 +142,7 @@ def test_ignores_non_form_pages(tmp_path):
     sdir = _setup(tmp_path)
     # A list page (no create/edit signal) must not be scaffolded.
     (sdir / "rentals.json").write_text(json.dumps(
-        {"root": {"type": "Stack", "children": [{"type": "Table", "props": {}}]}}))
+        {"root": {"type": "Stack", "children": [{"type": "Table", "props": {}}]}}), encoding="utf-8")
     res = scaffold_forms(str(tmp_path))
     assert res["added"] == 0
 
@@ -161,7 +161,7 @@ def test_repair_fixes_wrong_fk_entity(tmp_path):
             "MembershipPlan": {"fields": {"id": {"type": "uuid"}, "name": {"type": "varchar"}}},
         },
         "relations": [{"from_entity": "Member", "to_entity": "MembershipPlan", "type": "many-to-one"}],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "members"
     sdir.mkdir(parents=True)
     # The bug: dataSource entity "Plan" (doesn't exist) → empty dropdown.
@@ -172,12 +172,12 @@ def test_repair_fixes_wrong_fk_entity(tmp_path):
             {"type": "Select", "props": {"name": "planId", "label": "Plan",
                                          "optionsFrom": {"source": "plans", "value": "id", "label": "name"}}},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = repair_fk_dropdowns(str(tmp_path))
     assert res["repaired"] == 1
 
-    d = json.loads((sdir / "new.json").read_text())
+    d = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     ds = d["dataSources"][0]
     assert ds["entity"] == "MembershipPlan"           # real entity
     assert ds["name"] == "membershipPlans"            # resolvable /api/data/ path
@@ -193,7 +193,7 @@ def test_repair_leaves_correct_dropdown_untouched(tmp_path):
             "Trainer": {"fields": {"id": {"type": "uuid"}, "name": {"type": "varchar"}}},
         },
         "relations": [{"from_entity": "Member", "to_entity": "Trainer", "type": "many-to-one"}],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "members"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -203,7 +203,7 @@ def test_repair_leaves_correct_dropdown_untouched(tmp_path):
             {"type": "Select", "props": {"name": "trainerId", "label": "Trainer",
                                          "optionsFrom": {"source": "trainers", "value": "id", "label": "name"}}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = repair_fk_dropdowns(str(tmp_path))
     assert res["repaired"] == 0   # already correct
 
@@ -246,7 +246,7 @@ def test_scaffold_populates_nested_new_form(tmp_path):
             {"from_entity": "ClassBooking", "to_entity": "Member", "type": "many-to-one"},
             {"from_entity": "ClassBooking", "to_entity": "Class", "type": "many-to-one"},
         ],
-    }))
+    }), encoding="utf-8")
     nested = tmp_path / "src" / "schemas" / "bookings"
     nested.mkdir(parents=True)
     (nested / "new.json").write_text(json.dumps({
@@ -254,11 +254,11 @@ def test_scaffold_populates_nested_new_form(tmp_path):
         "root": {"type": "Form", "props": {"workflow": "CreateClassBooking"}, "children": [
             {"type": "Stack", "children": []},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = scaffold_forms(str(tmp_path))
     assert res["added"] >= 3
-    doc = json.loads((nested / "new.json").read_text())
+    doc = json.loads((nested / "new.json").read_text(encoding="utf-8"))
     fields = {}
     def walk(n):
         if isinstance(n, dict):
@@ -299,7 +299,7 @@ def _ats_registry(tmp_path):
             {"from_entity": "Application", "to_entity": "RecruitmentDrive", "type": "many-to-one"},
             {"from_entity": "Application", "to_entity": "User", "type": "many-to-one"},
         ],
-    }))
+    }), encoding="utf-8")
 
 
 def test_fk_target_shortlistedby_resolves_to_user():
@@ -329,12 +329,12 @@ def test_repair_upgrades_fk_input_to_select(tmp_path):
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = repair_fk_dropdowns(str(tmp_path))
     assert res["repaired"] >= 1
 
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     nodes = {}
     def walk(n):
         if isinstance(n, dict):
@@ -372,9 +372,9 @@ def test_repair_skips_hidden_preset_fk_input(tmp_path):
                                             "defaultValue": "{{candidate.id}}"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
     res = repair_fk_dropdowns(str(tmp_path))
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     node = doc["root"]["children"][0]["children"][0]
     assert node["type"] == "Input"     # untouched
     assert res["repaired"] == 0
@@ -394,7 +394,7 @@ def test_ensure_required_markers_stamps_notnull_fields(tmp_path):
                 "createdAt": {"type": "timestamp", "nullable": False, "hasDefault": True},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "widgets"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -406,12 +406,12 @@ def test_ensure_required_markers_stamps_notnull_fields(tmp_path):
                 {"type": "Textarea", "props": {"name": "notes", "label": "Notes"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = ensure_required_markers(str(tmp_path))
     assert res["marked"] == 1
 
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     nodes = {}
     def walk(n):
         if isinstance(n, dict):
@@ -444,7 +444,7 @@ def test_ensure_required_markers_skips_system_and_hidden(tmp_path):
                 "name": {"type": "varchar", "nullable": False},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "widgets"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -457,10 +457,10 @@ def test_ensure_required_markers_skips_system_and_hidden(tmp_path):
                 {"type": "Input", "props": {"name": "name", "label": "Name"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
     res = ensure_required_markers(str(tmp_path))
     assert res["marked"] == 1  # only `name`
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     nodes = {}
     def walk(n):
         if isinstance(n, dict):
@@ -480,7 +480,7 @@ def test_ensure_required_markers_skips_system_and_hidden(tmp_path):
 def test_ensure_required_markers_ignores_non_form_pages(tmp_path):
     (tmp_path / "registry.json").write_text(json.dumps({
         "entities": {"Widget": {"fields": {"name": {"type": "varchar", "nullable": False}}}},
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True)
     (sdir / "widgets.json").write_text(json.dumps({
@@ -488,7 +488,7 @@ def test_ensure_required_markers_ignores_non_form_pages(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Input", "props": {"name": "name", "label": "Search"}},
         ]},
-    }))
+    }), encoding="utf-8")
     assert ensure_required_markers(str(tmp_path))["marked"] == 0
 
 
@@ -511,7 +511,7 @@ def test_ensure_required_markers_deterministic_fallback_all_nullable(tmp_path):
                 "notes": {"type": "text", "nullable": True},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "bookings"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -524,13 +524,13 @@ def test_ensure_required_markers_deterministic_fallback_all_nullable(tmp_path):
                 {"type": "Textarea", "props": {"name": "notes", "label": "Notes"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = ensure_required_markers(str(tmp_path))
     # customerId, startDate, status marked; notes left alone.
     assert res["marked"] == 3
 
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     nodes = {}
     def walk(n):
         if isinstance(n, dict):
@@ -561,7 +561,7 @@ def test_ensure_required_markers_fallback_never_overrides_explicit_false(tmp_pat
                 "status": {"type": "varchar", "nullable": True},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "bookings"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -572,10 +572,10 @@ def test_ensure_required_markers_fallback_never_overrides_explicit_false(tmp_pat
                                             "validators": {"required": False}}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
     # required is already present (False) — the pass leaves it untouched.
     res = ensure_required_markers(str(tmp_path))
-    doc = json.loads((sdir / "new.json").read_text())
+    doc = json.loads((sdir / "new.json").read_text(encoding="utf-8"))
     node = doc["root"]["children"][0]["children"][0]
     assert node["props"]["validators"]["required"] is False
     assert res["marked"] == 0  # explicit opt-out preserved, nothing marked
@@ -608,9 +608,9 @@ def test_repair_leaves_fk_input_on_nonform_page(tmp_path):
         "root": {"type": "Stack", "children": [
             {"type": "Input", "props": {"name": "candidateId", "label": "Filter by candidate"}},
         ]},
-    }))
+    }), encoding="utf-8")
     res = repair_fk_dropdowns(str(tmp_path))
-    doc = json.loads((sdir / "applications.json").read_text())
+    doc = json.loads((sdir / "applications.json").read_text(encoding="utf-8"))
     assert doc["root"]["children"][0]["type"] == "Input"
     assert res["repaired"] == 0
 
@@ -650,7 +650,7 @@ def test_ensure_enum_selects_upgrades_status_input(tmp_path):
             "Candidate": {"fields": {"id": {"type": "uuid"}, "email": {"type": "varchar"}}},
         },
         "relations": [{"from_entity": "Application", "to_entity": "Candidate", "type": "many-to-one"}],
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "applications"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -663,12 +663,12 @@ def test_ensure_enum_selects_upgrades_status_input(tmp_path):
                 {"type": "Input", "props": {"name": "candidateId", "label": "Candidate"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     res = ensure_enum_selects(str(tmp_path))
     assert res["converted"] == 1
 
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     assert nodes["status"]["type"] == "Select"
     assert {o["value"] for o in nodes["status"]["props"]["options"]} >= {"Active", "Pending"}
     assert nodes["nationality"]["type"] == "Input"   # open-ended → untouched
@@ -688,7 +688,7 @@ def test_ensure_enum_selects_prefers_registry_enum(tmp_path):
                 "status": {"type": "varchar", "enum_values": ["Open", "Resolved", "Closed"]},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "tickets"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -698,10 +698,10 @@ def test_ensure_enum_selects_prefers_registry_enum(tmp_path):
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     assert ensure_enum_selects(str(tmp_path))["converted"] == 1
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     assert nodes["status"]["type"] == "Select"
     assert {o["value"] for o in nodes["status"]["props"]["options"]} == {"Open", "Resolved", "Closed"}
 
@@ -720,7 +720,7 @@ def test_ensure_enum_selects_labels_use_title_case_for_flat_keys(tmp_path):
                 "status": {"type": "varchar", "enum_values": ["open", "in_progress", "closed"]},
             }},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "tickets"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -730,10 +730,10 @@ def test_ensure_enum_selects_labels_use_title_case_for_flat_keys(tmp_path):
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     assert ensure_enum_selects(str(tmp_path))["converted"] == 1
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     opts = nodes["status"]["props"]["options"]
     assert opts == [
         {"value": "open", "label": "Open"},
@@ -752,7 +752,7 @@ def test_ensure_enum_selects_labels_from_plan_authored_object_shape(tmp_path):
                 "method": {"type": "varchar"},
             }},
         },
-    }))
+    }), encoding="utf-8")
     # Plan authoring — this is where the LLM emits labels.
     plan_dir = tmp_path / "src" / "contracts"
     plan_dir.mkdir(parents=True)
@@ -764,7 +764,7 @@ def test_ensure_enum_selects_labels_from_plan_authored_object_shape(tmp_path):
                 {"key": "credit_card", "label": "Credit Card"},
             ]},
         ]}},
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "payments"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -774,10 +774,10 @@ def test_ensure_enum_selects_labels_from_plan_authored_object_shape(tmp_path):
                 {"type": "Input", "props": {"name": "method", "label": "Method"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     assert ensure_enum_selects(str(tmp_path))["converted"] == 1
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     assert nodes["method"]["props"]["options"] == [
         {"value": "ach", "label": "ACH Transfer"},
         {"value": "cash", "label": "Cash"},
@@ -800,7 +800,7 @@ def test_ensure_enum_selects_plan_wins_over_workflow_harvest(tmp_path):
                 "status": {"type": "varchar"},   # no registry enum on purpose
             }},
         },
-    }))
+    }), encoding="utf-8")
     # Plan says these are the ONLY 3 valid statuses.
     contracts = tmp_path / "src" / "contracts"
     contracts.mkdir(parents=True)
@@ -812,7 +812,7 @@ def test_ensure_enum_selects_plan_wins_over_workflow_harvest(tmp_path):
                  "enum_values": ["open", "shortlisted", "rejected"]},
             ]},
         },
-    }))
+    }), encoding="utf-8")
     # Workflow set-nodes reference OTHER strings — which the harvester would
     # merge in without the plan authority. They MUST NOT leak into the form.
     wdir = tmp_path / "workflows"
@@ -826,7 +826,7 @@ def test_ensure_enum_selects_plan_wins_over_workflow_harvest(tmp_path):
                 "values": {"status": "interview_scheduled"},
             }},
         ],
-    }))
+    }), encoding="utf-8")
     # Create form with a plain Status input.
     sdir = tmp_path / "src" / "schemas" / "applications"
     sdir.mkdir(parents=True)
@@ -837,7 +837,7 @@ def test_ensure_enum_selects_plan_wins_over_workflow_harvest(tmp_path):
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
 
     # Invalidate any lookup cache from prior tests so this run picks up the
     # freshly-written plan.json under `tmp_path` (the module-level cache is
@@ -848,7 +848,7 @@ def test_ensure_enum_selects_plan_wins_over_workflow_harvest(tmp_path):
 
     ensure_enum_selects(str(tmp_path))
 
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     assert nodes["status"]["type"] == "Select"
     got = [o["value"] for o in nodes["status"]["props"]["options"]]
     # Exactly the plan's list, in the plan's order. No workflow strings.
@@ -871,7 +871,7 @@ def test_ensure_enum_selects_falls_through_when_plan_silent(tmp_path):
                            "enum_values": ["Open", "Resolved"]},
             }},
         },
-    }))
+    }), encoding="utf-8")
     # plan.json exists but has NO enum_values for status — silent for this field.
     contracts = tmp_path / "src" / "contracts"
     contracts.mkdir(parents=True)
@@ -882,7 +882,7 @@ def test_ensure_enum_selects_falls_through_when_plan_silent(tmp_path):
                 {"name": "status", "type": "varchar"},   # no enum_values
             ]},
         },
-    }))
+    }), encoding="utf-8")
     sdir = tmp_path / "src" / "schemas" / "tickets"
     sdir.mkdir(parents=True)
     (sdir / "new.json").write_text(json.dumps({
@@ -892,13 +892,13 @@ def test_ensure_enum_selects_falls_through_when_plan_silent(tmp_path):
                 {"type": "Input", "props": {"name": "status", "label": "Status"}},
             ]},
         ]},
-    }))
+    }), encoding="utf-8")
     from services.plan_field_lookup import _CACHE
     _CACHE.clear()
 
     ensure_enum_selects(str(tmp_path))
 
-    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text()))
+    nodes = _nodes_by_name(json.loads((sdir / "new.json").read_text(encoding="utf-8")))
     assert nodes["status"]["type"] == "Select"
     got = {o["value"] for o in nodes["status"]["props"]["options"]}
     # Registry enum_values (the pre-existing #1 priority) still wins.

@@ -11,6 +11,7 @@ corrupt files don't become empty ones, and disagreement between Blueprint and
 implementation is recorded rather than fixed (§76).
 """
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -65,7 +66,7 @@ def test_corrupt_file_raises_instead_of_becoming_an_empty_blueprint(tmp_path):
     svc = BlueprintService.create(
         output_dir=tmp_path, app_id="a", name="n", domain="d"
     )
-    svc.current_path.write_text("{ not json", "utf-8")
+    svc.current_path.write_text("{ not json", encoding="utf-8")
     with pytest.raises(BlueprintInvalid):
         BlueprintService.load(output_dir=tmp_path)
 
@@ -354,8 +355,16 @@ def test_blueprint_schema_is_current():
 
     committed = CONTRACT_PATH.read_bytes()
     try:
+        # `shutil.which`, not a bare "npm". On Windows npm is `npm.cmd`, and
+        # `subprocess.run(["npm", ...])` raises WinError 2 ("cannot find the
+        # file specified") rather than running anything — so this test failed
+        # for a reason that had nothing to do with the schema being current.
+        # Same fix as services/blueprint/assembly.py's verify_build.
+        npm = shutil.which("npm")
+        if not npm:
+            pytest.skip("npm not on PATH")
         out = subprocess.run(
-            ["npm", "run", "--silent", "emit:blueprint-schema"],
+            [npm, "run", "--silent", "emit:blueprint-schema"],
             cwd=pkg, capture_output=True, text=True, timeout=300,
         )
         assert out.returncode == 0, out.stderr

@@ -491,24 +491,41 @@ class WorkflowRuntimeEngine:
     # -----------------------------------------------------------------------
 
     def _load_definition(self, output_dir: str, workflow_id: str) -> dict | None:
-        # Load from the SAME place the list/editor/apply resolve by
-        # (routers.workflows._workflows_path): the Blueprint projection writes
-        # generated workflows to app/src/lib/workflows/definitions/<id>.json.
-        # The engine previously only looked in the legacy <output_dir>/workflows
-        # dir, so every simulate/start of a generated workflow failed with
-        # "Workflow definition '<id>' not found". Prefer the projected dir; fall
-        # back to the legacy dir for old projects.
-        candidates = [
-            Path(output_dir) / "app" / "src" / "lib" / "workflows"
-                / "definitions" / f"{workflow_id}.json",
-            Path(output_dir) / "workflows" / f"{workflow_id}.json",
-        ]
-        for wf_file in candidates:
-            if wf_file.exists():
-                try:
-                    return json.loads(wf_file.read_text())
-                except (json.JSONDecodeError, OSError):
-                    return None
+        """Resolve a workflow definition by id, filename stem or blueprint id.
+
+        THE LEGACY DIRECTORY ONLY, UNTIL NOW. `<output_dir>/workflows` is
+        where the classic pipeline writes; a Blueprint project's definitions
+        are projected to `app/src/lib/workflows/definitions/`, so
+        `POST /api/projects/{id}/workflows/start` could never find one of its
+        workflows and returned "not found" for every Blueprint app.
+
+        Filenames are slugs (`add-inventory-item.json`) while the id every
+        caller actually holds is the Blueprint's (`FLOW-001`), so a stem miss
+        falls through to a scan on `blueprintId`/`id` — the same three keys
+        the generated app's own loader indexes by (`workflows/index.ts:110`).
+        """
+        from routers.workflows import PROJECTED_WORKFLOWS_DIR, WORKFLOWS_DIR
+
+        roots = [Path(output_dir) / PROJECTED_WORKFLOWS_DIR,
+                 Path(output_dir) / WORKFLOWS_DIR]
+
+        def _read(p: Path) -> dict | None:
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return None
+
+        for root in roots:
+            if not root.is_dir():
+                continue
+            direct = root / f"{workflow_id}.json"
+            if direct.is_file():
+                return _read(direct)
+            for f in sorted(root.glob("*.json")):
+                data = _read(f)
+                if data and workflow_id in (data.get("blueprintId"), data.get("id"),
+                                            data.get("name")):
+                    return data
         return None
 
     def _find_start_nodes(self, nodes: list[dict], edges: list[dict]) -> list[dict]:

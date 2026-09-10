@@ -147,7 +147,7 @@ def test_run_workflow_gate_aggregates_unproduced_vars(tmp_path):
     )
     wf_dir = tmp_path / "workflows"
     wf_dir.mkdir()
-    (wf_dir / "w1.json").write_text(json.dumps(wf))
+    (wf_dir / "w1.json").write_text(json.dumps(wf), encoding="utf-8")
     summary = run_workflow_gate(str(tmp_path))
     assert summary["unproduced_vars"] >= 1
     assert any(f["variable"] == "missingVar" for f in summary["unproduced_var_findings"])

@@ -54,9 +54,9 @@ def _make_app(tmp_path: Path) -> Path:
     out = tmp_path / "app"
     (out / "src" / "db" / "schema").mkdir(parents=True)
     (out / "src" / "schemas").mkdir(parents=True)
-    (out / "src" / "db" / "schema" / "applicants.ts").write_text(_SCHEMA_APPLICANTS)
-    (out / "src" / "db" / "schema" / "interviews.ts").write_text(_SCHEMA_INTERVIEWS)
-    (out / "registry.json").write_text(json.dumps(_REGISTRY))
+    (out / "src" / "db" / "schema" / "applicants.ts").write_text(_SCHEMA_APPLICANTS, encoding="utf-8")
+    (out / "src" / "db" / "schema" / "interviews.ts").write_text(_SCHEMA_INTERVIEWS, encoding="utf-8")
+    (out / "registry.json").write_text(json.dumps(_REGISTRY), encoding="utf-8")
     return out
 
 
@@ -71,7 +71,7 @@ def _stub(slug: str, route: str, heading: str) -> dict:
 
 def _write(out: Path, slug: str, page: dict) -> Path:
     p = out / "src" / "schemas" / f"{slug}.json"
-    p.write_text(json.dumps(page))
+    p.write_text(json.dumps(page), encoding="utf-8")
     return p
 
 
@@ -97,7 +97,7 @@ def test_stub_home_gets_metric_tiles_and_recent_list(tmp_path):
     res = backfill_stub_pages(str(out))
 
     assert any(b["id"] == "home" and b["kind"] == "dashboard" for b in res["backfilled"])
-    page = json.loads(home.read_text())
+    page = json.loads(home.read_text(encoding="utf-8"))
     assert not is_stub_page(page)
     types = _node_types(page)
     assert "metrictile" in types
@@ -117,7 +117,7 @@ def test_stub_list_route_gets_real_table(tmp_path):
     res = backfill_stub_pages(str(out))
 
     assert any(b["id"] == "interviews" and b["kind"] == "list" for b in res["backfilled"])
-    page = json.loads(lst.read_text())
+    page = json.loads(lst.read_text(encoding="utf-8"))
     assert not is_stub_page(page)
     assert "table" in _node_types(page)
     list_ds = [ds for ds in page["dataSources"] if ds.get("op") == "list"]
@@ -142,12 +142,12 @@ def test_full_page_left_untouched(tmp_path):
         ]},
     }
     p = _write(out, "applicants", full)
-    before = p.read_text()
+    before = p.read_text(encoding="utf-8")
 
     res = backfill_stub_pages(str(out))
 
     assert all(b["id"] != "applicants" for b in res["backfilled"])
-    assert p.read_text() == before  # byte-identical, untouched
+    assert p.read_text(encoding="utf-8") == before  # byte-identical, untouched
 
 
 def test_emitted_datasources_pass_binding_validator(tmp_path):
@@ -169,11 +169,11 @@ def test_idempotent_second_run_no_change(tmp_path):
     home = _write(out, "home", _stub("home", "/", "Dashboard"))
 
     backfill_stub_pages(str(out))
-    after_first = home.read_text()
+    after_first = home.read_text(encoding="utf-8")
     res2 = backfill_stub_pages(str(out))
 
     assert all(b["id"] != "home" for b in res2["backfilled"])
-    assert home.read_text() == after_first
+    assert home.read_text(encoding="utf-8") == after_first
 
 
 def test_never_raises_on_missing_registry(tmp_path):

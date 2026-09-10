@@ -15,11 +15,11 @@ def _app(tmp_path):
             "MembershipPlan": {"fields": {"id": {"type": "uuid"}, "name": {"type": "varchar"}}},
         },
         "relations": [{"from_entity": "Member", "to_entity": "MembershipPlan", "type": "many-to-one"}],
-    }))
+    }), encoding="utf-8")
     wf = tmp_path / "workflows"
     wf.mkdir()
-    (wf / "CreateMember.json").write_text('{"name": "CreateMember"}')
-    (wf / "UpdateMember.json").write_text('{"name": "UpdateMember"}')
+    (wf / "CreateMember.json").write_text('{"name": "CreateMember"}', encoding="utf-8")
+    (wf / "UpdateMember.json").write_text('{"name": "UpdateMember"}', encoding="utf-8")
     return tmp_path
 
 
@@ -52,7 +52,7 @@ def test_block_hands_page_agent_exact_references(tmp_path):
 def test_save_and_reload(tmp_path):
     _app(tmp_path)
     save_binding_contract(str(tmp_path))
-    saved = json.loads((tmp_path / "contracts" / "binding-contract.json").read_text())
+    saved = json.loads((tmp_path / "contracts" / "binding-contract.json").read_text(encoding="utf-8"))
     assert saved["Member"]["fkBindings"][0]["targetEntity"] == "MembershipPlan"
 
 

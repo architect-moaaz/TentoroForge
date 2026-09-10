@@ -42,7 +42,7 @@ def read_cache(project_root: Path, entity_name: str) -> list[dict[str, Any]] | N
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("fixtures.cache: malformed cache at %s — ignoring: %s", path, e)
         return None
@@ -63,6 +63,6 @@ def write_cache(
     path = _cache_path(project_root, entity_name)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(records, indent=2))
+        path.write_text(json.dumps(records, indent=2), encoding="utf-8")
     except OSError as e:
         logger.warning("fixtures.cache: failed to write %s: %s", path, e)

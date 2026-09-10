@@ -30,7 +30,7 @@ _CONTRACT = pathlib.Path(__file__).resolve().parents[2] / "contracts" / "bluepri
 
 
 def _pattern_enum() -> list[str]:
-    c = json.loads(_CONTRACT.read_text())
+    c = json.loads(_CONTRACT.read_text(encoding="utf-8"))
     return c["properties"]["pages"]["items"]["properties"]["pattern"]["enum"]
 
 

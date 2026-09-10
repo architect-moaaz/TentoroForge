@@ -13,7 +13,10 @@ export type CrossRefError = {
 };
 
 const RESERVED_TYPES = new Set([
-  "Stack", "Row", "Grid", "Container", "Spacer",
+  // GridCell is structural (one box of a fixed R x C Grid), emitted by the
+  // editor rather than authored, so it is never in ctx.libraryNames and would
+  // otherwise be reported as an unknown library component on every grid.
+  "Stack", "Row", "Grid", "GridCell", "Container", "Spacer",
   "Box", "Text", "Image",
   "Repeat", "Conditional", "DataBoundary",
   "Slot",

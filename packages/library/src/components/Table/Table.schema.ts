@@ -166,6 +166,21 @@ export const TableSortableProps = z
   .object({
     columns: z.preprocess((v) => (v == null ? [] : v), z.array(ColumnDef)),
     caption: z.string().optional(),
+    // THE PROP THAT CLOSED THE VOID. This component built its `<tbody>` from
+    // `children` alone while the registry declares it a leaf, so a dropped
+    // TableSortable was a header over an empty body, permanently, with no empty
+    // state to say so. Declared here rather than left to `.passthrough()`:
+    // passthrough would carry the value, but `extract-contracts.ts` reads THIS
+    // schema to tell the page composer which props exist, so an undeclared
+    // `rows` is a prop the model is told not to emit — which is how the void
+    // would quietly come back on generated pages.
+    //
+    // `z.unknown()` for the same reason `TableProps.rows` is: in an authored
+    // page this is a Mustache binding string that the renderer interpolates to
+    // an array before render, so both forms are legal here and only the
+    // resolved one is renderable.
+    rows: z.unknown().optional(),
+    emptyText: z.string().optional(),
     onSort: z.unknown().optional(),
     style: StyleSlot.optional(),
     className: z.string().optional(),

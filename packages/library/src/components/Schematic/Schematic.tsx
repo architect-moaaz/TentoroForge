@@ -27,7 +27,7 @@ const DEFAULT_STATUS_COLORS: Record<string, string> = {
  */
 export function Schematic({
   width = 100, height = 60, grid, regions, markers,
-  statusColors, showLabels = true, heightPx = 320, style,
+  statusColors, showLabels = true, heightPx = 320, className, style,
 }: SchematicProps) {
   const pts = Array.isArray(markers) ? markers : [];
   const colors = { ...DEFAULT_STATUS_COLORS, ...(statusColors ?? {}) };
@@ -37,7 +37,7 @@ export function Schematic({
   const usedStatuses = Array.from(new Set(pts.map((m: any) => m.status).filter(Boolean)));
 
   return (
-    <div className="w-full" data-schematic="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
+    <div className={className ? `w-full ${className}` : "w-full"} data-schematic="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={heightPx}
         preserveAspectRatio="xMidYMid meet"
         style={{ background: "var(--color-surface-sunken, #f8fafc)", borderRadius: 8, border: "1px solid var(--color-border-default, #e2e8f0)" }}>

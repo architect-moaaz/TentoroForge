@@ -22,7 +22,17 @@ export function Progress({ label, value = 0, max = 100, variant = "bar", showVal
           <circle cx="22" cy="22" r={r} fill="none" stroke="currentColor" strokeWidth="4" className="text-primary"
             strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c} strokeLinecap="round" transform="rotate(-90 22 22)" />
         </svg>
+        {/* THE RING USED TO BE THE ONLY THING THIS BRANCH RENDERED.
+            `label` was passed to `aria-label` and dropped on the floor
+            visually, so a circular Progress in a generated app was a
+            decorative arc: no words, and — before `showValue` had a control —
+            no number either. A sighted user could see that something was some
+            fraction of the way along and nothing about what. The bar branch
+            below has always drawn its label; the two branches simply
+            disagreed. `aria-label` still carries it for assistive tech, and
+            the visible copy is now the same copy. */}
         {showValue && <span className="text-xs text-muted-foreground">{now}%</span>}
+        {label && <span className="text-sm text-foreground">{label}</span>}
       </div>
     );
   }

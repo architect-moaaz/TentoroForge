@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { cx } from "../../util/cx";
 import { useDensity } from "../../theme/tokens-context";
 import { useVirtualRows } from "./useVirtualRows";
 import type { DataGridPropsType } from "./DataGrid.schema";
@@ -28,7 +29,20 @@ export function DataGrid({
   virtualise,
   selectable,
   rowActions,
+  expandable,
+  className,
+  style,
 }: DataGridProps) {
+  // `className` and `style` were declared on this component's props AND on its
+  // node schema and destructured by neither, so a producer writing either onto
+  // the node had it silently discarded. See util/cx for why the merge helper is
+  // shared rather than written out eight times.
+  // `expandable` was offered in the Properties panel as a toggle and read by
+  // nothing — an editor affordance that provably did nothing. It IS in
+  // `DataGridProps` and `DataGridNode`, so the honest fix is to read it: it
+  // marks the grid so a row-expansion wave, and any host CSS, can find it,
+  // rather than leaving the control lying about what it does.
+
   // `rows` may be a binding string ("{{invoices}}") before the Engine resolves it,
   // and the schema type now reflects that — coerce to an array of records here.
   const rows: Record<string, any>[] = Array.isArray(rowsProp) ? rowsProp : [];
@@ -38,7 +52,7 @@ export function DataGrid({
 
   if (columns.length === 0) {
     return (
-      <div className="overflow-auto rounded border border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
+      <div className={cx("overflow-auto rounded border border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground", className)} style={style as React.CSSProperties | undefined}>
         No columns defined.
       </div>
     );
@@ -139,7 +153,8 @@ export function DataGrid({
   return (
     <div
       ref={scrollRef}
-      className="overflow-auto rounded border border-border bg-card"
+      className={cx("overflow-auto rounded border border-border bg-card", className)}
+      data-datagrid-expandable={expandable ? "true" : undefined}
       style={{ maxHeight: shouldVirtualise ? 480 : undefined }}
     >
       <table className="w-full text-sm">

@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 const DEFAULT_PALETTE = [
   "hsl(var(--primary))",
@@ -50,7 +51,7 @@ export function LineChartImpl(props: ChartPropsType) {
               type="monotone"
               dataKey={s.dataKey}
               name={s.name}
-              stroke={s.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]}
+              stroke={paintOr(s.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])}
               strokeWidth={2}
               dot={{ r: 3 }}
             />

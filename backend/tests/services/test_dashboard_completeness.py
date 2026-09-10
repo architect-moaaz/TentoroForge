@@ -13,13 +13,13 @@ from services.dashboard_completeness import apply_dashboard_completeness
 def _make_app(root: Path, *, plan: dict, schemas: dict[str, dict]) -> None:
     (root / "src" / "contracts").mkdir(parents=True)
     (root / "src" / "schemas").mkdir(parents=True)
-    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan))
+    (root / "src" / "contracts" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     for name, doc in schemas.items():
-        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc))
+        (root / "src" / "schemas" / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _read(root: Path, name: str) -> dict:
-    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text())
+    return json.loads((root / "src" / "schemas" / f"{name}.json").read_text(encoding="utf-8"))
 
 
 # ---------- bare dashboard gets topped up ---------------------------------

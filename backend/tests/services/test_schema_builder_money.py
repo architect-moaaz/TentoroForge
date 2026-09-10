@@ -76,13 +76,13 @@ def test_default_currency_literal_defaults_to_USD_and_honours_override():
 
 def test_money_column_emits_decimal_19_4(tmp_path):
     build_schema_files(_plan([{"name": "amount", "type": "money"}]), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert 'decimal("amount", { precision: 19, scale: 4 })' in src
 
 
 def test_money_column_emits_sibling_currency_column_defaulting_USD(tmp_path):
     build_schema_files(_plan([{"name": "amount", "type": "money"}]), str(tmp_path))
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     # sibling: char(3).notNull().default('USD') — banking's ISO-4217 slot
     assert 'amount_currency: char("amount_currency", { length: 3 }).notNull().default("USD")' in src
     # char is imported into the drizzle-orm/pg-core import line
@@ -94,7 +94,7 @@ def test_money_sibling_name_swaps_trailing_Amount(tmp_path):
     build_schema_files(
         _plan([{"name": "totalAmount", "type": "money"}]), str(tmp_path)
     )
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert 'totalCurrency: char("total_currency", { length: 3 })' in src
     # No stray `totalAmount_currency` — swap, not append.
     assert "totalAmount_currency" not in src
@@ -104,7 +104,7 @@ def test_money_sibling_name_swaps_trailing_snake_amount(tmp_path):
     build_schema_files(
         _plan([{"name": "price_amount", "type": "money"}]), str(tmp_path)
     )
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert 'price_currency: char("price_currency", { length: 3 })' in src
     assert "price_amount_currency" not in src
 
@@ -114,7 +114,7 @@ def test_defaultCurrency_override_applies_to_sibling(tmp_path):
         _plan([{"name": "amount", "type": "money", "defaultCurrency": "EUR"}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     assert 'default("EUR")' in src
 
 
@@ -127,7 +127,7 @@ def test_money_amount_column_default_is_notNull(tmp_path):
         _plan([{"name": "amount", "type": "money", "nullable": False}]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     # amount is nullable:false → .notNull() present on the decimal line
     assert 'decimal("amount", { precision: 19, scale: 4 }).notNull()' in src
     # sibling always notNull
@@ -144,6 +144,6 @@ def test_money_is_idempotent_when_plan_predeclares_sibling(tmp_path):
         ]),
         str(tmp_path),
     )
-    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text()
+    src = (tmp_path / "src" / "db" / "schema" / "transactions.ts").read_text(encoding="utf-8")
     # Only ONE amount_currency: line.
     assert src.count("amount_currency:") == 1

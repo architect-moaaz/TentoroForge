@@ -51,7 +51,7 @@ def load_memory(output_dir: str) -> dict:
         p = _ledger_path(output_dir)
         if not p.exists():
             return empty
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("pages"), list):
             return empty
         return data
@@ -95,7 +95,7 @@ def record_page(
         data["pages"] = pages
         p = _ledger_path(output_dir)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(data, indent=2))
+        p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:  # noqa: BLE001
         logger.exception(
             "[page-memory] record_page failed for %s / %s", output_dir, slug,

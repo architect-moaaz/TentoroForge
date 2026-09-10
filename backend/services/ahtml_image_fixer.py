@@ -41,7 +41,7 @@ def fix_ahtml_images(output_dir: str) -> dict[str, int]:
         return {}
 
     # Load manifest and categorize images by size/type
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     available_images = list(manifest.keys())
 
     # Categorize images

@@ -131,7 +131,7 @@ FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "figma" / "commitb
 
 
 def test_parses_full_commitbiz_fixture():
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     tree = parse_jsx_tree(src)
     assert tree.tag == "div"
     # Root has data-node-id="1:2" data-name="Commitbiz_intentai_login"
@@ -147,7 +147,7 @@ def test_parses_full_commitbiz_fixture():
 
 def test_fixture_descendant_count():
     """The fixture has many elements; ensure the parser doesn't lose them."""
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     tree = parse_jsx_tree(src)
     count = [0]
     def walk(n):
@@ -162,7 +162,7 @@ def test_fixture_descendant_count():
 
 def test_find_descendant_button():
     """The fixture has a Button at data-node-id 1:72. Verify we can find it."""
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     tree = parse_jsx_tree(src)
     button = tree.find_descendant(
         lambda n: hasattr(n, "tag") and n.attrs.get("data-name") == "Button"
@@ -173,7 +173,7 @@ def test_find_descendant_button():
 
 def test_find_descendant_sign_in_text():
     """Inside the Button there should be a <p>Sign in</p>."""
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     tree = parse_jsx_tree(src)
     button = tree.find_descendant(lambda n: hasattr(n, "tag") and n.attrs.get("data-name") == "Button")
     p = button.find_descendant(lambda n: hasattr(n, "tag") and n.tag == "p")
@@ -405,7 +405,7 @@ FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "figma" / "commitb
 
 
 def test_fixture_round_trip_expected_types():
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     schema = transform_jsx_to_schema(src)
     types: dict[str, int] = {}
     def walk(n):
@@ -426,7 +426,7 @@ def test_fixture_round_trip_expected_types():
 
 
 def test_fixture_button_has_label():
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     schema = transform_jsx_to_schema(src)
     button = None
     def find(n):
@@ -441,7 +441,7 @@ def test_fixture_button_has_label():
 
 
 def test_fixture_email_input_has_placeholder():
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     schema = transform_jsx_to_schema(src)
     email_input = None
     def find(n):
@@ -557,7 +557,7 @@ def test_fixture_no_flow_absolute_in_classnames():
     ARE allowed — those are intentionally preserved by Fix 1 (C.7).
     """
     import json
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     schema = transform_jsx_to_schema(src)
     schema_text = json.dumps(schema)
 
@@ -748,7 +748,7 @@ def test_heading_wrapper_no_leaf_p_unchanged():
 
 def test_fixture_subtitle_has_classname():
     """The 'Sign in to access your workspace' <p> should emit className with color."""
-    src = FIXTURE.read_text()
+    src = FIXTURE.read_text(encoding="utf-8")
     schema = transform_jsx_to_schema(src)
     # Find the Text node with that content
     subtitle = None

@@ -151,7 +151,7 @@ def guard_fk_types(output_dir: str | Path) -> dict[str, Any]:
     if not schema_dir.exists():
         return {"checked": 0, "fixed": 0, "changes": []}
 
-    files = {p: p.read_text() for p in sorted(schema_dir.glob("*.ts"))
+    files = {p: p.read_text(encoding="utf-8") for p in sorted(schema_dir.glob("*.ts"))
              if p.name not in ("index.ts", "relations.ts")}
 
     parsed = {p: _parse_file(t) for p, t in files.items()}
@@ -189,6 +189,6 @@ def guard_fk_types(output_dir: str | Path) -> dict[str, Any]:
                 "from": old, "to": want, "references": foreign_export,
             })
         if dirty:
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8")
 
     return {"checked": checked, "fixed": len(changes), "changes": changes}

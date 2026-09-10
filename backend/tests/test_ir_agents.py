@@ -98,7 +98,7 @@ class TestShouldUseIREdit:
         """Create a temp dir with IR manifest."""
         ir_dir = Path(tmpdir) / ".ir"
         ir_dir.mkdir()
-        (ir_dir / "manifest.json").write_text(json.dumps(SAMPLE_IR))
+        (ir_dir / "manifest.json").write_text(json.dumps(SAMPLE_IR), encoding="utf-8")
         return tmpdir
 
     def test_ui_change_routes_to_ir(self, tmp_path):

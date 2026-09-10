@@ -24,9 +24,9 @@ def _write_contracts(base: Path, short_id: str, app_model: dict, registry: dict 
     """Write app-model.json (and optional registry.json) under base/<short_id>/src/contracts/."""
     contracts_dir = base / short_id / "src" / "contracts"
     contracts_dir.mkdir(parents=True, exist_ok=True)
-    (contracts_dir / "app-model.json").write_text(json.dumps(app_model))
+    (contracts_dir / "app-model.json").write_text(json.dumps(app_model), encoding="utf-8")
     if registry is not None:
-        (contracts_dir / "registry.json").write_text(json.dumps(registry))
+        (contracts_dir / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
 
 
 MINIMAL_APP_MODEL = {

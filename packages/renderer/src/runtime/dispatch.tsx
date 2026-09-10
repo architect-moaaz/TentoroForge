@@ -1,9 +1,10 @@
 import { cloneElement, isValidElement, type ReactNode } from "react";
 import { CustomHtml } from "../nodes/library/CustomHtml";
-import { Stack, Row, Grid, Container, Spacer } from "../nodes/layout";
+import { Stack, Row, Grid, GridCell, Container, Spacer } from "../nodes/layout";
 import { Box, Text, Image } from "../nodes/primitive";
 import { Repeat, Conditional, DataBoundary } from "../nodes/data";
 import { Slot } from "../nodes/slot/Slot";
+import { StructuralNodeShell } from "./StructuralNodeShell";
 import { PageOutlet } from "../nodes/shell/PageOutlet";
 import { LibraryDispatcher } from "../nodes/library/LibraryDispatcher";
 import { NodeErrorBoundary } from "../nodes/library/NodeErrorBoundary";
@@ -97,6 +98,109 @@ function expandOptionsFrom(node: any, data: Record<string, unknown>): any {
   return { ...node, props: { ...rest, options , ...(dep ? { dependsOn: { field: dep.field, keys } } : {}) } };
 }
 
+/**
+ * Props that a library component renders in REACT CHILD POSITION rather than
+ * consuming as data — AppShell's four composition slots are the whole set
+ * today. `packages/schema/src/nodes/enterprise.ts` types each of them as a
+ * NodeV2Ref (a schema sub-tree) and the registry description says the same,
+ * but nothing ever converted that sub-tree into rendered nodes: AppShell.tsx
+ * does `{sidebar}` verbatim.
+ *
+ * Two consequences, both fatal before this map existed:
+ *   • the documented feature (compose a sidebar/topbar sub-tree) rendered
+ *     nothing correct — React threw on the plain object;
+ *   • validateProps cannot coerce these back to safety. Its step-3 rules
+ *     rescue "non-array where an array is expected"; a NodeV2 union mismatch
+ *     produces an invalid_union error it has no rule for, so the object
+ *     survives verbatim into the child position, throws "Objects are not valid
+ *     as a React child", and — because Fizz has no error boundaries — takes
+ *     the whole SSR document with it (docs/editor-audit/containment.md #1).
+ *
+ * The conversion happens here, in dispatch, because this is the only layer
+ * that has both the value and a renderer for it; the library must stay
+ * dispatch-unaware.
+ */
+const NODE_SLOT_PROPS: Record<string, readonly string[]> = {
+  AppShell: ["sidebar", "topbar", "actions", "rightRail"],
+};
+
+/** True for a value React can legally put in child position on its own. */
+function isRenderablePrimitive(v: unknown): boolean {
+  return (
+    v === null ||
+    v === undefined ||
+    typeof v === "string" ||
+    typeof v === "number" ||
+    typeof v === "boolean"
+  );
+}
+
+/**
+ * Convert the node-slot props of `type` into rendered ReactNodes.
+ *
+ * A schema sub-tree is rendered through renderNode (delivering the documented
+ * feature). Strings/numbers pass through as text. Anything else — an action
+ * object from the Properties panel, a stray array of scalars, a bound value
+ * that never resolved — becomes a labelled inline placeholder, because
+ * rendering it would be the crash this function exists to prevent, and
+ * silently dropping it would leave the user with an empty rail and no clue
+ * why.
+ */
+function resolveNodeSlotProps(
+  type: string,
+  props: Record<string, unknown>,
+  ctx: DispatchContext,
+): Record<string, unknown> {
+  const slotNames = NODE_SLOT_PROPS[type];
+  if (!slotNames) return props;
+  let out: Record<string, unknown> | null = null;
+  for (const name of slotNames) {
+    const v = props[name];
+    if (v === undefined || isRenderablePrimitive(v)) continue;
+    const resolved = Array.isArray(v)
+      ? v.map((c, i) => {
+          // Same keying rule as the children pass below: a schema node id when
+          // there is one, else the index — otherwise React warns for every
+          // multi-node slot.
+          const el = renderSlotValue(c, `${type}.${name}[${i}]`, ctx);
+          const key = (c as any)?.id ?? i;
+          return isValidElement(el) ? cloneElement(el, { key }) : el;
+        })
+      : renderSlotValue(v, `${type}.${name}`, ctx);
+    out ??= { ...props };
+    out[name] = resolved;
+  }
+  return out ?? props;
+}
+
+function renderSlotValue(v: unknown, label: string, ctx: DispatchContext): ReactNode {
+  if (isRenderablePrimitive(v)) return v as ReactNode;
+  if (isValidElement(v)) return v;
+  if (v && typeof v === "object" && typeof (v as any).type === "string") {
+    return renderNode(v, ctx);
+  }
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 8px",
+        border: "1px dashed hsl(var(--destructive, 0 70% 50%))",
+        borderRadius: 4,
+        background: "hsl(var(--destructive, 0 70% 50%) / 0.08)",
+        color: "hsl(var(--destructive, 0 70% 50%))",
+        fontSize: 12,
+        fontFamily: "ui-sans-serif, system-ui, sans-serif",
+      }}
+      data-invalid-node={label}
+      title={`${label} is not a schema node or text`}
+    >
+      ⚠ {label}: not renderable
+    </span>
+  );
+}
+
 export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // Ensure every node has a stable id so the editor overlay can locate it
   // via [data-node-id]. Schemas from the legacy pipeline may omit the id field.
@@ -147,12 +251,34 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // Conditional branches, DataBoundary wraps in try/catch). Pre-computing children
   // here would bypass their error-handling and scoping logic.
   switch (node.type) {
+    // THE FOUR THAT EMITTED NO ADDRESSABLE ELEMENT.
+    //
+    // These are dispatched ahead of the generic path below, which is where
+    // `data-node-id` is stamped — so they returned a bare fragment (or, for
+    // Slot, `null`) and the editor had nothing to select, measure, drop into or
+    // bind. The shell restores the handle every other node type already has.
+    // It is layout-neutral (`display: contents`) outside an authoring surface,
+    // so no shipped page changes, and it knows nothing about these four types
+    // beyond `node.type` — a fifth structural node is covered by being wrapped.
+    // See StructuralNodeShell.tsx.
     case "Repeat":
-      return <Repeat node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Repeat node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     case "Conditional":
-      return <Conditional node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Conditional node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     case "DataBoundary":
-      return <DataBoundary node={node} ctx={ctx} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <DataBoundary node={node} ctx={ctx} />
+        </StructuralNodeShell>
+      );
     default:
       // P1-O13: dev-mode misuse warning. `bind` is only honored by iterator
       // nodes above; a `bind` on Grid/Stack/Card silently renders 0 items and
@@ -193,6 +319,8 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
       return <Row node={node} children={children} />;
     case "Grid":
       return <Grid node={node} children={children} />;
+    case "GridCell":
+      return <GridCell node={node} children={children} />;
     case "Container":
       return <Container node={node} children={children} />;
     case "Spacer":
@@ -224,7 +352,11 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
       return <Image node={sizedNode} />;
     }
     case "Slot":
-      return <Slot node={node} />;
+      return (
+        <StructuralNodeShell node={node}>
+          <Slot node={node} />
+        </StructuralNodeShell>
+      );
     case "PageOutlet":
       // Shell composition: render the page content injected via PageOutletContext.
       // Works as a "use client" component because PageOutletContext.useContext
@@ -266,13 +398,24 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
       // so the editor canvas stays usable while the user fixes the schema.
       if (ctx.registry && ctx.registry.has(node.type)) {
         try {
-          const validatedProps = ctx.registry.validateProps(node.type, node.props ?? {});
+          const validatedProps = resolveNodeSlotProps(
+            node.type,
+            ctx.registry.validateProps(node.type, node.props ?? {}),
+            ctx,
+          );
           // Pass node.style through so library components (Task 20 StyleSlot mixin) can apply it.
           const propsWithStyle = node.style !== undefined
             ? { ...validatedProps, style: node.style }
             : validatedProps;
           return (
-            <NodeErrorBoundary nodeType={node.type}>
+            <NodeErrorBoundary
+              nodeType={node.type}
+              // The id makes the error placeholder selectable on the canvas
+              // (the editor hit-tests [data-node-id]); the props let it name
+              // the prop that threw. Both are already validated here.
+              nodeId={node.id}
+              nodeProps={propsWithStyle as Record<string, unknown>}
+            >
               <LibraryDispatcher
                 node={node}
                 ctx={ctx}

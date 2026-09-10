@@ -17,7 +17,7 @@ def read_fidelity_log(output_dir: str | Path) -> dict[str, Any]:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
 
@@ -76,4 +76,4 @@ def append_fidelity_entry(
         page_entry["cost_usd"] = cost_usd
     if flags is not None:
         page_entry["flags"] = flags
-    p.write_text(json.dumps(log, indent=2))
+    p.write_text(json.dumps(log, indent=2), encoding="utf-8")

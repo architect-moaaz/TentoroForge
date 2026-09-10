@@ -29,7 +29,7 @@ def _mk_app(tmp_path: Path, *, schemas: dict[str, dict],
 
 
 def _read(root: Path, rel: str) -> dict:
-    return json.loads((root / "src/schemas" / rel).read_text())
+    return json.loads((root / "src/schemas" / rel).read_text(encoding="utf-8"))
 
 
 def _detail(children: list | None = None) -> dict:
@@ -182,7 +182,7 @@ def test_report_written(tmp_path: Path):
     root = _mk_app(tmp_path, routes=["/documents", "/documents/[id]"],
                    schemas={"documents/[id].json": _detail()})
     apply_page_anatomy(root)
-    rep = json.loads((root / "contracts" / "page-anatomy.json").read_text())
+    rep = json.loads((root / "contracts" / "page-anatomy.json").read_text(encoding="utf-8"))
     assert rep["summary"]["injected"] >= 1
 
 

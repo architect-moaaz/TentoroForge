@@ -29,8 +29,8 @@ _REGISTRY = {
 def _write(tmp_path, schema, registry=_REGISTRY):
     sdir = tmp_path / "src" / "schemas"
     sdir.mkdir(parents=True, exist_ok=True)
-    (sdir / "home.json").write_text(json.dumps(schema))
-    (tmp_path / "registry.json").write_text(json.dumps(registry))
+    (sdir / "home.json").write_text(json.dumps(schema), encoding="utf-8")
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
     return str(tmp_path)
 
 

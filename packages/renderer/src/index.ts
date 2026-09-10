@@ -36,6 +36,7 @@ export type {
 } from "./runtime/computeAction";
 export type { SchemaRendererProps, DataEngine } from "./SchemaRenderer";
 export { compileTokens, tokenToCssVar, resolveStyle } from "./runtime/tokens";
+export { applyStyleSlot, isColorTokenRef, isScaleTokenRef } from "./runtime/style-slot";
 export { applyLayout } from "./runtime/layouts";
 export { validatePage } from "./runtime/validate";
 export { renderToObject } from "./test-harness/renderToObject";
@@ -71,6 +72,12 @@ export {
   NavigatorContext,
   NavigatorProvider,
   useNavigator,
+  useHref,
+  // Base-path translation for hosts that serve app routes under a prefix
+  // (the preview renderer's /p/<project>/…). One implementation, so every
+  // component that navigates through the seam gets it at once.
+  createBasePathNavigator,
+  resolveWithBasePath,
 } from "./client/Navigator";
 export type { Navigator } from "./client/Navigator";
 
@@ -106,3 +113,14 @@ export {
   usePresence,
 } from "./runtime/presence-client";
 export type { PresenceUser } from "./runtime/presence-client";
+
+// Design time — the one signal that says "this tree is being authored, not
+// run". Consumed by the dispatcher's structural-node shell and by the library
+// components whose only data source is a runtime the editor does not run.
+export {
+  DesignTimeProvider,
+  DesignTimePlaceholder,
+  useDesignTime,
+  useIdleRender,
+  useRuntimeArmed,
+} from "./client/DesignTime";

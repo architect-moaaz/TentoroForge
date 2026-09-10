@@ -687,7 +687,11 @@ async def export_project(
         # Add all project files
         for path in sorted(project_dir.rglob("*")):
             if path.is_file():
-                rel = str(path.relative_to(project_dir))
+                # `.as_posix()`: the skip test splits on "/", so with `str()`
+                # this produced a single element on Windows, nothing was
+                # ever skipped, and the export zip streamed the whole of
+                # node_modules and .git.
+                rel = path.relative_to(project_dir).as_posix()
                 # Skip node_modules, .git, .next
                 if any(part in rel.split("/") for part in ["node_modules", ".git", ".next", "__pycache__"]):
                     continue

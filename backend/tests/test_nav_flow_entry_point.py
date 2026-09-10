@@ -6,7 +6,7 @@ from services.nav_flow_emitter import emit_nav_flow
 
 def _emit(tmp_path, plan):
     emit_nav_flow(str(tmp_path), plan)
-    return json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text())
+    return json.loads((tmp_path / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
 
 
 def test_gated_app_enters_at_login(tmp_path):

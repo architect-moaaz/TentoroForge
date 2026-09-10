@@ -181,18 +181,18 @@ class TestFilesystemRun:
             "root": {"type": "Stack", "children": [
                 {"type": "EmptyState", "props": {"title": "No candidates"}},
             ]},
-        }))
+        }), encoding="utf-8")
         (schemas / "settings.json").write_text(json.dumps({
             "root": {"type": "Stack", "children": [
                 {"type": "Heading", "props": {"text": "Settings"}},
             ]},
-        }))
+        }), encoding="utf-8")
         r = pass_mod.run(tmp_path)
         assert r["pages_scanned"] == 2
         assert r["pages_upgraded"] == 1
         assert r["total_upgrades"] == 1
         # File was rewritten with the upgraded type.
-        reloaded = json.loads((schemas / "candidates.json").read_text())
+        reloaded = json.loads((schemas / "candidates.json").read_text(encoding="utf-8"))
         assert reloaded["root"]["children"][0]["type"] == "IllustratedEmpty"
 
     def test_run_skips_shell_json(self, tmp_path: Path):
@@ -204,11 +204,11 @@ class TestFilesystemRun:
                 # prove the walker refuses to touch shell.json.
                 {"type": "EmptyState", "props": {"title": "T"}},
             ]},
-        }))
+        }), encoding="utf-8")
         r = pass_mod.run(tmp_path)
         assert r["pages_scanned"] == 0  # shell.json is excluded
         # Shell content untouched.
-        reloaded = json.loads((schemas / "shell.json").read_text())
+        reloaded = json.loads((schemas / "shell.json").read_text(encoding="utf-8"))
         assert reloaded["root"]["children"][0]["type"] == "EmptyState"
 
     def test_route_derivation_from_file_path(self, tmp_path: Path):
@@ -218,9 +218,9 @@ class TestFilesystemRun:
             "root": {"type": "Stack", "children": [
                 {"type": "EmptyState", "props": {"title": "T"}},
             ]},
-        }))
+        }), encoding="utf-8")
         r = pass_mod.run(tmp_path)
         assert r["total_upgrades"] == 1
-        upgraded = json.loads((schemas / "candidates" / "search.json").read_text())
+        upgraded = json.loads((schemas / "candidates" / "search.json").read_text(encoding="utf-8"))
         # Route "/candidates/search" matches _pick_kind's search rule.
         assert upgraded["root"]["children"][0]["props"]["kind"] == "search"

@@ -23,7 +23,7 @@ from services.smith_resource_slice import (
 def _write(root: Path, rel: str, doc: dict) -> None:
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def test_resolve_entity_from_nav_flow_page_entity_field(tmp_path):

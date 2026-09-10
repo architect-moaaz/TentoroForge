@@ -10,7 +10,7 @@ from services.nav_flow_from_schemas import (
 def _write_schema(root, rel, data):
     p = root / "src" / "schemas" / f"{rel}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data))
+    p.write_text(json.dumps(data), encoding="utf-8")
 
 
 def test_returns_none_without_schemas(tmp_path):
@@ -68,7 +68,7 @@ def test_ensure_nav_flow_writes_when_missing(tmp_path):
     result = ensure_nav_flow(tmp_path)
     assert result == target
     assert target.exists()
-    assert len(json.loads(target.read_text())["pages"]) == 1
+    assert len(json.loads(target.read_text(encoding="utf-8"))["pages"]) == 1
 
 
 def test_ensure_nav_flow_idempotent(tmp_path):
@@ -76,10 +76,10 @@ def test_ensure_nav_flow_idempotent(tmp_path):
     target = tmp_path / "src" / "contracts" / "nav-flow.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     sentinel = {"version": "hand-written", "pages": []}
-    target.write_text(json.dumps(sentinel))
+    target.write_text(json.dumps(sentinel), encoding="utf-8")
 
     ensure_nav_flow(tmp_path)  # must NOT overwrite an existing file
-    assert json.loads(target.read_text()) == sentinel
+    assert json.loads(target.read_text(encoding="utf-8")) == sentinel
 
 
 def test_ensure_nav_flow_none_without_schemas(tmp_path):

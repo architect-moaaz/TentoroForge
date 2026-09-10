@@ -87,7 +87,7 @@ def test_already_up_yields_not_booted(monkeypatch, tmp_path):
 
 
 def test_boots_when_unreachable(monkeypatch, tmp_path):
-    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}')
+    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
     # First probe = unreachable; second inside _wait_for_boot = reachable
     monkeypatch.setattr(boot_mod, "_reachable", _fake_reachable([False, True]))
     _install_fake_popen(monkeypatch)
@@ -111,7 +111,7 @@ def test_bootless_when_no_package_json(monkeypatch, tmp_path):
 
 
 def test_boot_timeout_raises_with_log_tail(monkeypatch, tmp_path):
-    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}')
+    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
     # Always unreachable → _wait_for_boot exhausts its budget
     monkeypatch.setattr(boot_mod, "_reachable", lambda url, timeout_s=2: False)
     monkeypatch.setattr(boot_mod.time, "sleep", lambda _s: None)  # skip 1s delays
@@ -119,7 +119,7 @@ def test_boot_timeout_raises_with_log_tail(monkeypatch, tmp_path):
 
     # Write something into the log path that _tail will surface
     log_path = tmp_path / ".journey-boot.log"
-    log_path.write_text("Error: EADDRINUSE port 9999 already in use\n")
+    log_path.write_text("Error: EADDRINUSE port 9999 already in use\n", encoding="utf-8")
 
     with pytest.raises(BootError) as exc:
         with booted_app(
@@ -134,7 +134,7 @@ def test_boot_timeout_raises_with_log_tail(monkeypatch, tmp_path):
 
 
 def test_exception_inside_block_still_kills_child(monkeypatch, tmp_path):
-    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}')
+    (tmp_path / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
     monkeypatch.setattr(boot_mod, "_reachable", _fake_reachable([False, True]))
     _install_fake_popen(monkeypatch)
 

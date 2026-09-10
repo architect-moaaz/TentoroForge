@@ -392,9 +392,10 @@ def emit(spec: JourneySpec, output_dir: Path | str) -> Path:
     journeys_dir.mkdir(parents=True, exist_ok=True)
 
     (journeys_dir / "journeys.json").write_text(
-        json.dumps(spec.to_dict(), indent=2, sort_keys=False)
+        json.dumps(spec.to_dict(), indent=2, sort_keys=False),
+        encoding="utf-8",
     )
-    (journeys_dir / "playwright.config.ts").write_text(PLAYWRIGHT_CONFIG_TS)
-    (journeys_dir / "driver.spec.ts").write_text(DRIVER_SPEC_TS)
+    (journeys_dir / "playwright.config.ts").write_text(PLAYWRIGHT_CONFIG_TS, encoding="utf-8")
+    (journeys_dir / "driver.spec.ts").write_text(DRIVER_SPEC_TS, encoding="utf-8")
 
     return journeys_dir

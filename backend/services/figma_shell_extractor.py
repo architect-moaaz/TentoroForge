@@ -193,7 +193,7 @@ def extract_shell_by_structural_diff(
         if not schema_path.exists():
             continue
         try:
-            schema = json.loads(schema_path.read_text())
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except Exception:
             continue
         root_children = schema.get("children") or []
@@ -256,7 +256,7 @@ def extract_shell_by_structural_diff(
         "children": [shell_root],
     }
 
-    (schemas_dir / "shell.json").write_text(json.dumps(shell_schema, indent=2))
+    (schemas_dir / "shell.json").write_text(json.dumps(shell_schema, indent=2), encoding="utf-8")
 
     # Rewrite each page to keep only non-chrome children.
     chrome_indices = set(chrome_at_index.keys())
@@ -264,7 +264,7 @@ def extract_shell_by_structural_diff(
         new_kids = [k for i, k in enumerate(kids) if i not in chrome_indices]
         new_root = {**root, "children": new_kids}
         new_schema = {**schema, "children": [new_root]}
-        schema_path.write_text(json.dumps(new_schema, indent=2))
+        schema_path.write_text(json.dumps(new_schema, indent=2), encoding="utf-8")
 
     return shell_schema
 
@@ -307,7 +307,7 @@ def extract_shell_from_pages(
         if not schema_path.exists():
             continue
         try:
-            schema = json.loads(schema_path.read_text())
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except Exception:
             continue
         found = _find_nav_subtree(schema)
@@ -356,7 +356,7 @@ def extract_shell_from_pages(
 
     # Save shell.json.
     shell_out = schemas_dir / "shell.json"
-    shell_out.write_text(json.dumps(shell_schema, indent=2))
+    shell_out.write_text(json.dumps(shell_schema, indent=2), encoding="utf-8")
 
     # -----------------------------------------------------------------
     # Rewrite each shell page: strip the nav subtree (the shell provides it).
@@ -384,6 +384,6 @@ def extract_shell_from_pages(
                 + page_parent["children"][nav_idx + 1 :]
             )
 
-        schema_path.write_text(json.dumps(schema, indent=2))
+        schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
     return shell_schema

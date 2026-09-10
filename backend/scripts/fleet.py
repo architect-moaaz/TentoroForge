@@ -50,9 +50,9 @@ def load_fixture(name: str) -> dict:
     return {
         "name": name,
         "dir": d,
-        "plan": json.loads(plan_p.read_text()) if plan_p.is_file() else None,
-        "description": (d / "description.txt").read_text().strip(),
-        "meta": json.loads((d / "meta.json").read_text()),
+        "plan": json.loads(plan_p.read_text(encoding="utf-8")) if plan_p.is_file() else None,
+        "description": (d / "description.txt").read_text(encoding="utf-8").strip(),
+        "meta": json.loads((d / "meta.json").read_text(encoding="utf-8")),
     }
 
 
@@ -97,7 +97,7 @@ async def run_fixture(fx: dict, *, runtime: bool, replan: bool) -> dict:
         if fx["plan"] is None:
             # seed the fixture so future runs are deterministic
             (fx["dir"] / "plan.json").write_text(
-                json.dumps(plan, indent=2) + "\n")
+                json.dumps(plan, indent=2) + "\n", encoding="utf-8")
             print(f"[{name}] seeded fleet/fixtures/{name}/plan.json")
 
     if out.exists():
@@ -161,7 +161,7 @@ async def run_fixture(fx: dict, *, runtime: bool, replan: bool) -> dict:
 def load_baselines() -> dict:
     if BASELINES_PATH.is_file():
         try:
-            return json.loads(BASELINES_PATH.read_text())
+            return json.loads(BASELINES_PATH.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             pass
     return {}
@@ -209,8 +209,8 @@ async def cmd_run(args: argparse.Namespace) -> int:
         "replan": args.replan,
         "results": results,
     }
-    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    (run_dir / "summary.md").write_text(table + "\n")
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (run_dir / "summary.md").write_text(table + "\n", encoding="utf-8")
 
     print("\n" + table)
     print(f"\nresults saved: {run_dir.relative_to(_BACKEND)}/")
@@ -246,7 +246,7 @@ def _read_scorecard_for(result: dict) -> dict:
     p = result.get("scorecard")
     if p and Path(p).is_file():
         try:
-            return json.loads(Path(p).read_text())
+            return json.loads(Path(p).read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             pass
     return {}
@@ -318,7 +318,7 @@ def attribute_sources(card: dict, base: dict) -> list[str]:
 
 def cmd_bless(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(args.run)
-    summary = json.loads((run_dir / "summary.json").read_text())
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     baselines = build_baselines(summary)
     if not baselines:
         raise SystemExit(f"nothing to bless — no ok results in {run_dir.name}")
@@ -327,7 +327,7 @@ def cmd_bless(args: argparse.Namespace) -> int:
     # MERGE with existing baselines — a partial run (--only) must update
     # just its own fixtures, never wipe the rest of the fleet's ratchet.
     merged = {**load_baselines(), **baselines}
-    BASELINES_PATH.write_text(json.dumps(merged, indent=2) + "\n")
+    BASELINES_PATH.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     print(f"blessed {len(baselines)} fixture(s) from run {summary['run_ts']}"
           f" ({len(merged)} total in baselines)"
           f" → {BASELINES_PATH.relative_to(_BACKEND)}")
@@ -344,7 +344,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if not baselines:
         raise SystemExit("no baselines — run `scripts.fleet bless` first")
     run_dir = _resolve_run_dir(args.run)
-    summary = json.loads((run_dir / "summary.json").read_text())
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     results = summary.get("results", [])
     regressions = compare_results(results, baselines, args.tolerance)
 

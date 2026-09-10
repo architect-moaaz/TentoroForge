@@ -473,7 +473,7 @@ def extract(output_dir: Path | str, base_url: str = "http://localhost:3000") -> 
     plan: dict[str, Any] = {}
     if plan_path and plan_path.exists():
         try:
-            plan = json.loads(plan_path.read_text())
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
         except Exception:
             plan = {}
 

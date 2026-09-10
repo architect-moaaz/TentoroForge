@@ -33,7 +33,7 @@ _NON_CATALOG_TYPES = {
 
 
 def _registered_types() -> set[str]:
-    catalog = json.loads(_CATALOG.read_text())["components"]
+    catalog = json.loads(_CATALOG.read_text(encoding="utf-8"))["components"]
     names = {c["name"] if isinstance(c, dict) else c for c in catalog} \
         if isinstance(catalog, list) else set(catalog)
     return names | _NON_CATALOG_TYPES
@@ -51,7 +51,7 @@ def _is_planner_level_fixture(path: Path) -> bool:
     live in the same tree but are not page schemas — this test only applies
     to page-level schemas. Identify planner fixtures by top-level keys."""
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return False
     return isinstance(data, dict) and (
@@ -140,7 +140,7 @@ def test_the_gold_set_is_not_empty():
                          ids=lambda p: f"{p.parent.name}/{p.stem}")
 class TestSchemaExamples:
     def test_uses_only_registered_types(self, example_path: Path):
-        page = json.loads(example_path.read_text())
+        page = json.loads(example_path.read_text(encoding="utf-8"))
         unknown_types: list[str] = []
         for node in _walk_nodes(page):
             t = node.get("type")
@@ -152,7 +152,7 @@ class TestSchemaExamples:
     def test_style_slots_use_token_refs_only(self, example_path: Path):
         """Every string value inside a style block must look like 'tokens.<...>'
         EXCEPT background.type/url and motion enum values."""
-        page = json.loads(example_path.read_text())
+        page = json.loads(example_path.read_text(encoding="utf-8"))
         bad: list[tuple[str, str]] = []
         for style in _all_style_blocks(page):
             for path, val in _walk_style_slot_values(style):
@@ -177,7 +177,7 @@ class TestSchemaExamples:
             f"{example_path.name} has non-token-ref style values: {bad}"
 
     def test_has_schemaVersion_2(self, example_path: Path):
-        page = json.loads(example_path.read_text())
+        page = json.loads(example_path.read_text(encoding="utf-8"))
         assert page.get("schemaVersion") == "2", \
             f"{example_path.name} missing schemaVersion '2'"
 
@@ -198,7 +198,7 @@ class TestSchemaExamples:
         """
         if not _is_gold_example(example_path):
             pytest.skip("pattern, not a gold example — teaches structure, not style")
-        page = json.loads(example_path.read_text())
+        page = json.loads(example_path.read_text(encoding="utf-8"))
         count = sum(1 for _ in _all_style_blocks(page))
         assert count >= 1, \
             f"{example_path.name} has no StyleSlot — gold examples must showcase v2 features"

@@ -160,7 +160,7 @@ def ensure_workflow_validity(output_dir: str | Path, plan: dict | None) -> dict:
     # 1) repair existing malformed/unparseable workflow files (keep valid ones intact)
     for f in sorted(wf_dir.glob("*.json")):
         try:
-            d = json.loads(f.read_text())
+            d = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             d = None
         if d is not None and is_valid_workflow(d):
@@ -191,7 +191,7 @@ def ensure_workflow_validity(output_dir: str | Path, plan: dict | None) -> dict:
             )
         if isinstance(d, dict) and d.get("description"):
             fixed["description"] = d["description"]
-        f.write_text(json.dumps(fixed, indent=2))
+        f.write_text(json.dumps(fixed, indent=2), encoding="utf-8")
         present_names.add(_norm(wname))
         repaired.append(f.name)
 
@@ -221,7 +221,7 @@ def ensure_workflow_validity(output_dir: str | Path, plan: dict | None) -> dict:
                 mw["processVariables"] = pv
         except Exception:
             pass
-        path.write_text(json.dumps(mw, indent=2))
+        path.write_text(json.dumps(mw, indent=2), encoding="utf-8")
         present_names.add(_norm(nm))
         created.append(path.name)
 

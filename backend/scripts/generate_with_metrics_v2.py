@@ -33,7 +33,7 @@ from scripts.generate_with_metrics import _classify_phase, _extract_token_usage 
 async def run(description: str, plan_path: Path, short_id: str) -> int:
     output_dir = _OUTPUT_ROOT / short_id
     output_dir.mkdir(parents=True, exist_ok=True)
-    plan = json.loads(plan_path.read_text())
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
     print(f"┌─ generation start ──────────────────────────────────────")
     print(f"│ description : {description}")
@@ -54,7 +54,7 @@ async def run(description: str, plan_path: Path, short_id: str) -> int:
     # Persist plan into the project so downstream loaders find it
     contracts = output_dir / "src" / "contracts"
     contracts.mkdir(parents=True, exist_ok=True)
-    (contracts / "app-model.json").write_text(json.dumps(plan, indent=2))
+    (contracts / "app-model.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
     # Per-phase aggregator
     phase_stats: dict[str, dict[str, Any]] = {}

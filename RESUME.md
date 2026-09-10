@@ -1,97 +1,118 @@
-# Resume after restart
+# Resume state — editor audit & fix campaign
 
-Everything you need to pick up exactly where you left off.
+> ## ⚠ FIRST THING: PUSH
+> This branch has local commits that are **NOT on the remote**. `git push`
+> requires GitHub MFA, which could not be authorised while the work was
+> running, so pushing was deliberately abandoned rather than left hanging.
+>
+> ```
+> git push origin smithv2-editor-fixes
+> ```
+>
+> Run that first, authorise the MFA prompt, and the work is safe. Until then it
+> exists only in this working copy. Check how far ahead you are with:
+> `git rev-list --count origin/smithv2-editor-fixes..HEAD`
 
-## Quick start (one command)
+Written so a fresh session can continue without re-deriving anything. Last
+pushed commit: **`76213c8`** on branch **`smithv2-editor-fixes`**.
 
-```bash
-cd /Users/m/Work/code/poc/design2ui-forge-v3
-./start-all.sh
-```
+## What this campaign is
 
-That brings up all 4 services. Wait ~30 seconds for everything to settle, then open the view URLs below.
+Audit every component in the TentoroForge palette by driving the real editor as
+a user, fix what is found at the **root cause / component level** (never
+per-app), and prove it with tests plus live verification.
 
-## What's running
+Standing rule from the user, applies to everything:
+**no compromise on completeness, and every fix must be a root-cause or
+component-level fix — never a patch for one particular app.** No special-casing
+by project / page / route / component name. When the same defect appears on N
+components, fix the mechanism, not N descriptors.
 
-| Port | Service | Process | Cwd |
+## Coverage — 133 components in 6 categories
+
+| category | count | state | report |
 |---|---|---|---|
-| 6500 | Backend API | `python3 -m uvicorn main:app --port 6500 --host 0.0.0.0 --reload` | `backend/` |
-| 6501 | Main frontend (editor) | `next dev -p 6501` | `frontend/` |
-| 6502 | Render service (vision eval) | `python3 -m services.render_service` | `backend/` |
-| 6503 | Render scaffold (schema preview) | `next dev -p 6503` | `apps/render-scaffold/` |
+| layout | 18 | done | `docs/editor-audit/containment.md`, `browser-test.md` |
+| input | 41 | done | `input-components.md`, `-2.md`, `-3.md` |
+| display | 31 | done | `display-components.md`, `-2.md` |
+| navigation | 10 | audited, fixes in flight | `qa-audit-log.md` |
+| feedback | 21 | audit in flight | `qa-audit-log.md` |
+| data | 12 | audit in flight | `qa-audit-log.md` |
 
-## URLs to view the work-in-progress
+## Known-open work
 
-The test project from today's session is `genmetrics-1778439719` (a "team task tracker").
+1. **The 4 app routes need re-auditing WITH A SIGNED-IN SESSION.** They were
+   audited unauthenticated; the app redirects to `/login`, so "blank page",
+   "list invisible", "`[id]` ignored" are all void. See the CORRECTION block at
+   the end of `qa-audit-log.md`. This is a real coverage gap.
+2. **Round 5 rows 27–29** — the empty-node hint names the wrong prop (`bind`
+   instead of the required-and-missing one), names none at all for five
+   components, and is absent for zero-area nodes. Assigned to Fixer F. The
+   durable fix derives the hint from each component's Zod schema, NOT a
+   per-component lookup table.
+3. **`final-qa-report.md` has not been produced yet.** It must cross-check every
+   row of `qa-audit-log.md` into a table with columns: Component/Route · Tested ·
+   Bugs Found · Bugs Fixed · Features Requested · Features Added · Final Status,
+   and explicitly call out anything never tested, found-but-not-fixed, or
+   requested-but-not-implemented.
+4. **Showcase pages** — `/ops-dashboard` is built (54 nodes, 29 component
+   types). `/stock-intake`, `/item-profile`, `/workspace`, `/toolbar-lab` are
+   not. See `docs/editor-audit/showcase-checklist.md`. Building through the
+   palette costs ~15-25s per component.
+5. **`frontend/src/lib/preview-resolve.ts`** now delegates to the engine's
+   `computeAggregate`, but the KPI `format` field (`"currency"`) is carried and
+   never applied — tiles render `46851.48`, not `$46,851.48`.
 
-- **List view (most polished):** http://localhost:6503/p/genmetrics-1778439719/tasks/list
-- Detail: http://localhost:6503/p/genmetrics-1778439719/tasks/detail
-- Form:   http://localhost:6503/p/genmetrics-1778439719/tasks/form
-- Users:  http://localhost:6503/p/genmetrics-1778439719/users/list
+## Baselines — measure against these, and REBUILD FIRST
 
-Other existing projects you can browse for comparison:
-- http://localhost:6503/p/w9595ngp/leaverequests/list (pre-fixes baseline)
-- http://localhost:6503/p/test-app/products/list
+A stale `dist/` silently changes these numbers; it has produced two false
+regression readings in this campaign.
 
-## Critical state (don't lose this)
-
-| File | What it holds |
+| suite | baseline |
 |---|---|
-| `backend/.env` | `ANTHROPIC_API_KEY` — already gitignored. **Rotate the current key**, then put the new one here. |
-| `output/genmetrics-1778439719/` | Today's generated project. Schemas, design-spec, fixtures-cache, all there. |
-| `packages/{schema,renderer,library}/dist/` | Compiled output. Rebuilt by `tsc` if missing — see "If something feels stale" below. |
+| frontend | 47 files / 613 tests / **0 failures** |
+| `editor-validation.test.tsx` | 21/21, `invalidProps=0`, `selectable=129` |
+| patches | 68 passing |
+| registry | 23 passing |
+| library | **24 failing** / ~1057 passing (pre-existing: theming-contract, Heading, DescriptionList, Money, registry-parity, Stagger, Sidebar, CameraCapture, data-feedback-nav) |
+| renderer | **30 failing** / ~249 passing (pre-existing) |
+| engine | **2 failing** / 45 passing (pre-existing) |
+| backend | 122 failing / 13369 passing across 64 files — all pre-existing, spread wide; the changed areas are green |
 
-## What was changed in the platform today (high-level)
+Build order: `schema → patches → renderer → library → registry → engine`.
+The root `npm run build` order is WRONG.
 
-Permanent improvements that apply to all future generations:
+## Services
 
-**Reliability**
-- `packages/schema/src/page.ts` — `NodeV2` switched to `z.discriminatedUnion` (fixes the OOM on Mark 2 schemas)
-- `packages/schema/src/tokens.ts` + `nodes/*.ts` + `style-slot.ts` — schema validation loosened to match what the LLM actually emits
-- `packages/renderer/src/runtime/{interpolate,dispatch}.tsx` — date + snake-case humanizer in Text, prefix-icon detection
-- `packages/renderer/src/nodes/layout/{Grid,Stack,Row}.tsx` — gap tokens mapped to real Tailwind classes (was silently 0)
-- `apps/render-scaffold/.../page.tsx` — production-style URL fallback (`/tasks/<id>` → detail page)
-- `apps/render-scaffold/tailwind.config.ts` — library packages added to `content` (was missing → no compiled CSS for library classes)
+| port | what | notes |
+|---|---|---|
+| 6500 | backend (uvicorn, no `--reload` — restart to pick up Python changes) | |
+| 6501 | editor frontend | |
+| 6503 | render-scaffold (`NEXT_BASE_PATH=/p`) | crashes often; restart per `start-all.ps1` |
+| 6510 | the generated app standalone (`next dev` in `output/gh0mlpbp/app`) | **requires login** |
+| 5433 | Postgres (userspace cluster, `pg_ctl -w start`) | |
 
-**Generation pipeline**
-- `backend/agents/planner.py` — added `run_planner_oneshot()` for headless generation (12s vs 4m 20s conversational planner)
-- `backend/services/register_selector.py` — LLM-driven register classification (with rule-based fallback)
-- `backend/services/fixtures/{llm_gen,cache,dispatcher}.py` — LLM-generated preview fixtures, cached per project
-- `backend/routers/_debug_schema.py` — preview-data enrichment (FK joins with person aliases, semantic field aliases, stat aliases, metadata defaults)
+## Hard-won lessons — do not relearn these
 
-**Visual polish (Tier S/M/L partial)**
-- `apps/render-scaffold/tailwind.config.ts` — type scale tokens (`text-page-title`/section/card-title/body/caption/micro) + spacing rhythm tokens (`rhythm-tight`/`-comfortable`/`-loose`)
-- `packages/library/src/icons/index.ts` — Lucide icon resolver + semantic inference (NEW file)
-- `packages/library/src/components/{Hero,Card,MetricTile,Badge,Section,Button}/...` — converted to use new tokens + icons + WCAG-AA contrast
-
-## If something feels stale after restart
-
-If you make a code change and don't see it reflected:
-
-```bash
-# Rebuild the schema/renderer/library packages
-cd packages/schema   && /Users/m/Work/code/poc/design2ui-forge-v3/node_modules/.bin/tsc
-cd ../renderer       && /Users/m/Work/code/poc/design2ui-forge-v3/node_modules/.bin/tsc
-cd ../library        && /Users/m/Work/code/poc/design2ui-forge-v3/node_modules/.bin/tsc
-# Clear the scaffold's compiled CSS cache (forces Tailwind to re-scan)
-rm -rf apps/render-scaffold/.next
-# Restart scaffold
-pkill -9 -f "next dev -p 6503"
-# (then ./start-all.sh again)
-```
-
-The library's `tsc` reports pre-existing TS errors in `PersonCard`, `Tabs`, `resolveStyle` — those are unrelated to today's work; the affected components still emit valid JS.
-
-## What's still pending (next session)
-
-From the Tier S/M/L plan that's ~50% complete:
-
-1. **Tier S**: Radius scale unification (Card uses `rounded-xl`, Buttons `rounded-md`, Badges `rounded-full` — pick one system), Heading component conversion to type-scale tokens.
-2. **Tier L**: Icon prop on Button, primary/secondary CTA hierarchy in design-spec, progressive disclosure schema patterns, schema-prompt proximity training.
-3. **Tier M**: Keyboard-nav audit, aria-labels on icon-only Button variants, semantic markup (`<dl>` for KeyValueList).
-4. **Reference bank**: Seeder still needs prompt work — current attempts score 1-2/10. Without this, the fidelity loop has nothing to ground against.
-5. **Schema-mode generation produces no seed.ts** — the seed-plan exists but the script wasn't compiled. Generated apps can't run with seeded data; user must signup manually.
-
-## What's burned that you should rotate
-
-You pasted an Anthropic API key in chat. It's in `backend/.env` now. **Rotate it at https://console.anthropic.com/settings/keys**, replace the value in `backend/.env`, and don't reuse the pasted one in any other system.
+- **Never silence a `git stash pop`.** One did, failed on a tracked `dist/`
+  artifact, and reverted 582 files. Recovered by resetting the one blocking file.
+- **Rebuild before measuring test counts.** Stale `dist/` gave a false
+  "2 regressions" and a false "28 tests vanished".
+- **A registry `default` is copied onto every dropped node.** A default the
+  component reads as a COMMAND rather than "unset" is a new bug:
+  `ActivityFeed.maxHeight: 0`, `FileUpload.maxSizeMb: 0`,
+  `MultiSelect.maxSelectionLabel: 0`, `BulkActionBar.selectedCount: 0`.
+  When in doubt, omit the default.
+- **Every default must satisfy BOTH** the library `.schema.ts` AND the
+  `.strict()` node schema in `packages/schema/src/nodes/`. Valid for one and
+  rejected by the other = every dropped node fails `PageV2`.
+- **Verify agent claims.** Subagents report optimistically. Two headline
+  findings this session did not reproduce.
+- Screenshots time out on this Chrome profile — use `javascript_tool` DOM probes.
+- Editor chrome must be clicked via JS (find by text), not coordinates — the
+  canvas scrolls and stale coordinates hit the wrong thing.
+- `packages/schema` edits require `npm run emit:blueprint-schema` afterwards or
+  a backend contract test fails.
+- The A2UI sibling repo (`../agent2ui`) regenerates
+  `specification/v0_9/catalogs/forge/catalog.json` when the composer runs. The
+  user has no push access there — check `git status` in it before pushing.

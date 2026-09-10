@@ -2,6 +2,8 @@
 
 import React, { useMemo } from "react";
 import type { ResourceTimelinePropsType } from "./ResourceTimeline.schema";
+import { resolveStyle } from "../../style/resolveStyle";
+import { useMotion } from "../../style/useMotion";
 
 /** Categorical status → HSL bar colour. Falls back to a hashed hue. */
 const STATUS_HUE: Record<string, number> = {
@@ -112,7 +114,7 @@ export function ResourceTimeline(props: ResourceTimelinePropsType & Record<strin
 
   if (groups.length === 0) {
     return (
-      <div className={className} style={style} data-timeline-empty>
+      <div className={className} style={resolveStyle(style)} {...useMotion((style as any)?.motion)} data-timeline-empty>
         <div style={{ padding: "48px 16px", textAlign: "center", color: "hsl(var(--muted-foreground))" }}>
           {emptyText}
         </div>
@@ -130,8 +132,10 @@ export function ResourceTimeline(props: ResourceTimelinePropsType & Record<strin
       data-resource-timeline
       style={{
         border: "1px solid hsl(var(--border))", borderRadius: "var(--radius, 0.5rem)",
-        overflow: "auto", background: "hsl(var(--card))", fontSize: 13, ...style,
+        overflow: "auto", background: "hsl(var(--card))", fontSize: 13,
+        ...resolveStyle(style),
       }}
+      {...useMotion((style as any)?.motion)}
     >
       {/* Header */}
       <div style={{ display: "grid", gridTemplateColumns: gridCols, position: "sticky", top: 0, zIndex: 3, background: "hsl(var(--card))", borderBottom: "1px solid hsl(var(--border))" }}>

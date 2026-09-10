@@ -35,7 +35,7 @@ def test_inject_typography_adds_google_fonts_import():
             "heading_tracking": "-0.01em",
         }
         _inject_typography_into_globals(css_path, register)
-        css = css_path.read_text()
+        css = css_path.read_text(encoding="utf-8")
         assert "fonts.googleapis.com" in css
         assert "Playfair+Display" in css
         assert "Source+Sans+3" in css
@@ -54,7 +54,7 @@ def test_inject_typography_adds_css_variables():
             "heading_tracking": "-0.02em",
         }
         _inject_typography_into_globals(css_path, register)
-        css = css_path.read_text()
+        css = css_path.read_text(encoding="utf-8")
         assert "--font-heading:" in css
         assert "'Inter'" in css or '"Inter"' in css
         assert "--font-body:" in css
@@ -76,9 +76,9 @@ def test_inject_typography_is_idempotent():
             "heading_tracking": "-0.02em",
         }
         _inject_typography_into_globals(css_path, register)
-        first = css_path.read_text()
+        first = css_path.read_text(encoding="utf-8")
         _inject_typography_into_globals(css_path, register)
-        second = css_path.read_text()
+        second = css_path.read_text(encoding="utf-8")
         assert first == second
         assert second.count("fonts.googleapis.com") == 1
         assert second.count("--font-heading:") == 1
@@ -97,7 +97,7 @@ def test_inject_typography_preserves_existing_css():
             "heading_tracking": "0em",
         }
         _inject_typography_into_globals(css_path, register)
-        css = css_path.read_text()
+        css = css_path.read_text(encoding="utf-8")
         assert "@tailwind base;" in css
         assert "--background: 0 0% 100%;" in css
         assert "--foreground: 222.2 84% 4.9%;" in css

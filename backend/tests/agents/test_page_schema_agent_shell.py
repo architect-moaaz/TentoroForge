@@ -96,7 +96,7 @@ async def test_run_page_schema_agent_writes_schema_file_for_simple_page(tmp_path
         )
     written = tmp_path / "src" / "schemas" / "tasks.json"
     assert written.exists(), f"page schema not written at {written}"
-    schema = json.loads(written.read_text())
+    schema = json.loads(written.read_text(encoding="utf-8"))
     assert schema["id"] == "tasks"
 
 
@@ -146,7 +146,7 @@ async def test_shell_context_added_to_prompt_when_shell_json_exists(tmp_path):
     # Pre-seed shell.json so the agent's existence check passes
     schemas_dir = tmp_path / "src" / "schemas"
     schemas_dir.mkdir(parents=True)
-    (schemas_dir / "shell.json").write_text(json.dumps({"schemaVersion": "2", "children": []}))
+    (schemas_dir / "shell.json").write_text(json.dumps({"schemaVersion": "2", "children": []}), encoding="utf-8")
 
     with patch(
         "agents.page_schema_agent._collect_llm_text",
@@ -174,7 +174,7 @@ async def test_shell_context_NOT_added_for_auth_pages(tmp_path):
     """
     schemas_dir = tmp_path / "src" / "schemas"
     schemas_dir.mkdir(parents=True)
-    (schemas_dir / "shell.json").write_text(json.dumps({"schemaVersion": "2", "children": []}))
+    (schemas_dir / "shell.json").write_text(json.dumps({"schemaVersion": "2", "children": []}), encoding="utf-8")
 
     with patch(
         "agents.page_schema_agent._collect_llm_text",

@@ -54,10 +54,10 @@ def _scaffold(tmp_path: Path,
     for rel_path, page in pages:
         target = outdir / "src" / "schemas" / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(page, indent=2))
+        target.write_text(json.dumps(page, indent=2), encoding="utf-8")
     for wf in workflows:
         (outdir / "workflows" / f"{str(wf['name']).lower()}.json").write_text(
-            json.dumps(wf, indent=2),
+            json.dumps(wf, indent=2), encoding="utf-8",
         )
     return outdir
 
@@ -164,7 +164,7 @@ def test_wire_orphan_workflows_wires_perfect_match(tmp_path):
 
     # Verify the form now points at the workflow.
     page = json.loads(
-        (outdir / "src" / "schemas" / "feedback" / "new.json").read_text(),
+        (outdir / "src" / "schemas" / "feedback" / "new.json").read_text(encoding="utf-8"),
     )
     form = page["root"]["children"][0]
     assert form["props"]["workflow"] == "SubmitFeedbackWorkflow"
@@ -226,7 +226,7 @@ def test_wire_orphan_workflows_never_overwrites_wired_form(tmp_path):
     assert any(u["workflow"] == "ParseCvWorkflow" for u in result["unresolved"])
     # The original wire is intact.
     page = json.loads(
-        (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(),
+        (outdir / "src" / "schemas" / "candidates" / "new.json").read_text(encoding="utf-8"),
     )
     assert page["root"]["children"][0]["props"]["workflow"] == "CreateCandidateProfile"
 
@@ -271,7 +271,7 @@ def test_wire_orphan_workflows_wires_api_event_trigger(tmp_path):
     assert result["unresolved"] == []
 
     # The Form's props.workflow now points at the api_event workflow.
-    page = json.loads((outdir / "src" / "schemas" / "scan.json").read_text())
+    page = json.loads((outdir / "src" / "schemas" / "scan.json").read_text(encoding="utf-8"))
     form = page["root"]["children"][0]
     assert form["props"]["workflow"] == "ScanProductWorkflow"
 

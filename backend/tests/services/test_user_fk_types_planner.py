@@ -50,7 +50,7 @@ class TestPlannerActorRewritesUnusualName:
         })
         rep = reconcile_user_fk_types(tmp_path)
         assert rep["reconciled"] is True
-        txt = (d / "asset.ts").read_text()
+        txt = (d / "asset.ts").read_text(encoding="utf-8")
         assert 'primaryOwnerRefId: integer("primary_owner_ref_id")' in txt
 
 
@@ -79,7 +79,7 @@ class TestPlannerOptOut:
         })
         rep = reconcile_user_fk_types(tmp_path)
         assert rep["reconciled"] is False
-        txt = (d / "property.ts").read_text()
+        txt = (d / "property.ts").read_text(encoding="utf-8")
         assert 'landlordId: uuid("landlord_id")' in txt
 
 
@@ -97,7 +97,7 @@ class TestLegacyPathPreserved:
         rep = reconcile_user_fk_types(tmp_path)
         assert rep["reconciled"] is True
         assert rep["columns"] == 1
-        txt = (d / "property.ts").read_text()
+        txt = (d / "property.ts").read_text(encoding="utf-8")
         assert 'landlordId: integer("landlord_id")' in txt
 
     def test_no_planner_hint_no_op_when_users_uuid(self, tmp_path):

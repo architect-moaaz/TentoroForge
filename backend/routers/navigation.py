@@ -74,7 +74,7 @@ def _pages_from_schemas(output_dir: str) -> list[dict]:
     nav_flow_path = Path(output_dir) / "src" / "contracts" / "nav-flow.json"
     if nav_flow_path.exists():
         try:
-            nav_flow = json.loads(nav_flow_path.read_text())
+            nav_flow = json.loads(nav_flow_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             nav_flow = None
         if isinstance(nav_flow, dict):
@@ -100,7 +100,7 @@ def _pages_from_schemas(output_dir: str) -> list[dict]:
     pages: list[dict] = []
     for json_file in sorted(schemas_dir.rglob("*.json")):
         try:
-            schema = json.loads(json_file.read_text())
+            schema = json.loads(json_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         route = schema.get("route")
@@ -159,7 +159,7 @@ def _derive_edges_from_schemas(output_dir: str, screens: list[dict]) -> list[dic
     nav_flow_path = Path(output_dir) / "src" / "contracts" / "nav-flow.json"
     if nav_flow_path.exists():
         try:
-            nav_flow = json.loads(nav_flow_path.read_text())
+            nav_flow = json.loads(nav_flow_path.read_text(encoding="utf-8"))
             for entry in nav_flow.get("pages") or []:
                 sf = entry.get("schemaFile")
                 rt = entry.get("route")
@@ -228,7 +228,7 @@ def _derive_edges_from_schemas(output_dir: str, screens: list[dict]) -> list[dic
     # Map each schema file to the screen at its route
     for json_file in schemas_dir.rglob("*.json"):
         try:
-            schema = json.loads(json_file.read_text())
+            schema = json.loads(json_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         # Resolve route: legacy schemas put it at top level; current schemas
@@ -269,7 +269,7 @@ def _build_nav_from_app_model(output_dir: str) -> dict:
         if not app_model_path:
             return {"screens": [], "edges": [], "sidebarLinks": [], "topbarLinks": []}
         try:
-            app_model = json.loads(app_model_path.read_text())
+            app_model = json.loads(app_model_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {"screens": [], "edges": [], "sidebarLinks": [], "topbarLinks": []}
         pages = app_model.get("pages", [])
@@ -330,7 +330,7 @@ def _build_nav_from_app_model(output_dir: str) -> dict:
     # Persist so subsequent reads don't re-generate
     try:
         nav_file = Path(output_dir) / NAV_FILE
-        nav_file.write_text(json.dumps(nav_data, indent=2))
+        nav_file.write_text(json.dumps(nav_data, indent=2), encoding="utf-8")
     except OSError:
         pass
 
@@ -389,7 +389,7 @@ def _reconcile_nav_with_schemas(output_dir: str, saved: dict) -> dict:
     # Persist the merged result so user-saved positions survive the next read
     # (the build helper above wrote fresh-without-positions over the file).
     try:
-        (Path(output_dir) / NAV_FILE).write_text(json.dumps(fresh, indent=2))
+        (Path(output_dir) / NAV_FILE).write_text(json.dumps(fresh, indent=2), encoding="utf-8")
     except OSError:
         pass
     return fresh
@@ -409,7 +409,7 @@ async def get_navigation(
     if not nav_file.exists():
         return _build_nav_from_app_model(project.output_dir)
 
-    saved = json.loads(nav_file.read_text())
+    saved = json.loads(nav_file.read_text(encoding="utf-8"))
     return _reconcile_nav_with_schemas(project.output_dir, saved)
 
 
@@ -425,7 +425,7 @@ async def save_navigation(
         raise HTTPException(status_code=400, detail="No output directory")
 
     nav_file = _nav_path(project.output_dir)
-    nav_file.write_text(json.dumps(req.model_dump(), indent=2))
+    nav_file.write_text(json.dumps(req.model_dump(), indent=2), encoding="utf-8")
     return {"saved": True}
 
 
@@ -444,7 +444,7 @@ async def apply_navigation(
     if not nav_file.exists():
         raise HTTPException(status_code=404, detail="No navigation config")
 
-    nav_data = json.loads(nav_file.read_text())
+    nav_data = json.loads(nav_file.read_text(encoding="utf-8"))
     instruction = _build_navigation_instruction(nav_data)
 
     async def event_stream():
@@ -622,7 +622,7 @@ async def get_modules_layout(
     if not modules_file.exists():
         return {"modules": [], "dependencies": []}
 
-    return json.loads(modules_file.read_text())
+    return json.loads(modules_file.read_text(encoding="utf-8"))
 
 
 @router.post("/api/projects/{project_id}/modules/layout")
@@ -637,5 +637,5 @@ async def save_modules_layout(
         raise HTTPException(status_code=400, detail="No output directory")
 
     modules_file = _modules_path(project.output_dir)
-    modules_file.write_text(json.dumps(req.model_dump(), indent=2))
+    modules_file.write_text(json.dumps(req.model_dump(), indent=2), encoding="utf-8")
     return {"saved": True}

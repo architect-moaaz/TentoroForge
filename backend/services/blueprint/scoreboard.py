@@ -300,7 +300,7 @@ def bless(scores: dict[str, Score], path: str | Path = BASELINE_PATH) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(
         {k: v.to_dict() for k, v in sorted(scores.items())}, indent=2, sort_keys=True
-    ) + "\n", "utf-8")
+    ) + "\n", encoding="utf-8")
     return p
 
 

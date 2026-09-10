@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 const DEFAULT_PALETTE = [
   "hsl(var(--primary))",
@@ -39,7 +40,7 @@ export function AreaChartImpl(props: ChartPropsType) {
           {props.showTooltip !== false && <Tooltip />}
           {props.showLegend !== false && <Legend wrapperStyle={{ fontSize: 11 }} />}
           {props.series.map((s, i) => {
-            const color = s.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
+            const color = paintOr(s.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]);
             return (
               <Area
                 // recharts 2.15's entry animation goes through react-smooth's

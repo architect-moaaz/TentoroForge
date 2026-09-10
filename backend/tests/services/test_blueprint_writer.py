@@ -30,7 +30,7 @@ class TestWrite:
         assert result["byte_size"] > 0
         p = tmp_path / "BLUEPRINT.md"
         assert p.is_file()
-        assert p.read_text().startswith("# Untitled App")
+        assert p.read_text(encoding="utf-8").startswith("# Untitled App")
 
     def test_missing_output_dir(self, tmp_path):
         result = write_blueprint(
@@ -58,7 +58,7 @@ class TestLog:
     def test_log_appended_per_write(self, tmp_path):
         write_blueprint(tmp_path, source="generation", summary="first")
         write_blueprint(tmp_path, source="editor", summary="second")
-        log = (tmp_path / ".blueprint-log.jsonl").read_text().splitlines()
+        log = (tmp_path / ".blueprint-log.jsonl").read_text(encoding="utf-8").splitlines()
         assert len(log) == 2
         e1 = json.loads(log[0])
         e2 = json.loads(log[1])
@@ -68,7 +68,7 @@ class TestLog:
 
     def test_log_appears_in_blueprint_body(self, tmp_path):
         write_blueprint(tmp_path, source="smith", summary="hello world")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "## Generation Log" in md
         assert "hello world" in md
         assert "smith" in md
@@ -89,11 +89,11 @@ class TestIdempotency:
         # Generation-Log section actually changes, so the second write is
         # NOT a no-op. Demonstrate by matching identical LOG content.
         # Read + rewrite to normalize.
-        first = (tmp_path / "BLUEPRINT.md").read_text()
+        first = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
 
         # Force-restore log so the second build renders identical content.
         (tmp_path / ".blueprint-log.jsonl").unlink()
-        (tmp_path / "BLUEPRINT.md").write_text(first)
+        (tmp_path / "BLUEPRINT.md").write_text(first, encoding="utf-8")
 
         # Now writer should skip — its build appends one log entry, but
         # write compares against the on-disk body. After the pre-write
@@ -171,28 +171,28 @@ class TestFlag:
 class TestMutationSourceAnnotation:
     def test_source_appears_in_header(self, tmp_path):
         write_blueprint(tmp_path, source="editor", summary="edited x")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "Written by: editor" in md
 
     def test_smith_source_flows_through(self, tmp_path):
         write_blueprint(tmp_path, source="smith", summary="patched y")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "Written by: smith" in md
 
     def test_generation_source_flows_through(self, tmp_path):
         write_blueprint(tmp_path, source="generation", summary="ran")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "Written by: generation" in md
 
     def test_manual_source_flows_through(self, tmp_path):
         write_blueprint(tmp_path, source="manual", summary="user click")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "Written by: manual" in md
 
     def test_log_entry_count_annotated(self, tmp_path):
         write_blueprint(tmp_path, source="generation")
         write_blueprint(tmp_path, source="editor")
-        md = (tmp_path / "BLUEPRINT.md").read_text()
+        md = (tmp_path / "BLUEPRINT.md").read_text(encoding="utf-8")
         assert "Log: 2 entries" in md
 
 
@@ -200,7 +200,7 @@ class TestSafeWrapper:
     def test_never_raises_on_bad_dir(self, tmp_path):
         # Passing a file path instead of a dir.
         bad = tmp_path / "file.txt"
-        bad.write_text("x")
+        bad.write_text("x", encoding="utf-8")
         result = write_blueprint_safe(bad)
         assert result["written"] is False
         # Did not raise.

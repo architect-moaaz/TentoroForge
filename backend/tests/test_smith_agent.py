@@ -38,7 +38,7 @@ def _dummy_output_dir(tmp_path: Path) -> str:
         "relationships": [],
         "roles": [],
         "interactions": [],
-    }))
+    }), encoding="utf-8")
     return str(tmp_path)
 
 
@@ -313,7 +313,7 @@ def test_answer_refused_when_edit_has_no_matching_verify(tmp_path):
     # Make a real target so edit_file's I/O doesn't crash the trace shape.
     target = Path(out) / "src" / "schemas" / "candidates" / "new.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text('{"kind":"form","widgets":[]}')
+    target.write_text('{"kind":"form","widgets":[]}', encoding="utf-8")
 
     result = smith_agent.run_smith_agent(
         "Change the CV field to a FileUpload",

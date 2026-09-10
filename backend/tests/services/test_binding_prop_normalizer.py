@@ -22,7 +22,7 @@ def _mk_app(tmp_path: Path, schemas: dict[str, dict],
 
 
 def _page(root: Path, rel: str) -> dict:
-    return json.loads((root / "src" / "schemas" / rel).read_text())
+    return json.loads((root / "src" / "schemas" / rel).read_text(encoding="utf-8"))
 
 
 def _list_doc(node: dict) -> dict:
@@ -167,7 +167,7 @@ def test_report_written_to_contracts(tmp_path: Path):
                                     "columns": []}})})
     normalize_binding_props(root)
     rep = json.loads((root / "contracts" / "binding-normalize.json")
-                     .read_text())
+                     .read_text(encoding="utf-8"))
     assert rep["summary"]["normalized"] == 1
 
 

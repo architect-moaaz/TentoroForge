@@ -135,9 +135,9 @@ def test_sync_replaces_stale_groups_in_shell(app_root):
 
 def test_sync_is_idempotent(app_root):
     sync_shell_menu(str(app_root))
-    first = (app_root / "src/schemas/shell.json").read_text()
+    first = (app_root / "src/schemas/shell.json").read_text(encoding="utf-8")
     sync_shell_menu(str(app_root))
-    second = (app_root / "src/schemas/shell.json").read_text()
+    second = (app_root / "src/schemas/shell.json").read_text(encoding="utf-8")
     assert first == second
 
 
@@ -145,10 +145,10 @@ def test_sync_no_nav_flow_is_noop(tmp_path):
     """A project without a nav-flow (fresh scaffold, imported app) is
     ignored — sync doesn't touch shell.json, doesn't crash."""
     (tmp_path / "src" / "schemas").mkdir(parents=True)
-    (tmp_path / "src/schemas/shell.json").write_text('{"root":{"type":"Stack"}}')
-    before = (tmp_path / "src/schemas/shell.json").read_text()
+    (tmp_path / "src/schemas/shell.json").write_text('{"root":{"type":"Stack"}}', encoding="utf-8")
+    before = (tmp_path / "src/schemas/shell.json").read_text(encoding="utf-8")
     result = sync_shell_menu(str(tmp_path))
-    after = (tmp_path / "src/schemas/shell.json").read_text()
+    after = (tmp_path / "src/schemas/shell.json").read_text(encoding="utf-8")
     assert before == after
     assert result["synced"] is False
 

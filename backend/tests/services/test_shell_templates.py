@@ -71,8 +71,8 @@ def test_end_to_end_on_real_e1ndat91_artifacts_if_present():
     nf_p, ds_p = base / "nav-flow.json", base / "design-spec.json"
     if not (nf_p.exists() and ds_p.exists()):
         pytest.skip("e1ndat91 artifacts not present")
-    nav_flow = json.loads(nf_p.read_text())
-    design_spec = json.loads(ds_p.read_text())
+    nav_flow = json.loads(nf_p.read_text(encoding="utf-8"))
+    design_spec = json.loads(ds_p.read_text(encoding="utf-8"))
     shell = build_shell_deterministic({"pages": []}, nav_flow, None, design_spec)
     assert is_renderable_shell(shell)
     blob = json.dumps(shell)

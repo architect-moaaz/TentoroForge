@@ -370,6 +370,26 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
     except Exception as e:  # noqa: BLE001
         logger.warning("action_invariants failed: %s", e)
 
+    # One metric dialect, before anything reads a metric. The page composer
+    # writes `{"expression": "sum(quantity * price)"}` while every resolver —
+    # the generated app's data engine, the editor's preview-resolve, and the
+    # shape widget_data_source_guard emits — reads `{"fn", "field"}`. Nothing
+    # parsed the other form, so a correctly-NAMED aggregate source still
+    # resolved to 0 and its KPI tile rendered blank. Generation now normalises
+    # at the source (page_planner.plan_page); this catches the other writers
+    # and is a no-op on a page that is already in the runtime dialect.
+    try:
+        from services.metric_dialect import repair_output_dir as _fix_metrics
+        md = _fix_metrics(output_dir)
+        if md.get("metrics"):
+            applied += md["metrics"]
+            logger.info(
+                "metric_dialect: normalised %d expression metric(s) across %d file(s) in %s",
+                md["metrics"], md.get("files", 0), output_dir,
+            )
+    except Exception as e:  # noqa: BLE001 — never block generation on a repair
+        logger.warning("metric_dialect failed: %s", e)
+
     # Static-widget binding: stat/KPI/progress tiles carrying a literal number and
     # list widgets carrying a hardcoded array (copied from the dashboard exemplar)
     # render fake data. Rebind them to a real op:"aggregate"/op:"list" dataSource
@@ -535,7 +555,7 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
         from services.workflow_launch_forms import ensure_workflow_launch_forms
         import json as _json
         _reg_path = root / "registry.json"
-        _reg = _json.loads(_reg_path.read_text()) if _reg_path.exists() else {}
+        _reg = _json.loads(_reg_path.read_text(encoding="utf-8")) if _reg_path.exists() else {}
         _wlf_routes = ensure_workflow_launch_forms(str(root), _reg)
         if _wlf_routes:
             applied += len(_wlf_routes)
@@ -1391,14 +1411,14 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
         fixed_pages = 0
         for sp in Path(root, "src", "schemas").glob("**/*.json"):
             try:
-                page = _json.loads(sp.read_text())
+                page = _json.loads(sp.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001 — not every json here is a page
                 continue
             if not isinstance(page, dict) or "root" not in page:
                 continue
             rep = reconcile_kpi_formats(page)
             if rep["changed"]:
-                sp.write_text(_json.dumps(page, indent=2))
+                sp.write_text(_json.dumps(page, indent=2), encoding="utf-8")
                 fixed_pages += 1
                 applied += rep["changed"]
                 for note in rep["notes"]:
@@ -1443,7 +1463,7 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
         from services.unbound_placeholder_text import repair_unbound_templates
         for sp in Path(root, "src", "schemas").glob("**/*.json"):
             try:
-                page = _json.loads(sp.read_text())
+                page = _json.loads(sp.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001 — not every json here is a page
                 continue
             if not isinstance(page, dict) or "root" not in page:
@@ -1451,7 +1471,7 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
             fit = fit_dashboard_slots(page)
             ph = repair_unbound_templates(page)
             if fit["changed"] or ph["changed"]:
-                sp.write_text(_json.dumps(page, indent=2))
+                sp.write_text(_json.dumps(page, indent=2), encoding="utf-8")
                 applied += fit["changed"] + ph["changed"]
                 for note in fit["notes"] + ph["notes"]:
                     logger.info("slot_fit(%s): %s", sp.name, note)
@@ -1467,21 +1487,21 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
         from services.widget_data_contract import reconcile_widget_data
         from services.widget_data_contract import entity_columns_from_app
         reg_path = Path(root, "contracts", "registry.json")
-        registry = _json.loads(reg_path.read_text()) if reg_path.exists() else {}
+        registry = _json.loads(reg_path.read_text(encoding="utf-8")) if reg_path.exists() else {}
         if not (registry.get("entities") or {}):
             # No registry (or an empty one) — read the columns from the app's
             # own Drizzle schema, which is where they always really are.
             registry = entity_columns_from_app(str(root))
         for sp in Path(root, "src", "schemas").glob("**/*.json"):
             try:
-                page = _json.loads(sp.read_text())
+                page = _json.loads(sp.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
                 continue
             if not isinstance(page, dict) or "root" not in page:
                 continue
             rep = reconcile_widget_data(page, registry)
             if rep["changed"]:
-                sp.write_text(_json.dumps(page, indent=2))
+                sp.write_text(_json.dumps(page, indent=2), encoding="utf-8")
                 applied += rep["changed"]
                 for note in rep["notes"]:
                     logger.info("widget_data_contract(%s): %s", sp.name, note)

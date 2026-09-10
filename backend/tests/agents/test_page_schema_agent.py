@@ -25,7 +25,7 @@ async def test_emits_one_file_at_route_path(tmp_path):
 
     written = tmp_path / "src" / "schemas" / "notes.json"
     assert written.exists()
-    on_disk = json.loads(written.read_text())
+    on_disk = json.loads(written.read_text(encoding="utf-8"))
     # id is overwritten to the slug so the file is self-describing
     assert on_disk["id"] == "notes"
     assert on_disk["route"] == "/notes"

@@ -83,8 +83,18 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 # Rate limiting
 # ---------------------------------------------------------------------------
 
-RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "120"))
-RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "20"))
+# THE EDITOR SATURATES ITS OWN BUDGET AT 120/min.
+# The visual editor's persister debounces autosave at 500ms, which is exactly
+# 120 writes a minute at a steady edit rate — the entire old allowance, before
+# the schema/theme/preview-data reads the same page issues. The observed result
+# was a red "COULDN'T SAVE — src/theme/tokens.custom.json -> HTTP 429" banner
+# with the user's changes left unsaved, i.e. a rate limit for abusive clients
+# was silently costing a legitimate one their work.
+# 600/min with a 100 burst leaves the editor headroom while still bounding a
+# genuinely hostile caller; the client also retries a 429 once (see
+# frontend/src/lib/persistence.ts) so a brief overrun never surfaces at all.
+RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "600"))
+RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "100"))
 
 # ---------------------------------------------------------------------------
 # App

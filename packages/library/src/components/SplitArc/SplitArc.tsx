@@ -4,6 +4,7 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { SplitArcPropsType } from "./SplitArc.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { paintOr } from "../../util/paint";
 
 export interface SplitArcProps extends SplitArcPropsType {
   style?: StyleSlotT;
@@ -52,6 +53,7 @@ export function SplitArc({
   stroke,
   showLegend = true,
   showEndLabels = true,
+  className,
   style,
 }: SplitArcProps) {
   const values = segments.map((s) => Math.max(0, Number(s.value) || 0));
@@ -88,7 +90,7 @@ export function SplitArc({
 
   return (
     <div
-      className="inline-flex flex-col items-stretch min-w-[220px]"
+      className={["inline-flex flex-col items-stretch min-w-[220px]", className].filter(Boolean).join(" ")}
       data-splitarc=""
       style={resolveStyle(style)}
       {...useMotion(style?.motion)}
@@ -143,7 +145,7 @@ export function SplitArc({
             key={i}
             d={a.d}
             fill="none"
-            stroke={a.color}
+            stroke={paintOr(a.color, "currentColor")}
             strokeWidth={strokeW}
             strokeLinecap={i === 0 || i === arcs.length - 1 ? "round" : "butt"}
           />

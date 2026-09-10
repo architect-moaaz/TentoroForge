@@ -100,7 +100,7 @@ def test_run_rewrites_persona_screen_labels(tmp_path: Path):
     })
     res = run(str(out))
     assert res == {"rewritten": 4}
-    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     labels = [s["label"] for s in nf["personas"][0]["screens"]]
     assert labels == ["Schedule", "Bookings", "Membership", "Reviews"]
 
@@ -118,7 +118,7 @@ def test_run_leaves_authored_labels_alone(tmp_path: Path):
     })
     res = run(str(out))
     assert res == {"rewritten": 0}
-    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     labels = [s["label"] for s in nf["personas"][0]["screens"]]
     assert labels == ["My Schedule", "Membership"]
 
@@ -138,7 +138,7 @@ def test_run_also_repairs_pages_title_and_jobs(tmp_path: Path):
     })
     res = run(str(out))
     assert res == {"rewritten": 2}
-    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text())
+    nf = json.loads((out / "src" / "contracts" / "nav-flow.json").read_text(encoding="utf-8"))
     assert nf["pages"][0]["title"] == "Schedule"
     assert nf["personas"][0]["jobs"][0]["label"] == "Dashboard"
 

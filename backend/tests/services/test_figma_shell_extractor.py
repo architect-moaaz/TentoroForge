@@ -218,7 +218,7 @@ def test_extract_shell_creates_shell_json(tmp_path):
     # Write a shell:true page with a nav.
     page_schema = _make_page_schema(["/dashboard", "/settings"])
     schema_path = schemas_dir / "dashboard.json"
-    schema_path.write_text(json.dumps(page_schema))
+    schema_path.write_text(json.dumps(page_schema), encoding="utf-8")
 
     nav_flow = {
         "pages": [
@@ -238,7 +238,7 @@ def test_extract_shell_creates_shell_json(tmp_path):
     shell_file = schemas_dir / "shell.json"
     assert shell_file.exists()
 
-    shell = json.loads(shell_file.read_text())
+    shell = json.loads(shell_file.read_text(encoding="utf-8"))
     # Shell should contain the nav Row.
     shell_str = json.dumps(shell)
     assert "PageOutlet" in shell_str
@@ -251,7 +251,7 @@ def test_extract_shell_strips_nav_from_page(tmp_path):
 
     page_schema = _make_page_schema(["/a", "/b"])
     schema_path = schemas_dir / "page-a.json"
-    schema_path.write_text(json.dumps(page_schema))
+    schema_path.write_text(json.dumps(page_schema), encoding="utf-8")
 
     nav_flow = {
         "pages": [
@@ -268,7 +268,7 @@ def test_extract_shell_strips_nav_from_page(tmp_path):
     extract_shell_from_pages(tmp_path, nav_flow)
 
     # Page schema should no longer contain the nav Row with navigate buttons.
-    rewritten = json.loads(schema_path.read_text())
+    rewritten = json.loads(schema_path.read_text(encoding="utf-8"))
     rewritten_str = json.dumps(rewritten)
     # The body text should still be there.
     assert "Page content here" in rewritten_str
@@ -307,7 +307,7 @@ def test_extract_shell_returns_none_when_no_nav_in_schema(tmp_path):
         ],
     }
     schema_path = schemas_dir / "plain.json"
-    schema_path.write_text(json.dumps(no_nav_schema))
+    schema_path.write_text(json.dumps(no_nav_schema), encoding="utf-8")
 
     nav_flow = {
         "pages": [
@@ -331,7 +331,7 @@ from services.figma_shell_extractor import (
 
 def _write_page(schemas_dir, name, root):
     schema = {"schemaVersion": "2", "id": name, "children": [root]}
-    (schemas_dir / f"{name}.json").write_text(json.dumps(schema, indent=2))
+    (schemas_dir / f"{name}.json").write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
 
 def test_structural_diff_extracts_shared_sidebar(tmp_path):
@@ -394,7 +394,7 @@ def test_structural_diff_extracts_shared_sidebar(tmp_path):
     # shell.json was written
     shell_path = schemas_dir / "shell.json"
     assert shell_path.exists()
-    shell_data = json.loads(shell_path.read_text())
+    shell_data = json.loads(shell_path.read_text(encoding="utf-8"))
     shell_root = shell_data["children"][0]
     # First child of shell root is the sidebar
     assert shell_root["children"][0]["type"] == "Stack"
@@ -404,7 +404,7 @@ def test_structural_diff_extracts_shared_sidebar(tmp_path):
     # Each page's schema now has only its unique body — the sidebar
     # is gone.
     for name in ("dashboard", "leads", "settings"):
-        page = json.loads((schemas_dir / f"{name}.json").read_text())
+        page = json.loads((schemas_dir / f"{name}.json").read_text(encoding="utf-8"))
         root_kids = page["children"][0]["children"]
         # Sidebar Stack must be absent; the body Stack must remain.
         assert not any(k.get("id") == "sb" for k in root_kids)

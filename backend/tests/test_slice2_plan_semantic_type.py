@@ -11,7 +11,7 @@ import json
 
 def _write(path, doc):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _find(schema, name):
@@ -65,7 +65,7 @@ def test_plan_city_beats_date_heuristic(tmp_path):
 
     apply_semantic_field_types(str(tmp_path))
 
-    schema = json.loads((tmp_path / "src" / "schemas" / "roles" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "roles" / "new.json").read_text(encoding="utf-8"))
     node = _find(schema, "basedAt")
     assert node["type"] == "Input", (
         f"expected plan 'semantic_type=city' to force Input; got {node['type']}. "
@@ -106,7 +106,7 @@ def test_plan_semantic_ignored_on_real_date_column(tmp_path):
 
     apply_semantic_field_types(str(tmp_path))
 
-    schema = json.loads((tmp_path / "src" / "schemas" / "roles" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "roles" / "new.json").read_text(encoding="utf-8"))
     node = _find(schema, "applicationClosing")
     assert node["type"] == "DatePicker"
 
@@ -148,7 +148,7 @@ def test_plan_silent_falls_through_to_llm_semanticType(tmp_path):
 
     apply_semantic_field_types(str(tmp_path))
 
-    schema = json.loads((tmp_path / "src" / "schemas" / "users" / "new.json").read_text())
+    schema = json.loads((tmp_path / "src" / "schemas" / "users" / "new.json").read_text(encoding="utf-8"))
     node = _find(schema, "avatarUrl")
     # The LLM's semanticType=image reached resolve_control and forced FileUpload —
     # the plan was silent, so legacy behavior preserved.

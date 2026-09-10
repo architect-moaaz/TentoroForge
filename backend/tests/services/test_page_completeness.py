@@ -19,7 +19,7 @@ async def test_continuation_generates_then_floors_the_rest(tmp_path, monkeypatch
         if page["route"] == "/a":  # LLM "succeeds" for /a
             slug = slugify_route("/a")
             (Path(output_dir) / "src" / "schemas" / f"{slug}.json").write_text(
-                '{"id":"a","root":{"type":"Stack"}}')
+                '{"id":"a","root":{"type":"Stack"}}', encoding="utf-8")
             return
         raise RuntimeError("wedged")  # LLM "fails" for /b
 
@@ -32,7 +32,7 @@ async def test_continuation_generates_then_floors_the_rest(tmp_path, monkeypatch
     assert (tmp_path / "src" / "schemas" / "a.json").exists()
     floored = tmp_path / "src" / "schemas" / "b.json"
     assert floored.exists()
-    assert json.loads(floored.read_text()).get("id") == "b"
+    assert json.loads(floored.read_text(encoding="utf-8")).get("id") == "b"
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_noop_when_all_pages_present(tmp_path, monkeypatch):
     plan = {"pages": [{"route": "/a", "type": "list"}]}
     schemas = tmp_path / "src" / "schemas"
     schemas.mkdir(parents=True)
-    (schemas / "a.json").write_text('{"id":"a"}')
+    (schemas / "a.json").write_text('{"id":"a"}', encoding="utf-8")
 
     called = {"n": 0}
 

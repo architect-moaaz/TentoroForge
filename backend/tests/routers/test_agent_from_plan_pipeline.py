@@ -87,7 +87,7 @@ async def test_install_writes_agent_definition_file(tmp_path, test_db):
     assert files[0].stem == summary["agent_id"]
 
     # File contents match the AgentDefinition envelope shape.
-    data = json.loads(files[0].read_text())
+    data = json.loads(files[0].read_text(encoding="utf-8"))
     assert set(data.keys()) >= {"id", "name", "description", "nodes", "edges"}
     assert data["name"] == "TestAgent"
     node_types = sorted(n["data"]["nodeType"] for n in data["nodes"])

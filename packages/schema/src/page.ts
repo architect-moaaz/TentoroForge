@@ -242,6 +242,13 @@ const V2GridNode = z.object({
   props: z
     .object({
       columns: z.number().int().min(1).max(12),
+      // rows — fixed row count picked in the visual editor. 0/absent keeps the
+      // original implicit-row behaviour (children flow and wrap); above 0 the
+      // grid holds exactly rows x columns GridCell children. Must be declared
+      // because this props object is .strict() — an undeclared prop makes the
+      // whole page fail to parse, which in the editor means the save is
+      // rejected with no visible cause.
+      rows: z.number().int().min(0).max(12).optional(),
       gap: TR.optional(),
       // See nodes/layout.ts GridNode — equalRows/equalCols codify the v4
       // spike CSS fix as optional boolean schema props. Mirrored here on the
@@ -339,21 +346,97 @@ const V2RepeatNode = z.object({
   props: z
     .object({
       source: z.string().min(1).optional(),
+      // `bind` was read by `nodes/data/Repeat.tsx` (it is one of the four source
+      // slots it checks) and undeclared here, so the registry's `bind` control
+      // wrote a prop that made `NodeV2` fail with "Unrecognized key(s): 'bind'".
+      // The control could only ever break the page it was offered on. Declared
+      // now, because the runtime honours it — the alternative was deleting a
+      // control for something the renderer genuinely supports.
+      bind: z.string().min(1).optional(),
       path: z.string().optional(),
       as: z.string().default("item"),
       keyPath: z.string().default("id"),
     })
     .strict()
     .optional(),
-  children: z.array(NodeV2Ref).min(1),
+  // "YOU HAVE NOT FILLED THIS IN YET" MUST NOT BE SPELLED THE SAME WAY AS
+  // "THIS PAGE IS CORRUPT".
+  //
+  // This was `.min(1)`, and a Repeat dropped from the palette always arrives
+  // with `children: []`. `NodeV2` tries the strict shapes first and falls back
+  // to `anyRegistered`, which deliberately REFUSES any type a strict shape
+  // already covers — so an unconfigured Repeat matched nothing, `PageV2` failed,
+  // and the scaffold logged `schema validation failed … rendering raw`, taking
+  // every OTHER node on the page out of validated rendering with it. Measured on
+  // a real saved page: one empty Repeat, whole page invalid.
+  //
+  // Exactly the relaxation `DropdownMenuNode.items` / `ContextMenuNode.items` /
+  // `MenubarNode.menus` already received, for the identical reason. A Repeat
+  // with no children renders nothing, which is the correct rendering of "not
+  // configured yet" — it is not malformed.
+  children: z.array(NodeV2Ref).default([]),
 });
+
+/**
+ * One branch of a first-match-wins Conditional, in the shape the runtime
+ * actually reads (`nodes/data/Conditional.tsx`): `if` is canonical with
+ * `when`/`condition` accepted as aliases, and a branch with NO condition is a
+ * deliberate catch-all — the `default:` of a switch — so the condition is
+ * optional rather than required. `node` is a single node, `children` an array;
+ * the runtime takes either.
+ *
+ * Deliberately NOT `.strict()`: this is the shape LLM output lands in, and a
+ * stray key on one branch must not invalidate the whole page.
+ */
+const V2ConditionalBranches = z.array(
+  z.object({
+    if: Expression.optional(),
+    when: Expression.optional(),
+    condition: Expression.optional(),
+    node: NodeV2Ref.optional(),
+    children: z.array(NodeV2Ref).optional(),
+  }),
+);
 
 const V2ConditionalNode = z.object({
   ...V2Envelope,
   type: z.literal("Conditional"),
-  props: z.object({ when: Expression }).strict(),
-  children: z.array(NodeV2Ref).min(1),
+  // `when` was REQUIRED with no default, so a Conditional was invalid from the
+  // instant it landed and stayed invalid until the author typed an expression —
+  // which they could not do, because the Properties panel needs a selection and
+  // the node emitted no element to select. Optional now, and the runtime already
+  // distinguishes "no `when` authored" (render children) from "`when` present
+  // and falsy" (render `else`), so absence has a defined meaning here rather
+  // than being a hole.
+  //
+  // `branches` is the OTHER shape the runtime fully supports and the schema
+  // rejected outright. `nodes/data/Conditional.tsx` documents two shapes and
+  // implements both — the legacy `when`/`else` pair, and a first-match-wins
+  // `branches` array that the stateful single-page pattern uses — but this
+  // `.strict()` props object declared only `when`, so a hand-authored branches
+  // Conditional failed `PageV2` with "Unrecognized key(s): 'branches'" and took
+  // every other node on its page down with it (`anyRegistered` refuses any type
+  // a strict shape covers, so there is no fallback). A runtime capability the
+  // schema forbids is a capability nobody can use.
+  //
+  // The branch shape mirrors what the runtime actually reads: `if` is the
+  // canonical condition key with `when`/`condition` accepted as aliases, and a
+  // branch with NO condition is a deliberate catch-all — the `default:` of a
+  // switch — so the condition is optional rather than required. `node` is a
+  // single node and `children` an array; the runtime takes either, so both are
+  // declared and at least one is expected. Left non-strict per branch: this is
+  // the shape LLM output lands in, and a stray key must not invalidate a page.
+  props: z
+    .object({ when: Expression.optional(), branches: V2ConditionalBranches.optional() })
+    .strict()
+    .optional(),
+  children: z.array(NodeV2Ref).default([]),
   else: z.array(NodeV2Ref).optional(),
+  // The runtime also accepts `branches` at the TOP level, because LLM authors
+  // routinely drop it there; `Conditional.tsx` checks `node.branches` right
+  // after `props.branches`. Declared so that shape parses too — one const, so
+  // the two accepted positions cannot drift apart.
+  branches: V2ConditionalBranches.optional(),
 });
 
 const V2DataBoundaryNode = z.object({

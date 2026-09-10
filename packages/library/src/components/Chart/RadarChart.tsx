@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 const DEFAULT_PALETTE = [
   "hsl(var(--primary))",
@@ -43,8 +44,8 @@ export function RadarChartImpl(props: ChartPropsType) {
               key={s.dataKey}
               name={s.name}
               dataKey={s.dataKey}
-              stroke={s.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]}
-              fill={s.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]}
+              stroke={paintOr(s.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])}
+              fill={paintOr(s.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])}
               fillOpacity={0.35}
             />
           ))}

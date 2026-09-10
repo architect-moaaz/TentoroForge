@@ -79,3 +79,87 @@ describe("Calendar — event mode", () => {
     ).not.toThrow();
   });
 });
+
+/**
+ * User report #5: "What does this today do it is not doing anything."
+ *
+ * It genuinely did nothing in picker mode — which is what a Calendar dropped
+ * from the palette is. `goToday()` set `displayed` (already the current month,
+ * so a no-op) and `selected` (which the picker grid did not read: it painted its
+ * highlight from the `value` PROP). The same bug also meant plain day clicks
+ * never highlighted in any app that does not write `value` back.
+ */
+describe("Calendar — picker mode selection (report #5)", () => {
+  const todayIso = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  it("Today selects the current date and returns to the current month", () => {
+    // Open on a month that is not the current one so both halves are observable.
+    render(<Calendar value="2020-02-10" />);
+    expect(screen.getByText(/February 2020/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^today$/i }));
+    const now = new Date();
+    const monthName = now.toLocaleDateString("en-US", { month: "long" });
+    expect(screen.getByText(new RegExp(`${monthName} ${now.getFullYear()}`, "i"))).toBeInTheDocument();
+    const cell = screen.getByTestId(`cal-day-${now.getDate()}`);
+    expect(cell).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("highlights a clicked day with no controlled parent writing `value` back", () => {
+    render(<Calendar value="2026-06-15" />);
+    expect(screen.getByTestId("cal-day-15")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("cal-day-20"));
+    expect(screen.getByTestId("cal-day-20")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("cal-day-15")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("still follows a controlled parent that rewrites `value`", () => {
+    const { rerender } = render(<Calendar value="2026-06-15" />);
+    rerender(<Calendar value="2026-07-04" />);
+    expect(screen.getByText(/July 2026/i)).toBeInTheDocument();
+    expect(screen.getByTestId("cal-day-4")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("Today works from the current month too (the case that looked inert)", () => {
+    render(<Calendar />);
+    const now = new Date();
+    // Nothing is selected on a freshly-dropped Calendar…
+    expect(screen.getByTestId(`cal-day-${now.getDate()}`)).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: /^today$/i }));
+    // …and pressing Today must visibly change that, not silently re-set the month.
+    expect(screen.getByTestId(`cal-day-${now.getDate()}`)).toHaveAttribute("aria-pressed", "true");
+    expect(todayIso()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+/**
+ * User report #2: "This calendar definitely needs a fix in the looks, it looks
+ * terrible." Structural assertions only — the things that were visibly broken
+ * rather than merely a matter of taste.
+ */
+describe("Calendar — surface chrome matches the rest of the library (report #2)", () => {
+  it("clips its own children to the rounded border and carries a token surface", () => {
+    const { container } = render(<Calendar events={[]} dateField="d" value="2026-06-15" />);
+    const root = container.querySelector("[data-calendar]") as HTMLElement;
+    // Without overflow-hidden the day cells' backgrounds and hairlines painted
+    // straight over the rounded corners — Card carries the same class.
+    expect(root.className).toContain("overflow-hidden");
+    // Radius + elevation come from the tokens, not a hard-coded rounded-lg.
+    expect(root.className).toMatch(/rounded-(none|lg|2xl)/);
+    expect(root.className).toMatch(/shadow-(none|sm|lg)/);
+  });
+
+  it("pads the month grid out to whole weeks so the bottom edge is not ragged", () => {
+    // June 2026 starts on a Monday (1 leading blank) and has 30 days → 31 cells,
+    // so 4 trailing blanks are needed to reach 35.
+    const { container } = render(<Calendar events={[]} dateField="d" value="2026-06-15" />);
+    const cells = container.querySelectorAll("[data-testid^='cal-day-']");
+    expect(cells.length).toBe(30);
+    // The grid holding the day cells must be a whole number of weeks — the old
+    // one simply stopped after the last day, leaving a torn bottom row.
+    const dayGrid = (cells[0] as HTMLElement).parentElement as HTMLElement;
+    expect(dayGrid.children.length).toBe(35);
+  });
+});

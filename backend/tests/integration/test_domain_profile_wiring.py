@@ -310,7 +310,7 @@ async def test_discovery_persisted_via_pipeline(tmp_path):
     disk_path = Path(out)
     assert disk_path.exists(), "persist_discovery didn't write a file"
 
-    on_disk = json.loads(disk_path.read_text())
+    on_disk = json.loads(disk_path.read_text(encoding="utf-8"))
     assert on_disk["domain"] == "Hospitality"
     assert on_disk["personas"]["planner"].startswith("PERSONA_PLANNER")
     assert "Reservation" in {e["name"] for e in on_disk["entitySuggestions"]}

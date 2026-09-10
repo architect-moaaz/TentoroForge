@@ -26,10 +26,13 @@ export interface TagProps extends TagPropsType {
   onRemove?: () => void;
 }
 
-export function Tag({ label, variant = "default", removable, style, onRemove }: TagProps) {
+export function Tag({ label, variant = "default", removable, className, style, onRemove }: TagProps) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${VARIANT_CLASS[variant] ?? ""}`}
+      // Honour the declared `className`. It was destructured nowhere and
+      // dropped silently — the same defect row 19 fixed on Gauge, Heatmap,
+      // Schematic, SplitArc and Stepper, in the sibling component.
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${VARIANT_CLASS[variant] ?? ""}${className ? ` ${className}` : ""}`}
       data-tag=""
       style={{ ...(VARIANT_STYLE[variant] ?? {}), ...resolveStyle(style) }}
       {...useMotion(style?.motion)}

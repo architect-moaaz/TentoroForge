@@ -1,8 +1,17 @@
 import * as React from "react";
+import type { StyleSlotT } from "@tentoroforge/schema";
+import { resolveStyle } from "../../style/resolveStyle";
+import { useMotion } from "../../style/useMotion";
 import { z } from "zod";
 import type { ApprovalStepperNode } from "@tentoroforge/schema";
 
-type Props = z.infer<typeof ApprovalStepperNode>["props"];
+/** The renderer passes the node's `style` envelope alongside its props.
+ *  WITHOUT `style` here the Style panel wrote background / padding /
+ *  radius / shadow / motion into the page schema and this component
+ *  rendered none of it — the edit persisted to disk and was invisible on
+ *  the canvas, which reads as a broken Style tab rather than an
+ *  unsupported one. */
+type Props = z.infer<typeof ApprovalStepperNode>["props"] & { style?: StyleSlotT };
 
 const STATUS_DOT: Record<string, string> = {
   pending:  "bg-muted text-muted-foreground border border-border",
@@ -28,12 +37,15 @@ const STATUS_CONNECTOR: Record<string, string> = {
   skipped: "bg-border opacity-50",
 };
 
-export function ApprovalStepper({ steps, orientation = "horizontal" }: Props) {
+export function ApprovalStepper({ steps, orientation = "horizontal", style }: Props) {
   if (orientation === "vertical") {
     return (
-      <ol className="space-y-4">
+      <ol className="space-y-4" style={resolveStyle(style)} {...useMotion(style?.motion)}>
+        {/* `StepperStep.id` is optional and the seeded default carries none, so
+            keying on it alone gave every row key={undefined} and a React
+            warning on drop. Index fallback, same as Timeline. */}
         {steps.map((step, idx) => (
-          <li key={step.id} className="flex gap-3">
+          <li key={step.id ?? idx} className="flex gap-3">
             <div className="flex flex-col items-center">
               <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${STATUS_DOT[step.status]}`}>
                 {STATUS_GLYPH[step.status] || (idx + 1)}
@@ -57,9 +69,9 @@ export function ApprovalStepper({ steps, orientation = "horizontal" }: Props) {
     );
   }
   return (
-    <ol className="flex items-start w-full">
+    <ol className="flex items-start w-full" style={resolveStyle(style)} {...useMotion(style?.motion)}>
       {steps.map((step, idx) => (
-        <li key={step.id} className="flex flex-1 flex-col items-center relative">
+        <li key={step.id ?? idx} className="flex flex-1 flex-col items-center relative">
           <div className="flex items-center w-full">
             <div className={`flex-1 h-0.5 ${idx === 0 ? "invisible" : STATUS_CONNECTOR[step.status]}`} />
             <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${STATUS_DOT[step.status]}`}>

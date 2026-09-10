@@ -7,7 +7,7 @@ from services.nav_route_reconcile_guard import reconcile_nav_routes
 def _write(root, rel, obj):
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(obj))
+    p.write_text(json.dumps(obj), encoding="utf-8")
 
 
 def _nav(root, pages, **extra):
@@ -16,7 +16,7 @@ def _nav(root, pages, **extra):
 
 
 def _read_nav(root):
-    return json.loads((root / "src/contracts/nav-flow.json").read_text())
+    return json.loads((root / "src/contracts/nav-flow.json").read_text(encoding="utf-8"))
 
 
 def test_repoints_drifted_route_to_schemafile(tmp_path):
@@ -86,13 +86,13 @@ def test_fixes_root_page_redirect(tmp_path):
     page = tmp_path / "src/app/page.tsx"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text('import { redirect } from "next/navigation";\n'
-                    'export default function RootPage() { redirect("/dashboard"); }\n')
+                    'export default function RootPage() { redirect("/dashboard"); }\n', encoding="utf-8")
     _nav(tmp_path, [
         {"id": "analytics", "route": "/dashboard", "schemaFile": "src/schemas/analytics.json", "shell": True},
     ], initialPage="analytics")
     res = reconcile_nav_routes(str(tmp_path))
     assert res["root_fixed"] is True
-    assert 'redirect("/analytics")' in page.read_text()
+    assert 'redirect("/analytics")' in page.read_text(encoding="utf-8")
 
 
 def test_gated_root_redirect_lands_on_shell_not_login(tmp_path):
@@ -102,15 +102,15 @@ def test_gated_root_redirect_lands_on_shell_not_login(tmp_path):
     page = tmp_path / "src/app/page.tsx"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text('import { redirect } from "next/navigation";\n'
-                    'export default function RootPage() { redirect("/login"); }\n')
+                    'export default function RootPage() { redirect("/login"); }\n', encoding="utf-8")
     _nav(tmp_path, [
         {"id": "login", "route": "/login", "schemaFile": "src/schemas/login.json", "shell": False},
         {"id": "dashboard", "route": "/dashboard", "schemaFile": "src/schemas/dashboard.json", "shell": True},
     ], initialPage="login", authGated=True, post_login_redirect="/dashboard")
     res = reconcile_nav_routes(str(tmp_path))
     assert res["landing"] == "/dashboard"
-    assert 'redirect("/dashboard")' in page.read_text()
-    assert 'redirect("/login")' not in page.read_text()
+    assert 'redirect("/dashboard")' in page.read_text(encoding="utf-8")
+    assert 'redirect("/login")' not in page.read_text(encoding="utf-8")
 
 
 def test_idempotent(tmp_path):
@@ -141,9 +141,9 @@ def test_group_landing_materialized_into_real_folder(tmp_path):
     ], initialFor={"__default__": "/dashboard"})
     # Group-root page.tsx exists but no real /dashboard folder.
     (tmp_path / "src/app/(dashboard)").mkdir(parents=True)
-    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}")
+    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}", encoding="utf-8")
     # Root redirect target that the guard will keep pointing at /dashboard.
-    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/dashboard")}')
+    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/dashboard")}', encoding="utf-8")
 
     reconcile_nav_routes(str(tmp_path))
 
@@ -161,10 +161,10 @@ def test_group_root_page_purged_when_real_folder_already_exists(tmp_path):
         {"id": "dashboard", "route": "/dashboard", "schemaFile": "src/schemas/dashboard.json", "shell": True},
     ], initialFor={"__default__": "/dashboard"})
     (tmp_path / "src/app/(dashboard)").mkdir(parents=True)
-    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}")
+    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}", encoding="utf-8")
     (tmp_path / "src/app/dashboard").mkdir(parents=True)
-    (tmp_path / "src/app/dashboard/page.tsx").write_text("export default function D(){return null}")
-    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/dashboard")}')
+    (tmp_path / "src/app/dashboard/page.tsx").write_text("export default function D(){return null}", encoding="utf-8")
+    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/dashboard")}', encoding="utf-8")
 
     reconcile_nav_routes(str(tmp_path))
 
@@ -181,8 +181,8 @@ def test_group_landing_noop_when_landing_is_root(tmp_path):
         {"id": "home", "route": "/", "schemaFile": "src/schemas/home.json", "shell": True},
     ], initialFor={"__default__": "/"})
     (tmp_path / "src/app/(dashboard)").mkdir(parents=True)
-    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}")
-    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/")}')
+    (tmp_path / "src/app/(dashboard)/page.tsx").write_text("export default function P(){return null}", encoding="utf-8")
+    (tmp_path / "src/app/page.tsx").write_text('import {redirect} from "next/navigation"; export default function R(){redirect("/")}', encoding="utf-8")
 
     reconcile_nav_routes(str(tmp_path))
 
@@ -207,7 +207,7 @@ def test_group_root_page_purged_when_landing_is_unrelated_segment(tmp_path):
         'export default async function P(){return renderSchemaPage("/")}'
     )
     (tmp_path / "src/app/(dashboard)/services").mkdir(parents=True)
-    (tmp_path / "src/app/(dashboard)/services/page.tsx").write_text("export default function S(){return null}")
+    (tmp_path / "src/app/(dashboard)/services/page.tsx").write_text("export default function S(){return null}", encoding="utf-8")
     (tmp_path / "src/app/page.tsx").write_text(
         'import {redirect} from "next/navigation"; '
         'export default function R(){redirect("/services")}'
@@ -255,6 +255,6 @@ def test_materialized_landing_rewrites_render_schema_page_arg(tmp_path):
     moved = tmp_path / "src/app/(dashboard)/dashboard/page.tsx"
     assert moved.exists()
     # ...and its renderSchemaPage argument was rewritten to the landing route.
-    body = moved.read_text()
+    body = moved.read_text(encoding="utf-8")
     assert 'renderSchemaPage("/dashboard")' in body
     assert 'renderSchemaPage("/")' not in body

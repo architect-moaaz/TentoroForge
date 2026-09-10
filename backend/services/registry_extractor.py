@@ -478,7 +478,11 @@ def extract_schema_pages_from_json(output_dir: str) -> dict:
             continue
 
         rel = path.relative_to(schemas_dir).with_suffix("")
-        route_key = page.get("route") or ("/" + str(rel))
+        # `.as_posix()`: `route_key` is the registry's page key, matched by
+        # every route-keyed consumer (route_tree, nav_guard, the singleton
+        # reconciler). `str()` registered a schema without an explicit
+        # `route` under `/notes\list`, which nothing can ever match.
+        route_key = page.get("route") or ("/" + rel.as_posix())
         rel_path = str(path.relative_to(out))
 
         api_calls = _api_calls_from_data_sources(page.get("dataSources", []))

@@ -3,6 +3,7 @@ import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import type { UndoManagerPropsType } from "./UndoManager.schema";
 import { resolveStyle } from "../../style/resolveStyle";
+import { useIdleRender } from "@tentoroforge/renderer";
 
 /**
  * Runtime shape the mutation queue publishes.
@@ -47,6 +48,11 @@ export function UndoManager({
   className,
 }: UndoManagerProps): React.ReactElement | null {
   const [entries, setEntries] = React.useState<UndoEntry[]>([]);
+  const idle = useIdleRender(
+    "UndoManager",
+    "No undoable action yet — toasts arrive from the runtime mutation queue.",
+    220,
+  );
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -87,7 +93,11 @@ export function UndoManager({
     return () => timers.forEach(clearTimeout);
   }, [entries, timeoutMs]);
 
-  if (entries.length === 0) return null;
+  // Outside an authoring surface this is the previous `return null`, so a
+  // shipped app still shows nothing until something is actually undoable. On
+  // the canvas the node now has a box, which is what `position` and `maxStack`
+  // need in order to be checkable against the page they will cover.
+  if (entries.length === 0) return idle;
   const styleProps = resolveStyle(style);
 
   return (

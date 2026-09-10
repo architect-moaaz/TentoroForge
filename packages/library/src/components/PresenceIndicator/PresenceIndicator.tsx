@@ -3,6 +3,7 @@ import * as React from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import type { PresenceIndicatorPropsType } from "./PresenceIndicator.schema";
 import { resolveStyle } from "../../style/resolveStyle";
+import { useIdleRender } from "@tentoroforge/renderer";
 
 export type PresenceUser = {
   userId: string;
@@ -45,6 +46,14 @@ export function PresenceIndicator({
   users: usersProp,
 }: PresenceIndicatorProps): React.ReactElement | null {
   const [users, setUsers] = React.useState<PresenceUser[]>(usersProp ?? []);
+  // Hook order is fixed regardless of the branch below — the `return null` that
+  // used to sit here was above nothing, but the same guard in CartBadge WAS
+  // above a hook and changed the hook count with the fetch result.
+  const idle = useIdleRender(
+    "PresenceIndicator",
+    "Nobody here yet — avatars arrive from the live presence stream.",
+    200,
+  );
 
   React.useEffect(() => {
     if (usersProp) {
@@ -59,7 +68,11 @@ export function PresenceIndicator({
     return hook(route, (u) => setUsers(u ?? []));
   }, [usersProp, route]);
 
-  if (users.length === 0) return null;
+  // Outside an authoring surface this is exactly the previous `return null`.
+  // Inside the editor it is a box the author can see, click and style — the
+  // four exposed props (`max`, `size`, `showTooltips`, `route`) were otherwise
+  // four controls that provably could not alter anything on screen.
+  if (users.length === 0) return idle;
   const visible = users.slice(0, max);
   const overflow = users.length - visible.length;
   const styleProps = resolveStyle(style);

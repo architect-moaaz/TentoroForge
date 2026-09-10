@@ -41,7 +41,7 @@ def _make_app(tmp_path: Path) -> Path:
             ],
         },
     }
-    (root / "src" / "schemas" / "employees" / "new.json").write_text(json.dumps(new_schema, indent=2))
+    (root / "src" / "schemas" / "employees" / "new.json").write_text(json.dumps(new_schema, indent=2), encoding="utf-8")
 
     # A simple plan.json for mirror testing
     plan = {
@@ -60,7 +60,7 @@ def _make_app(tmp_path: Path) -> Path:
             }
         ]
     }
-    (root / "plan.json").write_text(json.dumps(plan, indent=2))
+    (root / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     return root
 
 
@@ -80,7 +80,7 @@ class TestHappy:
         assert r["changed"]
 
         # Verify on disk
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         fields = data["root"]["children"][0]["fields"]
         hra = next(f for f in fields if f["name"] == "hra")
         assert hra["interaction"]["computed"]["formula"] == "basicSalary * 0.4"
@@ -104,7 +104,7 @@ class TestHappy:
         )
         # No registry → resource checks skipped, should succeed
         assert r["applied"], r
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         state = next(
             f for f in data["root"]["children"][0]["fields"] if f["name"] == "state"
         )
@@ -143,7 +143,7 @@ class TestModes:
             mode="replace",
         )
         assert r["applied"], r
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         hra = next(
             f for f in data["root"]["children"][0]["fields"] if f["name"] == "hra"
         )
@@ -163,7 +163,7 @@ class TestModes:
             mode="merge",
         )
         assert r["applied"], r
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         hra = next(
             f for f in data["root"]["children"][0]["fields"] if f["name"] == "hra"
         )
@@ -180,7 +180,7 @@ class TestModes:
             str(root), page="employees/new", field="hra", mode="remove",
         )
         assert r["applied"], r
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         hra = next(
             f for f in data["root"]["children"][0]["fields"] if f["name"] == "hra"
         )
@@ -206,7 +206,7 @@ class TestModes:
             mode="merge",
         )
         assert r["applied"], r
-        data = json.loads((root / "src/schemas/employees/new.json").read_text())
+        data = json.loads((root / "src/schemas/employees/new.json").read_text(encoding="utf-8"))
         hra = next(
             f for f in data["root"]["children"][0]["fields"] if f["name"] == "hra"
         )
@@ -283,7 +283,7 @@ class TestPlanMirror:
         # plan.json should be in edited_paths
         assert any("plan.json" in p for p in r["edited_paths"])
         # Interaction is mirrored
-        plan = json.loads((root / "plan.json").read_text())
+        plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
         hra_in_plan = next(
             f for f in plan["pages"][0]["fields"] if f["name"] == "hra"
         )
@@ -299,7 +299,7 @@ class TestPlanMirror:
             str(root), page="employees/new", field="hra", mode="remove",
         )
         assert r["applied"]
-        plan = json.loads((root / "plan.json").read_text())
+        plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
         hra_in_plan = next(
             f for f in plan["pages"][0]["fields"] if f["name"] == "hra"
         )
@@ -309,18 +309,18 @@ class TestPlanMirror:
         root = _make_app(tmp_path)
         # Mutate plan to have different case
         plan_path = root / "plan.json"
-        plan = json.loads(plan_path.read_text())
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
         for f in plan["pages"][0]["fields"]:
             if f["name"] == "hra":
                 f["name"] = "HRA"
-        plan_path.write_text(json.dumps(plan, indent=2))
+        plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
         r = set_field_interaction(
             str(root), page="employees/new", field="hra",
             interaction={"computed": {"formula": "basicSalary * 0.4"}},
         )
         assert r["applied"]
-        plan = json.loads(plan_path.read_text())
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
         hra_in_plan = next(
             f for f in plan["pages"][0]["fields"] if f["name"].lower() == "hra"
         )

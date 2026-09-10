@@ -302,7 +302,7 @@ def test_run_gate_writes_report_and_counts(tmp_path: Path):
     report = run_delivery_gate(root, mode="warn")
     assert report["summary"]["error"] >= 3   # missing page, launcher, trigger
     assert report["summary"]["warn"] >= 2    # kind mismatch + move missing
-    on_disk = json.loads((root / "contracts" / "delivery-report.json").read_text())
+    on_disk = json.loads((root / "contracts" / "delivery-report.json").read_text(encoding="utf-8"))
     assert on_disk["summary"] == report["summary"]
     rules = {v["rule"] for v in on_disk["violations"]}
     assert {"planned_page_missing", "workflow_launcher_missing",

@@ -27,7 +27,7 @@ def _write_brief_min(tmp_path: Path) -> Path:
         "layout": {"density": "compact", "radius": "soft_8", "grid": "12col"},
         "signature_moves": [{"kind": "warm_serif_h1", "detail": "x"}],
     }
-    (p / "brief.json").write_text(json.dumps(brief, indent=2))
+    (p / "brief.json").write_text(json.dumps(brief, indent=2), encoding="utf-8")
     return p / "brief.json"
 
 
@@ -43,7 +43,7 @@ def test_writes_derived_recipes_back(tmp_path):
     assert result == {"/home": "member_home"}
 
     # On-disk brief reflects the change.
-    reread = json.loads(brief_path.read_text())
+    reread = json.loads(brief_path.read_text(encoding="utf-8"))
     assert reread["page_recipes"] == {"/home": "member_home"}
 
 
@@ -68,9 +68,9 @@ def test_second_run_is_idempotent(tmp_path):
 def test_existing_page_recipes_win_by_default(tmp_path):
     brief_path = _write_brief_min(tmp_path)
     # Seed a manual override.
-    initial = json.loads(brief_path.read_text())
+    initial = json.loads(brief_path.read_text(encoding="utf-8"))
     initial["page_recipes"] = {"/home": "creator_workspace"}
-    brief_path.write_text(json.dumps(initial))
+    brief_path.write_text(json.dumps(initial), encoding="utf-8")
 
     plan = {"pages": [{"route": "/home", "persona": "member", "title": "your day"}]}
     result = derive_persist_apply(tmp_path, plan)
@@ -80,9 +80,9 @@ def test_existing_page_recipes_win_by_default(tmp_path):
 
 def test_overwrite_flag_replaces_wholesale(tmp_path):
     brief_path = _write_brief_min(tmp_path)
-    initial = json.loads(brief_path.read_text())
+    initial = json.loads(brief_path.read_text(encoding="utf-8"))
     initial["page_recipes"] = {"/home": "creator_workspace"}
-    brief_path.write_text(json.dumps(initial))
+    brief_path.write_text(json.dumps(initial), encoding="utf-8")
 
     plan = {"pages": [{"route": "/home", "persona": "member", "title": "your day"}]}
     result = derive_persist_apply(tmp_path, plan, overwrite=True)
@@ -91,6 +91,6 @@ def test_overwrite_flag_replaces_wholesale(tmp_path):
 
 def test_broken_brief_returns_empty_without_raising(tmp_path):
     (tmp_path / "contracts").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "contracts" / "brief.json").write_text("{not-json")
+    (tmp_path / "contracts" / "brief.json").write_text("{not-json", encoding="utf-8")
     plan = {"pages": [{"route": "/home", "persona": "member", "title": "your day"}]}
     assert derive_persist_apply(tmp_path, plan) == {}

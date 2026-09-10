@@ -36,7 +36,7 @@ function glyph(status: Status | undefined, index: number): string {
  * active / complete / error / skipped, and `activeStep` derives status for steps
  * that omit it (index < active → complete, == active → current, > active → pending).
  */
-export function Stepper({ steps, orientation = "horizontal", activeStep, activeId, style }: StepperProps) {
+export function Stepper({ steps, orientation = "horizontal", activeStep, activeId, className, style }: StepperProps) {
   const list = Array.isArray(steps) ? steps : [];
   // `activeId` resolves a bound status string ("queued") to its step
   // index by id or label; an explicit numeric `activeStep` wins.
@@ -57,7 +57,7 @@ export function Stepper({ steps, orientation = "horizontal", activeStep, activeI
 
   return (
     <div
-      className={vertical ? "flex flex-col" : "flex items-start"}
+      className={[vertical ? "flex flex-col" : "flex items-start", className].filter(Boolean).join(" ")}
       data-stepper=""
       style={resolveStyle(style)}
       {...useMotion(style?.motion)}

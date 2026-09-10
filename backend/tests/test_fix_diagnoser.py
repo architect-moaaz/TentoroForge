@@ -152,7 +152,7 @@ def app_dir(tmp_path: Path) -> Path:
     (out / "workflows").mkdir(parents=True)
     (out / "src" / "schemas" / "candidates").mkdir(parents=True)
 
-    (out / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY))
+    (out / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY), encoding="utf-8")
     (out / "workflows" / "assessmentschedulingworkflow.json").write_text(
         json.dumps(_assessment_workflow())
     )

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StyleSlot } from "@tentoroforge/schema";
 
 /**
  * FocusTrap — Spec E Wave 2 accessibility spine.
@@ -26,6 +27,18 @@ export const FocusTrapProps = z.object({
    */
   restoreFocus: z.boolean().optional().default(true),
   className: z.string().optional(),
+  /**
+   * THE ONE COMPONENT IN THE FAMILY THAT RENDERS A REAL LAYOUT BOX AND COULD
+   * NOT BE STYLED.
+   *
+   * Every sibling in this batch renders `display: contents` and takes its
+   * geometry from the node-level style the dispatcher wrapper applies. FocusTrap
+   * renders a bare `<div>` — and it had no `style` slot in any layer, only
+   * `className`, which the registry did not expose either. So an empty trap
+   * measured **960x0**: an invisible strip whose only evidence on the canvas was
+   * the empty-node hint, and padding it out was not authorable.
+   */
+  style: StyleSlot.optional(),
 });
 
 export type FocusTrapPropsType = z.infer<typeof FocusTrapProps>;

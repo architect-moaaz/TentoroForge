@@ -59,7 +59,7 @@ def test_load_applies_migrations(tmp_path):
     svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="R", domain="ATS")
     svc.doc["workflows"] = _old_doc()["workflows"]
     # Written raw — as a pre-catalog run would have left it.
-    svc.current_path.write_text(json.dumps(svc.doc), "utf-8")
+    svc.current_path.write_text(json.dumps(svc.doc), encoding="utf-8")
 
     loaded = BlueprintService.load(output_dir=tmp_path)
     types = {s["type"] for s in loaded.doc["workflows"][0]["steps"]}

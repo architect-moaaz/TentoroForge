@@ -79,6 +79,6 @@ def test_record_never_raises_on_bad_path(monkeypatch):
 def test_malformed_ledger_lines_skipped(ledger):
     ledger.write_text('{"project": "a", "agent": "x", "input_tokens": 5, '
                       '"output_tokens": 1, "sdk_cost_usd": 0, '
-                      '"est_cost_usd": 0.1, "ts": 1700000000}\nNOT JSON\n')
+                      '"est_cost_usd": 0.1, "ts": 1700000000}\nNOT JSON\n', encoding="utf-8")
     assert len(build_usage.read_ledger()) == 1
     assert build_usage.usage_summary()["totals"]["events"] == 1

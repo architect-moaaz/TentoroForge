@@ -6,7 +6,7 @@ from pathlib import Path
 
 def _write_tw(tmp_path: Path, text: str | None):
     if text is not None:
-        (tmp_path / "tailwind.config.ts").write_text(text)
+        (tmp_path / "tailwind.config.ts").write_text(text, encoding="utf-8")
 
 
 def _run_tailwind_step(tmp_path: Path):
@@ -16,28 +16,28 @@ def _run_tailwind_step(tmp_path: Path):
     cfg = tmp_path / "tailwind.config.ts"
     needs = True
     if cfg.exists():
-        needs = "hsl(var(--border))" not in cfg.read_text()
+        needs = "hsl(var(--border))" not in cfg.read_text(encoding="utf-8")
     if needs:
-        cfg.write_text(_SHADCN_TAILWIND_CONFIG)
+        cfg.write_text(_SHADCN_TAILWIND_CONFIG, encoding="utf-8")
     return cfg
 
 
 def test_repairs_empty_extend_config(tmp_path):
     _write_tw(tmp_path, 'const config = { theme: { extend: {} } };\nexport default config;\n')
     cfg = _run_tailwind_step(tmp_path)
-    assert 'border: "hsl(var(--border))"' in cfg.read_text()
+    assert 'border: "hsl(var(--border))"' in cfg.read_text(encoding="utf-8")
 
 
 def test_creates_config_when_missing(tmp_path):
     cfg = _run_tailwind_step(tmp_path)
-    assert cfg.exists() and "hsl(var(--background))" in cfg.read_text()
+    assert cfg.exists() and "hsl(var(--background))" in cfg.read_text(encoding="utf-8")
 
 
 def test_leaves_correct_config_untouched(tmp_path):
     good = 'x border: "hsl(var(--border))" x'
     _write_tw(tmp_path, good)
     cfg = _run_tailwind_step(tmp_path)
-    assert cfg.read_text() == good  # already has border token → not overwritten
+    assert cfg.read_text(encoding="utf-8") == good  # already has border token → not overwritten
 
 
 def test_constant_is_self_contained(tmp_path):
@@ -54,14 +54,14 @@ def test_existing_shadcn_config_upgraded_with_renderer_glob(tmp_path):
     the gap-*/utility classes the renderer's Stack/Grid emit and page spacing collapses."""
     from services.runtime_injector import _fix_tailwind_config
     (tmp_path / "src" / "app").mkdir(parents=True)
-    (tmp_path / "src" / "app" / "globals.css").write_text(":root { --border: 0 0% 90%; }\n")
+    (tmp_path / "src" / "app" / "globals.css").write_text(":root { --border: 0 0% 90%; }\n", encoding="utf-8")
     # Pre-existing config: has the border token mapping but NO renderer glob.
     (tmp_path / "tailwind.config.ts").write_text(
         'export default { content: ["./src/**/*.tsx",'
         ' "./node_modules/@tentoroforge/library/**/*.tsx"],'
-        ' theme: { extend: { colors: { border: "hsl(var(--border))" } } } };\n')
+        ' theme: { extend: { colors: { border: "hsl(var(--border))" } } } };\n', encoding="utf-8")
     _fix_tailwind_config(tmp_path)
-    out = (tmp_path / "tailwind.config.ts").read_text()
+    out = (tmp_path / "tailwind.config.ts").read_text(encoding="utf-8")
     assert "@tentoroforge/renderer" in out
     assert "@tentoroforge/engine" in out
     assert "hsl(var(--border))" in out  # still has the token mapping

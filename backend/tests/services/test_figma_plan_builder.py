@@ -9,7 +9,7 @@ FIXTURE = pathlib.Path(__file__).parent.parent / "fixtures" / "figma" / "commitb
 
 def test_extracts_top_level_frames():
     """Commitbiz fixture has 4 frames: 1 login + 3 intent_intelligence."""
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     frames = _extract_frames(file_meta)
     assert len(frames) == 4
     names = [f["name"] for f in frames]
@@ -17,7 +17,7 @@ def test_extracts_top_level_frames():
 
 
 def test_every_frame_has_id_route_type():
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     for f in _extract_frames(file_meta):
         assert f["id"]
         assert f["route"].startswith("/")
@@ -25,7 +25,7 @@ def test_every_frame_has_id_route_type():
 
 
 def test_login_classified_as_auth():
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     frames = _extract_frames(file_meta)
     login = next(f for f in frames if "login" in f["name"].lower())
     assert login["route"] == "/login"
@@ -35,14 +35,14 @@ def test_login_classified_as_auth():
 def test_duplicate_routes_deduped():
     """Commitbiz has TWO frames named 'Commitbiz_intentai_intent_intelligence'
     plus one 'Commitbiz_intentai_intent_intelligence2'. Routes must be unique."""
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     routes = [f["route"] for f in _extract_frames(file_meta)]
     assert len(routes) == len(set(routes)), f"duplicate routes: {routes}"
 
 
 @pytest.mark.asyncio
 async def test_build_plan_returns_full_shape():
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     with patch("services.figma_plan_builder.fetch_figma_file",
                AsyncMock(return_value=file_meta)):
         plan = await build_plan_from_figma(
@@ -62,7 +62,7 @@ async def test_build_plan_returns_full_shape():
 
 @pytest.mark.asyncio
 async def test_login_page_in_plan():
-    file_meta = json.loads(FIXTURE.read_text())
+    file_meta = json.loads(FIXTURE.read_text(encoding="utf-8"))
     with patch("services.figma_plan_builder.fetch_figma_file",
                AsyncMock(return_value=file_meta)):
         plan = await build_plan_from_figma("https://figma.com/design/X/Y", token="t")

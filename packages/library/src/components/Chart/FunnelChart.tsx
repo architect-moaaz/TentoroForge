@@ -5,6 +5,7 @@ import * as React from "react";
 import { FunnelChart as ReFunnelChart, Funnel, LabelList, Tooltip, Cell, ResponsiveContainer } from "recharts";
 import type { ChartPropsType } from "./Chart.schema";
 import { useTokens } from "../../theme/tokens-context";
+import { paintOr } from "../../util/paint";
 
 const DEFAULT_PALETTE = [
   "hsl(var(--primary))",
@@ -31,7 +32,7 @@ export function FunnelChartImpl(props: ChartPropsType) {
           <Funnel dataKey={valueKey} nameKey={nameKey} data={data} isAnimationActive>
             <LabelList position="right" fill="var(--color-text-secondary)" stroke="none" dataKey={nameKey} fontSize={11} />
             {data.map((_, i) => (
-              <Cell key={i} fill={props.series?.[i]?.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]} />
+              <Cell key={i} fill={paintOr(props.series?.[i]?.color, DEFAULT_PALETTE[i % DEFAULT_PALETTE.length])} />
             ))}
           </Funnel>
         </ReFunnelChart>

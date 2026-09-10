@@ -11,7 +11,7 @@ from services.theme_tokens import ensure_tailwind_directives
 def _write(tmp_path: Path, css: str) -> Path:
     p = tmp_path / "src" / "app" / "globals.css"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(css)
+    p.write_text(css, encoding="utf-8")
     return p
 
 
@@ -19,7 +19,7 @@ def test_inserts_directives_when_missing(tmp_path):
     css = "@import url('https://fonts.googleapis.com/x');\n\n:root { --primary: 173 79% 26%; }\n"
     p = _write(tmp_path, css)
     info = ensure_tailwind_directives(tmp_path)
-    out = p.read_text()
+    out = p.read_text(encoding="utf-8")
     assert out.count("@tailwind base;") == 1
     assert "@tailwind components;" in out and "@tailwind utilities;" in out
     assert info["inserted"] is True
@@ -33,14 +33,14 @@ def test_noop_when_already_present(tmp_path):
     p = _write(tmp_path, css)
     info = ensure_tailwind_directives(tmp_path)
     assert info["inserted"] is False
-    assert p.read_text().count("@tailwind base;") == 1  # not duplicated
+    assert p.read_text(encoding="utf-8").count("@tailwind base;") == 1  # not duplicated
 
 
 def test_handles_no_import_line(tmp_path):
     css = ":root { --primary: 1 2% 3%; }\n"
     p = _write(tmp_path, css)
     ensure_tailwind_directives(tmp_path)
-    out = p.read_text()
+    out = p.read_text(encoding="utf-8")
     assert out.startswith("@tailwind base;")
     assert out.index("@tailwind base;") < out.index(":root")
 

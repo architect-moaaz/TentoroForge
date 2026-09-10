@@ -105,17 +105,17 @@ _PAGE = {
 @pytest.fixture
 def app_dir(tmp_path: Path) -> Path:
     (tmp_path / "contracts").mkdir()
-    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY))
+    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps(_REGISTRY), encoding="utf-8")
     (tmp_path / "workflows").mkdir()
-    (tmp_path / "workflows" / "CreateAssessment.json").write_text(json.dumps(_WORKFLOW))
+    (tmp_path / "workflows" / "CreateAssessment.json").write_text(json.dumps(_WORKFLOW), encoding="utf-8")
     (tmp_path / "src" / "schemas" / "assessments").mkdir(parents=True)
-    (tmp_path / "src" / "schemas" / "assessments" / "new.json").write_text(json.dumps(_PAGE))
+    (tmp_path / "src" / "schemas" / "assessments" / "new.json").write_text(json.dumps(_PAGE), encoding="utf-8")
     # Also a small dossier so recall() has intent.
     (tmp_path / "contracts" / "generation-dossier.json").write_text(json.dumps({
         "prompt": "recruit-tech assessments app",
         "plan": {"description": "an ATS with assessments"},
         "generatedAt": None,
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -230,7 +230,7 @@ def test_parse_error_non_error_returns_empty():
 
 def test_probe_logs_available(app_dir: Path):
     (app_dir / "logs").mkdir()
-    (app_dir / "logs" / "server.log").write_text("hello\nworld\n")
+    (app_dir / "logs" / "server.log").write_text("hello\nworld\n", encoding="utf-8")
     out = tools.probe_logs_tool(str(app_dir), lines=10)
     assert out["available"] is True
     assert out["evidence"]["lines"][-1] == "world"

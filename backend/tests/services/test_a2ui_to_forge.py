@@ -494,6 +494,146 @@ def test_a_bound_delta_survives():
     assert nodes(r, "MetricTile")[0]["props"]["delta"] == "{{votes.change}}"
 
 
+# ───────────────────────────── the literal-array drop, both directions
+#
+# The rule above keyed on the prop's NAME, so every `_DATA_PROPS`-named prop
+# not called `columns`/`series` lost its literal. `KeyValueList.items` is
+# declared an array of {label, value} with the bindings one level DOWN inside
+# the rows, so the drop discarded a well-formed prop and `validate_props` then
+# refused the page for `'items' is a required property` — measured on
+# gh0mlpbp's own saved surfaces, twice, which is why `/items/[id]` 404s.
+#
+# Both directions are load-bearing. The guard was written for a real defect
+# (`trend: [8, 9, 10, 11, 12]` on a live tile) and half of these tests exist to
+# keep it working; the other half exist because it was refusing every detail
+# page in every generated app.
+
+
+def _record(comp, data=None):
+    """One component on a page that is about a single Task record."""
+    kids = [{"id": "root", "component": "Stack", "children": [comp["id"]]}, comp]
+    return translate(
+        payload(kids, data or {"task": {"id": "t-1", "title": "Follow up",
+                                        "createdAt": "2024-01-15",
+                                        "status": "done"}}),
+        REG, route="/tasks/[id]", page_id="PAGE-REC", kind="record_workspace")
+
+
+def test_a_key_value_lists_literal_rows_survive_because_the_contract_wants_them():
+    """The exact refusal from gh0mlpbp PAGE-003, in miniature.
+
+    `KeyValueList.items` is `{"type": "array"}` with a declared `{label,
+    value}` item shape, so a literal array IS the contract and the pointers
+    live inside the rows."""
+    kvl = {"id": "meta", "component": "KeyValueList",
+           "items": [{"label": "Added", "value": {"path": "/task/createdAt"}}]}
+    r = _record(kvl)
+    props = nodes(r, "KeyValueList")[0]["props"]
+    assert "items" in props, (
+        "dropping this is what refuses every record page: validate_props then "
+        "reports \"'items' is a required property\" for a prop the composer "
+        "supplied")
+    assert props["items"] == [{"label": "Added", "value": "{{tasks.createdAt}}"}]
+
+
+def test_a_row_pointer_becomes_a_binding_not_a_raw_path_dict():
+    """Keeping the rows and not rewriting what is inside them moves the same
+    failure one level in: a `{"path": …}` dict reaches the row's own `.strict()`
+    schema, which rejects an object where a string belongs."""
+    kvl = {"id": "meta", "component": "KeyValueList",
+           "items": [{"label": "Added", "value": {"path": "/task/createdAt"}}]}
+    r = _record(kvl)
+    assert '"path"' not in json.dumps(r["schema"]), (
+        "interpolateDeep resolves {{...}} strings and nothing else")
+
+
+def test_a_row_whose_pointer_resolves_to_nothing_loses_the_row_not_the_prop():
+    """A key/value list missing one line is a list. A detail page missing its
+    key/value list is a 404."""
+    kvl = {"id": "meta", "component": "KeyValueList",
+           "items": [{"label": "Added", "value": {"path": "/task/createdAt"}},
+                     {"label": "Owner", "value": {"path": "/nowhere/at/all"}}]}
+    r = _record(kvl)
+    rows = nodes(r, "KeyValueList")[0]["props"]["items"]
+    assert [x["label"] for x in rows] == ["Added"]
+    assert any("nowhere" in w for w in r["warnings"])
+
+
+def test_a_literal_breadcrumb_survives_off_a_record_page_too():
+    """`Breadcrumb.items` is `{label, href}` — authored navigation, which
+    nothing fetches and no dataSource could supply."""
+    crumbs = {"id": "bc", "component": "Breadcrumb",
+              "items": [{"label": "Tasks", "href": "/tasks"},
+                        {"label": "Detail"}]}
+    r = translate(payload(_root([crumbs]), {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Breadcrumb")[0]["props"]["items"] == [
+        {"label": "Tasks", "href": "/tasks"}, {"label": "Detail"}]
+
+
+def test_a_required_scalar_selector_survives():
+    """`Tabs.value` names the open tab. It is a required string, nothing
+    fetches it, and dropping it fails the page outright — the `k == "value"`
+    rescue only ever covered int/float."""
+    tabs = {"id": "tabs", "component": "Tabs", "value": "overview",
+            "tabs": [{"value": "overview", "label": "Overview"}]}
+    r = translate(payload(_root([tabs]), {"tasks": {"rows": []}}), REG)
+    assert nodes(r, "Tabs")[0]["props"]["value"] == "overview"
+
+
+def test_a_fabricated_sparkline_literal_is_still_dropped():
+    """`Sparkline.data` is an array of NUMBER — no declared item shape, so the
+    elements are measurements, not authored config. This is the defect the
+    guard was written for and it still fires."""
+    spark = {"id": "s", "component": "Sparkline", "data": [8, 9, 10, 11, 12]}
+    r = translate(payload(_root([spark]), {"tasks": {"rows": []}}), REG)
+    assert "data" not in nodes(r, "Sparkline")[0]["props"]
+    assert any("dropped a literal on a data prop" in w for w in r["warnings"])
+
+
+def test_a_literal_feed_of_open_rows_is_still_dropped():
+    """`EditableLineGrid.rows` is an array of `additionalProperties: {}` —
+    database rows, whatever their columns turn out to be. A literal there is
+    the same fiction `Table.rows` was."""
+    grid = {"id": "g", "component": "EditableLineGrid",
+            "rows": [{"title": "Invented row"}],
+            "columns": [{"key": "title", "label": "Title"}]}
+    r = translate(payload(_root([grid]), {"tasks": {"rows": []}}), REG)
+    assert "Invented row" not in json.dumps(r["schema"])
+    assert nodes(r, "EditableLineGrid")[0]["props"]["columns"] == [
+        {"key": "title", "label": "Title"}], "config still survives beside it"
+
+
+def test_a_bindable_union_prop_still_drops_its_literal():
+    """`Timeline.entries` is typed a union because it also accepts a
+    `{{binding}}` string — the loose types are exactly the props a dataSource
+    feeds, so a literal there is invented history."""
+    tl = {"id": "tl", "component": "Timeline",
+          "entries": [{"timestamp": "2024-01-15", "title": "Approved by Ana"}]}
+    r = translate(payload(_root([tl]), {"tasks": {"rows": []}}), REG)
+    assert "Approved by Ana" not in json.dumps(r["schema"])
+
+
+def test_a_literal_value_on_a_measuring_component_is_still_dropped():
+    """`Stat.value` is an OPTIONAL string on a KPI. A required scalar is
+    structural; an optional one on a measuring component is a claim nobody
+    counted, and dropping it cannot refuse the page."""
+    stat = {"id": "st", "component": "Stat", "label": "Total Tasks",
+            "value": "142"}
+    r = translate(payload(_root([stat]), {"tasks": {"rows": []}}), REG)
+    assert "142" not in json.dumps(r["schema"])
+
+
+def test_an_unknown_component_gets_the_conservative_answer():
+    """The catalog describes what the renderer enforces. A component it does
+    not describe cannot be shown to want a literal, and guessing permissively
+    is how invented rows would walk back in."""
+    from services.a2ui_to_forge import _literal_is_the_contract
+
+    assert not _literal_is_the_contract("NotAComponent", "items")
+    assert not _literal_is_the_contract("KeyValueList", "notAProp")
+    assert _literal_is_the_contract("KeyValueList", "items")
+
+
 def test_a_label_naming_a_boolean_column_binds_it():
     """"Quorum Met" against a `quorumMet` column is the same two words. The
     generic flag vocabulary has no entry for a domain's own flags and never

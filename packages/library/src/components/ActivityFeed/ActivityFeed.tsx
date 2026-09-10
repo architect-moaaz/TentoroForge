@@ -1,4 +1,7 @@
 import * as React from "react";
+import type { StyleSlotT } from "@tentoroforge/schema";
+import { resolveStyle } from "../../style/resolveStyle";
+import { useMotion } from "../../style/useMotion";
 import { formatValue } from "../../utils/formatValue";
 import { z } from "zod";
 import type { ActivityFeedNode } from "@tentoroforge/schema";
@@ -8,7 +11,13 @@ import { SCROLL_X } from "../../style/scroll";
 import { applyRowCap } from "../../style/rowCap";
 import { normalizeEntry } from "./normalizeEntry";
 
-type Props = z.infer<typeof ActivityFeedNode>["props"];
+/** The renderer passes the node's `style` envelope alongside its props.
+ *  WITHOUT `style` here the Style panel wrote background / padding /
+ *  radius / shadow / motion into the page schema and this component
+ *  rendered none of it — the edit persisted to disk and was invisible on
+ *  the canvas, which reads as a broken Style tab rather than an
+ *  unsupported one. */
+type Props = z.infer<typeof ActivityFeedNode>["props"] & { style?: StyleSlotT };
 
 const CATEGORY_TONE: Record<string, string> = {
   create:  "bg-emerald-500/10 text-emerald-700 border-emerald-200",
@@ -49,7 +58,7 @@ function formatRelativeSafe(iso: unknown): string {
 }
 
 
-export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fields }: Props) {
+export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fields, style }: Props) {
   const radiusScale = useRadiusScale();
   // Schema accepts entries as either an inline array OR a Mustache binding
   // string (e.g. "{{stats.recentActivity}}"). When the binding hasn't been
@@ -60,13 +69,21 @@ export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fi
   const list = applyRowCap(Array.isArray(entries) ? entries : [], limit);
   const isUnresolvedBinding = typeof entries === "string";
   return (
-    <section data-activity-feed="" className={`${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-card ${SCROLL_X}`}>
+    <section data-activity-feed="" className={`${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-card ${SCROLL_X}`}
+      style={resolveStyle(style)} {...useMotion(style?.motion)}>
       <header className="border-b border-border px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
       </header>
       <ol
         className="overflow-y-auto"
-        style={{ maxHeight: maxHeight != null
+        // 0 MEANS UNCONSTRAINED — the registry descriptor says so in as many
+        // words ("Maximum height in px (0 = unconstrained)"), but this tested
+        // `!= null`, which 0 passes. Every ActivityFeed dropped from the palette
+        // arrived with the seeded `maxHeight: 0` and rendered as
+        // `max-height: 0px`: the <ol> measured 958×0 with its two seeded rows
+        // present at 54.8px each and clipped to nothing. No error, no issue
+        // badge, no empty-node hint — just a feed that is not there.
+        style={{ maxHeight: maxHeight
           ? (typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight)
           : "480px" }}
       >

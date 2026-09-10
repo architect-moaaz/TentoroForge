@@ -8,13 +8,37 @@ const MenuItem = z.object({
   disabled: z.boolean().optional(),
 }).strict();
 
+/**
+ * A menu's item list: optional, and empty is legal.
+ *
+ * WHY NOT `.min(1)`, WHICH IS WHAT THIS WAS
+ * -----------------------------------------
+ * An unconfigured menu is *under-configured*, not malformed — and the cost of
+ * calling it malformed is paid by the whole page, not by the menu. `NodeV2`
+ * tries the strict shapes first and falls back to `anyRegistered`, which
+ * deliberately REFUSES any type a strict shape already covers (otherwise the
+ * fallback would launder every failed strict node). So a DropdownMenu with no
+ * items matched nothing at all, `PageV2` failed, and the scaffold logged
+ * `schema validation failed … rendering raw` and dropped the ENTIRE page out of
+ * validated rendering. Observed live: three unconfigured menus on one page took
+ * the other nine nodes down with them, and the DropdownMenu that started it
+ * would not even open in the shipped app.
+ *
+ * "You have not filled this in yet" must not be spelled the same way as "this
+ * page is corrupt". The components now render a legible empty state
+ * (MenuEmptyNote), so an empty list is a state the runtime handles rather than
+ * one it has to be protected from — and every other node on the page keeps its
+ * validation.
+ */
+const MenuItems = z.array(MenuItem).default([]);
+
 export const DropdownMenuNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("DropdownMenu"),
   props: z.object({
     trigger:     z.string().min(1),
     triggerIcon: z.string().optional(),
-    items:       z.array(MenuItem).min(1),
+    items:       MenuItems,
     align:       z.enum(["start", "center", "end"]).optional(),
   }).strict(),
   style: StyleSlot.optional(),
@@ -41,6 +65,11 @@ export const TooltipNode = z.object({
     label:   z.string().min(1),
     content: z.string().min(1),
     side:    z.enum(["top", "right", "bottom", "left"]).optional(),
+    // `Tooltip.tsx` hardwired `delayDuration={0}`, so every authored tooltip
+    // fired instantly and the conventional hover-intent window was not
+    // expressible anywhere. Optional and unseeded, so nothing already on disk
+    // changes. Same bounds as `HoverCardNode.props.openDelay`.
+    delayMs: z.number().int().min(0).max(5000).optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -65,7 +94,7 @@ export const ContextMenuNode = z.object({
   type: z.literal("ContextMenu"),
   props: z.object({
     label: z.string().min(1),
-    items: z.array(MenuItem).min(1),
+    items: MenuItems,
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -78,18 +107,29 @@ export const HoverCardNode = z.object({
     label:   z.string().min(1),
     title:   z.string().optional(),
     content: z.string().min(1),
+    // HoverCard was the only floating surface with no placement prop in any
+    // layer — Tooltip declares `side`, Popover declares `align`, and this one
+    // could only ever open below its trigger with a 0ms hover intent. All
+    // optional, so nothing already on disk changes.
+    side:       z.enum(["top", "right", "bottom", "left"]).optional(),
+    align:      z.enum(["start", "center", "end"]).optional(),
+    openDelay:  z.number().int().min(0).max(5000).optional(),
+    closeDelay: z.number().int().min(0).max(5000).optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
 export type HoverCardNodeT = z.infer<typeof HoverCardNode>;
 
 const MenubarItem = z.object({ label: z.string().min(1), value: z.string().min(1) }).strict();
-const MenubarMenu = z.object({ label: z.string().min(1), items: z.array(MenubarItem).min(1) }).strict();
+// Same reasoning as MenuItems: a menu title with no entries yet is an
+// authoring state the Menubar renders legibly, not a reason to invalidate
+// the page it sits on.
+const MenubarMenu = z.object({ label: z.string().min(1), items: z.array(MenubarItem).default([]) }).strict();
 export const MenubarNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("Menubar"),
   props: z.object({
-    menus: z.array(MenubarMenu).min(1),
+    menus: z.array(MenubarMenu).default([]),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

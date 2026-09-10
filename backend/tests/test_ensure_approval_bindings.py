@@ -14,7 +14,7 @@ PLAN = {
     }],
 }
 
-def _bindings(tmp): return json.loads((tmp/"src/contracts/event-bindings.json").read_text())["bindings"]
+def _bindings(tmp): return json.loads((tmp/"src/contracts/event-bindings.json").read_text(encoding="utf-8"))["bindings"]
 
 def test_creates_file_and_binding_when_missing(tmp_path):
     r = ensure_approval_bindings(tmp_path, PLAN)
@@ -25,7 +25,7 @@ def test_creates_file_and_binding_when_missing(tmp_path):
 def test_patches_existing_llm_file_without_clobbering(tmp_path):
     p = tmp_path/"src/contracts"; p.mkdir(parents=True)
     (p/"event-bindings.json").write_text(json.dumps({"bindings":[
-        {"event":"other_event","source":"x","workflows":["Other"]}]}))
+        {"event":"other_event","source":"x","workflows":["Other"]}]}), encoding="utf-8")
     r = ensure_approval_bindings(tmp_path, PLAN)
     assert r["added"] == 1
     b = _bindings(tmp_path)

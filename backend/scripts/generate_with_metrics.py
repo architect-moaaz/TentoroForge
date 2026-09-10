@@ -181,7 +181,7 @@ async def run(description: str, short_id: str) -> int:
     # Persist plan for the relay pipeline
     contracts = output_dir / "src" / "contracts"
     contracts.mkdir(parents=True, exist_ok=True)
-    (contracts / "app-model.json").write_text(json.dumps(plan, indent=2))
+    (contracts / "app-model.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
     # ── Phase 2: relay pipeline ──────────────────────────────────────
     bump_phase("design")
