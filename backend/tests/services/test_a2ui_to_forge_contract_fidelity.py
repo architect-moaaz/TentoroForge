@@ -89,3 +89,37 @@ def test_an_optional_data_prop_of_pure_fiction_is_still_just_dropped():
     lst = find(r["schema"]["root"], "List")
     assert lst is not None and "items" not in lst["props"]
     assert "made up" not in json.dumps(r["schema"])
+
+
+def test_a_dialog_composed_as_its_own_root_is_kept_and_named(tmp_path):
+    """The composer writes a Dialog as a second top-level component, opened by
+    a button's `opensDialog`. Built from `root` only, it vanished, and the
+    page was refused for opening a dialog it did not contain — twice, on two
+    builds. It is attached under the root and named by its `id` prop, which
+    is what `opensDialog` and the functional check resolve against."""
+    from services.blueprint.functional_completeness import page_findings
+
+    comps = [{"id": "root", "component": "Stack", "children": ["h", "del"]},
+             {"id": "h", "component": "Heading", "content": {"path": "/note/title"}},
+             {"id": "del", "component": "Button", "label": "Delete Note",
+              "variant": "danger", "opensDialog": "delete-dialog"},
+             {"id": "delete-dialog", "component": "Dialog", "title": "Delete this note?",
+              "description": "This cannot be undone.", "size": "sm", "child": "confirm"},
+             {"id": "confirm", "component": "Button", "label": "Delete Permanently",
+              "variant": "danger", "workflow": "FLOW-003"}]
+    data = {"note": {"id": "n1", "title": "Groceries"}}
+    r = translate(payload(comps, data), REG, route="/notes/[id]", kind="record")
+    dialog = find(r["schema"]["root"], "Dialog")
+    assert dialog is not None, r["warnings"]
+    assert dialog["props"]["id"] == "delete-dialog"
+    assert find(dialog, "Button")["props"]["workflow"] == "FLOW-003"
+    assert validate_props({"root": r["schema"]["root"]}, load_catalog()) == []
+
+    # The functional check sees the dialog the button opens.
+    doc = {"pages": [{"id": "PAGE-002", "route": "/notes/[id]", "status": "PROPOSED"}],
+           "pageLayouts": [{"page": "PAGE-002", "root": r["schema"]["root"],
+                            "dataSources": r["schema"]["dataSources"]}],
+           "workflows": [{"id": "FLOW-003", "name": "Delete Note",
+                          "trigger": {"kind": "manual"}}]}
+    rules = {f["rule"] for f in page_findings(doc)}
+    assert "dialog-not-defined" not in rules, page_findings(doc)

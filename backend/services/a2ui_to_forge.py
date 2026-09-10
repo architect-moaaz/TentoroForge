@@ -1669,6 +1669,14 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     f"this app does not define. Cleared for the "
                     f"submit-authority pass to resolve.")
 
+        if kind == "Dialog" and c.get("id"):
+            # A DIALOG IS NAMED BY ITS OWN `id` PROP. `opensDialog` on a
+            # Button points at it, and `functional_completeness` resolves the
+            # target against Dialog `props.id` — node ids are composition-time
+            # and stripped before commit. A2UI names the dialog with the node
+            # id and nothing else, so dropping that with the other node ids
+            # left every dialog anonymous and every button opening nothing.
+            props.setdefault("id", str(c["id"]))
         node: dict[str, Any] = {"type": kind, "props": props}
         # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
         # not a prop. A2UI emits it inside props, its own catalog accepts that,
@@ -1705,6 +1713,32 @@ def translate(payload: dict, registry: dict, route: str = "/",
     # whatever composed the page. Called here too so an A2UI schema is
     # already well-shaped when the floor judges it.
     root = shape_sections(root)
+
+    # A DIALOG IS OPENED BY ID, NOT PLACED. The composer writes it as a second
+    # top-level component — a surface root of its own, referenced by a
+    # button's `opensDialog` and by nothing's `children` — and this built
+    # only what `root` reaches, so the dialog vanished and the contract then
+    # refused the page for opening a dialog it "does not contain". Measured
+    # on two builds running: the detail page was composed correctly twice
+    # and lost twice. The runtime mounts a Dialog wherever it sits in the
+    # tree and shows it on `openDialog(id)`, so an unreached one is attached
+    # under the root, after sectioning, which is layout and none of its.
+    def _ids(n: Any) -> set[str]:
+        out: set[str] = set()
+        if isinstance(n, dict):
+            if n.get("id"):
+                out.add(str(n["id"]))
+            for child in n.get("children") or []:
+                out |= _ids(child)
+        return out
+
+    placed = _ids(root)
+    for cid, c in list(comps.items()):
+        if c.get("component") == "Dialog" and str(cid) not in placed:
+            dialog = build(str(cid))
+            if dialog:
+                root.setdefault("children", []).append(dialog)
+                placed |= _ids(dialog)
 
     schema: dict[str, Any] = {
         "schemaVersion": "2",
