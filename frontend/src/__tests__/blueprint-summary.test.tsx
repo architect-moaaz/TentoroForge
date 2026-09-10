@@ -5,7 +5,7 @@
  * Covered:
  *   • identity, language, palette and the four counts come off the document
  *   • pages, entities, capabilities and requirements are named, not counted
- *   • long lists fold, and "+N more" unfolds them in place
+ *   • requirements start closed, open in place, and a long list is cut short
  *   • the footer offers Build for a ready definition, and not for a built one
  */
 import { describe, it, expect, vi } from "vitest";
@@ -106,7 +106,6 @@ describe("BlueprintSummary", () => {
   it("shows the application's identity and the four counts", () => {
     const { el, unmount } = mount({ kind: "ready" });
     const t = el.textContent ?? "";
-    expect(t).toContain("App Blueprint");
     expect(t).toContain("v31");
     expect(t).toContain("Task Tracker App");
     expect(t).toContain("Simple Task Tracker");
@@ -133,19 +132,22 @@ describe("BlueprintSummary", () => {
     expect(t).toContain("/tasks/new");
     expect(t).toContain("New Task");
     expect(t).toContain("4 fields");
-    expect(t).toContain("id, title, status, priority");
+    const chips = Array.from(el.querySelectorAll("code")).map((c) => c.textContent);
+    expect(chips).toEqual(["id", "title", "status", "priority"]);
     expect(t).toContain("Task Status Toggle");
     unmount();
   });
 
-  it("folds long requirement lists and unfolds them in place", () => {
+  it("keeps requirements closed until asked, then cuts a long list short", () => {
     const { el, click, unmount } = mount({ kind: "ready" });
-    expect(el.textContent).toContain("Requirement number 3");
-    expect(el.textContent).not.toContain("Requirement number 4");
-    expect(el.textContent).toContain("6 more requirements");
-    click("6 more requirements");
+    expect(el.textContent).not.toContain("Requirement number 1");
+    click("Requirements");
+    expect(el.textContent).toContain("Requirement number 8");
+    expect(el.textContent).not.toContain("Requirement number 9");
+    click("Show 1 more");
     expect(el.textContent).toContain("Requirement number 9");
-    expect(el.textContent).toContain("Show less");
+    click("Requirements");
+    expect(el.textContent).not.toContain("Requirement number 1");
     unmount();
   });
 
@@ -167,7 +169,7 @@ describe("BlueprintSummary", () => {
     partial.unmount();
 
     const built = mount({ kind: "built" });
-    expect(built.el.textContent).toContain("Built");
+    expect(built.el.textContent).toContain("Built from this definition");
     expect(built.buttons().some((b) => b.textContent?.includes("Build app"))).toBe(false);
     expect(built.buttons().some((b) => b.textContent?.includes("Edit blueprint"))).toBe(true);
     built.unmount();
