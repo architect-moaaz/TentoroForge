@@ -356,7 +356,16 @@ def _row_scoped(control: dict, layout: dict, doc: dict) -> str | None:
     item carries that item: the entity of the source the Table or Repeat
     reads is in scope. Returns that entity's id or None."""
     if control.get("type") == "Table":
-        data = str((control.get("props") or {}).get("data") or "")
+        props = control.get("props") or {}
+        # The row source can arrive under any of the Table's data-prop names.
+        # `Table.schema.ts` accepts `data`, `rows` AND `items`, the a2ui composer
+        # emits `rows` on a list table, and the converter carries whichever it
+        # was given. Reading only `data` here made the validator blind to a
+        # perfectly-composed table — a rowAction over `rows: "{{tasks}}"` was
+        # refused for "nothing names a task" when the row plainly does. Read the
+        # same prop names the schema and converter treat as the row source.
+        data = next((str(props[p]) for p in ("data", "rows", "items")
+                     if props.get(p)), "")
         return _entity_of_source(doc, layout, data.strip("{} ").split(".")[0])
     # Inside a Repeat (or any node repeating over a source), the item is the
     # record — an Approve button drawn once per pending case.
