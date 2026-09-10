@@ -567,3 +567,13 @@ def test_flagging_never_revives_a_retired_artifact(svc):
                                 artifact_id=old["id"], detail="leftover")]
     assert flag_unrepaired(svc, obs, "") == []
     assert svc.doc["pages"][0]["status"] == "DEPRECATED"
+
+
+def test_the_critic_is_not_shown_provenance(svc):
+    svc.upsert("pages", {"name": "C", "route": "/c", "purpose": "p"},
+               natural_key=page_key("/c"))
+    pid = svc.doc["pages"][0]["id"]
+    svc.mark_out_of_sync(pid, "a relationship is missing")
+    ctx = observation_context(svc.doc, agent="page_design")
+    assert "syncNote" not in ctx["output"]["pages"][0]
+    assert "missing" not in json.dumps(ctx)

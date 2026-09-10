@@ -713,6 +713,7 @@ def apply_agent_result(
             # model-spelled keys, two of them still live — and a repair that
             # rephrased a key was an insert, not an update. The same route,
             # name or prose is the same artifact whatever the model called it.
+            model_key = p.natural_key
             p.natural_key = _canonical_key(
                 alloc, p.section, p.body, p.natural_key, page_routes)
             # A body id is honoured ONLY when it belongs to this section — a
@@ -730,6 +731,14 @@ def apply_agent_result(
                 keep = False
             artifact_id = str(body_id) if keep else alloc.allocate(prefix, p.natural_key)
             allocated[p.natural_key] = artifact_id
+            # THE KEY THE MODEL CHOSE STAYS CITABLE. A role in the same batch
+            # cites its permissions by the keys the agent gave them
+            # ("PERM-create-note"); restating the key above and then mapping
+            # only the restated one left every such citation unresolved, and
+            # `security` failed the contract twice on a live build — a
+            # regression the canonicalisation introduced the same morning.
+            if model_key and model_key != p.natural_key:
+                allocated.setdefault(model_key, artifact_id)
             if not keep and body_id:
                 # ACTUALLY drop it — do not just allocate beside it. The
                 # comment above promised a wrong-prefix id is dropped, but the

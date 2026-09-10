@@ -257,6 +257,21 @@ def owned_sections(agent: str) -> tuple[str, ...]:
     return tuple(sorted(s for s, owner in SECTION_OWNER.items() if owner == agent))
 
 
+#: Where an artifact came from, not what it says. `syncNote` is what the
+#: LAST verdict wrote on it; shown to the next critic it reads as a claim the
+#: artifact makes — measured: the database critic reported the Member entity
+#: "internally contradictory" because its syncNote said a relationship was
+#: missing after the relationship had been added. Same fields
+#: `executors.PROVENANCE_FIELDS` withholds from every non-owning agent.
+_PROVENANCE = ("syncNote", "evidence")
+
+
+def _without_provenance(row: Any) -> Any:
+    if isinstance(row, dict):
+        return {k: v for k, v in row.items() if k not in _PROVENANCE}
+    return row
+
+
 def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
     value = _section(doc, section)
     if isinstance(value, list):
@@ -264,7 +279,9 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
         # read as duplicates left lying around — measured: a repaired module
         # was flagged for the DEPRECATED one it had replaced, and the next
         # round churned on that instead of the real finding.
-        value = _live(value)
+        value = [_without_provenance(row) for row in _live(value)]
+    elif isinstance(value, dict):
+        value = _without_provenance(value)
     if not subject or not isinstance(value, list):
         return value
     # A fan-out subject is an artifact id (a page); its own row, and any row

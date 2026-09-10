@@ -672,3 +672,19 @@ def test_a_key_bound_before_canonicalisation_is_kept(svc):
     assert svc.doc["roles"][0]["description"] == "runs the place"
     with IdAllocator.session(output_dir=svc.output_dir) as alloc:
         assert alloc.lookup(role_key("Admin")) is None
+
+
+def test_a_batch_citation_by_the_models_own_key_still_resolves(svc):
+    """The security agent proposes permissions and a role citing them by the
+    keys it gave them. Canonicalising the keys must not orphan the citation:
+    measured live, the role reached the contract holding 'PERM-create-note'
+    and the node failed twice."""
+    result = AgentResult(task_id="t", agent="security", confidence=0.95, proposals=[
+        ArtifactProposal(section="permissions", natural_key="PERM-create-note",
+                         body={"name": "create note", "action": "create"}),
+        ArtifactProposal(section="roles", natural_key="ROLE-member",
+                         body={"name": "Member", "permissions": ["PERM-create-note"]}),
+    ])
+    apply_agent_result(svc, result)
+    perm = svc.doc["permissions"][0]["id"]
+    assert svc.doc["roles"][0]["permissions"] == [perm]
