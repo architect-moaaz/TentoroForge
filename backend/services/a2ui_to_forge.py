@@ -841,6 +841,66 @@ def _enum_members(kind: str, prop: str) -> set[str]:
     return {str(m) for m in members} if isinstance(members, list) else set()
 
 
+def _contract_prop(kind: str, prop: str) -> dict:
+    """`kind.prop`'s contract entry, or {} — read the same way `_enum_members`
+    reads it, from the generated Zod contracts, never restated here."""
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+        return dict(props_for(kind, load_contracts()).get(prop) or {})
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        return {}
+
+
+def _is_required(kind: str, prop: str) -> bool:
+    """The contract knows the prop and does not mark it optional."""
+    spec = _contract_prop(kind, prop)
+    return bool(spec) and not spec.get("optional")
+
+
+def _coerce_copy(kind: str, prop: str, value: Any) -> Any:
+    """A literal read out of the sample model, in the type the contract asks
+    for.
+
+    A2UI types a caption as DynamicString, which admits a binding; the
+    composer bound `Table.caption` to a count and the sample model answered
+    `6`. The contract wants a string, so the page was refused for a value that
+    was right in everything but its type. The same value, typed as declared:
+    a number becomes its text, a numeric string becomes its number, "true"
+    becomes true. Nothing is invented; only the spelling changes.
+    """
+    if isinstance(value, bool):
+        scalar_kind = "boolean"
+    elif isinstance(value, (int, float)):
+        scalar_kind = "number"
+    elif isinstance(value, str):
+        scalar_kind = "string"
+    else:
+        return value
+    declared = str(_contract_prop(kind, prop).get("type") or "")
+    if declared == "string" and scalar_kind != "string":
+        return "true" if value is True else "false" if value is False else str(value)
+    if declared in ("number", "integer") and scalar_kind == "string":
+        try:
+            num = float(value)
+            return int(num) if declared == "integer" or num.is_integer() else num
+        except ValueError:
+            return value
+    if declared == "boolean" and scalar_kind == "string":
+        low = value.strip().lower()
+        if low in ("true", "false"):
+            return low == "true"
+    return value
+
+
+def _has_pointer(value: Any) -> bool:
+    """Whether a literal carries `{"path": ...}` anywhere inside it."""
+    if isinstance(value, dict):
+        return "path" in value or any(_has_pointer(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_pointer(v) for v in value)
+    return False
+
+
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
 #: them among the props and the binder lifts them out afterwards, so they are
 #: not unknown — they are early.
@@ -1245,6 +1305,24 @@ def translate(payload: dict, registry: dict, route: str = "/",
         aliases = _PROP_ALIASES.get(kind, {})
         unsupported = _UNSUPPORTED.get(kind, frozenset())
         props: dict[str, Any] = {}
+
+        def pointer_binding(raw2: str, where: str) -> str | None:
+            """A pointer nested inside a prop → a `{{binding}}`, or None with
+            the reason recorded. Same rule as the dict-of-pointers branch:
+            the record this page shows, the row in scope, or nothing."""
+            segs2 = [x for x in raw2.strip("/").split("/") if x]
+            if (binder.is_record_page() and len(segs2) >= 2
+                    and binder.dominant
+                    and isinstance(at_path("/" + segs2[0]), dict)):
+                src2 = binder.record_source(binder.dominant)
+                return f"{{{{{src2}.{segs2[-1]}}}}}"
+            if scope and segs2 and not raw2.startswith("/"):
+                return f"{{{{{scope}.{segs2[-1]}}}}}"
+            binder.warnings.append(
+                f'{c.get("id")}.{where}: "{raw2}" resolves to no source on '
+                f"this page — dropped rather than sent as a pointer the "
+                f"renderer cannot read.")
+            return None
         items = [(k, v) for k, v in c.items()
                  if k not in _DROP_PROPS and k not in _CHILD_KEYS
                  and k not in unsupported]
@@ -1286,6 +1364,31 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"renders exactly like one that was.")
                 continue
             if k in _DATA_PROPS:
+                if isinstance(val, list) and k not in _CONFIG_DATA_PROPS \
+                        and _has_pointer(val):
+                    # A LIST OF COPY WITH BOUND VALUES IS NOT FICTION. A
+                    # record page's metadata block — KeyValueList items of
+                    # `{label: "Created", value: {path: "/note/createdAt"}}` —
+                    # is labels the composer wrote and values the record
+                    # supplies. The literal check below saw a list, called it
+                    # invented rows and dropped it, and the contract then
+                    # refused the component for the `items` it requires.
+                    # Each pointer inside is bound the way a pointer prop is;
+                    # the labels ride along as the copy they are.
+                    resolved = [
+                        {k2: (pointer_binding(str(v["path"]), f"{k}[{i}].{k2}")
+                              if isinstance(v, dict) and "path" in v else v)
+                         for k2, v in el.items()}
+                        if isinstance(el, dict) else el
+                        for i, el in enumerate(val)
+                    ]
+                    resolved = [
+                        {k2: v for k2, v in el.items() if v is not None}
+                        if isinstance(el, dict) else el
+                        for el in resolved
+                    ]
+                    props[k] = resolved
+                    continue
                 if not isinstance(val, dict) and k not in _CONFIG_DATA_PROPS:
                     # A scalar `value` on a measuring component is recoverable:
                     # the number is invented but the label names a real subset,
@@ -1300,6 +1403,18 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     # Not a pointer at all — a literal rows/data array is the
                     # same fiction wearing a different prop name, and `resolve`
                     # would hand it straight through.
+                    if _is_required(kind, k):
+                        # A component without the prop its contract requires
+                        # is not a component. Shipping it failed the page on
+                        # a `required` check far from here; the composer
+                        # wrote content nothing fetches, so the honest
+                        # outcome is no component — said so, not silently.
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}: {kind} requires {k!r} and the '
+                            f"composer wrote a literal nothing on this page "
+                            f"reads — the component is left out rather than "
+                            f"shipped invalid or with invented rows.")
+                        return None
                     binder.warnings.append(
                         f'{c.get("id")}.{k}: dropped a literal on a data prop '
                         f"— rows the page did not read from anywhere.")
@@ -1388,7 +1503,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"record this page shows — bound to {resolved!r} "
                         f"rather than read out of the sample.")
                 else:
-                    resolved = at_path(raw)
+                    resolved = _coerce_copy(kind, k, at_path(raw))
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
