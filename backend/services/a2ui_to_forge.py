@@ -842,12 +842,29 @@ def _enum_members(kind: str, prop: str) -> set[str]:
 
 
 def _contract_prop(kind: str, prop: str) -> dict:
-    """`kind.prop`'s contract entry, or {} — read the same way `_enum_members`
-    reads it, from the generated Zod contracts, never restated here."""
+    """`kind.prop`'s contract entry as `{"type": ..., "optional": ...}`, or {}.
+
+    Read from the SAME catalogue `page_planner.validate_props` judges the
+    finished page by — the tracked `contracts/component-catalog.json` — so
+    what is coerced here and what is checked there cannot disagree. The
+    registry's generated Zod contracts are the fallback: they are richer, but
+    they are a build artefact a checkout may not have, and a coercion that
+    silently did nothing on such a checkout is what this first shipped as.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        entry = load_catalog().get(kind) or {}
+        schema = entry.get("props") or {}
+        spec = (schema.get("properties") or {}).get(prop)
+        if isinstance(spec, dict):
+            return {"type": spec.get("type"),
+                    "optional": prop not in (schema.get("required") or [])}
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        pass
     try:
         from services.a2ui_catalog import load_contracts, props_for
         return dict(props_for(kind, load_contracts()).get(prop) or {})
-    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+    except Exception:  # noqa: BLE001
         return {}
 
 
