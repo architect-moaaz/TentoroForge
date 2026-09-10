@@ -35,6 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 import {
   AlertCircle,
+  ArrowRight,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -49,6 +50,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  AppTile,
+  BlueprintSummary,
+  blueprintCountsLine,
+  blueprintName,
+  type BlueprintStatus,
+} from "./BlueprintSummary";
 import {
   useBlueprintRun,
   type RunNode,
@@ -439,6 +447,9 @@ export function SmithPanel({
    * without having to ask for it.
    */
   const [openPlan, setOpenPlan] = useState<BlueprintRun | null>(null);
+  // "Edit blueprint" on the right means "tell Smith": the definition is
+  // changed by talking, so the button brings the cursor here.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
   const [listening, setListening] = useState(false);
@@ -688,6 +699,19 @@ export function SmithPanel({
     layoutCount < Math.max(pageCount, 1) &&
     !alreadyBuilt;
 
+  // Whether there is a definition to show at all, and where it stands. The
+  // summary reads the document; this decides which of its footers it gets.
+  const hasDefinition =
+    (Array.isArray(bp.requirements) && (bp.requirements as unknown[]).length > 0) ||
+    pageCount > 0;
+  const summaryStatus: BlueprintStatus = busy
+    ? { kind: "building" }
+    : definedNotBuilt
+      ? layoutCount === 0
+        ? { kind: "ready" }
+        : { kind: "partial", missing: pageCount - layoutCount, total: pageCount }
+      : { kind: "built" };
+
   // What the side panel is showing: the run you picked, or the live one.
   const sidePlan =
     openPlan ??
@@ -775,7 +799,35 @@ export function SmithPanel({
                 )}
               </div>
             )}
-            {m.plan ? (
+            {m.plan?.awaitingApproval ? (
+              // THE BLUEPRINT'S CARD. A definition is the one plan whose
+              // outcome is a thing rather than a run, so its marker names the
+              // application and what it holds, and opens the Blueprint on the
+              // right rather than a stage list.
+              <button
+                type="button"
+                onClick={() => setOpenPlan(m.plan ?? null)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left hover:bg-muted/60",
+                  openPlan === m.plan && "border-primary",
+                )}
+              >
+                <AppTile doc={blueprint} className="h-11 w-11 text-lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">
+                    {blueprintName(blueprint)}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">App Blueprint</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                    {blueprintCountsLine(blueprint)}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                  View on right
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+              </button>
+            ) : m.plan ? (
               // A MARKER, NOT THE PLAN ITSELF. Clicking it opens that run on
               // the right, where there is room for it.
               <button
@@ -788,11 +840,9 @@ export function SmithPanel({
               >
                 <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="font-medium">
-                  {m.plan.awaitingApproval
-                    ? "Definition ready to review"
-                    : m.plan.nodesTotal > 0
-                      ? `Built in ${m.plan.nodesTotal} stages`
-                      : "Nothing needed doing"}
+                  {m.plan.nodesTotal > 0
+                    ? `Built in ${m.plan.nodesTotal} stages`
+                    : "Nothing needed doing"}
                 </span>
                 <span className="ml-auto text-muted-foreground">
                   {m.at &&
@@ -926,6 +976,7 @@ export function SmithPanel({
             </button>
           )}
           <textarea
+            ref={composerRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -966,66 +1017,56 @@ export function SmithPanel({
       a 380px sidebar on the Blueprint page, and two columns in that is two
       unreadable ones. There the plan opens in place, as it did before.
     */}
-    <aside className="hidden w-[340px] shrink-0 flex-col overflow-y-auto border-l bg-muted/30 p-3 lg:flex">
-      {sidePlan ? (
-        <>
+    <aside className="hidden w-[420px] shrink-0 flex-col border-l bg-muted/30 lg:flex xl:w-[460px]">
+      {sidePlan &&
+      !(sidePlan.awaitingApproval && sidePlan.status === "complete") ? (
+        // A RUN IN PROGRESS, OR ONE PICKED FROM THE TRANSCRIPT: its stages.
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {openPlan && (
             <button
               type="button"
               onClick={() => setOpenPlan(null)}
-              className="mb-2 self-start text-xs text-muted-foreground hover:text-foreground"
+              className="mb-2 text-xs text-muted-foreground hover:text-foreground"
             >
               ← Back to the current run
             </button>
           )}
-          <StageList
-            run={sidePlan}
-            onApprove={approve}
-            definition={blueprint}
+          <StageList run={sidePlan} />
+        </div>
+      ) : hasDefinition ? (
+        // THE BLUEPRINT. Read off the document rather than the run, so a
+        // reload or a later turn — connecting a design, answering a question
+        // — does not hide the definition or the way to say yes to it. That
+        // is what used to leave the panel with no plan and no approval
+        // control: the definition was finished and nothing could start.
+        <>
+          {openPlan && run.status === "running" && (
+            <button
+              type="button"
+              onClick={() => setOpenPlan(null)}
+              className="px-4 pt-3 text-left text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← Back to the current run
+            </button>
+          )}
+          <BlueprintSummary
+            doc={bp}
+            status={summaryStatus}
+            onBuild={approve}
+            onEdit={() => composerRef.current?.focus()}
+            className="min-h-0 flex-1"
           />
         </>
-      ) : definedNotBuilt ? (
-        // THE GATE OUTLIVES THE RUN THAT OPENED IT.
-        //
-        // `run.awaitingApproval` is in-memory: a reload, or any turn after the
-        // definition — connecting a Figma design, answering a question — left
-        // the panel with no plan and the approval control gone. The definition
-        // was finished and there was no way left to say yes to it, so nothing
-        // ever started and the stage list stayed empty. That is why the
-        // pipeline "cannot be seen": no run was ever begun from here.
-        //
-        // Derived from the Blueprint instead: a definition exists, nothing has
-        // been built from it, and no run is in flight.
-        <div className="mt-6 px-2">
-          {/* The same list the in-memory gate shows, read off the Blueprint
-              so that a reload or a later turn does not hide what will be
-              built behind a bare button. */}
-          <Definition doc={blueprint as Record<string, unknown> | null} />
-          <p className="mt-3 text-xs text-muted-foreground">
-              {/* "Nothing built" was said over a project with fourteen of
-                  fifteen pages composed — the one that failed had brought the
-                  gate back, and the sentence claimed the whole build was
-                  missing. Say what is actually left. */}
-              {layoutCount === 0
-                ? "The definition is ready and nothing has been built from it yet. " +
-                  "Approving builds the application — the pages, the data and the " +
-                  "workflows — which takes a few minutes."
-                : `${pageCount - layoutCount} of ${pageCount} page${pageCount === 1 ? "" : "s"} ` +
-                  "still has no layout. Approving composes what is missing and " +
-                  "leaves the rest as built."}
-            </p>
-          <button
-            onClick={approve}
-            disabled={busy}
-            className="mt-3 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
-          >
-              {layoutCount === 0 ? "Approve and build" : "Finish the missing pages"}
-            </button>
-        </div>
+      ) : sidePlan?.awaitingApproval ? (
+        // The define run has finished and the document is on its way.
+        <p className="mt-8 flex items-center justify-center gap-2 px-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading the definition…
+        </p>
       ) : (
         <p className="mt-8 px-2 text-center text-xs text-muted-foreground">
           What Smith does appears here — the plan it follows, the stages as
-          they run, and the definition it asks you to approve.
+          they run, and the Blueprint it asks you to approve.
         </p>
       )}
     </aside>
@@ -1043,12 +1084,8 @@ export function SmithPanel({
  */
 function StageList({
   run,
-  onApprove,
-  definition,
 }: {
   run: ReturnType<typeof useBlueprintRun>["run"];
-  onApprove: () => void;
-  definition?: Record<string, unknown> | null;
 }) {
   // WHEN THIS RUN BEGAN, and a clock that moves. Elapsed time read from a
   // static render would freeze at whatever it was when a node last landed —
@@ -1237,28 +1274,6 @@ function StageList({
         anyone who wants it in the Activity log.
       */}
       {run.events.length > 0 && <EventLog events={run.events} />}
-
-      {run.awaitingApproval && run.status === "complete" && (
-        <Definition doc={definition} />
-      )}
-
-      {run.awaitingApproval && run.status === "complete" && (
-        // §25 — the approval gate. The definition is done and the run is
-        // holding; nothing further is spent until this is answered.
-        <div className="mt-3 border-t pt-3">
-          <p className="text-xs text-muted-foreground">
-            I&apos;ve read your request and written it down. Approving builds
-            the application — the pages, the data and the workflows — which
-            takes a few minutes.
-          </p>
-          <button
-            onClick={onApprove}
-            className="mt-2 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-          >
-            Approve and build
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -1352,132 +1367,6 @@ function EventLog({ events }: { events: RunEventT[] }) {
             </li>
           ))}
         </ol>
-      )}
-    </div>
-  );
-}
-
-/**
- * §109's Application Definition — what Smith understood, at the moment it asks
- * whether it understood correctly.
- *
- * The approval gate said "Here's what I understood" and then showed a stage
- * list and a cost, so approving was an act of faith: the one thing being
- * approved was the one thing not on screen. The requirements are already in
- * the Blueprint by this point — `requirements` and `application_model` are the
- * two nodes a define-only run executes — so this reads them rather than asking
- * for anything new.
- */
-function Definition({ doc }: { doc?: Record<string, unknown> | null }) {
-  const reqs = (doc?.requirements as Array<Record<string, unknown>>) ?? [];
-  const product = (doc?.product ?? {}) as Record<string, unknown>;
-  const app = (doc?.application ?? {}) as Record<string, unknown>;
-  const roles = (product.personas ?? product.actors ?? doc?.roles ?? []) as
-    Array<Record<string, unknown> | string>;
-
-  if (!reqs.length && !app.description) return null;
-
-  const nameOf = (r: Record<string, unknown> | string) =>
-    typeof r === "string" ? r : String(r.name ?? r.role ?? r.id ?? "");
-  const rows = (v: unknown): Record<string, unknown>[] =>
-    Array.isArray(v) ? (v as Record<string, unknown>[]).filter((x) => x && typeof x === "object") : [];
-  const caps = rows((doc?.product as Record<string, unknown> | undefined)?.capabilities);
-  const frames = rows(doc?.designSources).flatMap((src) => rows(src.frames));
-  const data = (doc?.data as Record<string, unknown> | undefined) ?? {};
-  const named = (v: unknown, key = "name") =>
-    rows(v).map((x) => String(x[key] ?? x.name ?? x.id ?? "")).filter(Boolean);
-  const sections: [string, string[]][] = [
-    ["Pages", named(doc?.pages, "route")],
-    ["Data model", named(data.entities)],
-    ["Workflows", named(doc?.workflows)],
-    ["Business rules", named(doc?.businessRules)],
-  ];
-
-  return (
-    <div className="mt-3 border-t pt-3">
-      {typeof app.description === "string" && app.description && (
-        <p className="text-xs leading-relaxed">{app.description}</p>
-      )}
-
-      {roles.length > 0 && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          For {roles.map(nameOf).filter(Boolean).join(", ")}
-        </p>
-      )}
-
-      {/*
-        WHAT WILL BE BUILT, BY NAME. The gate showed the requirements and a
-        row of counts; the user asked where the pages, data model, workflows
-        and rules could be seen before approving. Before the build the
-        Blueprint holds the product's capabilities and the design's frames —
-        those are what the build will turn into pages — and after a build the
-        sections themselves are listed, so the same panel reads correctly at
-        both moments. The left rail's Data Model, Workflows, Rules and Pages
-        tabs open each section in full once it exists.
-      */}
-      {frames.length > 0 && (
-        <>
-          <p className="mt-3 text-xs font-medium">
-            Screens from the design ({frames.length})
-          </p>
-          <ul className="mt-1 space-y-1">
-            {frames.map((f, i) => (
-              <li key={String(f.nodeId ?? i)} className="flex gap-1.5 text-xs">
-                <span className="text-muted-foreground/50">·</span>
-                <span>{String(f.name ?? f.nodeId ?? "")}</span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {caps.length > 0 && (
-        <>
-          <p className="mt-3 text-xs font-medium">
-            What it will be able to do ({caps.length})
-          </p>
-          <ul className="mt-1 space-y-1">
-            {caps.map((c, i) => (
-              <li key={String(c.name ?? i)} className="flex gap-1.5 text-xs">
-                <span className="text-muted-foreground/50">·</span>
-                <span>
-                  <span className="font-medium">{String(c.name ?? "")}</span>
-                  {c.description ? <span className="text-muted-foreground"> — {String(c.description)}</span> : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {sections.map(([label, items]) =>
-        items.length === 0 ? null : (
-          <div key={label}>
-            <p className="mt-3 text-xs font-medium">
-              {label} ({items.length})
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              {items.join(" · ")}
-            </p>
-          </div>
-        ),
-      )}
-      {reqs.length > 0 && (
-        <>
-          <p className="mt-3 text-xs font-medium">
-            What it needs to do ({reqs.length})
-          </p>
-          <ul className="mt-1 space-y-1">
-            {reqs.map((r, i) => (
-              <li key={String(r.id ?? i)} className="flex gap-1.5 text-xs">
-                <span className="text-muted-foreground/50">·</span>
-                <span>{String(r.description ?? r.name ?? r.id ?? "")}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Anything missing or wrong? Tell me below and I&apos;ll change it
-            before building.
-          </p>
-        </>
       )}
     </div>
   );
