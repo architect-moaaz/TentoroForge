@@ -1691,6 +1691,22 @@ def translate(payload: dict, registry: dict, route: str = "/",
         style = props.pop("style", None)
         if style is not None:
             node["style"] = style
+        # `visibleIf` is a sibling of `type` too, and the composer writes it
+        # as the pointer path it binds fields from — `/note/id`, or `!/note/id`
+        # for "no record". The renderer evaluates it with FEEL-lite in data
+        # scope, so the pointer becomes the binding's path and the negation a
+        # null test: `notes.id != null` / `notes.id = null`. A pointer that
+        # resolves to no source is dropped, with the reason; the node then
+        # always shows, which is the failure that is visible.
+        cond = props.pop("visibleIf", None)
+        if isinstance(cond, str) and cond.strip():
+            raw_cond = cond.strip()
+            negated = raw_cond.startswith("!")
+            pointer = raw_cond.lstrip("!").strip()
+            bound = pointer_binding(pointer, "visibleIf") if pointer else None
+            if bound:
+                path = bound.strip("{}").strip()
+                node["visibleIf"] = f"{path} = null" if negated else f"{path} != null"
         if c.get("id"):
             node["id"] = c["id"]
 

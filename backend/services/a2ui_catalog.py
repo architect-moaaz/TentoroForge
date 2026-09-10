@@ -658,7 +658,21 @@ def build_a2ui_catalog(manifest: dict | None = None,
                             "Relative flex-grow within a Row or Column. Only "
                             "valid on a direct child of a layout component."
                         ),
-                    }
+                    },
+                    # The renderer already evaluates `visibleIf` on every
+                    # node (runtime/dispatch.tsx); the composer could not
+                    # write it. A record screen that also creates its record
+                    # needs it: the creating Form shows when there is no
+                    # record, the editing Form when there is one.
+                    "visibleIf": {
+                        "type": "string",
+                        "description": (
+                            "Show this component only when the condition "
+                            "holds. A pointer path into the data model, "
+                            "optionally negated: \"/note/id\" shows it when "
+                            "the record exists, \"!/note/id\" when it does not."
+                        ),
+                    },
                 },
             },
             "anyComponent": {

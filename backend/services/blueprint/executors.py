@@ -2669,6 +2669,7 @@ def make_executor(
                 # could read it — so on a page A2UI owns, the correction
                 # reached nobody.
                 feedback=spec.feedback or "",
+                contract=page,
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)

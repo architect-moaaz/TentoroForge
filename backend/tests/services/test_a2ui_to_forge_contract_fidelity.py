@@ -123,3 +123,33 @@ def test_a_dialog_composed_as_its_own_root_is_kept_and_named(tmp_path):
                           "trigger": {"kind": "manual"}}]}
     rules = {f["rule"] for f in page_findings(doc)}
     assert "dialog-not-defined" not in rules, page_findings(doc)
+
+
+def test_visible_if_becomes_a_null_test_on_the_bound_record():
+    """The composer writes `visibleIf` as the pointer it binds fields from;
+    the renderer evaluates FEEL-lite in data scope, so it becomes a null test
+    on the record source. A screen that also creates its record shows one of
+    two forms this way."""
+    comps = [{"id": "root", "component": "Stack", "children": ["h", "create", "edit"]},
+             {"id": "h", "component": "Heading", "content": {"path": "/note/title"}},
+             {"id": "create", "component": "Form", "workflow": "FLOW-001",
+              "visibleIf": "!/note/id", "submitLabel": "Create"},
+             {"id": "edit", "component": "Form", "workflow": "FLOW-002",
+              "visibleIf": "/note/id", "submitLabel": "Save"}]
+    data = {"note": {"id": "n1", "title": "Groceries"}}
+    r = translate(payload(comps, data), REG, route="/notes/[id]", kind="record")
+    forms = {f["props"]["workflow"]: f for f in r["schema"]["root"]["children"] if f["type"] == "Form"}
+    assert forms["FLOW-001"]["visibleIf"] == "notes.id = null"
+    assert forms["FLOW-002"]["visibleIf"] == "notes.id != null"
+    assert "visibleIf" not in forms["FLOW-001"]["props"]
+    assert validate_props({"root": r["schema"]["root"]}, load_catalog()) == []
+
+
+def test_an_unresolvable_visible_if_is_dropped_and_the_node_stays_visible():
+    comps = [{"id": "root", "component": "Stack", "children": ["f"]},
+             {"id": "f", "component": "Form", "workflow": "FLOW-001",
+              "visibleIf": "/nowhere/id", "submitLabel": "Create"}]
+    r = translate(payload(comps, {"nowhere": {}}), REG, route="/notes", kind="collection")
+    form = r["schema"]["root"]["children"][0]
+    assert "visibleIf" not in form
+    assert any("visibleIf" in w for w in r["warnings"])
