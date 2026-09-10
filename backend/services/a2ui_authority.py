@@ -756,8 +756,10 @@ def build_domain_context(root: Path, registry: dict | None = None,
         parts.append(
             "\nThe workflows this screen launches. An action on this screen "
             "runs one of these and nothing else — put the id in `workflow` on "
-            "the Button or Form that runs it. Each needs what is listed, and "
-            "a control that cannot supply an input is refused:\n"
+            "the Button or Form that runs it. Other workflow ids exist in the "
+            "catalogue for other screens; a control here naming one is "
+            "refused. Each needs what is listed, and a control that cannot "
+            "supply an input is refused:\n"
             + "\n".join(
                 f"- {w['id']}: {w.get('name') or w['id']}"
                 + (f" — {w['purpose']}" if w.get("purpose") else "")
@@ -1031,12 +1033,17 @@ def compose_page_via_a2ui(
             return {"applied": False, "route": route, "kind": kind, "reason": why}
         # Bound rather than passed at the call site, so an INJECTED provider
         # keeps the two-argument seam every test uses.
-        # ONLY THIS SCREEN'S WORKFLOWS. The list is what the composer's
-        # catalogue types `workflow` as, so a workflow not in it cannot be
-        # written at all — the shape of what is asked, not a check afterwards.
+        # THE APPLICATION'S IDS, NOT THE PAGE'S. The catalogue is one document
+        # shared by every page in a run and the composer's cached prompt
+        # prefix; enumerating per page rebuilds it per page, loses the cache,
+        # and races between pages composing in parallel (see
+        # test_workflow_ids_are_enumerated). The per-page narrowing is the
+        # brief's job — `build_domain_context` names only what this screen
+        # launches, with what each needs, and says the rest are refused.
         surface_provider = partial(
             _mcp_surface, progress=progress,
-            workflows=[str(w["id"]) for w in launchable(registry, page_id)])
+            workflows=[str(w.get("id")) for w in (registry.get("workflows") or [])
+                       if isinstance(w, dict) and w.get("id")])
 
     from services.a2ui_to_forge import translate
 

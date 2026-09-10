@@ -1069,7 +1069,7 @@ _NOTES = {
 }
 
 
-def test_only_the_workflows_a_screen_launches_are_offered_to_the_composer():
+def test_the_brief_narrows_to_the_workflows_a_screen_launches():
     from services.a2ui_authority import launchable, registry_from_blueprint
 
     reg = registry_from_blueprint(_NOTES)
