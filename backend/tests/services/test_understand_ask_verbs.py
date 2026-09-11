@@ -119,3 +119,12 @@ def test_a_new_field_ask_is_add_field_even_when_it_also_says_show_it():
     add_widgets — the column has to exist before any page can bind to it."""
     assert "add_field" in _PROMPT
     assert "cannot create a column" in _PROMPT.lower() or "before any page" in _PROMPT.lower()
+
+
+def test_a_policy_or_rule_ask_is_not_reduced_to_add_field():
+    """A rule/approval/workflow ask ('managers must approve offers above X') must
+    NOT be shortcut to add_field by inventing a status column — it needs impact
+    analysis. The prompt must carry that exclusion so F-12 is not regressed."""
+    low = _PROMPT.lower()
+    assert "only for an explicit" in low or "not a field-add" in low
+    assert "impact analysis" in low
