@@ -32,6 +32,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
                "desired_behavior", "target_file"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
+    # A new field on an existing entity's data model. `field` carries at least
+    # {name, type}; the column is created nullable via drizzle-kit push, so it
+    # is a migration, never a rebuild. Displaying it is a separate edit_page.
+    "add_field": {"entity", "field"},
     # `token_env` is the NAME of an environment variable, never the token.
     # §42 puts `chat history` first on the list of places the raw
     # credential must not come to rest, and Smith's conversation is
@@ -61,7 +65,17 @@ VERB_HELP: dict[str, str] = {
     ),
     "add_widgets": (
         "Add named sections or widgets to a screen that exists: "
-        '"put upcoming sessions and quorum status on the dashboard".'
+        '"put upcoming sessions and quorum status on the dashboard". NOT for a '
+        "new data-model field — that is add_field."
+    ),
+    "add_field": (
+        "Add ONE NEW field/attribute to an existing entity's DATA MODEL: "
+        '"add a discount field to offers", "give tasks a due date". This is '
+        "the verb whenever the ask introduces a new field on an entity, EVEN "
+        "IF it also says \"and show it on <page>\" — the column must exist "
+        "before any page can show it, and add_widgets/compose_route cannot "
+        "create a column. Needs the entity name and the field ({name, type}). "
+        "Displaying the field is a separate later edit_page turn."
     ),
     "connect_figma": (
         "Attach a Figma design as evidence for the application: \"use this "

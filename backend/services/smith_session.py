@@ -409,6 +409,94 @@ class SmithSession:
             touched_paths=touched,
         )
 
+    def _add_field(self, understanding: dict) -> "TurnResult":
+        """Add one column to an existing entity — the incremental data-model
+        change a field-add is (F-01). The field is added to the Living
+        Blueprint's entity and the data layer is re-projected, so the new column
+        appears in ``src/db/schema/<entity>.ts`` and reaches the app as a
+        non-destructive ``drizzle-kit push`` — existing rows keep their data and
+        nothing rebuilds. Displaying the field is a separate later edit_page
+        turn. Falls back to the file-based seam for a registry-only app.
+        """
+        entity = str(understanding.get("entity") or "").strip()
+        field = understanding.get("field") if isinstance(understanding.get("field"), dict) else {}
+        fname = str(field.get("name") or "").strip()
+        if not entity or not fname:
+            return TurnResult(status="asked",
+                              answer="I need the entity and the new field's name and type.")
+
+        # Map Smith's SQL-ish type words to the Blueprint's field vocabulary.
+        _t = str(field.get("type") or "string").lower().strip()
+        bp_type = ({"text": "string", "varchar": "string", "str": "string",
+                    "int": "integer", "integer": "integer", "number": "integer",
+                    "decimal": "decimal", "numeric": "decimal", "float": "decimal",
+                    "money": "decimal", "bool": "boolean", "boolean": "boolean",
+                    "date": "date", "datetime": "timestamp",
+                    "timestamp": "timestamp"}.get(_t, _t)) or "string"
+
+        from pathlib import Path
+        bp_path = Path(self.output_dir) / ".forge" / "blueprint" / "current.json"
+        if not bp_path.exists():
+            # Registry-only (older) app — the file-based seam is the right tool.
+            from services.fix_applier import _apply_add_field
+            out = _apply_add_field(
+                str(self.output_dir),
+                {"proposedFix": {"seam": "add_field",
+                                 "patch": {"entity": entity, "field": field}}}, git=False)
+            if not out.get("applied"):
+                return TurnResult(status="needs_user",
+                                  answer=str(out.get("reason") or
+                                             f"I could not add {fname!r} to {entity}."))
+            touched = [c["path"] for c in (out.get("changes") or []) if c.get("path")]
+            return self._added_field_result(fname, bp_type, entity, touched)
+
+        try:
+            from services.blueprint.service import BlueprintService
+            from services.blueprint.projection import project_data_layer
+            svc = BlueprintService.load(output_dir=str(self.output_dir))
+            entities = (svc.doc.get("data") or {}).get("entities") or []
+            target = next((e for e in entities
+                           if str(e.get("name") or "").lower() == entity.lower()), None)
+            if target is None:
+                known = ", ".join(str(e.get("name")) for e in entities) or "(none)"
+                return TurnResult(status="needs_user",
+                                  answer=f"There is no {entity!r} entity. I can see: {known}.")
+            fields = target.setdefault("fields", [])
+            if any(str(f.get("name") or "").lower() == fname.lower() for f in fields):
+                return TurnResult(status="no_op",
+                                  answer=f"{entity} already has a {fname!r} field, so I changed nothing.")
+            # A new field is NEVER required — an existing row has no value for it,
+            # so the column must be nullable for the migration to apply cleanly.
+            # The Blueprint field schema is closed (name/type/required only for a
+            # plain column); precision/scale are a projection concern, so they
+            # are not carried onto the Blueprint field.
+            fields.append({"name": fname, "type": bp_type, "required": False})
+            svc.validate()
+            svc.save()
+            app_root = Path(self.output_dir) / "app"
+            if not (app_root / "src" / "db" / "schema").exists():
+                app_root = Path(self.output_dir)
+            res = project_data_layer(svc.doc, app_root)
+            touched = list(res.get("files") or res.get("written") or [])
+        except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
+            logger.exception("add_field failed for %s.%s", entity, fname)
+            return TurnResult(status="needs_user",
+                              answer=f"I could not add {fname!r} to {entity}: {exc}")
+        return self._added_field_result(fname, bp_type, entity, touched)
+
+    @staticmethod
+    def _added_field_result(fname: str, ftype: str, entity: str,
+                            touched: list[str]) -> "TurnResult":
+        return TurnResult(
+            status="resolved",
+            answer=(f"Added a {ftype} column “{fname}” to {entity}. It is nullable "
+                    "and applied as a migration, so existing rows keep their data "
+                    "and nothing rebuilds"
+                    + (f". Updated: {', '.join(touched[:6])}." if touched else ".")
+                    + f" Say “show {fname} on the offer detail page” and I will surface it."),
+            touched_paths=touched,
+        )
+
     def run_iteration(self, user_message: str,
                       history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
@@ -500,6 +588,8 @@ class SmithSession:
             return self._connect_uxpilot(understanding)
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, user_message)
+        if verb == "add_field":
+            return self._add_field(understanding)
         if verb == "rebuild":
             # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
             # The build is driven by the client — `useBlueprintRun` posts the

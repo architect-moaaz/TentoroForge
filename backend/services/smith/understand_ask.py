@@ -41,6 +41,17 @@ Return ONLY a JSON object with exactly these keys:
                         when they want it laid out again from scratch.
       "add_widgets"   — add named sections to a screen that exists: "put
                         upcoming sessions and quorum status on the dashboard".
+                        NOT for a new data-model field — that is add_field.
+      "add_field"     — add ONE NEW field/attribute to an existing entity's
+                        DATA MODEL: "add a discount field to offers", "give
+                        tasks a due date", "customers need a phone number".
+                        Use this WHENEVER the ask introduces a new field on an
+                        entity, EVEN IF it also says "and show it on <page>":
+                        the column must exist before any page can display it,
+                        and add_widgets/compose_route CANNOT create a column
+                        (they only recompose a screen, so the field would bind
+                        to nothing). Pick add_field; showing the field is a
+                        separate later edit_page turn — not this one.
       "connect_figma" — they named a Figma design to build from or to use as
                         the visual reference. Any figma.com/design or
                         figma.com/file link is this verb.
@@ -77,6 +88,13 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "widgets": a JSON array of the sections to add, each naming WHAT IT SHOWS
       ("Upcoming Sessions", "Quorum Status"). Never an empty array — the
       widgets are the request.
+
+  add_field needs:
+  "entity": the name of the existing entity gaining the field, as the Blueprint
+      spells it ("Offer", "Task").
+  "field": a JSON object with "name" and "type" for the new column — name in the
+      app's style ("discountPercent"), type one of text / varchar / int /
+      decimal / boolean / date / timestamp. (Optional: length, precision, scale.)
 
   connect_figma needs:
       "figma_url": the Figma link exactly as they gave it, whole.
@@ -115,6 +133,13 @@ five things on the dashboard" are compose_route or add_widgets. Calling one of
 them a rename means looking for a label that was never mentioned, finding
 nothing, and reporting that the current state already matches — which is
 useless to someone whose screen is blank.
+
+A NEW FIELD IS A DATA-MODEL CHANGE, NOT A DISPLAY ONE. "Add a discount field to
+offers and show it on the detail page" is add_field — the column comes first;
+"and show it" is a second turn. Do not read the "show it" half as add_widgets:
+a widget bound to a column that does not exist yet renders nothing, which is the
+exact failure this verb removes. If a new field/attribute is named anywhere in
+the ask, the verb this turn is add_field.
 
 A REPLY IS PART OF AN EXCHANGE. When the conversation below ends with a
 question of yours, read the request as its answer: "yes" confirms what you
@@ -292,6 +317,11 @@ def understand_ask(
         # a removal or a question legitimately has none, so "" is a real value
         # here rather than a missing one.
         "new_value": str(data.get("new_value") or "").strip(),
+        # add_field: the entity gaining a column, and the column spec. Kept as a
+        # string + a dict so `missing_fields` sees them and `run_iteration` can
+        # hand them to the seam. Absent for every other verb.
+        "entity": str(data.get("entity") or "").strip(),
+        "field": data.get("field") if isinstance(data.get("field"), dict) else {},
     }
 
 

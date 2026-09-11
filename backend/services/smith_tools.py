@@ -547,7 +547,15 @@ TOOL_CATALOG: list[dict] = [
              "route. Use this when a route renders nothing.\n"
              "  add_widgets   {route, widgets:[...]} — add named sections "
              "to a screen: 'put upcoming sessions and quorum status on "
-             "the dashboard'.\n"
+             "the dashboard'. NOT for a new data-model field (see add_field).\n"
+             "  add_field     {entity, field} — add ONE NEW field/attribute "
+             "to an existing entity's DATA MODEL: 'add a discount field to "
+             "offers', 'give tasks a due date'. This is the verb whenever the "
+             "ask introduces a new field on an entity, EVEN IF it also says "
+             "'and show it on <page>' — the column must exist before any page "
+             "can show it, and add_widgets/compose_route cannot create a "
+             "column. Pick add_field now; displaying the field is a separate "
+             "later edit_page turn.\n"
              "  connect_figma {figma_url, token_env} — attach a Figma "
              "design as evidence. `token_env` is the NAME of the environment "
              "variable holding the token (e.g. FIGMA_TOKEN); never the token "
@@ -611,7 +619,11 @@ TOOL_CATALOG: list[dict] = [
              "page again against it, so the Blueprint and the rendered "
              "screen say the same thing \u2014 a patch on the tree alone "
              "would be dropped by the next composition. Pass what each "
-             "widget SHOWS, not just its name."},
+             "widget SHOWS, not just its name. NOT for introducing a NEW "
+             "DATA-MODEL FIELD: 'add a discount field to offers (and show "
+             "it)' is add_field first (it creates the column), THEN edit_page "
+             "to display it \u2014 add_widgets only recomposes a screen and "
+             "cannot create a column, so the widget would bind to nothing."},
     {"name": "remove_page",
      "signature": "remove_page(route, cascade?, _confirmed?) -> "
                   "{status: 'needs_confirmation'|'ok', ...}",

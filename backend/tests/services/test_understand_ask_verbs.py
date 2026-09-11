@@ -89,3 +89,33 @@ def test_every_degraded_path_carries_the_new_keys():
     for shape in (blank, unreachable, unparseable):
         assert {"verb", "route", "widgets"} <= set(shape)
         assert shape["widgets"] == []
+
+
+# ── add_field (F-01): a new field on an entity is a data-model verb, not a
+#    display one, and it survives normalization so run_iteration can act on it.
+
+def test_add_field_is_a_known_verb_needing_entity_and_field():
+    u = {"verb": "add_field", "entity": "Offer",
+         "field": {"name": "discountPercent", "type": "decimal"}}
+    assert verb_of(u) == "add_field"
+    assert is_known(u)
+    assert missing_fields(u) == []
+    assert REQUIRED_BY_VERB["add_field"] == {"entity", "field"}
+
+
+def test_understand_ask_carries_entity_and_field_through_normalization():
+    reply = {"verb": "add_field", "entity": "Offer",
+             "field": {"name": "discountPercent", "type": "decimal"},
+             "clarification_needed": "", "answer": ""}
+    u = _ask(reply, message="add a discount percentage field to offers and show it on the detail page")
+    assert u["verb"] == "add_field"
+    assert u["entity"] == "Offer"
+    assert u["field"] == {"name": "discountPercent", "type": "decimal"}
+    assert missing_fields(u) == []
+
+
+def test_a_new_field_ask_is_add_field_even_when_it_also_says_show_it():
+    """The prompt must steer a combined 'add X and show it' to add_field, not
+    add_widgets — the column has to exist before any page can bind to it."""
+    assert "add_field" in _PROMPT
+    assert "cannot create a column" in _PROMPT.lower() or "before any page" in _PROMPT.lower()
