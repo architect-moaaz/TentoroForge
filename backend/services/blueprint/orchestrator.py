@@ -37,7 +37,9 @@ placements are marked and are the parts to argue with.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from services.blueprint import approval
@@ -773,8 +775,76 @@ def _section(doc: Mapping[str, Any], path: str) -> Any:
     return cur
 
 
+def _ledger_gated_nodes(nodes: dict[str, DagNode]) -> set[str]:
+    """Agent nodes a resumed run cannot judge from section content alone (D-07).
+
+    Two agent nodes that write the SAME section and are INDEPENDENT of each
+    other (no dependency path either way) — `requirements` and
+    `figma_intelligence` both write `requirements` — cannot be told apart by
+    "the section has content": whichever committed first fills it, and on a
+    resumed run the other is read as done though it never ran, so its
+    contribution is lost (or, when figma_intelligence commits first, the real
+    `requirements` authoring is skipped).
+
+    The core pairs are NOT affected: `entity_fields` depends on `data_model`
+    (and carries a per-subject authored-check), `page_details` on
+    `page_contracts`, `workflow_steps` on `workflows` — the dependency fixes the
+    order and the authored-check tells the downstream node apart. Only a node
+    with no authored-check that shares all its sections with an INDEPENDENT
+    agent node is returned here; for those, the run ledger is the authority.
+    """
+    agent = {k: n for k, n in nodes.items() if n.kind == "agent" and n.produces}
+
+    def _depends_via(a: str, b: str, seen: set[str] | None = None) -> bool:
+        seen = seen or set()
+        for d in nodes[a].depends_on if a in nodes else ():
+            if d == b or (d not in seen and _depends_via(d, b, seen | {d})):
+                return True
+        return False
+
+    gated: set[str] = set()
+    for key, node in agent.items():
+        if node.fanout and _SUBJECT_AUTHORED.get(node.fanout) is not None:
+            continue  # a per-subject authored-check already disambiguates it
+        prod = set(node.produces)
+        for other, on in agent.items():
+            if other == key:
+                continue
+            if prod <= set(on.produces) and not _depends_via(key, other) and not _depends_via(other, key):
+                gated.add(key)
+                break
+    return gated
+
+
+def nodes_recorded_done(output_dir: str | Path) -> set[str]:
+    """Nodes the run ledger recorded as finishing — the authority on which node
+    actually ran when a shared section cannot say (resume; QA D-07).
+
+    Best-effort: an unreadable or absent ledger yields the empty set, which
+    makes :func:`completed_nodes` fall back to its section-only judgement.
+    """
+    from services.blueprint.run_ledger import LEDGER_DIR
+
+    out: set[str] = set()
+    d = Path(output_dir) / LEDGER_DIR
+    if not d.is_dir():
+        return out
+    for f in sorted(d.glob("*.jsonl")):
+        try:
+            for line in f.read_text("utf-8").splitlines():
+                if not line.strip():
+                    continue
+                obj = json.loads(line)
+                if obj.get("event") == "node:done" and obj.get("node"):
+                    out.add(str(obj["node"]))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def completed_nodes(
     doc: Mapping[str, Any], nodes: dict[str, DagNode] = DAG,
+    *, confirmed: set[str] | None = None,
 ) -> set[str]:
     """Agent nodes whose every produced section already has content.
 
@@ -792,13 +862,30 @@ def completed_nodes(
     meant to replace.
 
     A node that declares no ``produces`` cannot be judged and so always runs.
+
+    ``confirmed`` — the nodes the run ledger recorded as done (see
+    :func:`nodes_recorded_done`). When given, a node whose completion cannot be
+    judged from a shared section (:func:`_ledger_gated_nodes`) is done only if
+    the ledger recorded it: this is the D-07 fix, so a build killed between two
+    independent writers of one section resumes correctly instead of skipping the
+    writer that had not run. Absent (the default), behaviour is unchanged, so
+    every non-resume caller is untouched.
     """
+    gated = _ledger_gated_nodes(nodes) if confirmed is not None else set()
     done: set[str] = set()
     for key, node in nodes.items():
         if node.kind != "agent" or not node.produces:
             continue
         if not all(_section(doc, path) for path in node.produces):
             continue
+        # SHARED SECTION, RESUMED RUN: content is not proof THIS node ran (D-07).
+        # A ledger-gated node is done only if the ledger recorded it — except a
+        # fan-out with no subjects, which has nothing to author and so is
+        # vacuously complete (figma_intelligence on a build with no design).
+        if key in gated and key not in confirmed:
+            has_work = bool(subjects_for(node, doc)) if node.fanout else True
+            if has_work:
+                continue
         # A FAN-OUT IS COMPLETE WHEN EVERY SUBJECT IS, NOT WHEN ANY IS.
         #
         # "The section has content" is the right test for a node that writes
