@@ -812,6 +812,24 @@ async def generate_via_blueprint(
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
             outcome = await loop.run_in_executor(None, work)
+            # COMMIT THE BUILT APP. The mainline generate path commits after a
+            # build; this DAG path did not, so the app tree stayed untracked and
+            # Smith's first change landed in an untracked working tree — its
+            # ground-truth (git diff vs a baseline) saw no new modified path and
+            # reported "nothing changed on disk" for a rename that had in fact
+            # written the file. Commit here so the first change is detectable.
+            if (req.approved and not req.define_only
+                    and isinstance(outcome, dict)
+                    and not outcome.get("awaitingApproval")):
+                try:
+                    from services.git_service import git_commit
+                    await git_commit(
+                        str(output_dir),
+                        f"Initial generation: {(req.description or '')[:80]}",
+                        actor="generator")
+                except Exception:  # noqa: BLE001 — a failed commit must not fail the build
+                    logger.warning("post-build git commit failed for %s",
+                                   project_id, exc_info=True)
             emit("done", outcome)
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("blueprint generation failed for %s", project_id)
