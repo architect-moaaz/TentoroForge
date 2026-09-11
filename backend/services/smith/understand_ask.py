@@ -138,8 +138,18 @@ A NEW FIELD IS A DATA-MODEL CHANGE, NOT A DISPLAY ONE. "Add a discount field to
 offers and show it on the detail page" is add_field — the column comes first;
 "and show it" is a second turn. Do not read the "show it" half as add_widgets:
 a widget bound to a column that does not exist yet renders nothing, which is the
-exact failure this verb removes. If a new field/attribute is named anywhere in
-the ask, the verb this turn is add_field.
+exact failure this verb removes. When the ask EXPLICITLY names a new field or
+attribute to add to an entity, the verb this turn is add_field.
+
+BUT add_field IS ONLY FOR AN EXPLICIT "add a field" ASK. A policy, rule, or
+approval/workflow request — "managers must approve offers above 150000", "reject
+orders over $10k", "notify the owner when a task is overdue" — is NOT a field-add,
+even though you could imagine a column behind it. Do not invent an `approvalStatus`
+or `isApproved` field and call it add_field: that request needs impact analysis
+(a new actor, a new status, an approval workflow, a business rule), which is more
+than a single column. Only pick add_field when the user actually says to add a
+named field/attribute; leave a rule/policy/workflow ask for the fuller path
+(answer with the impact, or clarification_needed, not add_field).
 
 A REPLY IS PART OF AN EXCHANGE. When the conversation below ends with a
 question of yours, read the request as its answer: "yes" confirms what you
