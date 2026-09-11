@@ -675,7 +675,7 @@ async def generate_via_blueprint(
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.orchestrator import (
-        DAG, completed_nodes, levels, run)
+        DAG, completed_nodes, levels, run, nodes_recorded_done)
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
 
@@ -766,7 +766,7 @@ async def generate_via_blueprint(
             # `fresh` remains the escape hatch for starting over.
             already: set[str] = set()
             if resumed:
-                already = completed_nodes(svc.doc)
+                already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
                 plan = [k for k in plan if k not in already]
 
             emit("plan", {"nodes": plan, "total": len(plan),
@@ -1181,7 +1181,7 @@ async def smith_chat(
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.orchestrator import (
-        DAG, completed_nodes, levels, run)
+        DAG, completed_nodes, levels, run, nodes_recorded_done)
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
     from services.blueprint.plan_forecast import forecast
@@ -1610,7 +1610,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     """Invoke §28's graph and narrate it. Never reorders it (§116)."""
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
-    from services.blueprint.orchestrator import completed_nodes, levels, run
+    from services.blueprint.orchestrator import completed_nodes, levels, run, nodes_recorded_done
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
@@ -1665,7 +1665,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # `domain_nodes` rather than a list spelled out here: the gate is one
         # fact about the lifecycle, and three copies of it drift.
         plan = domain_nodes()
-    already = completed_nodes(svc.doc)
+    already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
 
     emit("plan", {"nodes": plan, "total": len(plan),
