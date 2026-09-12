@@ -142,9 +142,54 @@ because you would have made a different one.
 """
 
 
+async def critique_images(
+    images: list[dict],
+    *,
+    identity: dict | None = None,
+) -> list[dict]:
+    """The vision call itself: ``[{route, png: bytes}]`` -> validated findings.
+
+    The one place the model sees the pages, shared by the sweep-based critic and
+    Smith's render loop, so the two judge by exactly the same rubric. Raises on a
+    provider/parse failure — the caller decides whether that is a skipped review
+    or an error; here it must not silently become "no findings", which reads as
+    a clean page.
+    """
+    from services import llm_client  # ChatAnthropic-backed shim
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("no ANTHROPIC_API_KEY")
+    client = llm_client.AsyncAnthropic(api_key=api_key)
+
+    content: list[dict] = []
+    for im in images:
+        png = im.get("png")
+        if not png:
+            continue
+        data = base64.standard_b64encode(png).decode()
+        content.append({"type": "text", "text": f"Route: {im.get('route')}"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": "image/png", "data": data}})
+    if not content:
+        return []
+
+    ident = json.dumps(identity or {}, ensure_ascii=False)[:2000]
+    resp = await client.messages.create(
+        model=os.getenv("FORGE_VISUAL_QA_MODEL", "claude-haiku-4-5-20251001"),
+        max_tokens=2048,
+        system=_PROMPT.format(identity=ident or "{}"),
+        messages=[{"role": "user", "content": content}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    raw = json.loads(m.group(0)) if m else {}
+    return [f for f in map(_validate_finding, raw.get("findings") or [])
+            if f is not None]
+
+
 async def critique_screenshots(output_dir: str | Path) -> dict:
-    """Run the critic. Returns the report dict (also written to
-    contracts/visual-qa.json). Never raises."""
+    """Run the critic over the sweep's screenshots. Returns the report dict
+    (also written to contracts/visual-qa.json). Never raises."""
     root = Path(output_dir)
     pages = _sweep_pages(root)
     report: dict = {"pages_reviewed": [p["route"] for p in pages],
@@ -153,35 +198,10 @@ async def critique_screenshots(output_dir: str | Path) -> dict:
         return report
 
     try:
-        from services import llm_client  # LangGraph migration (LG-1): ChatAnthropic-backed shim
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            # Still fall through to the report write below — an empty
-            # report with `skipped` beats a silently absent file.
-            raise RuntimeError("no ANTHROPIC_API_KEY")
-        client = llm_client.AsyncAnthropic(api_key=api_key)
-
-        content: list[dict] = []
-        for p in pages:
-            data = base64.standard_b64encode(
-                Path(p["screenshot"]).read_bytes()).decode()
-            content.append({"type": "text", "text": f"Route: {p['route']}"})
-            content.append({"type": "image", "source": {
-                "type": "base64", "media_type": "image/png", "data": data}})
-
-        identity = json.dumps(_brief_identity(root), ensure_ascii=False)[:2000]
-        resp = await client.messages.create(
-            model=os.getenv("FORGE_VISUAL_QA_MODEL", "claude-haiku-4-5-20251001"),
-            max_tokens=2048,
-            system=_PROMPT.format(identity=identity or "{}"),
-            messages=[{"role": "user", "content": content}],
-        )
-        text = "".join(b.text for b in resp.content if b.type == "text")
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        raw = json.loads(m.group(0)) if m else {}
-        findings = [f for f in map(_validate_finding, raw.get("findings") or [])
-                    if f is not None]
-        report["findings"] = findings
+        images = [{"route": p["route"],
+                   "png": Path(p["screenshot"]).read_bytes()} for p in pages]
+        report["findings"] = await critique_images(
+            images, identity=_brief_identity(root))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[visual-qa] critic failed: %s", exc)
         report["error"] = str(exc)[:300]
@@ -198,4 +218,4 @@ async def critique_screenshots(output_dir: str | Path) -> dict:
     return report
 
 
-__all__ = ["critique_screenshots", "is_visual_qa_enabled"]
+__all__ = ["critique_screenshots", "critique_images", "is_visual_qa_enabled"]

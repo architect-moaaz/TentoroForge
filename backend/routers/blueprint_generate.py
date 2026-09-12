@@ -1444,9 +1444,17 @@ async def smith_chat(
                         emit("message", {"text": ui_designer.CONFIGURE_TEXT,
                                          "status": "needs_user"})
                         return {"status": "needs_user"}
-                return _run_dag(str(output_dir), app_root, req.message,
-                                approved=True, emit=emit,
-                                app_name=getattr(project, "name", "") or "")
+                built = _run_dag(str(output_dir), app_root, req.message,
+                                 approved=True, emit=emit,
+                                 app_name=getattr(project, "name", "") or "")
+                # SMITH LOOKS AT WHAT IT BUILT. The render loop screenshots the
+                # pages, re-composes the ones a visual review flags, rebuilds and
+                # looks again — bounded, and a clean no-op when the app cannot be
+                # rendered. Best-effort: a review never fails a build that
+                # otherwise succeeded.
+                _run_smith_review(str(output_dir), app_root, emit=emit,
+                                  app_name=getattr(project, "name", "") or "")
+                return built
 
             if not defined:
                 # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
@@ -1741,7 +1749,8 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
-             approved: bool, emit, app_name: str = "") -> dict:
+             approved: bool, emit, app_name: str = "",
+             announce_completion: bool = True) -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116)."""
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1842,13 +1851,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # reload shows "built" even when the stream that launched it was long
         # gone by the time it landed. Best-effort: a completion that cannot be
         # worded must not fail a build that succeeded.
-        try:
-            _done = _build_complete_message(svc.doc)
-            if _done:
-                emit("message", {"text": _done})
-        except Exception:  # noqa: BLE001 — never let the announcement fail the build
-            logger.warning("[blueprint] %s: could not announce completion",
-                           Path(output_dir).name)
+        if announce_completion:
+            try:
+                _done = _build_complete_message(svc.doc)
+                if _done:
+                    emit("message", {"text": _done})
+            except Exception:  # noqa: BLE001 — never let the announcement fail the build
+                logger.warning("[blueprint] %s: could not announce completion",
+                               Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
@@ -1856,3 +1866,74 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": not approved, "forecast": counts,
             "state": state,
             "report": _report_payload(report, svc.doc)}
+
+
+def _run_smith_review(output_dir: str, app_root: str, *, emit,
+                      app_name: str = "") -> None:
+    """Smith's OUTER render loop: review the built app, re-compose the pages a
+    visual review flags, rebuild, review again — bounded. Best-effort and a
+    clean no-op when the app cannot be screenshotted; it must never fail a build
+    that otherwise succeeded.
+
+    The loop's control flow lives in ``services.smith.review_loop``; this binds
+    it to the real critique (screenshots + the vision critic) and the real
+    re-compose (drop the flagged pages' layouts, leave their briefs in the
+    transient file the composer reads, and re-run the build as a resume). The
+    re-run passes ``announce_completion=False`` so the sub-builds do not each
+    re-announce "built" — the loop narrates its own rounds instead.
+    """
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.review_loop import run_review_loop
+        from services.smith.review_wiring import (
+            make_critique, invalidate_for_recompose,
+            write_review_briefs, clear_review_briefs,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[review] unavailable: %s", exc)
+        return
+
+    def read_doc() -> dict:
+        # Fresh each call, so a re-review sees the rebuilt document.
+        return BlueprintService.load(output_dir=output_dir).doc
+
+    def recompose_and_rebuild(briefs: dict) -> None:
+        svc = BlueprintService.load(output_dir=output_dir)
+        hit = invalidate_for_recompose(svc.doc, briefs)
+        if not hit:
+            return
+        svc.save()
+        write_review_briefs(output_dir, {pid: briefs[pid] for pid in hit})
+        try:
+            _run_dag(output_dir, app_root, "", approved=True, emit=emit,
+                     app_name=app_name, announce_completion=False)
+        finally:
+            clear_review_briefs(output_dir)
+
+    try:
+        outcome = run_review_loop(
+            read_doc=read_doc,
+            critique=make_critique(output_dir, read_doc),
+            recompose_and_rebuild=recompose_and_rebuild,
+            emit=emit,
+        )
+    except Exception as exc:  # noqa: BLE001 — a review never breaks a build
+        logger.warning("[review] loop failed for %s: %s",
+                       Path(output_dir).name, exc)
+        return
+
+    logger.info("[review] %s: %s", Path(output_dir).name, outcome.summary())
+    if outcome.skipped or not outcome.rounds:
+        return  # nothing reviewed, or nothing needed fixing — say nothing
+    n = len(outcome.recomposed)
+    page_word = "page" if n == 1 else "pages"
+    if outcome.converged:
+        emit("message", {"text":
+            f"I reviewed the built app and re-composed {n} {page_word} that "
+            f"weren't right — it looks good now."})
+    else:
+        r = len(outcome.remaining)
+        emit("message", {"text":
+            f"I reviewed the build and re-composed {n} {page_word}. {r} still "
+            f"had issues I couldn't fully resolve in {outcome.rounds} rounds — "
+            f"worth a look."})

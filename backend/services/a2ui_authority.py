@@ -563,7 +563,34 @@ def build_requirement(root: Path, kind: str = "dashboard",
     # will send it back if it reads as a sparse, evenly-spaced checklist. These
     # are authoring decisions, made here, from the content in front of you.
     parts.append(_DESIGN_DIRECTION)
+    # THE LAST REVIEW OF THIS PAGE, IF THERE WAS ONE. Smith's render loop looked
+    # at the page as it actually shipped and is re-composing it because of what
+    # it saw. This is that verdict — not a guess about the page, the way it
+    # really looked — so it outranks the general direction above: fix exactly
+    # these, and do not reproduce them. Read from a transient file, not the
+    # Blueprint: a between-builds note needs no declared schema field.
+    review = _review_brief_for(root, page_id)
+    if review:
+        parts.append("\nWHAT A REVIEW OF THE RENDERED PAGE FOUND — fix these "
+                     "before anything else:\n" + review)
     return "\n".join(parts)
+
+
+def _review_brief_for(root: Path, page_id: str) -> str:
+    """The render loop's verdict on this page, from ``contracts/review-briefs
+    .json`` (``{page_id: brief}``). Empty when there is none, unreadable, or no
+    page id — a review note is a courtesy, never a gate."""
+    if not page_id:
+        return ""
+    try:
+        import json as _json
+        f = Path(root) / "contracts" / "review-briefs.json"
+        if not f.exists():
+            return ""
+        data = _json.loads(f.read_text("utf-8"))
+        return str((data or {}).get(str(page_id)) or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 #: The visual-composition direction every screen carries. Not tied to a design
