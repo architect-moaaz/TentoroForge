@@ -49,6 +49,13 @@
         "description": {
           "type": "string",
           "default": ""
+        },
+        "uiDesigner": {
+          "type": "string",
+          "enum": [
+            "forge",
+            "uxpilot"
+          ]
         }
       },
       "required": [
@@ -574,6 +581,9 @@
           },
           "figmaFrame": {
             "type": "string"
+          },
+          "designedBy": {
+            "$ref": "#/properties/application/properties/uiDesigner"
           },
           "components": {
             "type": "array",

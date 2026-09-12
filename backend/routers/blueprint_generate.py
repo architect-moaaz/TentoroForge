@@ -1291,6 +1291,32 @@ async def smith_chat(
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
 
+            # THE ANSWER TO "WHO SHOULD DESIGN THE SCREENS?". Asked when the
+            # user pressed Approve on a definition with pages and no answer
+            # on record (below); the option they clicked arrives here as the
+            # next message, with the question as the turn before it. The
+            # answer is recorded on the application and the build the
+            # approval asked for starts — the question interrupted it, it
+            # did not cancel it. See services/smith/ui_designer.py.
+            if svc is not None:
+                from services.smith import ui_designer
+
+                picked = ui_designer.answer_in(
+                    req.message, [(t.role, t.text) for t in req.history])
+                if picked:
+                    said = ui_designer.record(svc, picked)
+                    if picked == ui_designer.UXPILOT and not ui_designer.configured(output_dir):
+                        emit("message", {"text": ui_designer.CONFIGURE_TEXT,
+                                         "status": "needs_user"})
+                        return {"status": "needs_user"}
+                    emit("message", {"text": said, "status": "resolved"})
+                    # The brief the approval carried, not the option's text:
+                    # "UX Pilot" is an answer, not a request.
+                    brief = str((svc.doc.get("application") or {}).get("description") or "")
+                    return _run_dag(str(output_dir), app_root, brief,
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "")
+
             # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
             # reason about. Answer it deterministically from the Blueprint and
             # return — it must NEVER fall through and trigger a define (which it
@@ -1346,6 +1372,26 @@ async def smith_chat(
             # turn. So the definition was written, the gate was shown, and
             # pressing approve started a conversation instead of a build.
             if req.approved:
+                # WHO DESIGNS THE SCREENS, ASKED ONCE. The page contracts the
+                # UX Pilot agent prompts from now exist and nothing has been
+                # composed yet, which makes this the one moment the question
+                # is both answerable and free. An application already
+                # answered — or with no pages to design — builds straight
+                # away. A UX Pilot choice without a key is refused here,
+                # before any page is attempted, rather than page by page.
+                if svc is not None:
+                    from services.smith import ui_designer
+
+                    if ui_designer.undecided(svc.doc):
+                        emit("message", {"text": ui_designer.question(svc.doc),
+                                         "options": list(ui_designer.OPTIONS),
+                                         "status": "asked"})
+                        return {"status": "asked"}
+                    if (ui_designer.chosen(svc.doc) == ui_designer.UXPILOT
+                            and not ui_designer.configured(output_dir)):
+                        emit("message", {"text": ui_designer.CONFIGURE_TEXT,
+                                         "status": "needs_user"})
+                        return {"status": "needs_user"}
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=True, emit=emit,
                                 app_name=getattr(project, "name", "") or "")

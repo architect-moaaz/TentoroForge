@@ -1,7 +1,8 @@
 # UX Pilot as a second page designer
 
-Design note, 2026-09-13. Ideation only; nothing here is implemented on this
-branch.
+Design note, 2026-09-13. Implemented the same day on `smithv2`; the sections
+below were revised where the code taught the note something (marked
+"As built").
 
 ## The decision in one paragraph
 
@@ -15,7 +16,12 @@ through the same engine. Nothing downstream of page layouts knows which one ran.
 ## What the user sees
 
 After page contracts exist and before page layouts run, Smith presents a
-two-card choice:
+two-card choice. **As built:** the moment is the approval gate. Pressing
+Approve on a definition with pages and no answer on record returns the
+question instead of starting the build; the option the user clicks arrives
+as the next message with the question as the turn before it, is recorded,
+and the build the approval asked for starts. An approval on an application
+already answered builds straight away.
 
 - **Forge UI Designer.** Composed from the component library. Consistent across
   pages, wired to the data model by construction, no external cost.
@@ -37,10 +43,18 @@ optionally the MCP endpoint.
 In the Blueprint, not in configuration or a flag. Two fields, declared in the
 zod source and regenerated before any producer writes them:
 
-- `decisions[]` gains a `uiDesigner` decision with value `forge` or `uxpilot`.
-  This is the app-wide default.
+- `application.uiDesigner` (`forge` | `uxpilot`) is the app-wide default.
+  **As built:** a typed field rather than only a decision row, because the
+  page-layouts node dispatches on it and a decision's free text would have
+  to be parsed. It sits on `application` because no agent in the registry
+  may write that section, so a model merging its own proposal over a
+  singleton cannot overwrite what a person chose. A `decisions` row is still
+  written alongside it, `source: user`, so the choice is citable; a change of
+  mind supersedes the earlier row.
 - `PageContract.designedBy` (optional, `forge` | `uxpilot`) is the per-page
-  override. Absent means "follow the decision".
+  override. Absent means "follow the application". **As built:** the field
+  and the dispatch honour it; the conversational move that sets it ("redraw
+  the dashboard with UX Pilot") is not wired yet.
 
 The `page_layouts` node stays the **single producer** of `pageLayouts`. It
 resolves the effective designer per page and dispatches to the A2UI author or
@@ -65,11 +79,14 @@ hop that owns authentication, the allowed tool list, request logging, rate
 limits and error classification.
 
 The gateway's allowlist today is read-only by design, because generation spends
-credits. This note changes that rule in one specific way: the generate tools
-become allowed **only for a run whose decision is `uxpilot`**. The user's click
-on the card is the consent. A run whose decision is `forge` cannot reach a
-generate tool even if the key is configured. Import of a design the user drew
-by hand stays read-only exactly as before.
+credits. This note changes that rule in one specific way: `generate_design` (one
+screen from one prompt, and only that: not import, publish, prototype or
+multi-screen flows) becomes allowed **only on a gateway opened with
+`may_generate=True`**, and the page-layouts node is the one caller that opens
+one, for a run whose application chose `uxpilot`. The user's click on the card
+is the consent. A run whose choice is `forge` cannot reach a generate tool
+even if the key is configured. Import of a design the user drew by hand
+stays read-only exactly as before.
 
 Tool argument names are still discovered from the server's input schema at
 session start rather than hard-coded, as the gateway does for the read tools.
@@ -95,16 +112,20 @@ from one prompt takes label control away.
 **3. Generate through the gateway**, passing the theme id so every page shares
 it.
 
-**4. Store the result as a design source.** Type `uxpilot`, `treatAs:
-specification`, one frame per generated page, keyed by the brief's content
-hash. A rebuild re-projects from the store and regenerates only pages whose
-brief changed, so credits are spent once per distinct brief. The design also
-lives in the user's UX Pilot workspace; edits there come back through design
-versions on the next sync.
+**4. Store the result in a generation ledger, not as a design source.**
+**As built:** `.forge/uxpilot/generated.json`, one entry per page with the
+design id, the HTML, the preview URL and the hash of the prompt that produced
+it. Not `designSources`, because that section is evidence: `figma_intelligence`
+fans out over it and extracts requirements from what it finds, and a design
+generated *from* this application's brief fed back in as evidence *for* it is
+a loop. A rebuild re-projects from the ledger and regenerates only a page whose
+brief changed (or that was refused and carries feedback), so credits are spent
+once per distinct brief. The design also lives in the user's UX Pilot workspace
+under the recorded id.
 
-**5. Strip the chrome.** UX Pilot draws its own sidebar and top bar. Forge's
-layout owns those. The agent keeps the page body only, using the chrome
-detection the Figma import already has.
+**5. Strip the chrome.** The prompt asks for the page body only; as a
+backstop the single-screen rail detection the Figma import already has runs
+on the result and removes what was drawn anyway.
 
 **6. HTML to tree** through the existing Figma-layout route, which maps
 semantic HTML onto the catalog's layout, text, image and form nodes.
@@ -118,6 +139,16 @@ left unbound and reported as a warning on the page. Invented literals in the
 HTML are discarded, never imported, for the same reason the A2UI converter
 discards the sample data model.
 
+**As built:** the binder produces classifications and hands them to the
+region realiser the Figma import already has, so a tile keeps its drawing and
+takes a live number, and a table is replaced rows and all (the header row
+alone was the smallest match, and replacing only that left the example rows
+drawn beneath a live table). A widget's filter travels onto its source.
+Buttons arrive from the HTML transform as text, because an unbound button is
+demoted; a text leaf carrying a wanted label becomes a Button that launches
+the workflow declared as launched from this page, or opens the entity's
+create page. Warnings ride on the layout's rationale and the result's issues.
+
 **8. Same gate.** The tree is validated against the component catalog, child
 contracts and prop schemas exactly as an A2UI tree is, then wrapped in the
 same artifact proposal.
@@ -130,9 +161,11 @@ and a hole would be worse than either. The rule:
 1. A generate or gateway failure goes back through the observer and repair
    loop with findings; repair for this agent means regenerate with the
    findings appended.
-2. After repair fails, the page is composed by A2UI **and marked visibly** as
-   `designedBy: forge` with the reason attached to the page, so the user sees
-   which pages did not come from UX Pilot and why.
+2. After repair fails, the page is composed by A2UI **and marked visibly**:
+   the layout's `composedBy` is `a2ui` and its rationale carries the reason,
+   while `designedBy` / `application.uiDesigner` still say UX Pilot, so the
+   mismatch is the visible fallback. When A2UI also declines, the fallback is
+   passed to the authoring agent as feedback so it says so in its rationale.
 3. A missing or invalid MCP configuration stops the run before any page is
    attempted; Smith reports it and asks for the configuration.
 
@@ -161,15 +194,26 @@ HTML. Two outcomes:
 
 ## Sequencing
 
-1. Payload exploration (above). Decides the shape of step 7.
-2. Contract fields: the `uiDesigner` decision and `PageContract.designedBy`,
-   declared and regenerated.
-3. Gateway: generate tools allowed under a `uxpilot` decision only; argument
-   discovery extended to them.
-4. Smith: the choice card, the decision write, the configuration prompt when
-   the key is absent.
-5. `page_layouts` dispatch and the UX Pilot agent, steps 1 to 8.
-6. Fallback marking and the observer repair path.
+1. Payload exploration (above). Decides the shape of step 7. **Still open:**
+   no key was available on 2026-09-13; everything below was built and tested
+   against a fake gateway answering with hand-written HTML. The first real
+   generation should be read against `bind_by_label` before this is offered.
+2. Contract fields: `application.uiDesigner` and `PageContract.designedBy`,
+   declared and regenerated. **Done.**
+3. Gateway: `generate_design` allowed on a consenting gateway only; argument
+   discovery extended to it. **Done.**
+4. Smith: the choice card at the approval gate, the decision write, the
+   configuration prompt when the key is absent. **Done** (`services/smith/
+   ui_designer.py`, `routers/blueprint_generate.py`).
+5. `page_layouts` dispatch and the UX Pilot agent, steps 1 to 8. **Done**
+   (`services/uxpilot/generate.py`, `executors._compose_via_a2ui`). Step 1,
+   the theme, is not wired: UX Pilot exposes theme listing and reading, not
+   theme generation, so the prompt carries the design system's tokens
+   instead.
+6. Fallback marking and the observer repair path. **Done** for the marking;
+   repair reaches the agent through the existing `feedback` channel.
+7. Not yet: the conversational per-page override, and syncing edits made in
+   UX Pilot back through design versions.
 
 ## Non-goals
 
