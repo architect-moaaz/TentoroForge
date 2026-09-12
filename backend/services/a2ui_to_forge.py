@@ -1787,6 +1787,29 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 root.setdefault("children", []).append(dialog)
                 placed |= _ids(dialog)
 
+    # ONE SEARCH PER LIST. A data-bound Table renders its own search toolbar,
+    # and a composer that also places a FilterBar above it hands the page two
+    # search boxes for one list — the duplication that reads as a broken,
+    # low-density layout (measured on the Master Data page: a FilterBar search
+    # over a Records table that already searched). When both are present the
+    # FilterBar keeps its filter chips (they drive the query) and drops its
+    # search; the Table's search stays. A Table whose own search is off leaves
+    # the FilterBar's alone, so a page with no other search still has one.
+    def _walk_nodes(n: Any):
+        if isinstance(n, dict):
+            yield n
+            for ch in n.get("children") or []:
+                yield from _walk_nodes(ch)
+
+    _table_searches = any(
+        (t.get("props") or {}).get("searchable") is not False
+        and any((t.get("props") or {}).get(p) for p in ("data", "rows"))
+        for t in _walk_nodes(root) if t.get("type") == "Table")
+    if _table_searches:
+        for n in _walk_nodes(root):
+            if n.get("type") == "FilterBar":
+                n.setdefault("props", {})["showSearch"] = False
+
     schema: dict[str, Any] = {
         "schemaVersion": "2",
         "id": page_id,

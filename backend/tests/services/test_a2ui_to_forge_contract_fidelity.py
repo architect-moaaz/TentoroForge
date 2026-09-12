@@ -176,6 +176,42 @@ def test_an_edit_page_is_record_scoped_even_though_a2ui_calls_it_a_form():
     assert "page-not-composed" not in {f["rule"] for f in page_findings(doc)}
 
 
+def test_a_filterbar_over_a_searchable_table_drops_its_duplicate_search():
+    """A data-bound Table renders its own search toolbar. A composer that also
+    places a FilterBar above it gives the page two search boxes for one list —
+    the duplication that read as a broken, low-density layout on the Master
+    Data page. When both are present the FilterBar keeps its filter chips and
+    drops its search (showSearch=false); the Table's search stays."""
+    comps = [{"id": "root", "component": "Stack", "children": ["bar", "tbl"]},
+             {"id": "bar", "component": "FilterBar", "showSearch": True,
+              "chips": [{"key": "status", "label": "Status",
+                         "options": [{"value": "open", "label": "Open"}]}]},
+             {"id": "tbl", "component": "Table", "rows": {"path": "/notes/rows"},
+              "columns": {"path": "/notes/columns"}}]
+    data = {"notes": {"rows": [{"title": "a"}],
+                      "columns": [{"key": "title", "label": "Title"}]}}
+    r = translate(payload(comps, data), REG, route="/notes")
+    bar = find(r["schema"]["root"], "FilterBar")
+    table = find(r["schema"]["root"], "Table")
+    assert bar is not None and table is not None, r["warnings"]
+    assert bar["props"].get("showSearch") is False, bar["props"]
+    # The Table's own search is left intact — it is the single search now.
+    assert table["props"].get("searchable") is not False, table["props"]
+
+
+def test_a_lone_filterbar_keeps_its_search():
+    """No Table with search on the page — the FilterBar's own search is the
+    only one, so it must not be stripped."""
+    comps = [{"id": "root", "component": "Stack", "children": ["bar"]},
+             {"id": "bar", "component": "FilterBar", "showSearch": True,
+              "chips": [{"key": "status", "label": "Status",
+                         "options": [{"value": "open", "label": "Open"}]}]}]
+    r = translate(payload(comps, {}), REG, route="/notes")
+    bar = find(r["schema"]["root"], "FilterBar")
+    assert bar is not None
+    assert bar["props"].get("showSearch") is not False, bar["props"]
+
+
 def test_visible_if_becomes_a_null_test_on_the_bound_record():
     """The composer writes `visibleIf` as the pointer it binds fields from;
     the renderer evaluates FEEL-lite in data scope, so it becomes a null test

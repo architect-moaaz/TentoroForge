@@ -50,7 +50,10 @@ function FilterChipDropdown({ filter }: { filter: Props["chips"][number] }) {
 }
 
 export function FilterBar({ chips, savedViews, showSearch }: Props) {
-  const [search, setSearch] = useUrlState("q", "");
+  // `search`, not `q`: the data API reads `?search=` (and reserves it from the
+  // filter map), so a box writing `?q=` searched nothing and, worse, arrived
+  // as a WHERE on a column named `q`. Written under the key the runtime reads.
+  const [search, setSearch] = useUrlState("search", "");
   const radiusScale = useRadiusScale();
 
   return (
