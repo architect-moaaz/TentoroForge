@@ -557,7 +557,40 @@ def build_requirement(root: Path, kind: str = "dashboard",
         "a control an action the domain context does not list. Inventing "
         "either produces a screen that looks finished and is false."
     )
+    # COMPOSE THE LOOK, DO NOT LEAVE IT TO A DEFAULT. Nothing downstream decides
+    # density, hierarchy or spacing for you any more — the arrangement you author
+    # is the arrangement that ships, and a reviewer looking at the rendered page
+    # will send it back if it reads as a sparse, evenly-spaced checklist. These
+    # are authoring decisions, made here, from the content in front of you.
+    parts.append(_DESIGN_DIRECTION)
     return "\n".join(parts)
+
+
+#: The visual-composition direction every screen carries. Not tied to a design
+#: reference (that adds a house layout on top): this is the baseline craft a
+#: page needs to read as designed rather than assembled. Phrased as decisions
+#: the composer makes, because the layout is now authored, not post-shaped.
+_DESIGN_DIRECTION = (
+    "\nHOW IT SHOULD READ — author these, they are yours to decide:\n"
+    "  - HIERARCHY. One screen has one primary thing. Lead with it (the list "
+    "people came to work, the record they opened, the form they must fill) and "
+    "let everything else support it. A page where every block has equal weight "
+    "has no focus.\n"
+    "  - DENSITY. Compose for a working screen, not a landing page. Group "
+    "related controls together, keep summary tiles to a single tidy row of "
+    "equal peers, and let the main content (the table, the record, the form) "
+    "take the width and the weight. Do not spread a handful of elements down an "
+    "empty page — a screen that is mostly whitespace reads as unfinished.\n"
+    "  - NO DUPLICATE CONTROLS. One search per list, one primary action per "
+    "screen. If the table you place already searches its rows, do not also add "
+    "a separate search box above it; add filters that the table does not "
+    "provide, not a second copy of what it does.\n"
+    "  - RHYTHM. Consistent spacing between peer sections and consistent "
+    "padding within cards. Uneven gaps and one oversized tile beside three "
+    "small ones read as broken, not as emphasis.\n"
+    "  - EMPTY STATES. Where a list or a region can be empty, say what it is "
+    "and how to fill it, so the first-run screen is composed rather than blank."
+)
 
 
 def _contract_guidance(contract: dict | None, registry: dict,
