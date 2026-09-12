@@ -15,10 +15,12 @@ through the same engine. Nothing downstream of page layouts knows which one ran.
 
 ## What the user sees
 
-After page contracts exist and before page layouts run, Smith presents a
-two-card choice. **As built:** the moment is the approval gate. Pressing
-Approve on a definition with pages and no answer on record returns the
-question instead of starting the build; the option the user clicks arrives
+Before page layouts run, Smith presents a two-card choice. **As built:** the
+moment is the approval gate, and what exists there is requirements, not
+pages: the define run is two nodes and the build authors the data model,
+pages and workflows, with `page_layouts` four waves after `page_contracts`.
+Pressing Approve on a definition with requirements and no answer on record
+returns the question instead of starting the build; the option the user clicks arrives
 as the next message with the question as the turn before it, is recorded,
 and the build the approval asked for starts. An approval on an application
 already answered builds straight away.
