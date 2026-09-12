@@ -40,6 +40,8 @@ _VALID_KINDS = {
     # a re-compose without inventing nitpicks.
     "sparse", "weak_hierarchy", "duplicate_control",
     "inconsistent_sizing", "missing_content",
+    # Domain — does the page look like THIS application and do what it said.
+    "off_domain", "unmet_requirement",
 }
 _VALID_SEVERITIES = {"error", "warn", "info"}
 
@@ -104,7 +106,10 @@ def _validate_finding(raw) -> dict | None:
 
 _PROMPT = """\
 You are a design QA reviewer for a generated business web app.
-Design brief identity (judge against this, not personal taste):
+
+WHAT THIS APPLICATION IS — judge the pages against this, honestly, not against
+personal taste. Its purpose, its real entities and their fields, and the
+requirements the pages are meant to satisfy:
 {identity}
 
 For each screenshot (labeled by route), report ONLY concrete visible
@@ -133,6 +138,16 @@ possible:
 - missing_content: an obviously incomplete surface — a form with fewer fields
   than the record plainly needs, a list missing columns it clearly should show,
   a summary area a data-heavy screen should have and does not
+
+DOES IT LOOK LIKE THIS APPLICATION — judge the page against the identity above
+(its purpose, its entities and their real fields, the requirements). Answer
+honestly, and say nothing when it does look right:
+- off_domain: the page does not read as belonging to THIS app — generic or
+  placeholder content, the wrong entity, fields that are not this domain's,
+  labels that name nothing in the identity above
+- unmet_requirement: a requirement above that this page is plainly meant to
+  satisfy is not visible on it — a field, column, action, filter or state the
+  requirement calls for and the page does not show. Name the requirement.
 
 Return STRICT JSON: {{"findings": [{{"route": "...", "kind": "...",
 "severity": "error|warn|info", "note": "..."}}]}}. Each note must say WHAT is

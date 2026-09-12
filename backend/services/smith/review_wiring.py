@@ -67,6 +67,37 @@ def _data_uri(png: bytes) -> str:
     return "data:image/png;base64," + base64.standard_b64encode(png).decode()
 
 
+def _domain_identity(doc: Mapping[str, Any]) -> dict:
+    """What this app IS, for the critic to judge the render against — not taste,
+    but 'does this page look like THIS application and do what it said'. The
+    domain (entities + their real fields), the purpose, and the requirements the
+    pages are meant to satisfy. Kept compact; the critic caps it anyway."""
+    app = doc.get("application") or {}
+    product = doc.get("product") or {}
+    entities = []
+    for e in ((doc.get("data") or {}).get("entities") or []):
+        if not isinstance(e, dict):
+            continue
+        fields = [str(f.get("name")) for f in (e.get("fields") or e.get("columns") or [])
+                  if isinstance(f, dict) and f.get("name")]
+        entities.append({"entity": str(e.get("name") or e.get("id") or ""),
+                         "fields": fields[:14]})
+    reqs = []
+    for r in (doc.get("requirements") or []):
+        if not isinstance(r, dict):
+            continue
+        t = r.get("text") or r.get("statement") or r.get("title") or r.get("description")
+        if t:
+            reqs.append(str(t)[:160])
+    return {
+        "app": str(app.get("name") or product.get("name") or ""),
+        "purpose": str(product.get("description") or app.get("description")
+                       or product.get("summary") or "")[:500],
+        "entities": entities[:10],
+        "requirements": reqs[:14],
+    }
+
+
 import json
 
 #: Where the render loop leaves its per-page verdict for the composer to read on
@@ -162,7 +193,8 @@ def make_critique(
     Smith look at what it built.
     """
     def critique() -> dict | None:
-        shots = _capture_pages(output_dir, read_doc())
+        doc = read_doc()
+        shots = _capture_pages(output_dir, doc)
         if not shots:
             return None
         if emit is not None:
@@ -171,7 +203,8 @@ def make_critique(
                 for s in shots]})
         try:
             from services.visual_qa_critic import critique_images
-            findings = _run_async(critique_images(shots, identity=None))
+            findings = _run_async(critique_images(
+                shots, identity=_domain_identity(doc)))
         except Exception as exc:  # noqa: BLE001 — a failed review is a skipped one
             logger.warning("[review] visual critic failed: %s", exc)
             if emit is not None:

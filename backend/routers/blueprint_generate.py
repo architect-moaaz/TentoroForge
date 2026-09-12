@@ -1451,14 +1451,33 @@ async def smith_chat(
                 built = _run_dag(str(output_dir), app_root, req.message,
                                  approved=True, emit=emit,
                                  app_name=getattr(project, "name", "") or "")
-                # SMITH LOOKS AT WHAT IT BUILT. The render loop screenshots the
-                # pages, re-composes the ones a visual review flags, rebuilds and
-                # looks again — bounded, and a clean no-op when the app cannot be
-                # rendered. Best-effort: a review never fails a build that
-                # otherwise succeeded.
+                # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. The
+                # build finished; Smith says so (in _run_dag) and OFFERS to check
+                # the app and fix what it finds — screenshots + a design review
+                # of every page, and that the buttons, search and links actually
+                # work — rather than spending the minutes and the tokens without
+                # being asked. The review runs on the next turn, only if the user
+                # takes the offer (see `_is_verify_consent`).
+                emit("message", {
+                    "text": "Want me to auto-verify and fix it? I'll look at "
+                            "every page as it renders — is it laid out well, "
+                            "does it match what you asked for — and check the "
+                            "buttons, search and links actually work, then "
+                            "re-compose anything that's off.",
+                    "options": list(_VERIFY_OFFER_OPTIONS),
+                    "status": "asked",
+                })
+                return built
+
+            # THE USER TOOK THE VERIFY OFFER. A built application and a message
+            # that is the consent to the review Smith offered after the build —
+            # so run it now. Gated on `_is_built`: the offer only exists for a
+            # built app, and "verify" said to a definition is not this.
+            if svc is not None and _is_built(output_dir) \
+                    and _is_verify_consent(req.message):
                 _run_smith_review(str(output_dir), app_root, emit=emit,
                                   app_name=getattr(project, "name", "") or "")
-                return built
+                return {"status": "verified"}
 
             if not defined:
                 # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
@@ -1870,6 +1889,27 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": not approved, "forecast": counts,
             "state": state,
             "report": _report_payload(report, svc.doc)}
+
+
+#: What Smith offers after a build. The first is the consent that runs the
+#: review; the second declines. Frontend sends the picked option back as the
+#: message, so the consent test matches the option text exactly (plus the
+#: obvious typed phrasings).
+_VERIFY_OFFER_OPTIONS = ("Verify & fix", "Not now")
+
+
+def _is_verify_consent(message: str) -> bool:
+    """Whether a message is the user taking the verify-and-fix offer. Precise on
+    purpose — the offer's own option, and a few unambiguous phrasings — so a
+    message that merely mentions verifying does not silently launch a run."""
+    m = " ".join((message or "").strip().lower().split())
+    if not m or "not now" in m or m.startswith("no") or m.startswith("don"):
+        return False
+    return m in {
+        "verify & fix", "verify and fix", "verify", "auto-verify and fix",
+        "auto verify and fix", "yes verify", "verify it", "verify the app",
+        "check and fix", "verify & fix it",
+    }
 
 
 def _run_smith_review(output_dir: str, app_root: str, *, emit,
