@@ -10,11 +10,14 @@ That is the expensive place to guess. A definition run costs a couple of
 minutes and every later node builds on it, so a question worth thirty seconds
 here saves a rebuild.
 
-ONE ROUND, AND ONLY AT THE START. Asked only when the conversation has no
-history — the first thing anybody says. Once they have answered, or said
-anything at all, the next message defines. A clarifier that can fire twice is
-a clarifier that can fire forever, and §16 wants Smith to ask rather than to
-interrogate.
+ONE QUESTION AT A TIME, IN TURNS. Called on every pre-definition turn against
+the brief accumulated so far — which now carries the answers to earlier
+questions — and the caller asks only the first question it returns, so each
+decision gets a considered answer instead of a wall of them arriving together.
+Because the brief grows with each answer, the model asks the NEXT open decision
+and returns nothing once they are settled; the caller also caps the rounds, so
+a clarifier that could otherwise fire forever always stops and defines. §16
+wants Smith to ask rather than to interrogate.
 
 SILENCE IS THE DEFAULT. A brief that names what the application is for and
 what people do in it needs no question, and asking anyway is worse than not
@@ -34,7 +37,9 @@ unsaid will be decided for them.
 
 Ask about what would change what gets built, and about nothing else. At most
 three questions; fewer is better and none is a good answer for a description
-that already says enough.
+that already says enough. They are asked one at a time, so put the single most
+important open decision first — and anything the description already answers is
+not an open decision.
 
 TWO THINGS ARE WORTH ASKING ABOUT ALMOST WHENEVER THEY ARE UNSAID, because
 both are decided once and inherited by every screen:

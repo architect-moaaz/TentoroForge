@@ -1454,10 +1454,9 @@ async def smith_chat(
                 # answer, and every later node builds on it. A question worth
                 # thirty seconds here saves a rebuild.
                 #
-                # Only on the opening message. `history` is empty exactly once
-                # per conversation, so this asks once and then defines —
-                # whether or not the answer was any good. A clarifier that can
-                # fire twice can fire forever.
+                # Asked in turns, one at a time, until the open decisions are
+                # settled or a turn cap is reached (see below) — not batched
+                # into a single opening wall of questions.
                 # THE DESIGN THE BRIEF NAMES. "Import from Figma" is an opening
                 # message with the file link in it; read as prose the link was
                 # lost — the definition ran, the clarifier asked which palette,
@@ -1470,23 +1469,48 @@ async def smith_chat(
                 _the_brief = _brief_from(req.history, req.message)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
 
-                if not req.history:
+                # §16 asks rather than assumes — but ONE decision at a time, in
+                # turns, so each question gets a considered answer instead of a
+                # wall of them arriving together. Runs on every turn against the
+                # accumulated brief (which now carries the earlier answers), so
+                # `clarify_brief` asks the NEXT open decision and returns nothing
+                # once they are settled. Bounded rather than one-shot: a
+                # clarifier that can fire twice could fire forever, so a turn cap
+                # stops it — after the cap, define with what is known.
+                #
+                # The cap counts prior USER turns — the same turns `_brief_from`
+                # folds into the brief, so it is guaranteed consistent with what
+                # was actually accumulated (it does not depend on whether the
+                # frontend echoes Smith's own questions back in `history`). Zero
+                # on the opening message, one after the first answer, and so on:
+                # a cap of 4 permits a question on the opening turn and after
+                # each of the next three answers.
+                _MAX_CLARIFY_TURNS = 4
+                _user_turns = sum(
+                    1 for t in (req.history or [])
+                    if str(getattr(t, "role", None)
+                           or (t.get("role") if isinstance(t, dict) else "")
+                           ) == "user"
+                    and str(getattr(t, "text", None)
+                            or (t.get("text") if isinstance(t, dict) else "")
+                            ).strip())
+                if _user_turns < _MAX_CLARIFY_TURNS:
                     from services.smith.clarify_brief import clarify_brief
 
-                    asked = clarify_brief(req.message,
+                    asked = clarify_brief(_the_brief,
                                           design_attached=bool(named_design))
                     if asked:
-                        # One message per question, so each carries its own
-                        # options and the panel can offer them as answers. They
-                        # are answered in one reply — the exchange reaches the
-                        # next turn through `history`, and the reply is added to
-                        # the brief rather than replacing it.
-                        for item in asked:
-                            emit("message", {
-                                "text": item["question"],
-                                "options": item.get("options") or [],
-                                "status": "asked",
-                            })
+                        # ONE question this turn — it carries its own options,
+                        # and its answer reaches the next turn through `history`,
+                        # where it joins the brief rather than replacing it. The
+                        # next turn re-asks against the fuller brief and moves on
+                        # to whatever is still open.
+                        item = asked[0]
+                        emit("message", {
+                            "text": item["question"],
+                            "options": item.get("options") or [],
+                            "status": "asked",
+                        })
                         return {"status": "asked"}
 
                 # DEFECT-C-06: a page that would do nothing is refused, not
