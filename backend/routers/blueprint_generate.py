@@ -626,6 +626,58 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
     }
 
 
+def _build_complete_message(doc: dict | None) -> str | None:
+    """One line, in Smith's voice, saying the build finished — or ``None``
+    when nothing was built to announce.
+
+    A build OUTLIVES THE STREAM THAT LAUNCHED IT. A long run or a dropped
+    connection releases the panel with "still running… reload", and the
+    completion card is rebuilt from telemetry — but the conversation kept only
+    the last thing said, so a reload showed the app looking unfinished when it
+    was done. Every other thing Smith says is a `message`, which `_remember`
+    writes to the transcript; the one moment the user most wants confirmed was
+    the only one that never spoke. Emitting it here persists it, so the user is
+    told the app is ready whenever they next look, not only if they were
+    watching when it landed.
+    """
+    if not doc:
+        return None
+    served_pages = [p for p in (doc.get("pages") or [])
+                    if str(p.get("status") or "").upper() != "REMOVED"]
+    unbuilt = _unbuilt_pages(doc)
+    funnel = (doc.get("runtime") or {}).get("pages") or {}
+    planned = funnel.get("planned")
+    if planned is None:
+        planned = len(served_pages)
+    served = funnel.get("served")
+    if served is None:
+        served = max(planned - len(unbuilt), 0)
+
+    if planned == 0:
+        # Nothing to announce — a run that stopped before it composed a page
+        # is not a built application, and saying so would be a false claim.
+        return None
+
+    if not unbuilt:
+        s = "" if planned == 1 else "s"
+        return (f"Your application is built — {planned} page{s} ready. Open the "
+                f"preview to see it, or Publish when you're happy with it.")
+
+    # Honest about the shortfall: a dropped page 404s, and telling the user it
+    # is "built" without saying which route is missing is the silent-loss this
+    # whole seam exists to prevent.
+    routes = sorted({(u.get("detail") or "").split(" ", 1)[0]
+                     for u in unbuilt if u.get("detail")}
+                    ) or [str(u.get("page")) for u in unbuilt]
+    n = len(unbuilt)
+    page_word = "page" if n == 1 else "pages"
+    return (f"Your application is built — {served} of {planned} pages are ready "
+            f"to preview. {n} {page_word} couldn't be composed "
+            f"({', '.join(routes)}) and {'is' if n == 1 else 'are'} not served "
+            f"yet; everything else works. Preview what's there, or tell me to "
+            f"retry {'it' if n == 1 else 'them'}.")
+
+
 def _output_dir(project: Any) -> Path:
     """Where this project's application lives.
 
@@ -1761,6 +1813,18 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         logger.info("[blueprint] %s built: state=%s completed=%d failed=%s",
                     Path(output_dir).name, state, len(report.completed),
                     report.failed or "-")
+        # Smith says, in the conversation, that the generation is done — the one
+        # message the build path never spoke. Persisted like every other, so a
+        # reload shows "built" even when the stream that launched it was long
+        # gone by the time it landed. Best-effort: a completion that cannot be
+        # worded must not fail a build that succeeded.
+        try:
+            _done = _build_complete_message(svc.doc)
+            if _done:
+                emit("message", {"text": _done})
+        except Exception:  # noqa: BLE001 — never let the announcement fail the build
+            logger.warning("[blueprint] %s: could not announce completion",
+                           Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
