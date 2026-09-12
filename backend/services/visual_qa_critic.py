@@ -32,8 +32,14 @@ logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 6
 _VALID_KINDS = {
+    # Broken — a user sees it as unfinished.
     "empty_area", "raw_label", "overflow", "contrast",
     "misalignment", "off_brief", "broken_render",
+    # Quality — the page renders, but is composed poorly. Each is a concrete,
+    # observable problem, not a matter of taste, so the render critic can drive
+    # a re-compose without inventing nitpicks.
+    "sparse", "weak_hierarchy", "duplicate_control",
+    "inconsistent_sizing", "missing_content",
 }
 _VALID_SEVERITIES = {"error", "warn", "info"}
 
@@ -102,7 +108,9 @@ Design brief identity (judge against this, not personal taste):
 {identity}
 
 For each screenshot (labeled by route), report ONLY concrete visible
-defects — things a user would notice as unfinished or broken:
+problems — never matters of taste. Two groups:
+
+BROKEN — a user notices it as unfinished:
 - empty_area: a large region that renders blank or a container with no content
 - raw_label: machine text shown to the user (snake_case, camelCase, ids, "{{{{...}}}}")
 - overflow: clipped/overlapping/overflowing content
@@ -111,9 +119,26 @@ defects — things a user would notice as unfinished or broken:
 - off_brief: styling that contradicts the brief identity above
 - broken_render: error text, stack traces, missing images
 
+POORLY COMPOSED — it renders, but the composition is wrong. Report these
+ONLY when the problem is unmistakable, not because a different choice was
+possible:
+- sparse: the page is mostly empty space — a handful of elements stranded on a
+  tall blank page, the main content not taking the width it should
+- weak_hierarchy: no primary focus — every block reads at equal weight, so the
+  thing the screen is FOR does not stand out
+- duplicate_control: two controls that do the same job (e.g. two search boxes
+  for one list, two primary buttons)
+- inconsistent_sizing: peers that should match render at different sizes (one
+  oversized tile beside small ones, ragged cards in a row)
+- missing_content: an obviously incomplete surface — a form with fewer fields
+  than the record plainly needs, a list missing columns it clearly should show,
+  a summary area a data-heavy screen should have and does not
+
 Return STRICT JSON: {{"findings": [{{"route": "...", "kind": "...",
-"severity": "error|warn|info", "note": "..."}}]}}. An empty findings
-list is a valid and common answer — do NOT invent issues.
+"severity": "error|warn|info", "note": "..."}}]}}. Each note must say WHAT is
+wrong and WHERE, concretely enough to fix. An empty findings list is a valid
+and common answer — do NOT invent issues, and do not report a choice merely
+because you would have made a different one.
 """
 
 
