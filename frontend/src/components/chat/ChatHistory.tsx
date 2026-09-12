@@ -9,6 +9,7 @@ import {
   Building2,
   AlertTriangle,
   CheckCircle2,
+  Download,
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -26,6 +27,7 @@ import { GenerationRing } from "./GenerationRing";
 import { computeGenerationProgress, formatElapsed } from "@/lib/generation-progress";
 import { JourneyGateCard } from "@/components/verify/JourneyGateCard";
 import { ShipReportCard } from "@/components/verify/ShipReportCard";
+import { PublishButton } from "@/components/deploy/PublishButton";
 import { VerifyProgressCard } from "@/components/verify/VerifyProgressCard";
 
 interface ChatHistoryProps {
@@ -407,6 +409,35 @@ export function ChatHistory({
   const bottomRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [summaryDismissed, setSummaryDismissed] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // Download the generated app's source as a zip. Same authenticated fetch the
+  // Export dialog uses — a plain <a href> can't carry the Bearer token the
+  // backend requires, so we fetch the blob and click a synthetic link.
+  const handleDownloadSource = async () => {
+    if (!projectId) return;
+    setDownloading(true);
+    try {
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const resp = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500"}/api/projects/${projectId}/download`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!resp.ok) throw new Error("Download failed");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "app-source.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Left silent — the chip re-enables so the user can retry.
+    } finally {
+      setDownloading(false);
+    }
+  };
   const error = useChatStore((s) => s.error);
   const designTemplates = useChatStore((s) => s.designTemplates);
   const selectedTemplateId = useChatStore((s) => s.selectedTemplateId);
@@ -638,6 +669,18 @@ export function ChatHistory({
                   isGenerating={false}
                   maxCards={12}
                 />
+              </div>
+              {/* Hand the finished app off — grab the source, or ship it. */}
+              <div className="flex flex-wrap items-center gap-2 border-t bg-muted/20 px-3 py-2">
+                <button
+                  onClick={handleDownloadSource}
+                  disabled={downloading || !projectId}
+                  className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download className="h-3 w-3" />
+                  {downloading ? "Preparing…" : "Download source"}
+                </button>
+                <PublishButton projectId={projectId} size="sm" />
               </div>
             </div>
           </div>
