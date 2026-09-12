@@ -62,7 +62,7 @@ _MAX_UNKNOWN_STREAK = 2
 # refused — the model must prove the edit landed before it may claim it did.
 _MUTATING_TOOLS = frozenset({
     "edit_file", "edit_page", "edit_workflow",
-    "add_page", "add_workflow", "add_entity",
+    "add_page", "add_workflow", "add_entity", "add_field",
     # NOTE: no "add_component" — it was advertised here and in the mutation-guard
     # prompt but has NO handler in smith_tools, so the model was steered to call a
     # phantom tool that dead-ended ("Smith doesn't do it"). Adding a section/
@@ -1407,6 +1407,23 @@ SYSTEM_PROMPT = (
     "    connect a manually-authored form to a\n"
     "    workflow) — deterministic, no LLM\n"
     "  Add a new entity + CRUD slice             → add_entity(name, fields, table?)\n"
+    "  Add ONE field to an EXISTING entity        → add_field(entity, field)\n"
+    "    ('add a discount field to offers', 'give   — the INCREMENTAL data-model\n"
+    "     tasks a due date', 'customers need a       change: one nullable column via\n"
+    "     phone number'). NOT a rebuild, NOT a       drizzle-kit push, existing rows\n"
+    "     definition update — the data model         keep their data. To also SHOW it\n"
+    "     already exists; you are extending it.      on a screen, follow with edit_page.\n"
+    "     ── NEW-FIELD RULE (read this before choosing a verb) ──\n"
+    "     If the ask INTRODUCES A NEW FIELD/ATTRIBUTE on an entity — 'add a "
+    "discountPercent to offers', 'offers need a discount field', even when it "
+    "also says 'and show it on the detail page' — the FIRST and ONLY verb this "
+    "turn is add_field. The column must exist in the data model before any page "
+    "can bind to it. Do NOT route a new-field ask to add_widgets or "
+    "compose_route: those recompose a screen and CANNOT create a column, so the "
+    "field would render nothing (or the compose returns nothing). Showing the "
+    "new field is a SEPARATE, LATER edit_page turn once the column exists. So: "
+    "new field mentioned anywhere in the ask ⇒ add_field now; page display is "
+    "step two, not this turn.\n"
     "  Author a BUSINESS RULE (server-enforced   → create_business_rule(name, rule_type,\n"
     "    data logic on all writes: 'reject X',      model_name?, field_name?, config)\n"
     "    'require Y', 'compute Z = ...', validation,\n"
@@ -1761,6 +1778,10 @@ schema / workflow JSON are the exact operation that drift-tracks itself into
                                                  route)
   Add a brand-new workflow                     add_workflow(op, entity, name?)
   Add a new entity + schema + starter tables   add_entity(name, fields, table?)
+  Add ONE field to an EXISTING entity          add_field(entity, field)
+    ("add a discount field to offers") — the incremental data-model change:
+    one nullable column, applied by drizzle-kit push, existing rows keep
+    their data. NEVER a rebuild or a definition update for a single field.
   User wants a WHOLE NEW APP, or a scope-      handoff_to_pipeline(kind=
     changing pivot ("rip out auth and rebuild     "planner"|"refine")
     with SAML", "convert this to a marketplace") — a genuine

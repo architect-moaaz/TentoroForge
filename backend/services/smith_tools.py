@@ -547,7 +547,15 @@ TOOL_CATALOG: list[dict] = [
              "route. Use this when a route renders nothing.\n"
              "  add_widgets   {route, widgets:[...]} — add named sections "
              "to a screen: 'put upcoming sessions and quorum status on "
-             "the dashboard'.\n"
+             "the dashboard'. NOT for a new data-model field (see add_field).\n"
+             "  add_field     {entity, field} — add ONE NEW field/attribute "
+             "to an existing entity's DATA MODEL: 'add a discount field to "
+             "offers', 'give tasks a due date'. This is the verb whenever the "
+             "ask introduces a new field on an entity, EVEN IF it also says "
+             "'and show it on <page>' — the column must exist before any page "
+             "can show it, and add_widgets/compose_route cannot create a "
+             "column. Pick add_field now; displaying the field is a separate "
+             "later edit_page turn.\n"
              "  connect_figma {figma_url, token_env} — attach a Figma "
              "design as evidence. `token_env` is the NAME of the environment "
              "variable holding the token (e.g. FIGMA_TOKEN); never the token "
@@ -614,7 +622,11 @@ TOOL_CATALOG: list[dict] = [
              "page again against it, so the Blueprint and the rendered "
              "screen say the same thing \u2014 a patch on the tree alone "
              "would be dropped by the next composition. Pass what each "
-             "widget SHOWS, not just its name."},
+             "widget SHOWS, not just its name. NOT for introducing a NEW "
+             "DATA-MODEL FIELD: 'add a discount field to offers (and show "
+             "it)' is add_field first (it creates the column), THEN edit_page "
+             "to display it \u2014 add_widgets only recomposes a screen and "
+             "cannot create a column, so the widget would bind to nothing."},
     {"name": "remove_page",
      "signature": "remove_page(route, cascade?, _confirmed?) -> "
                   "{status: 'needs_confirmation'|'ok', ...}",
@@ -734,6 +746,24 @@ TOOL_CATALOG: list[dict] = [
              "notNull?, ...}. Rolled back atomically on failure. "
              "Follow up with add_page(archetype='create', entity=<new>, "
              "…) to give it a UI."},
+    {"name": "add_field",
+     "signature": "add_field(entity, field:{name, type, length?, "
+                  "precision?, scale?, default?}) -> {applied, changes, "
+                  "verify, edited_paths}",
+     "desc": "Add ONE column to an EXISTING entity's data model — the "
+             "incremental, non-destructive path for 'add a discount field "
+             "to offers', 'give tasks a due date', 'add a phone number to "
+             "customers'. Writes exactly two files (the registry field list "
+             "+ that entity's Drizzle module), so downstream it lands as a "
+             "`drizzle-kit push` (the column is created, existing rows keep "
+             "their data) — NEVER a rebuild/reset/reseed. The column is "
+             "always nullable so the push can't fail on existing rows. "
+             "Use this — NOT rebuild, NOT a definition update — whenever the "
+             "ask is one new field on an entity that already exists (check "
+             "list_entities). To also SHOW the field on a screen, follow "
+             "with edit_page(<that page>, 'show the new discount field'). "
+             "Rolled back atomically on failure; refuses a duplicate field "
+             "or an unknown entity."},
     {"name": "plan_and_apply",
      "signature": "plan_and_apply(ask) -> {status, plan, steps, edited_paths}",
      "desc": "One call for ADD-A-FEATURE asks that span multiple seams "
@@ -1160,6 +1190,7 @@ READONLY_HANDLERS = {
     "set_field_interaction":    lambda output_dir, args: _smith_set_field_interaction(output_dir, args),
     "create_business_rule":     lambda output_dir, args: _smith_create_business_rule(output_dir, args),
     "add_entity":               lambda output_dir, args: _smith_add_entity(output_dir, args),
+    "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
     "think":                    lambda output_dir, args: _smith_think(args),
     "understand_ask":           lambda output_dir, args: _smith_understand_ask(args),
@@ -1713,6 +1744,32 @@ def _smith_add_entity(output_dir: str, args: dict) -> dict:
         }},
     }
     result = _apply_add_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_add_field(output_dir: str, args: dict) -> dict:
+    """Add one column to an EXISTING entity — the incremental data-model change
+    a field-add is supposed to be, instead of a whole-app rebuild (F-01).
+
+    Args: ``{entity: str, field: {name, type, length?, precision?, scale?,
+    default?}}``. Also accepts ``name``/``type`` as a flat shorthand.
+    """
+    from services.fix_applier import _apply_add_field
+    field = args.get("field")
+    if not isinstance(field, dict):
+        # Flat shorthand: {entity, name, type, ...}
+        field = {k: args[k] for k in ("name", "type", "length", "precision", "scale", "default")
+                 if k in args}
+    diagnosis = {
+        "artifact": {"kind": "field", "path": f"{args.get('entity') or ''}.{field.get('name') or ''}"},
+        "explanation": "",
+        "proposedFix": {"seam": "add_field", "patch": {
+            "entity": args.get("entity") or "",
+            "field":  field or {},
+        }},
+    }
+    result = _apply_add_field(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
 

@@ -253,13 +253,59 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
         }
       }
     }
+    // DATE-TYPED COLUMN SAFETY. Synthesized data sometimes carries a label like
+    // "Start Time 1" for what the schema made a `timestamp`/`date`; handed to a
+    // date-mode column drizzle calls `.toISOString()` on that string and throws
+    // ("value.toISOString is not a function"), so every row of the table fails
+    // to seed. Coerce anything a date-ish column can't accept to a valid value:
+    // a Date for date-mode, a YYYY-MM-DD / ISO string for string-mode.
+    const tcol: any = (table as any)[prop];
+    if (tcol) {
+      const dt = String(tcol.dataType ?? "").toLowerCase();
+      const ct = String(tcol.columnType ?? "").toLowerCase();
+      if (dt === "date" || /timestamp|date|time/.test(ct)) {
+        if (dt === "string") {
+          const s = typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val) ? val : "";
+          val = /time/.test(ct) && !/date/.test(ct)
+            ? (s || new Date().toISOString())
+            : (s ? s.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        } else if (!(val instanceof Date)) {
+          const d = new Date(val as any);
+          val = isNaN(d.getTime()) ? new Date() : d;
+        }
+      }
+    }
     out[prop] = val;
   }
   // Fill foreign keys (xxxId / xxx_id) with a real id from the referenced table.
+  // The parent pool is keyed by the inserted table's normalized name; a column's
+  // stem is not always that name — `ownerId`/`createdBy` point at `users`, and
+  // `veterinarianId` at `veterinarian_profiles` — so an exact stem lookup leaves
+  // a NOT NULL uuid FK null and the whole row fails. Resolve in three passes.
+  const singular = (s: string) => s.replace(/ies$/, "y").replace(/(ses|xes|zes|ches|shes)$/, (m) => m.slice(0, -2)).replace(/s$/, "");
   for (const k of Object.keys(table)) {
     if (!/(Id|_id)$/.test(k) || out[k] != null) continue;
     const stem = norm(k.replace(/(_id|Id)$/, ""));
-    const pool = ids[stem] || ids[stem + "s"] || ids[stem + "es"];
+    let pool = ids[stem] || ids[stem + "s"] || ids[stem + "es"];
+    // 1. User-semantic FK names resolve to the always-seeded users pool. Match
+    //    on the SUFFIX so a compound name works too — `petOwnerId` ends in
+    //    `owner`, `assignedToId` in `assignedto`.
+    if ((!pool || !pool.length) &&
+        /(owner|creator|createdby|author|updatedby|modifiedby|assignee|assignedto|assignedby|reviewer|approver|manager|member|user|admin)$/.test(stem)) {
+      pool = ids["users"] || ids["user"];
+    }
+    // 2. Fuzzy: a seeded pool whose (singularized) name the stem ends with, or
+    //    which contains the stem — `rescheduledFromSlotId` → slots,
+    //    `veterinarianId` → veterinarianProfiles, `availabilityId` →
+    //    availabilities. Suffix-anchored so a compound FK still finds its table.
+    if (!pool || !pool.length) {
+      const kk = Object.keys(ids).find((p) => {
+        if (!ids[p]?.length) return false;
+        const sp = singular(p);
+        return p.includes(stem) || stem.includes(p) || (sp.length >= 3 && stem.endsWith(sp));
+      });
+      if (kk) pool = ids[kk];
+    }
     if (pool && pool.length) out[k] = pool[i % pool.length];
   }
   _driverSafeDates(table, out);

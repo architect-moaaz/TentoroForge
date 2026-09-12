@@ -2404,6 +2404,23 @@ class RunUsage:
             "cost_usd": self.total_cost_usd,
             "unpriced_models": self.unpriced,
             "elapsed_s": round(sum(e["elapsed_s"] for e in self.entries), 1),
+            # PER-STAGE, NOT JUST THE TOTAL. The run already records what every
+            # node spent (see `render`); exposing it in the reachable payload is
+            # what lets a caller answer "what did the schema stage cost?" without
+            # the terminal table (QA D-06 — per-stage tokens/cost were captured
+            # but never surfaced through the API).
+            "perNode": [
+                {
+                    "node": e["node"],
+                    "model": e["model"],
+                    "inputTokens": e["input_tokens"],
+                    "outputTokens": e["output_tokens"],
+                    "tokens": e["input_tokens"] + e["output_tokens"],
+                    "cost_usd": e["cost_usd"],
+                    "elapsed_s": round(e["elapsed_s"], 1),
+                }
+                for e in self.entries
+            ],
         }
 
     def render(self) -> str:

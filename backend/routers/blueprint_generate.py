@@ -683,7 +683,7 @@ async def generate_via_blueprint(
         RunUsage, make_executor, tiered_router)
     from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import (
-        DAG, completed_nodes, levels, run)
+        DAG, completed_nodes, levels, run, nodes_recorded_done)
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
 
@@ -774,7 +774,7 @@ async def generate_via_blueprint(
             # `fresh` remains the escape hatch for starting over.
             already: set[str] = set()
             if resumed:
-                already = completed_nodes(svc.doc)
+                already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
                 plan = [k for k in plan if k not in already]
 
             emit("plan", {"nodes": plan, "total": len(plan),
@@ -825,6 +825,24 @@ async def generate_via_blueprint(
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
             outcome = await loop.run_in_executor(None, work)
+            # COMMIT THE BUILT APP. The mainline generate path commits after a
+            # build; this DAG path did not, so the app tree stayed untracked and
+            # Smith's first change landed in an untracked working tree — its
+            # ground-truth (git diff vs a baseline) saw no new modified path and
+            # reported "nothing changed on disk" for a rename that had in fact
+            # written the file. Commit here so the first change is detectable.
+            if (req.approved and not req.define_only
+                    and isinstance(outcome, dict)
+                    and not outcome.get("awaitingApproval")):
+                try:
+                    from services.git_service import git_commit
+                    await git_commit(
+                        str(output_dir),
+                        f"Initial generation: {(req.description or '')[:80]}",
+                        actor="generator")
+                except Exception:  # noqa: BLE001 — a failed commit must not fail the build
+                    logger.warning("post-build git commit failed for %s",
+                                   project_id, exc_info=True)
             emit("done", outcome)
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("blueprint generation failed for %s", project_id)
@@ -1176,7 +1194,7 @@ async def smith_chat(
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.orchestrator import (
-        DAG, completed_nodes, levels, run)
+        DAG, completed_nodes, levels, run, nodes_recorded_done)
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
     from services.blueprint.plan_forecast import forecast
@@ -1606,7 +1624,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.observer import anthropic_observer
-    from services.blueprint.orchestrator import completed_nodes, levels, run
+    from services.blueprint.orchestrator import completed_nodes, levels, run, nodes_recorded_done
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
@@ -1661,7 +1679,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # `domain_nodes` rather than a list spelled out here: the gate is one
         # fact about the lifecycle, and three copies of it drift.
         plan = domain_nodes()
-    already = completed_nodes(svc.doc)
+    already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
 
     emit("plan", {"nodes": plan, "total": len(plan),
