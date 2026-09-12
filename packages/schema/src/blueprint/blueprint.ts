@@ -39,11 +39,35 @@ import {
 // §11 · application — identity
 // ===========================================================================
 
+/**
+ * Who designs the screens: Forge's own composer (A2UI against the component
+ * catalog) or UX Pilot, generating each page from its brief.
+ *
+ * A closed pair rather than a free string so the page-layouts node can
+ * dispatch on it without interpretation, and so a value nobody produces
+ * cannot be written. `forge` is what every application built before the
+ * choice existed was, and is what an unset value means.
+ */
+export const UiDesigner = z.enum(["forge", "uxpilot"]);
+
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
   domain: z.string().describe("CRM | HRMS | ATS | Banking | … (§96)"),
   description: z.string().default(""),
+  /**
+   * The application-wide answer to "who designs the screens", recorded when
+   * the user picks at the approval gate. Lives here rather than in a
+   * `decisions` row because it is read by code, not cited by people: the
+   * page-layouts node dispatches on it per page, and a decision's free text
+   * would have to be parsed to do that. The decision row is still written,
+   * so the choice is citable; this is the fact it decided.
+   *
+   * On `application` because nothing in the agent registry may write this
+   * section — the value a person chose cannot be overwritten by a model that
+   * merges its own proposal over the singleton. Absent means `forge`.
+   */
+  uiDesigner: UiDesigner.optional(),
 });
 
 // ===========================================================================
@@ -390,6 +414,17 @@ export const PageContract = z.object({
    *  frame's node id, or a UX Pilot design id. Resolved against
    *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
+  /**
+   * Per-page override of `application.uiDesigner`. Absent means "follow the
+   * application". Set when the user asks for one page to be drawn by the
+   * other designer — "redraw the dashboard with UX Pilot" — so the choice is
+   * on the page it concerns and a rebuild honours it without re-asking.
+   *
+   * Intent, not provenance: `pageLayouts[].composedBy` records who actually
+   * produced the tree. The two differ exactly when a designer was asked for
+   * and could not deliver, and that difference is the visible fallback.
+   */
+  designedBy: UiDesigner.optional(),
 
   components: z.array(ComponentId).default([]),
   ...artifactBase,
@@ -1643,6 +1678,7 @@ export const Blueprint = z.object({
 
 export type Blueprint = z.infer<typeof Blueprint>;
 export type PageContract = z.infer<typeof PageContract>;
+export type UiDesigner = z.infer<typeof UiDesigner>;
 export type Requirement = z.infer<typeof Requirement>;
 export type Decision = z.infer<typeof Decision>;
 export type Entity = z.infer<typeof Entity>;
