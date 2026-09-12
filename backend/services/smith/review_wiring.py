@@ -19,14 +19,55 @@ The doc surgery is split out (``invalidate_for_recompose`` /
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import os
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
+#: The warm Playwright sidecar that screenshots a URL headless (POST /screenshot).
+_VERIFY_URL = "FORGE_VERIFY_URL"
+#: Where the generated apps are served, with the /p base path render-scaffold
+#: mounts. A page's URL is ``<base>/<short_id><route>``.
+_PREVIEW_BASE = "FORGE_PREVIEW_BASE_URL"
+
+
+def _preview_url(output_dir: str, route: str, doc: Mapping[str, Any]) -> str:
+    base = os.getenv(_PREVIEW_BASE, "http://localhost:6503/p").rstrip("/")
+    short_id = str((doc.get("application") or {}).get("id")
+                   or Path(output_dir).name)
+    r = route if route.startswith("/") else "/" + route
+    return f"{base}/{short_id}{r}"
+
+
+def _screenshot(url: str) -> bytes | None:
+    """PNG of ``url`` from the Playwright sidecar, or ``None`` on any failure."""
+    verify = os.getenv(_VERIFY_URL, "http://localhost:6600").rstrip("/")
+    try:
+        import httpx
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        resp = httpx.post(f"{verify}/screenshot",
+                          json={"url": url, "fullPage": True,
+                                "width": 1440, "height": 900, "waitMs": 600},
+                          timeout=45.0)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[review] screenshot request failed for %s: %s", url, exc)
+        return None
+    if resp.status_code != 200 or resp.content[:8] != b"\x89PNG\r\n\x1a\n":
+        logger.info("[review] screenshot %s -> %s", url, resp.status_code)
+        return None
+    return resp.content
+
+
+def _data_uri(png: bytes) -> str:
+    return "data:image/png;base64," + base64.standard_b64encode(png).decode()
+
 
 import json
-from pathlib import Path
 
 #: Where the render loop leaves its per-page verdict for the composer to read on
 #: the re-compose. Kept OUT of the Blueprint — a between-builds note needs no
@@ -91,47 +132,53 @@ def _slug_for(route: str, doc: Mapping[str, Any]) -> str:
 
 
 def _capture_pages(output_dir: str, doc: Mapping[str, Any]) -> list[dict]:
-    """``[{route, png}]`` for the pages that could be screenshotted. Empty when
-    no screenshot service is configured — the loop then degrades to a no-op."""
-    try:
-        from services.page_screenshot import (
-            capture_page_screenshot, screenshot_available,
-        )
-    except Exception:  # noqa: BLE001
-        return []
-    if not screenshot_available():
-        return []
+    """``[{route, png}]`` for the pages the sidecar could screenshot. Empty when
+    nothing rendered — the loop then degrades to a clean no-op. Dynamic routes
+    (``/x/[id]``) are skipped: they need a concrete id to serve."""
     shots: list[dict] = []
     for p in doc.get("pages") or []:
         if not isinstance(p, dict):
             continue
         route = str(p.get("route") or "").strip()
-        if not route or "[" in route:      # dynamic routes need a concrete id
+        if not route or "[" in route:
             continue
-        try:
-            png = capture_page_screenshot(output_dir, _slug_for(route, doc), route)
-        except Exception as exc:  # noqa: BLE001 — one bad shot is not the review
-            logger.info("[review] screenshot failed for %s: %s", route, exc)
-            png = None
+        png = _screenshot(_preview_url(output_dir, route, doc))
         if png:
             shots.append({"route": route, "png": png})
     return shots
 
 
-def make_critique(output_dir: str, read_doc: Callable[[], Mapping[str, Any]]
-                  ) -> Callable[[], dict | None]:
-    """A ``critique()`` for the loop: screenshot + vision critic → report, or
-    ``None`` when nothing could be rendered/reviewed."""
+def make_critique(
+    output_dir: str,
+    read_doc: Callable[[], Mapping[str, Any]],
+    emit: Callable[[str, dict], None] | None = None,
+) -> Callable[[], dict | None]:
+    """A ``critique()`` for the loop: screenshot the built pages, show them in the
+    review panel, run the vision critic, show its analysis, and return the report
+    — or ``None`` when nothing could be rendered/reviewed.
+
+    ``emit`` streams ``review`` events the panel renders: the screenshots as
+    they are taken, then the findings per page. The window is the user watching
+    Smith look at what it built.
+    """
     def critique() -> dict | None:
         shots = _capture_pages(output_dir, read_doc())
         if not shots:
             return None
+        if emit is not None:
+            emit("review", {"phase": "shots", "pages": [
+                {"route": s["route"], "image": _data_uri(s["png"])}
+                for s in shots]})
         try:
             from services.visual_qa_critic import critique_images
             findings = _run_async(critique_images(shots, identity=None))
         except Exception as exc:  # noqa: BLE001 — a failed review is a skipped one
             logger.warning("[review] visual critic failed: %s", exc)
+            if emit is not None:
+                emit("review", {"phase": "analysis", "findings": []})
             return None
+        if emit is not None:
+            emit("review", {"phase": "analysis", "findings": findings})
         return {"pages_reviewed": [s["route"] for s in shots],
                 "findings": findings}
     return critique

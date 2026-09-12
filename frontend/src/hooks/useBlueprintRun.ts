@@ -83,6 +83,29 @@ export interface RunMessage {
   diffSummary?: string;
 }
 
+/**
+ * Smith's post-build render review, live. The screenshots it took, the vision
+ * critic's analysis, and which pages it is re-composing — the utility window
+ * that comes up while Smith looks at what it built and narrates in chat.
+ * `null` until a review starts; carries no history (it means something only
+ * while it is happening), so it is never rebuilt from the run registry.
+ */
+export interface ReviewShot { route: string; image: string }
+export interface ReviewFinding {
+  route: string; kind: string; severity: string; note: string;
+}
+export interface ReviewState {
+  phase: "start" | "shots" | "analysis" | "fixing" | "done";
+  active: boolean;
+  round: number;
+  shots: ReviewShot[];
+  findings: ReviewFinding[];
+  fixing: string[];
+  converged?: boolean;
+  recomposed?: string[];
+  remaining?: string[];
+}
+
 export interface BlueprintRun {
   /** Smith's own words — it decides what to do, and says so. */
   messages: RunMessage[];
@@ -121,6 +144,8 @@ export interface BlueprintRun {
   usage: RunUsage | null;
   status: "idle" | "running" | "complete" | "error";
   error: string | null;
+  /** Smith's live render review, or null when none is happening. */
+  review: ReviewState | null;
   /**
    * The stage name a REATTACHED run is on, when this client did not watch the
    * stream that produced it and so has no `nodes` to read a label from.
@@ -145,6 +170,7 @@ const EMPTY: BlueprintRun = {
   usage: null,
   status: "idle",
   error: null,
+  review: null,
 };
 
 export interface StartOptions {
@@ -415,6 +441,49 @@ export function reduce(
           diffSummary: (data.diffSummary as string) || undefined,
         }].filter((m) => m.text),
       };
+
+    case "review": {
+      // The live render review. Each phase folds into one running ReviewState
+      // so the window is a single evolving view, not a stack of events.
+      const phase = String(data.phase ?? "");
+      const cur: ReviewState = prev.review ?? {
+        phase: "start", active: true, round: 0,
+        shots: [], findings: [], fixing: [],
+      };
+      if (phase === "start") {
+        return { ...prev, review: {
+          phase: "start", active: true, round: 0,
+          shots: [], findings: [], fixing: [] } };
+      }
+      if (phase === "shots") {
+        return { ...prev, review: {
+          ...cur, phase: "shots", active: true, fixing: [],
+          shots: (data.pages as ReviewShot[]) ?? [] } };
+      }
+      if (phase === "analysis") {
+        return { ...prev, review: {
+          ...cur, phase: "analysis", active: true,
+          findings: (data.findings as ReviewFinding[]) ?? [] } };
+      }
+      if (phase === "fixing") {
+        return { ...prev, review: {
+          ...cur, phase: "fixing", active: true,
+          round: cur.round + 1,
+          fixing: (data.pages as string[]) ?? [] } };
+      }
+      if (phase === "done") {
+        return { ...prev, review: {
+          ...cur, phase: "done",
+          // A review that found nothing, or could not run, closes itself; one
+          // that did work stays up so the user can see what changed.
+          active: !data.skipped && (cur.round > 0),
+          fixing: [],
+          converged: Boolean(data.converged),
+          recomposed: (data.recomposed as string[]) ?? [],
+          remaining: (data.remaining as string[]) ?? [] } };
+      }
+      return prev;
+    }
 
     case "plan": {
       const keys = (data.nodes as string[]) ?? [];

@@ -50,6 +50,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ReviewWindow } from "@/components/smith/ReviewWindow";
 import {
   AppTile,
   BlueprintSummary,
@@ -722,6 +723,9 @@ export function SmithPanel({
 
   return (
     <div className={cn("flex h-full min-w-0", className)}>
+    {/* Smith's live render review — a fixed bottom-right window while it looks
+        at what it built; renders nothing until a review starts. */}
+    <ReviewWindow review={run.review} />
     <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-background">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <div>

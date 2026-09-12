@@ -1303,8 +1303,12 @@ async def smith_chat(
         # The telemetry is still not written to the transcript — it would make
         # the conversation unreadable. It goes to the run registry instead, so
         # a page that loads mid-run can rebuild the progress bar without the
-        # stream that produced it.
-        run_registry.note(str(project_id), event, data)
+        # stream that produced it. `review` is the exception: it is a live view
+        # of Smith looking at the render, carrying full-page screenshots as data
+        # URIs, and persisting those would bloat the registry for a window that
+        # only means anything while the review is happening. Streamed, not kept.
+        if event != "review":
+            run_registry.note(str(project_id), event, data)
 
     # One per request: turns from this conversation queue behind each other
     # and nothing else waits on them.
@@ -1897,6 +1901,11 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
         # Fresh each call, so a re-review sees the rebuilt document.
         return BlueprintService.load(output_dir=output_dir).doc
 
+    def _routes_for(page_ids: list[str]) -> list[str]:
+        by_id = {str(p.get("id")): str(p.get("route") or p.get("id"))
+                 for p in (read_doc().get("pages") or []) if isinstance(p, dict)}
+        return [by_id.get(pid, pid) for pid in page_ids]
+
     def recompose_and_rebuild(briefs: dict) -> None:
         svc = BlueprintService.load(output_dir=output_dir)
         hit = invalidate_for_recompose(svc.doc, briefs)
@@ -1904,25 +1913,33 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
             return
         svc.save()
         write_review_briefs(output_dir, {pid: briefs[pid] for pid in hit})
+        emit("review", {"phase": "fixing", "pages": _routes_for(hit)})
         try:
             _run_dag(output_dir, app_root, "", approved=True, emit=emit,
                      app_name=app_name, announce_completion=False)
         finally:
             clear_review_briefs(output_dir)
 
+    emit("review", {"phase": "start"})
     try:
         outcome = run_review_loop(
             read_doc=read_doc,
-            critique=make_critique(output_dir, read_doc),
+            critique=make_critique(output_dir, read_doc, emit),
             recompose_and_rebuild=recompose_and_rebuild,
             emit=emit,
         )
     except Exception as exc:  # noqa: BLE001 — a review never breaks a build
         logger.warning("[review] loop failed for %s: %s",
                        Path(output_dir).name, exc)
+        emit("review", {"phase": "done", "skipped": True})
         return
 
     logger.info("[review] %s: %s", Path(output_dir).name, outcome.summary())
+    emit("review", {"phase": "done",
+                    "skipped": bool(outcome.skipped),
+                    "converged": outcome.converged,
+                    "recomposed": _routes_for(outcome.recomposed),
+                    "remaining": _routes_for(sorted(outcome.remaining))})
     if outcome.skipped or not outcome.rounds:
         return  # nothing reviewed, or nothing needed fixing — say nothing
     n = len(outcome.recomposed)
