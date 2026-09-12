@@ -59,6 +59,11 @@ logger = logging.getLogger(__name__)
 
 from services.section_layout import shape_sections
 
+# A route addresses one existing record when it carries a dynamic id segment
+# (`/records/[id]`, `/records/[id]/edit`). A Next.js catch-all (`[...slug]`) is
+# NOT one — it is the dev editor route — so a leading dot after `[` is excluded.
+_ROUTE_HAS_ID = re.compile(r"/\[[^.\]/][^\]/]*\]")
+
 # A2UI container props that carry child references.
 _CHILD_KEYS = ("children", "child")
 
@@ -535,9 +540,22 @@ class _Binder:
         nothing about `record_workspace` and answers None, and the authority's
         map is the one covering every declared kind.
         """
+        # A ROUTE WITH A RECORD ID ADDRESSES ONE EXISTING INSTANCE, whatever
+        # A2UI named the page. `/records/[id]/edit` and `/records/[id]` classify
+        # as `form`/unclassified, not `record` — but both show and act on the
+        # single record the `[id]` segment names, so their `/entity/*` pointers
+        # ARE record-scoped and must bind through a `get`-by-id source. Without
+        # this an edit page dropped every such pointer: a KeyValueList lost the
+        # `value` its contract requires, and the Save form had no record for its
+        # Update workflow to name. Route-driven, the same rule `_family_of`
+        # already applies (the route outranks the declared pattern); the `[...]`
+        # catch-all is excluded — it is the dev editor route, not a record.
+        if _ROUTE_HAS_ID.search(str(getattr(self, "route", "") or "")):
+            return True
         try:
             from services.a2ui_authority import _family_of
-            return _family_of(getattr(self, "page_kind", "")) == "record"
+            return _family_of(getattr(self, "page_kind", ""),
+                              getattr(self, "route", "")) == "record"
         except Exception:  # noqa: BLE001 — a lookup must not fail a binding
             return False
 
@@ -1137,6 +1155,9 @@ def translate(payload: dict, registry: dict, route: str = "/",
 
     binder = _Binder(registry, data_model)
     binder.page_kind = str(kind or "").strip().lower()
+    # The route drives `is_record_page()`: a `[id]` segment means one existing
+    # record is in scope, whatever the declared pattern.
+    binder.route = str(route or "")
     # The entity this page's own contract says it is about — the last thing
     # tried before a pointer is left unbound.
     binder.page_entity = str(
@@ -1167,6 +1188,16 @@ def translate(payload: dict, registry: dict, route: str = "/",
         _resolve_entity(" ".join(s2 for s2 in route.split("/") if s2), binder.idx)
         or binder.dominant
     )
+
+    # A record page needs a record entity for `record_source` to mint the
+    # `get`-by-id source its `/entity/*` pointers and workflow bind through. The
+    # tally sets `dominant` when the surface's paths name the entity, but a
+    # composer that used a generic `/record` key names none — so an edit page
+    # over an existing record could still find nothing. The route names it
+    # (`/records/[id]/edit` -> Record) and the contract names it (`page_entity`);
+    # fall back to those rather than leave a record page with no record.
+    if binder.is_record_page() and not binder.dominant:
+        binder.dominant = binder.form_entity or (binder.page_entity or None)
 
     def resolve(v: Any, comp: dict, prop: str) -> Any:
         if isinstance(v, dict) and "path" in v:

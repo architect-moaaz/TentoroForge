@@ -125,6 +125,57 @@ def test_a_dialog_composed_as_its_own_root_is_kept_and_named(tmp_path):
     assert "dialog-not-defined" not in rules, page_findings(doc)
 
 
+def test_an_edit_page_is_record_scoped_even_though_a2ui_calls_it_a_form():
+    """An edit route (`/notes/[id]/edit`, kind `form`) shows AND edits one
+    existing record. It classifies as `form`, not `record`, and its route does
+    not END with `]`, so both the converter and the completeness floor once
+    treated it as record-less: the metadata block lost the `value` its `items`
+    contract requires, and the Save form had no record for its Update workflow
+    to name. Measured on a live build — `/records/[id]/edit` was the one page a
+    four-page app dropped, 404ing its route.
+
+    The record the `[id]` names is in scope regardless of the declared pattern:
+    the `/note/*` pointers bind through a minted `get`-by-id source, and the
+    Update workflow's `record` input is satisfied by that same scope."""
+    from services.blueprint.functional_completeness import page_findings, unsatisfied_inputs
+
+    comps = [{"id": "root", "component": "Stack", "children": ["meta", "form1"]},
+             {"id": "meta", "component": "KeyValueList", "items": [
+                 {"label": "Created", "value": {"path": "/note/createdAt"}},
+                 {"label": "Title", "value": {"path": "/note/title"}}]},
+             {"id": "form1", "component": "Form", "workflow": "FLOW-002",
+              "submitLabel": "Save Changes",
+              "fields": [{"kind": "text", "name": "title", "label": "Title"}]}]
+    data = {"note": {"id": "n1", "title": "Groceries", "createdAt": "2026-01-01"}}
+    r = translate(payload(comps, data), REG, route="/notes/[id]/edit",
+                  page_id="PAGE-EDIT", kind="form")
+
+    # The metadata values survive as bindings, not stripped as fiction.
+    block = find(r["schema"]["root"], "KeyValueList")
+    assert block is not None, r["warnings"]
+    assert all("{{" in i["value"] for i in block["props"]["items"]), block["props"]["items"]
+    assert validate_props({"root": r["schema"]["root"]}, load_catalog()) == []
+    # A single get-by-id source is minted for the record the page edits.
+    gets = [s for s in r["schema"]["dataSources"]
+            if s.get("op") == "get" and s.get("entity") == "Note"]
+    assert len(gets) == 1, r["schema"]["dataSources"]
+
+    # The floor: the Save form's Update workflow finds its record in scope.
+    doc = {"pages": [{"id": "PAGE-EDIT", "route": "/notes/[id]/edit",
+                      "status": "PROPOSED", "data": {"primaryEntity": "Note"}}],
+           "pageLayouts": [{"page": "PAGE-EDIT", "root": r["schema"]["root"],
+                            "dataSources": r["schema"]["dataSources"]}],
+           "data": {"entities": [{"id": "Note", "name": "Note"}]},
+           "workflows": [{"id": "FLOW-002", "name": "Update Note",
+                          "trigger": {"kind": "manual"},
+                          "inputs": [{"name": "record", "kind": "record",
+                                      "entity": "Note", "required": True}]}]}
+    form = find(r["schema"]["root"], "Form")
+    layout = doc["pageLayouts"][0]
+    assert unsatisfied_inputs(doc, doc["pages"][0], layout, form, "FLOW-002") == []
+    assert "page-not-composed" not in {f["rule"] for f in page_findings(doc)}
+
+
 def test_visible_if_becomes_a_null_test_on_the_bound_record():
     """The composer writes `visibleIf` as the pointer it binds fields from;
     the renderer evaluates FEEL-lite in data scope, so it becomes a null test

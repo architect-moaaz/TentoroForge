@@ -36,6 +36,11 @@ _ACTIONABLE = ("Button", "Form")
 #: `{{plants}}` and `{{plants.count}}` both name `plants`.
 _BINDING = re.compile(r"\{\{([^}]+)\}\}")
 
+# A route addresses one existing record when it carries a dynamic id segment —
+# a detail page (`/records/[id]`) OR an edit page (`/records/[id]/edit`), which
+# does not END with `]`. A Next.js catch-all (`[...slug]`) is not a record id.
+_ROUTE_HAS_ID = re.compile(r"/\[[^.\]/][^\]/]*\]")
+
 
 def _dangling(schema: dict) -> list[str]:
     """`dangling_bindings`, or nothing if it cannot be reached.
@@ -276,7 +281,11 @@ def _record_in_scope(doc: dict, page: dict, entity: str) -> bool:
     primary = str((page.get("data") or {}).get("primaryEntity") or "")
     by_name = _entity_id_by_name(doc)
     wanted = {entity, by_name.get(entity, "")} - {""}
-    return route.endswith("]") and primary in wanted
+    # A detail route ends with the id (`/records/[id]`); an edit route carries
+    # it mid-path (`/records/[id]/edit`). Both hold the record — matching only
+    # `endswith("]")` dropped edit pages, whose Save form then read as having no
+    # record for its Update workflow to name.
+    return bool(_ROUTE_HAS_ID.search(route)) and primary in wanted
 
 
 def _form_fields_of(form: dict) -> set[str]:
