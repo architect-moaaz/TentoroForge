@@ -311,10 +311,97 @@ def registry_from_blueprint(doc: dict) -> dict:
             {"id": w.get("id"), "name": w.get("name"),
              "purpose": w.get("purpose") or "",
              "trigger": (w.get("trigger") or {}).get("kind") or "",
-             "launchedFrom": list(w.get("launchedFrom") or [])}
+             "launchedFrom": list(w.get("launchedFrom") or []),
+             # What the workflow needs, so the brief can say how each is
+             # satisfied on THIS screen rather than the contract refusing
+             # the page afterwards for an input nothing supplied.
+             "inputs": [
+                 {"name": str(i.get("name") or ""), "kind": str(i.get("kind") or ""),
+                  "entity": str(i.get("entity") or ""),
+                  "required": bool(i.get("required", True))}
+                 for i in (w.get("inputs") or []) if isinstance(i, dict) and i.get("name")
+             ]}
             for w in doc.get("workflows") or [] if w.get("id")
         ],
+        "entityNames": {
+            str(e.get("id")): str(e.get("name") or e.get("id"))
+            for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("id")
+        },
+        "routes": {
+            str(p.get("id")): str(p.get("route") or "")
+            for p in doc.get("pages") or []
+            if isinstance(p, dict) and p.get("id") and p.get("status") != "DEPRECATED"
+        },
     }
+
+
+def launchable(registry: dict, page_id: str) -> list[dict]:
+    """The workflows a person can start from this screen, and only those.
+
+    Scoped by two fields the workflow agent declares: which pages launch it,
+    and how it is triggered — only ``manual`` is something a user starts.
+    This is also the set the composer server is allowed to bind a control
+    to: handing it every workflow in the application let a list page put
+    "Create Note" on a button, a workflow declared to start from the record
+    page, and the contract refused the page for the record input the list
+    could never supply.
+    """
+    return [
+        w for w in (registry.get("workflows") or [])
+        if isinstance(w, dict) and w.get("id") and page_id
+        and page_id in (w.get("launchedFrom") or [])
+        and str(w.get("trigger") or "") == "manual"
+    ]
+
+
+def creates_here(registry: dict, page_id: str) -> dict | None:
+    """The workflow that creates this screen's own record on this screen,
+    or None.
+
+    Derived, not read off prose: a launchable workflow that collects fields
+    and needs no existing record of the page's entity is creation. That is
+    what "the Note page also creates notes" looks like in the Blueprint —
+    Create Note launched from /notes/[id] with title and body and a member,
+    but no Note — and it is the fact the page's composition has to honour.
+    """
+    entity = str((registry.get("pageEntity") or {}).get(page_id) or "")
+    names = registry.get("entityNames") or {}
+    for w in launchable(registry, page_id):
+        inputs = w.get("inputs") or []
+        if not any(i.get("kind") == "field" for i in inputs):
+            continue
+        needs_own = any(
+            i.get("kind") == "record" and i.get("required", True)
+            and (i.get("entity") == entity or names.get(i.get("entity")) == entity)
+            for i in inputs)
+        if not needs_own:
+            return w
+    return None
+
+
+def _input_guidance(w: dict, registry: dict, page_id: str) -> str:
+    """One line per required input: what it is and how this screen supplies it."""
+    entity = str((registry.get("pageEntity") or {}).get(page_id) or "")
+    names = registry.get("entityNames") or {}
+    lines = []
+    for i in w.get("inputs") or []:
+        if not i.get("required", True):
+            continue
+        name = i.get("name")
+        if i.get("kind") == "record":
+            ent = names.get(i.get("entity"), i.get("entity") or "a record")
+            if i.get("entity") == entity or ent == entity:
+                lines.append(f"`{name}` — the {ent} this screen shows; supplied automatically")
+            else:
+                lines.append(
+                    f"`{name}` — a {ent} record. When it is the signed-in person, pass it "
+                    f"as `\"args\": {{\"{name}\": \"$user.id\"}}` on the control; otherwise the "
+                    f"control must sit in a Repeat over {ent} or be a row action of a "
+                    f"Table whose data lists {ent}")
+        elif i.get("kind") == "field":
+            lines.append(f"`{name}` — a field a Form around the control collects, named exactly `{name}`")
+    return "; ".join(lines)
 
 
 def registry_for_binder(root: Path) -> dict:
@@ -380,7 +467,10 @@ def _locale_of(root: Path) -> str:
 
 def build_requirement(root: Path, kind: str = "dashboard",
                       route: str = "/", shared_context: str = "",
-                      presentation: str = "page") -> str:
+                      presentation: str = "page", *,
+                      contract: dict | None = None,
+                      registry: dict | None = None,
+                      page_id: str = "") -> str:
     # `shared_context` is accepted and ignored — it belongs to
     # `build_domain_context` now. See the note there; in short, this string is
     # the one the A2UI server scans for feature keywords, and a design system
@@ -445,6 +535,7 @@ def build_requirement(root: Path, kind: str = "dashboard",
         )
     if purpose:
         parts.append(f"\nWHAT THE APPLICATION IS FOR:\n{purpose}")
+    parts.extend(_contract_guidance(contract, registry or {}, page_id))
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
     guidance = build_composition_guidance(root, _family_of(kind, route))
@@ -467,6 +558,55 @@ def build_requirement(root: Path, kind: str = "dashboard",
         "either produces a screen that looks finished and is false."
     )
     return "\n".join(parts)
+
+
+def _contract_guidance(contract: dict | None, registry: dict,
+                       page_id: str) -> list[str]:
+    """What the page contract asks of this screen that the family text does
+    not say: where its controls lead, and whether it creates its own record.
+
+    Both were measured as failures the composer could not have avoided from
+    the brief it had. "New note" on the list page ran Create Note, a workflow
+    the record page launches, because nothing said the button's job was to
+    open that page; and the note page composed an edit form only, because
+    nothing said it is also reached with no record at all.
+    """
+    parts: list[str] = []
+    routes = registry.get("routes") or {}
+    targets = [routes.get(pid) for pid in ((contract or {}).get("navigatesTo") or [])
+               if routes.get(pid)]
+    if targets:
+        parts.append(
+            "\nWHERE THIS SCREEN LEADS. A control that opens another screen "
+            "uses `navigate` with that screen's route — it does not run a "
+            "workflow. This screen leads to: " + ", ".join(f"`{t}`" for t in targets)
+            + ". To open a record screen with no record yet — the way to start "
+            "a new one — navigate to its route with `new` in the `[id]` slot, "
+            "for example `/notes/new`."
+        )
+    creator = creates_here(registry, page_id) if page_id else None
+    if creator:
+        others = [w for w in launchable(registry, page_id) if w is not creator]
+        editor = next((w for w in others
+                       if any(i.get("kind") == "field" for i in w.get("inputs") or [])), None)
+        parts.append(
+            "\nTHIS SCREEN ALSO CREATES ITS RECORD. It is reached with no "
+            "record at all (the route with `new` in the id slot) as well as "
+            "with one, and both must work on this one surface. Compose the "
+            "creating state as a Form running "
+            f"{creator['id']} ({creator.get('name') or creator['id']}) with empty "
+            "fields, and mark it `\"visibleIf\": \"!<record pointer>/id\"` — the "
+            "same pointer path you bind the record's fields from, e.g. "
+            "`!/note/id`. "
+            + (f"Compose the editing state as a Form running {editor['id']} "
+               f"({editor.get('name') or editor['id']}) with the fields bound to "
+               "the record, marked `\"visibleIf\": \"/<record pointer>/id\"`. "
+               if editor else "")
+            + "Only one of the two shows at a time; everything that reads the "
+            "record (its title, its dates, its delete action) belongs with the "
+            "editing state."
+        )
+    return parts
 
 
 def _load_plan(root: Path) -> dict:
@@ -574,9 +714,7 @@ def build_domain_context(root: Path, registry: dict | None = None,
     # pages in `launchedFrom`; listing them unfiltered offers a button for
     # "Evaluate Plant Watering Status" (a derivation that runs on every read)
     # and one for "Seed Plant Catalogue" (database initialisation).
-    mine = [w for w in flows
-            if page_id and page_id in (w.get("launchedFrom") or [])
-            and w.get("trigger") == "manual"]
+    mine = launchable({"workflows": flows}, page_id)
     # A refusal is worth sending on its own. Without it in this guard, a
     # composition on an application whose registry came back empty would be
     # refused and then recomposed knowing nothing — which is the case most
@@ -618,10 +756,15 @@ def build_domain_context(root: Path, registry: dict | None = None,
         parts.append(
             "\nThe workflows this screen launches. An action on this screen "
             "runs one of these and nothing else — put the id in `workflow` on "
-            "the Button or Form that runs it:\n"
+            "the Button or Form that runs it. Other workflow ids exist in the "
+            "catalogue for other screens; a control here naming one is "
+            "refused. Each needs what is listed, and a control that cannot "
+            "supply an input is refused:\n"
             + "\n".join(
                 f"- {w['id']}: {w.get('name') or w['id']}"
                 + (f" — {w['purpose']}" if w.get("purpose") else "")
+                + (f"\n    needs: {_input_guidance(w, reg, page_id)}"
+                   if _input_guidance(w, reg, page_id) else "")
                 for w in mine
             )
         )
@@ -870,6 +1013,7 @@ def compose_page_via_a2ui(
     presentation: str = "page",
     progress: Any = None,
     feedback: str = "",
+    contract: dict | None = None,
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -889,6 +1033,13 @@ def compose_page_via_a2ui(
             return {"applied": False, "route": route, "kind": kind, "reason": why}
         # Bound rather than passed at the call site, so an INJECTED provider
         # keeps the two-argument seam every test uses.
+        # THE APPLICATION'S IDS, NOT THE PAGE'S. The catalogue is one document
+        # shared by every page in a run and the composer's cached prompt
+        # prefix; enumerating per page rebuilds it per page, loses the cache,
+        # and races between pages composing in parallel (see
+        # test_workflow_ids_are_enumerated). The per-page narrowing is the
+        # brief's job — `build_domain_context` names only what this screen
+        # launches, with what each needs, and says the rest are refused.
         surface_provider = partial(
             _mcp_surface, progress=progress,
             workflows=[str(w.get("id")) for w in (registry.get("workflows") or [])
@@ -931,7 +1082,10 @@ def compose_page_via_a2ui(
         try:
             payload = surface_provider(build_requirement(root, kind, route,
                                                          shared_context,
-                                                         presentation),
+                                                         presentation,
+                                                         contract=contract,
+                                                         registry=registry,
+                                                         page_id=page_id),
                                        build_domain_context(root, registry,
                                                             page_id,
                                                             shared_context,

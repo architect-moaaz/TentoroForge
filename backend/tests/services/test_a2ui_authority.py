@@ -1038,3 +1038,76 @@ def test_the_ceiling_leaves_room_for_three_attempts():
         f"{DEFAULT_TIMEOUT}s x 3 attempts is longer than anyone will wait")
 
 
+
+
+# --- the brief says how each workflow's inputs are met, and where the screen leads
+
+_NOTES = {
+    "data": {"entities": [
+        {"id": "ENTITY-001", "name": "Member", "fields": [{"name": "id", "type": "uuid"}]},
+        {"id": "ENTITY-002", "name": "Note", "fields": [
+            {"name": "id", "type": "uuid"}, {"name": "title", "type": "string"},
+            {"name": "body", "type": "text"}]}]},
+    "pages": [
+        {"id": "PAGE-001", "route": "/notes", "name": "Notes", "purpose": "list",
+         "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-002"},
+         "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "route": "/notes/[id]", "name": "Note", "purpose": "one",
+         "pattern": "record_workspace", "data": {"primaryEntity": "ENTITY-002"},
+         "navigatesTo": ["PAGE-001"]}],
+    "workflows": [
+        {"id": "FLOW-001", "name": "Create Note", "trigger": {"kind": "manual"},
+         "launchedFrom": ["PAGE-002"], "inputs": [
+             {"name": "member", "kind": "record", "entity": "ENTITY-001", "required": True},
+             {"name": "title", "kind": "field", "required": True}]},
+        {"id": "FLOW-002", "name": "Edit Note", "trigger": {"kind": "manual"},
+         "launchedFrom": ["PAGE-002"], "inputs": [
+             {"name": "note", "kind": "record", "entity": "ENTITY-002", "required": True},
+             {"name": "title", "kind": "field", "required": True}]},
+        {"id": "FLOW-009", "name": "Nightly Purge", "trigger": {"kind": "schedule"},
+         "launchedFrom": ["PAGE-002"], "inputs": []}],
+}
+
+
+def test_the_brief_narrows_to_the_workflows_a_screen_launches():
+    from services.a2ui_authority import launchable, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    assert [w["id"] for w in launchable(reg, "PAGE-002")] == ["FLOW-001", "FLOW-002"]
+    assert launchable(reg, "PAGE-001") == []
+
+
+def test_the_brief_says_how_each_input_is_met(tmp_path):
+    from services.a2ui_authority import build_domain_context, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    ctx = build_domain_context(tmp_path, reg, "PAGE-002")
+    assert "FLOW-001" in ctx and "FLOW-009" not in ctx
+    assert '"member": "$user.id"' in ctx
+    assert "`note` — the Note this screen shows; supplied automatically" in ctx
+    assert "a field a Form around the control collects, named exactly `title`" in ctx
+
+
+def test_a_screen_that_creates_its_record_is_told_to_compose_both_states(tmp_path):
+    from services.a2ui_authority import (
+        build_requirement, creates_here, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_NOTES)
+    assert creates_here(reg, "PAGE-002")["id"] == "FLOW-001"
+    assert creates_here(reg, "PAGE-001") is None
+    req = build_requirement(_app(tmp_path), "record_workspace", "/notes/[id]",
+                            contract=_NOTES["pages"][1], registry=reg, page_id="PAGE-002")
+    assert "ALSO CREATES ITS RECORD" in req
+    assert "FLOW-001" in req and "FLOW-002" in req
+    assert '"visibleIf": "!<record pointer>/id"' in req
+
+
+def test_a_list_screen_is_told_where_it_leads_not_what_to_run(tmp_path):
+    from services.a2ui_authority import build_requirement, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    req = build_requirement(_app(tmp_path), "entity_list", "/notes",
+                            contract=_NOTES["pages"][0], registry=reg, page_id="PAGE-001")
+    assert "`/notes/[id]`" in req and "`/notes/new`" in req
+    assert "ALSO CREATES" not in req

@@ -37,6 +37,7 @@ placements are marked and are the parts to argue with.
 """
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1015,6 +1016,17 @@ class RunReport:
     #: failure there (a low credit balance, a transient fault) is recorded here
     #: rather than in `failed`, and does not hold a built application in `draft`.
     degraded: dict[str, str] = field(default_factory=dict)
+    #: Node -> the observer's verdict on it (§73, closed at the node). Every
+    #: agent node the observer watched has an entry, passing or not, so a
+    #: report can be read for what was judged and not only for what failed.
+    observed: dict[str, dict] = field(default_factory=dict)
+    #: Labels the observer sent back to their author and then passed.
+    repaired: list[str] = field(default_factory=list)
+    #: Label -> what stayed wrong after every repair round. The artifact is
+    #: flagged OUT_OF_SYNC (§76) and left as its author last wrote it; it is
+    #: not a failure of the run, because nothing was lost — it is a divergence
+    #: the report names rather than a repair the platform hid.
+    unrepaired: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -1069,6 +1081,7 @@ def run(
     user_request: str = "",
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -1085,6 +1098,14 @@ def run(
     reaches disk reaches the observer first. That is how the virtual office
     animates: it reads this same account rather than keeping its own, so a node
     outcome recorded here cannot be missing from the picture.
+
+    ``observer_agent`` is a :class:`services.blueprint.observer.Observer`, or
+    nothing. With one, every agent node's outcome is judged the moment its
+    last subject lands — on a worker, while the rest of the graph carries on —
+    and a node the observer fails is sent back to its author with the findings
+    before anything downstream starts (§73). Injected for the same reason the
+    executor is: with no critic it costs nothing and calls no model, so the
+    loop is testable; with one it is the same loop with a judgement in it.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
     in_plan = set(order)
@@ -1107,7 +1128,8 @@ def run(
     try:
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
-                        user_request=user_request, app_root=app_root)
+                        user_request=user_request, app_root=app_root,
+                        observer_agent=observer_agent)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1131,6 +1153,7 @@ def _execute(
     commit: bool,
     user_request: str,
     app_root: str | None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1156,8 +1179,22 @@ def _execute(
     `requirements` — and for those, :func:`_yields_to` holds the later node's
     results until the earlier one has finished, so their numbering is the
     plan's, not the network's.
+
+    THE OBSERVER SITS BETWEEN "FINISHED" AND "DONE". A node whose calls have
+    all landed is *finished*; with an observer it is not *done* — nothing
+    downstream may start — until the observer has judged it and every
+    subject it failed has been re-authored and judged again, or the rounds
+    are spent and what is left is flagged. The judgement runs on a worker
+    like any call, so the rest of the graph keeps moving; only the node's
+    own dependents wait, which is exactly §28's rule. A declaration node
+    whose section a later node is still authoring (`data_model` before
+    `entity_fields`) is not judged on its own — the author is.
     """
     from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+
+    from services.blueprint.observer import (
+        OBSERVER_AGENT, RepairTask, flag_unrepaired,
+    )
 
     started: set[str] = set()
     finished: set[str] = set()
@@ -1165,6 +1202,11 @@ def _execute(
     futures: dict[Future, TaskSpec] = {}
     #: Results held back by :func:`_yields_to`, in arrival order.
     deferred: list[tuple[TaskSpec, Any]] = []
+    #: Future -> "observe" | "repair" for the observer's own traffic; a
+    #: future absent here is an ordinary call.
+    kinds: dict[Future, str] = {}
+    watches: dict[str, _Watch] = {}
+    rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
         return [
@@ -1196,9 +1238,17 @@ def _execute(
             key, "; ".join(report.degraded.get(lbl, "") for lbl in labels)[:200],
         )
 
-    def finish(key: str) -> None:
+    def finish(pool: ThreadPoolExecutor, key: str) -> None:
         state = runs[key]
         finished.add(key)
+        if observer_agent is not None and _watchable(key, state, order, in_plan,
+                                                    finished):
+            observe(pool, key, _applied(state))
+            return
+        complete(key)
+
+    def complete(key: str) -> None:
+        state = runs[key]
         # Only a node that authored nothing at all has genuinely failed;
         # anything less is a partial result its dependents can still use.
         if state.subjects and len(state.failed) == len(state.subjects):
@@ -1263,7 +1313,7 @@ def _execute(
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
         if not subjects:
-            finish(key)
+            finish(pool, key)
             return
         pump(pool, key)
 
@@ -1298,7 +1348,129 @@ def _execute(
             state.queue.append(spec.subject)
         pump(pool, key)
         if not state.in_flight and not state.queue:
-            finish(key)
+            finish(pool, key)
+
+    # -- the observer's half ------------------------------------------------
+
+    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str]) -> None:
+        """Judge ``subjects`` of ``key`` on a worker, against the document as
+        it is right now. The snapshot is taken here, under the lock, so the
+        observer reads what the node finished with and not what the next
+        apply writes."""
+        watches.setdefault(key, _Watch(
+            subjects=list(subjects),
+            authored={k: set(v) for k, v in runs[key].authored.items()},
+        ))
+        with svc.lock:
+            snapshot = copy.deepcopy(svc.doc)
+        fut = pool.submit(
+            observer_agent.observe, key, agent=DAG[key].agent,
+            subjects=list(subjects), doc=snapshot,
+            pending=_pending_sections(in_plan, finished),
+            planned=_planned_sections(in_plan), user_request=user_request,
+            subject_of=_subject_resolver(DAG[key], snapshot),
+        )
+        futures[fut] = TaskSpec(task_id=f"OBSERVE-{key}", node=key,
+                                agent=OBSERVER_AGENT)
+        kinds[fut] = "observe"
+
+    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any) -> None:
+        w = watches[key]
+        if isinstance(obs, Exception):
+            # The observer's own failure is not the node's. Recorded, and the
+            # node completes as its author left it.
+            logger.warning("[%s] observer failed: %s", key, _reason(obs))
+            report.observed[key] = {"node": key, "ok": None,
+                                    "error": _reason(obs)}
+            complete(key)
+            return
+        _record_observation(report, ledger, obs)
+        for subject in obs.subjects:
+            label = f"{key}:{subject}" if subject else key
+            if obs.findings.get(subject):
+                w.open[subject] = RepairTask(
+                    node=key, agent=DAG[key].agent, subject=subject,
+                    feedback=obs.brief(subject),
+                )
+                w.last[subject] = obs
+            elif subject in w.open:
+                w.open.pop(subject)
+                report.repaired.append(label)
+        advance(pool, key)
+
+    def advance(pool: ThreadPoolExecutor, key: str) -> None:
+        """Repair what is open, or flag it once the rounds are spent."""
+        w = watches[key]
+        if not w.open:
+            complete(key)
+            return
+        if w.round >= rounds:
+            for subject, task in w.open.items():
+                obs = w.last[subject]
+                with svc.lock:
+                    flag_unrepaired(svc, obs, subject)
+                why = "; ".join(
+                    f"{f.edge}: {f.detail}" for f in obs.findings.get(subject, [])
+                )[:600]
+                report.unrepaired[task.label] = why
+                _note(ledger, "unrepaired", key, subject, why)
+            complete(key)
+            return
+        w.round += 1
+        for subject, task in w.open.items():
+            spec = TaskSpec(
+                task_id=f"TASK-{task.label}-observer{w.round}",
+                node=key, agent=task.agent, attempt=w.round,
+                subject=subject, feedback=task.feedback,
+            )
+            _note(ledger, "repair", key, subject, w.round, rounds, task.feedback)
+            fut = pool.submit(_call, executor, spec)
+            futures[fut] = spec
+            kinds[fut] = "repair"
+            w.awaiting.add(subject)
+
+    def settle_repair(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
+        key = spec.node
+        w = watches[key]
+        w.awaiting.discard(spec.subject)
+        with svc.lock:
+            refused, application = _repair_apply(
+                svc, outcome, commit=commit, user_request=user_request)
+            if refused is None:
+                # A REPAIR IS THE WHOLE ANSWER, NOT AN ADDENDUM. Ids come
+                # from natural keys, so a re-authoring that renames a module
+                # or re-spells a constraint's expression is a new artifact
+                # beside the old one — measured live: three "Notes" modules
+                # and every index constraint twice, which the observer then
+                # rightly flagged and could not repair. What the subject
+                # authored before and did not re-propose is retired here.
+                now = _proposed_identities(outcome, application)
+                stale = w.authored.get(spec.subject, set()) - now
+                if stale:
+                    _retire(svc, stale,
+                            note=f"superseded by the observer's repair of "
+                                 f"{spec.task_id}")
+                w.authored[spec.subject] = now
+        if refused is not None:
+            # The author's repair was refused; the original stands, and the
+            # next round is told why. Nothing half-applied: apply validates
+            # before it commits.
+            task = w.open[spec.subject]
+            w.open[spec.subject] = RepairTask(
+                node=key, agent=task.agent, subject=spec.subject,
+                feedback=f"{task.feedback}\n\nYour previous repair was "
+                         f"rejected: {refused}",
+            )
+        else:
+            w.landed.append(spec.subject)
+        if w.awaiting:
+            return
+        landed, w.landed = w.landed, []
+        if landed:
+            # Verify again — the half of the loop that decides.
+            observe(pool, key, landed)
+        else:
+            advance(pool, key)
 
     def flush(pool: ThreadPoolExecutor) -> None:
         """Apply what arrived, holding back what must wait its turn."""
@@ -1332,6 +1504,13 @@ def _execute(
                     outcome = fut.result()
                 except Exception as exc:  # noqa: BLE001 — a deterministic node's own failure
                     outcome = exc
+                kind = kinds.pop(fut, None)
+                if kind == "observe":
+                    settle_observation(pool, spec.node, outcome)
+                    continue
+                if kind == "repair":
+                    settle_repair(pool, spec, outcome)
+                    continue
                 deferred.append((spec, outcome))
             flush(pool)
     except BaseException:
@@ -1359,6 +1538,169 @@ def _execute(
 
     ledger.finish(report)
     return report
+
+
+@dataclass
+class _Watch:
+    """One node's passage through the observer: what is open, what round."""
+
+    subjects: list[str]
+    round: int = 0
+    #: Subject -> the repair task it is waiting on (or about to be given).
+    open: dict[str, Any] = field(default_factory=dict)
+    #: Subject -> the observation that last failed it.
+    last: dict[str, Any] = field(default_factory=dict)
+    #: Repair calls out on a worker this round.
+    awaiting: set[str] = field(default_factory=set)
+    #: Repairs applied this round, to be judged again together.
+    landed: list[str] = field(default_factory=list)
+    #: Subject -> identities the node's current answer for it consists of.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
+
+
+def _applied(state: _NodeRun) -> list[str]:
+    """The subjects a node actually authored: given, not failed. A blocked
+    subject is in ``failed`` too."""
+    return [s for s in state.subjects if s not in state.failed]
+
+
+def _watchable(key: str, state: _NodeRun, order: Sequence[str],
+               in_plan: set[str], finished: set[str]) -> bool:
+    """Whether the observer judges this node now.
+
+    Not if it authored nothing this run — there is no outcome to judge. And
+    not if a later node in the plan is still to write a section this one
+    produces: `data_model` names the entities and `entity_fields` details
+    them, and a declaration judged on its own would be sent back for the
+    fields its author has not written yet. The author is judged instead, and
+    its findings route to the same agent.
+    """
+    if not _applied(state):
+        return False
+    mine = set(DAG[key].produces)
+    return not any(
+        other != key and other in in_plan and other not in finished
+        and DAG[other].produces & mine
+        for other in order
+    )
+
+
+def _pending_sections(in_plan: set[str], settled: set[str]) -> set[str]:
+    """Sections a node still to run in this plan will write."""
+    return {s for k in in_plan if k not in settled for s in DAG[k].produces}
+
+
+def _planned_sections(in_plan: set[str]) -> set[str]:
+    return {s for k in in_plan for s in DAG[k].produces}
+
+
+def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
+    """For a fan-out whose subject is not the artifact's own id, how a finding
+    on an artifact finds the subject to re-author. `page_details` fans out
+    per feature — an entity's pages together — so a finding on PAGE-004 is
+    the feature that page belongs to."""
+    if node.fanout != "page_features":
+        return None
+    by_page = {
+        p["id"]: (str((p.get("data") or {}).get("primaryEntity") or "") or p["id"])
+        for p in doc.get("pages") or []
+        if isinstance(p, dict) and p.get("id")
+    }
+    return by_page.get
+
+
+def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
+    report.observed[obs.node] = obs.summary()
+    for subject in obs.subjects:
+        hits = obs.findings.get(subject, [])
+        _note(ledger, "observed", obs.node, subject, not hits, len(hits),
+              obs.critic)
+
+
+def _repair_apply(
+    svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
+) -> tuple[str | None, Any]:
+    """Apply one repair. ``(None, application)`` when it landed; otherwise
+    ``(why it was refused, None)``.
+
+    A refused repair leaves the original artifact exactly as it was — apply
+    validates before it commits — so what the observer then flags is the
+    author's last accepted answer, never a half-applied fix.
+    """
+    if isinstance(outcome, Exception):
+        return _reason(outcome), None
+    if outcome is None:
+        return "the executor returned nothing", None
+    try:
+        application = apply_agent_result(
+            svc, outcome, commit=commit, user_request=user_request,
+        )
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep,
+            InvalidBusinessRule) as exc:
+        return _reason(exc), None
+    if application.applied:
+        return None, application
+    return _asked(application), None
+
+
+def _proposed_identities(result: Any, application: Any) -> set[tuple]:
+    """What one accepted result consists of, as identities the document keeps.
+
+    An id-bearing artifact is ``("id", section, id)``; a keyed-list row
+    (a constraint, a relationship, a layout) is ``("keyed", section, key)``
+    with the key the section is deduplicated on. Singletons merge and have
+    no identity. Ids are read off ``application.artifacts``, which
+    :func:`apply_agent_result` fills one per id-bearing proposal, in order.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS, SINGLETON_SECTIONS
+
+    out: set[tuple] = set()
+    ids = list(getattr(application, "artifacts", None) or [])
+    i = 0
+    for p in getattr(result, "proposals", None) or []:
+        section = p.section
+        if section in KEYED_LIST_SECTIONS:
+            keys = KEYED_LIST_SECTIONS[section]
+            out.add(("keyed", section, tuple(p.body.get(k) for k in keys)))
+        elif section in SINGLETON_SECTIONS:
+            continue
+        else:
+            if i < len(ids):
+                out.add(("id", section, ids[i]))
+            i += 1
+    return out
+
+
+def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None:
+    """Take a subject's superseded artifacts out of play.
+
+    An id-bearing artifact is marked ``DEPRECATED`` with the note — every
+    consumer already skips that status, and §22 lets it be revived. A keyed
+    row has no status to carry, so it is removed. Saved once.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS
+
+    for ident in identities:
+        kind, section, key = ident
+        if kind == "id":
+            try:
+                svc.set_status(str(key), "DEPRECATED", note=note)
+            except Exception:  # noqa: BLE001 — already gone is already retired
+                continue
+        elif kind == "keyed":
+            keys = KEYED_LIST_SECTIONS[section]
+            if "." in section:
+                parent, child = section.split(".", 1)
+                bucket = (svc.doc.get(parent) or {}).get(child)
+            else:
+                bucket = svc.doc.get(section)
+            if isinstance(bucket, list):
+                bucket[:] = [
+                    row for row in bucket
+                    if not (isinstance(row, dict)
+                            and tuple(row.get(k) for k in keys) == key)
+                ]
+    svc.save()
 
 
 def _call(executor: Executor, spec: TaskSpec) -> Any:
@@ -1549,6 +1891,11 @@ class _NodeRun:
     in_flight: set[str] = field(default_factory=set)
     #: Subject -> attempts made so far.
     attempts: dict[str, int] = field(default_factory=dict)
+    #: Subject -> the identities its accepted proposals wrote (see
+    #: :func:`_proposed_identities`). What a repair of that subject is
+    #: measured against: anything here the repair does not re-propose is
+    #: retired, because a repair is the subject's whole answer.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
 
 
 def _apply_subject(
@@ -1613,6 +1960,8 @@ def _apply_subject(
     if application.applied:
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
+        state.authored.setdefault(subject, set()).update(
+            _proposed_identities(outcome, application))
         _note(ledger, "node_subject", key, subject, _at(), total, True)
         return "applied"
     if application.needs_clarification or outcome.status == "blocked":

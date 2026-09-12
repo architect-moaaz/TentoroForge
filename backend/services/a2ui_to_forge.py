@@ -841,6 +841,83 @@ def _enum_members(kind: str, prop: str) -> set[str]:
     return {str(m) for m in members} if isinstance(members, list) else set()
 
 
+def _contract_prop(kind: str, prop: str) -> dict:
+    """`kind.prop`'s contract entry as `{"type": ..., "optional": ...}`, or {}.
+
+    Read from the SAME catalogue `page_planner.validate_props` judges the
+    finished page by — the tracked `contracts/component-catalog.json` — so
+    what is coerced here and what is checked there cannot disagree. The
+    registry's generated Zod contracts are the fallback: they are richer, but
+    they are a build artefact a checkout may not have, and a coercion that
+    silently did nothing on such a checkout is what this first shipped as.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        entry = load_catalog().get(kind) or {}
+        schema = entry.get("props") or {}
+        spec = (schema.get("properties") or {}).get(prop)
+        if isinstance(spec, dict):
+            return {"type": spec.get("type"),
+                    "optional": prop not in (schema.get("required") or [])}
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        pass
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+        return dict(props_for(kind, load_contracts()).get(prop) or {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _is_required(kind: str, prop: str) -> bool:
+    """The contract knows the prop and does not mark it optional."""
+    spec = _contract_prop(kind, prop)
+    return bool(spec) and not spec.get("optional")
+
+
+def _coerce_copy(kind: str, prop: str, value: Any) -> Any:
+    """A literal read out of the sample model, in the type the contract asks
+    for.
+
+    A2UI types a caption as DynamicString, which admits a binding; the
+    composer bound `Table.caption` to a count and the sample model answered
+    `6`. The contract wants a string, so the page was refused for a value that
+    was right in everything but its type. The same value, typed as declared:
+    a number becomes its text, a numeric string becomes its number, "true"
+    becomes true. Nothing is invented; only the spelling changes.
+    """
+    if isinstance(value, bool):
+        scalar_kind = "boolean"
+    elif isinstance(value, (int, float)):
+        scalar_kind = "number"
+    elif isinstance(value, str):
+        scalar_kind = "string"
+    else:
+        return value
+    declared = str(_contract_prop(kind, prop).get("type") or "")
+    if declared == "string" and scalar_kind != "string":
+        return "true" if value is True else "false" if value is False else str(value)
+    if declared in ("number", "integer") and scalar_kind == "string":
+        try:
+            num = float(value)
+            return int(num) if declared == "integer" or num.is_integer() else num
+        except ValueError:
+            return value
+    if declared == "boolean" and scalar_kind == "string":
+        low = value.strip().lower()
+        if low in ("true", "false"):
+            return low == "true"
+    return value
+
+
+def _has_pointer(value: Any) -> bool:
+    """Whether a literal carries `{"path": ...}` anywhere inside it."""
+    if isinstance(value, dict):
+        return "path" in value or any(_has_pointer(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_pointer(v) for v in value)
+    return False
+
+
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
 #: them among the props and the binder lifts them out afterwards, so they are
 #: not unknown — they are early.
@@ -1245,6 +1322,24 @@ def translate(payload: dict, registry: dict, route: str = "/",
         aliases = _PROP_ALIASES.get(kind, {})
         unsupported = _UNSUPPORTED.get(kind, frozenset())
         props: dict[str, Any] = {}
+
+        def pointer_binding(raw2: str, where: str) -> str | None:
+            """A pointer nested inside a prop → a `{{binding}}`, or None with
+            the reason recorded. Same rule as the dict-of-pointers branch:
+            the record this page shows, the row in scope, or nothing."""
+            segs2 = [x for x in raw2.strip("/").split("/") if x]
+            if (binder.is_record_page() and len(segs2) >= 2
+                    and binder.dominant
+                    and isinstance(at_path("/" + segs2[0]), dict)):
+                src2 = binder.record_source(binder.dominant)
+                return f"{{{{{src2}.{segs2[-1]}}}}}"
+            if scope and segs2 and not raw2.startswith("/"):
+                return f"{{{{{scope}.{segs2[-1]}}}}}"
+            binder.warnings.append(
+                f'{c.get("id")}.{where}: "{raw2}" resolves to no source on '
+                f"this page — dropped rather than sent as a pointer the "
+                f"renderer cannot read.")
+            return None
         items = [(k, v) for k, v in c.items()
                  if k not in _DROP_PROPS and k not in _CHILD_KEYS
                  and k not in unsupported]
@@ -1286,6 +1381,31 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"renders exactly like one that was.")
                 continue
             if k in _DATA_PROPS:
+                if isinstance(val, list) and k not in _CONFIG_DATA_PROPS \
+                        and _has_pointer(val):
+                    # A LIST OF COPY WITH BOUND VALUES IS NOT FICTION. A
+                    # record page's metadata block — KeyValueList items of
+                    # `{label: "Created", value: {path: "/note/createdAt"}}` —
+                    # is labels the composer wrote and values the record
+                    # supplies. The literal check below saw a list, called it
+                    # invented rows and dropped it, and the contract then
+                    # refused the component for the `items` it requires.
+                    # Each pointer inside is bound the way a pointer prop is;
+                    # the labels ride along as the copy they are.
+                    resolved = [
+                        {k2: (pointer_binding(str(v["path"]), f"{k}[{i}].{k2}")
+                              if isinstance(v, dict) and "path" in v else v)
+                         for k2, v in el.items()}
+                        if isinstance(el, dict) else el
+                        for i, el in enumerate(val)
+                    ]
+                    resolved = [
+                        {k2: v for k2, v in el.items() if v is not None}
+                        if isinstance(el, dict) else el
+                        for el in resolved
+                    ]
+                    props[k] = resolved
+                    continue
                 if not isinstance(val, dict) and k not in _CONFIG_DATA_PROPS:
                     # A scalar `value` on a measuring component is recoverable:
                     # the number is invented but the label names a real subset,
@@ -1300,6 +1420,18 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     # Not a pointer at all — a literal rows/data array is the
                     # same fiction wearing a different prop name, and `resolve`
                     # would hand it straight through.
+                    if _is_required(kind, k):
+                        # A component without the prop its contract requires
+                        # is not a component. Shipping it failed the page on
+                        # a `required` check far from here; the composer
+                        # wrote content nothing fetches, so the honest
+                        # outcome is no component — said so, not silently.
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}: {kind} requires {k!r} and the '
+                            f"composer wrote a literal nothing on this page "
+                            f"reads — the component is left out rather than "
+                            f"shipped invalid or with invented rows.")
+                        return None
                     binder.warnings.append(
                         f'{c.get("id")}.{k}: dropped a literal on a data prop '
                         f"— rows the page did not read from anywhere.")
@@ -1388,7 +1520,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"record this page shows — bound to {resolved!r} "
                         f"rather than read out of the sample.")
                 else:
-                    resolved = at_path(raw)
+                    resolved = _coerce_copy(kind, k, at_path(raw))
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
@@ -1537,6 +1669,14 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     f"this app does not define. Cleared for the "
                     f"submit-authority pass to resolve.")
 
+        if kind == "Dialog" and c.get("id"):
+            # A DIALOG IS NAMED BY ITS OWN `id` PROP. `opensDialog` on a
+            # Button points at it, and `functional_completeness` resolves the
+            # target against Dialog `props.id` — node ids are composition-time
+            # and stripped before commit. A2UI names the dialog with the node
+            # id and nothing else, so dropping that with the other node ids
+            # left every dialog anonymous and every button opening nothing.
+            props.setdefault("id", str(c["id"]))
         node: dict[str, Any] = {"type": kind, "props": props}
         # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
         # not a prop. A2UI emits it inside props, its own catalog accepts that,
@@ -1551,6 +1691,22 @@ def translate(payload: dict, registry: dict, route: str = "/",
         style = props.pop("style", None)
         if style is not None:
             node["style"] = style
+        # `visibleIf` is a sibling of `type` too, and the composer writes it
+        # as the pointer path it binds fields from — `/note/id`, or `!/note/id`
+        # for "no record". The renderer evaluates it with FEEL-lite in data
+        # scope, so the pointer becomes the binding's path and the negation a
+        # null test: `notes.id != null` / `notes.id = null`. A pointer that
+        # resolves to no source is dropped, with the reason; the node then
+        # always shows, which is the failure that is visible.
+        cond = props.pop("visibleIf", None)
+        if isinstance(cond, str) and cond.strip():
+            raw_cond = cond.strip()
+            negated = raw_cond.startswith("!")
+            pointer = raw_cond.lstrip("!").strip()
+            bound = pointer_binding(pointer, "visibleIf") if pointer else None
+            if bound:
+                path = bound.strip("{}").strip()
+                node["visibleIf"] = f"{path} = null" if negated else f"{path} != null"
         if c.get("id"):
             node["id"] = c["id"]
 
@@ -1573,6 +1729,32 @@ def translate(payload: dict, registry: dict, route: str = "/",
     # whatever composed the page. Called here too so an A2UI schema is
     # already well-shaped when the floor judges it.
     root = shape_sections(root)
+
+    # A DIALOG IS OPENED BY ID, NOT PLACED. The composer writes it as a second
+    # top-level component — a surface root of its own, referenced by a
+    # button's `opensDialog` and by nothing's `children` — and this built
+    # only what `root` reaches, so the dialog vanished and the contract then
+    # refused the page for opening a dialog it "does not contain". Measured
+    # on two builds running: the detail page was composed correctly twice
+    # and lost twice. The runtime mounts a Dialog wherever it sits in the
+    # tree and shows it on `openDialog(id)`, so an unreached one is attached
+    # under the root, after sectioning, which is layout and none of its.
+    def _ids(n: Any) -> set[str]:
+        out: set[str] = set()
+        if isinstance(n, dict):
+            if n.get("id"):
+                out.add(str(n["id"]))
+            for child in n.get("children") or []:
+                out |= _ids(child)
+        return out
+
+    placed = _ids(root)
+    for cid, c in list(comps.items()):
+        if c.get("component") == "Dialog" and str(cid) not in placed:
+            dialog = build(str(cid))
+            if dialog:
+                root.setdefault("children", []).append(dialog)
+                placed |= _ids(dialog)
 
     schema: dict[str, Any] = {
         "schemaVersion": "2",

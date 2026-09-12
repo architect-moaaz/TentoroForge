@@ -233,6 +233,12 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "build": _cap("build", {"runtime"}),
     # Verification reports divergence; it never edits an artifact's content.
     "verification": _cap("verification", set(), may_set_status=True),
+    # The observer (§73's loop, closed at the node). Judges every agent
+    # node's outcome as it lands and commands the repair — which the owning
+    # agent authors. Like verification it may flag and write nothing: an
+    # observer that patched a page directly would be a second author with no
+    # §30 boundary.
+    "observer": _cap("observer", set(), may_set_status=True),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -554,6 +560,26 @@ def check_pattern_templates(result: AgentResult,
         raise InvalidPatternTemplate("; ".join(problems[:6]))
 
 
+def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
+                   model_key: str, page_routes: Mapping[str, str]) -> str:
+    """The registry's key for this proposal.
+
+    ``natural_key_for`` derives it from the body (route, name, prose). Where
+    no scheme applies the model's key stands. Where the model's exact key is
+    already bound and the canonical one is not — a document written before
+    keys were canonicalised, resumed — the existing binding is kept, so an
+    id never moves under a running application.
+    """
+    from services.blueprint.ids import natural_key_for
+
+    canon = natural_key_for(section, body, page_routes=page_routes)
+    if not canon or canon == model_key:
+        return model_key
+    if alloc.lookup(model_key) and not alloc.lookup(canon):
+        return model_key
+    return canon
+
+
 def apply_agent_result(
     svc: BlueprintService,
     result: AgentResult,
@@ -666,6 +692,11 @@ def apply_agent_result(
         for alias in (existing.get("name"), existing.get("table")):
             if isinstance(alias, str) and alias:
                 allocated.setdefault(alias, str(existing["id"]))
+    page_routes = {
+        page["id"]: page.get("route") or ""
+        for page in (svc.doc.get("pages") or [])
+        if isinstance(page, dict) and page.get("id")
+    }
     with IdAllocator.session(output_dir=svc.output_dir) as alloc:
         for p in result.proposals:
             prefix = (
@@ -674,6 +705,17 @@ def apply_agent_result(
             )
             if not prefix:
                 continue
+            # IDENTITY IS READ OFF THE ARTIFACT, NOT TAKEN FROM THE MODEL.
+            # Smith's change path has restated keys through `natural_key_for`
+            # since §12 was wired; the agent path took the model's string as
+            # given. Measured on a live build: "A member can see all of their
+            # notes in one list." existed as six requirements under six
+            # model-spelled keys, two of them still live — and a repair that
+            # rephrased a key was an insert, not an update. The same route,
+            # name or prose is the same artifact whatever the model called it.
+            model_key = p.natural_key
+            p.natural_key = _canonical_key(
+                alloc, p.section, p.body, p.natural_key, page_routes)
             # A body id is honoured ONLY when it belongs to this section — a
             # resumed proposal carrying its own TEST-007 keeps it, and the batch
             # stays idempotent. But identity is assigned, not authored
@@ -689,6 +731,14 @@ def apply_agent_result(
                 keep = False
             artifact_id = str(body_id) if keep else alloc.allocate(prefix, p.natural_key)
             allocated[p.natural_key] = artifact_id
+            # THE KEY THE MODEL CHOSE STAYS CITABLE. A role in the same batch
+            # cites its permissions by the keys the agent gave them
+            # ("PERM-create-note"); restating the key above and then mapping
+            # only the restated one left every such citation unresolved, and
+            # `security` failed the contract twice on a live build — a
+            # regression the canonicalisation introduced the same morning.
+            if model_key and model_key != p.natural_key:
+                allocated.setdefault(model_key, artifact_id)
             if not keep and body_id:
                 # ACTUALLY drop it — do not just allocate beside it. The
                 # comment above promised a wrong-prefix id is dropped, but the

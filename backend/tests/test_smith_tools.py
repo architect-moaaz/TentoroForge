@@ -405,3 +405,62 @@ def test_the_no_match_message_names_what_was_searched():
 
     src = _P(smith_session.__file__).read_text(encoding="utf-8")
     assert "editing the nearest thing" in src
+
+
+def test_verify_app_is_dispatchable_and_runs_the_self_verify_pass(monkeypatch, tmp_path):
+    """The catalogue promised verify_app since the initial commit and nothing
+    dispatched it. The handler resolves the project owning output_dir and
+    runs the same pass the plain-language route fires."""
+    import uuid
+
+    calls: dict = {}
+    pid = uuid.uuid4()
+
+    async def fake_project(db, output_dir):
+        calls["output_dir"] = output_dir
+        return pid
+
+    async def fake_run(project_id, **kw):
+        calls["project_id"] = project_id
+        calls.update(kw)
+        return {"run_id": "r1", "status": "passed"}
+
+    class _Session:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    import services.self_verify_pass as svp
+    import database
+
+    monkeypatch.setattr(smith_tools, "_project_id_for_output_dir", fake_project)
+    monkeypatch.setattr(svp, "run_self_verify", fake_run)
+    monkeypatch.setattr(database, "async_session", lambda: _Session())
+
+    handler = smith_tools.READONLY_HANDLERS["verify_app"]
+    result = handler(str(tmp_path), {"scope": "/admin/*", "target": "preview", "fix": "false"})
+    assert result == {"run_id": "r1", "status": "passed"}
+    assert calls["project_id"] == pid
+    assert calls["scope"] == "/admin/*" and calls["target"] == "preview"
+    assert calls["fix"] is False and calls["invoked_by"] == "user_chat"
+
+
+def test_verify_app_says_when_no_project_owns_the_directory(monkeypatch, tmp_path):
+    async def nobody(db, output_dir):
+        return None
+
+    class _Session:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    import database
+
+    monkeypatch.setattr(smith_tools, "_project_id_for_output_dir", nobody)
+    monkeypatch.setattr(database, "async_session", lambda: _Session())
+    assert smith_tools.READONLY_HANDLERS["verify_app"](str(tmp_path), {}) == {
+        "error": "project_not_found_for_output_dir"}

@@ -144,6 +144,28 @@ class RunLedger:
                      "attempt": attempt, "of": of,
                      "reason": str(reason)[:600], "at": _now()})
 
+    def observed(self, key: str, subject: str, ok: bool, findings: int,
+                 critic: str) -> None:
+        """The observer's verdict on a node's outcome (§73). One line per
+        subject, so a build can be read for which page the observer sent
+        back and why."""
+        self._write({"event": "observer:verdict", "node": key,
+                     "subject": subject, "ok": ok, "findings": findings,
+                     "critic": str(critic)[:200], "at": _now()})
+
+    def repair(self, key: str, subject: str, round_: int, of: int,
+               reason: str) -> None:
+        """A subject going back to its author with the observer's brief."""
+        self._write({"event": "observer:repair", "node": key,
+                     "subject": subject, "round": round_, "of": of,
+                     "reason": str(reason)[:600], "at": _now()})
+
+    def unrepaired(self, key: str, subject: str, reason: str) -> None:
+        """Every round spent and the subject still wrong: flagged, not fixed."""
+        self._write({"event": "observer:unrepaired", "node": key,
+                     "subject": subject, "reason": str(reason)[:600],
+                     "at": _now()})
+
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
                      "reason": str(reason)[:600], "at": _now()})
@@ -171,6 +193,8 @@ class RunLedger:
             # that outlives the process.
             "blockedBecause": dict(getattr(report, "blocked_because", {}) or {}),
             "skippedBecause": dict(getattr(report, "skipped_because", {}) or {}),
+            "repaired": list(getattr(report, "repaired", []) or []),
+            "unrepaired": dict(getattr(report, "unrepaired", {}) or {}),
         })
 
     def crashed(self, exc: BaseException) -> None:

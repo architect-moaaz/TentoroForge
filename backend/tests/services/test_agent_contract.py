@@ -90,7 +90,12 @@ def test_figma_intelligence_is_registered_from_section_101():
     # answer to. It is in the registry anyway so that its writes go through the
     # same check_capability as theirs. A coordinator exempt from the boundary
     # check is how §28's "uncontrolled swarm" gets in wearing a badge.
-    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith"}
+    #
+    # The observer (§73) is the fifth: registered flag-only, like verification,
+    # so the check that stops it authoring is the same check that stops
+    # everyone else — see test_observer.py.
+    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith",
+                     "observer"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
@@ -622,3 +627,64 @@ def test_a_role_carrying_an_entity_id_is_kept_with_a_real_role_id(svc):
     assert len(roles) == 1
     assert roles[0]["id"].startswith("ROLE-") and roles[0]["id"] != "ENTITY-007"
     assert svc.is_valid(), "the document must satisfy the contract"
+
+
+# --- identity is read off the artifact ---------------------------------------
+
+def _req(task, key, text):
+    return AgentResult(task_id=task, agent="requirement", confidence=0.95,
+                       proposals=[ArtifactProposal(section="requirements",
+                                                   natural_key=key,
+                                                   body={"description": text})])
+
+
+def test_the_same_prose_under_two_model_keys_is_one_requirement(svc):
+    """Measured live: one description under six ids. The key comes from the
+    body, whatever the model called it."""
+    text = "A member can see all of their notes in one list."
+    result = AgentResult(task_id="t1", agent="requirement", confidence=0.95, proposals=[
+        ArtifactProposal(section="requirements", natural_key="REQ:list-notes",
+                         body={"description": text}),
+        ArtifactProposal(section="requirements", natural_key="see-all-notes",
+                         body={"description": text}),
+    ])
+    apply_agent_result(svc, result)
+    assert len(svc.doc["requirements"]) == 1
+    # A later reply spelling the key a third way updates the same artifact.
+    apply_agent_result(svc, _req("t2", "notes-list-requirement", text))
+    assert [r["description"] for r in svc.doc["requirements"]] == [text]
+
+
+def test_a_key_bound_before_canonicalisation_is_kept(svc):
+    """A resumed document keyed a role by its bare name. A reply that uses
+    that same name must land on the same id — not on a fresh canonical one
+    beside it."""
+    from services.blueprint.ids import IdAllocator, role_key
+
+    before = svc.upsert("roles", {"name": "Admin"}, natural_key="Admin")
+    svc.save()
+    result = AgentResult(task_id="t", agent="security", confidence=0.95, proposals=[
+        ArtifactProposal(section="roles", natural_key="Admin",
+                         body={"name": "Admin", "description": "runs the place"}),
+    ])
+    apply_agent_result(svc, result)
+    assert [r["id"] for r in svc.doc["roles"]] == [before["id"]]
+    assert svc.doc["roles"][0]["description"] == "runs the place"
+    with IdAllocator.session(output_dir=svc.output_dir) as alloc:
+        assert alloc.lookup(role_key("Admin")) is None
+
+
+def test_a_batch_citation_by_the_models_own_key_still_resolves(svc):
+    """The security agent proposes permissions and a role citing them by the
+    keys it gave them. Canonicalising the keys must not orphan the citation:
+    measured live, the role reached the contract holding 'PERM-create-note'
+    and the node failed twice."""
+    result = AgentResult(task_id="t", agent="security", confidence=0.95, proposals=[
+        ArtifactProposal(section="permissions", natural_key="PERM-create-note",
+                         body={"name": "create note", "action": "create"}),
+        ArtifactProposal(section="roles", natural_key="ROLE-member",
+                         body={"name": "Member", "permissions": ["PERM-create-note"]}),
+    ])
+    apply_agent_result(svc, result)
+    perm = svc.doc["permissions"][0]["id"]
+    assert svc.doc["roles"][0]["permissions"] == [perm]

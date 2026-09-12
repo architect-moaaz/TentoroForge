@@ -86,8 +86,8 @@ def narrated():
     return run
 
 
-PLAN = {"event": "plan", "total": 3,
-        "nodes": ["data_model", "page_contracts", "page_layouts"]}
+PLAN = {"event": "plan", "total": 4,
+        "nodes": ["data_model", "entity_fields", "page_contracts", "page_layouts"]}
 
 
 def test_the_plan_line_publishes_the_roster(narrated):
@@ -103,7 +103,7 @@ def test_a_node_start_walks_the_agent_in_and_says_what_it_is_doing(narrated):
     })[1:]
     assert start == {"type": "agent_start", "agent": "data_model",
                      "room": "data", "node": "data_model"}
-    assert status["status"] == "Designing the entities"
+    assert status["status"] == "Naming the entities"
     assert status["progress"] == 0.0
 
 
@@ -116,13 +116,15 @@ def test_a_node_the_office_does_not_know_is_ignored_rather_than_guessed(narrated
 def test_a_completed_node_sends_a_parcel_to_everyone_waiting(narrated):
     """The only thing on screen that draws the DAG's edges."""
     done, delivery = narrated(PLAN, {
-        "event": "node:done", "node": "data_model", "artifacts": 2,
+        "event": "node:done", "node": "entity_fields", "artifacts": 2,
     })[1:]
     assert done["type"] == "agent_complete"
     assert done["files_generated"] == 2
-    # page_contracts depends on data_model and is on the plan; database is not.
+    # page_contracts depends on entity_fields and is on the plan; database is
+    # not. (data_model -> entity_fields is the same agent handing itself the
+    # entities, and the office draws no parcel for that.)
     assert delivery == {"type": "artifact_delivery", "from": "data_model",
-                        "to": "page_design", "artifact": "data_model"}
+                        "to": "page_design", "artifact": "entity_fields"}
 
 
 def test_a_parcel_is_not_sent_to_the_agent_that_just_sent_it(narrated):

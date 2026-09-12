@@ -101,6 +101,40 @@ SECTION_OWNER: dict[str, str] = {
     "codeMap": "backend",
 }
 
+#: The Blueprint sections each edge reads — what it *relates*. A relationship
+#: can only be judged once both of its sides exist, which is the fact the
+#: observer needs: while a node that produces one side is still pending, the
+#: edge has nothing to say yet and a finding on it would be routed to an agent
+#: that cannot act on it. `check_requirement_code` reads codeMap, and an
+#: observed `requirements` node held to that edge before any projection has
+#: run would be told every requirement is unimplemented.
+#:
+#: Test-checked against :data:`CHECKS`: an edge without an entry, or an entry
+#: naming a section no agent can write, fails the suite rather than silently
+#: making the edge always-ready or never-ready.
+EDGE_SECTIONS: dict[str, tuple[str, ...]] = {
+    "Page↔API": ("pages", "apis"),
+    "API↔Database": ("apis", "data.entities"),
+    "Page↔Permission": ("pages", "roles"),
+    "API↔Permission": ("apis", "permissions"),
+    "Workflow↔BusinessRule": ("businessRules", "workflows", "pages", "apis",
+                              "data.entities", "roles", "permissions"),
+    "Workflow↔API": ("workflows", "apis", "pages", "data.entities"),
+    "Page↔Function": ("pages", "pageLayouts", "workflows", "data.entities"),
+    "Design↔DesignSystem": ("designSystem",),
+    "Requirement↔Code": ("requirements", "pages", "apis", "workflows",
+                         "businessRules", "components", "data.entities",
+                         "codeMap"),
+    "Requirement↔Test": ("requirements", "tests"),
+    "Blueprint↔Implementation": ("pages", "apis", "workflows", "businessRules",
+                                 "components", "data.entities", "codeMap"),
+    "Navigation↔Page": ("navigation", "pages"),
+    "Page↔Precondition": ("pages", "workflows", "data.entities"),
+    "Page↔Workflow": ("pages", "workflows"),
+    "Page↔Layout": ("pages", "pageLayouts"),
+    "Widget↔DataSource": ("widgets", "pages", "data.entities"),
+}
+
 #: Methods that change state and therefore need an explicit permission (§100).
 MUTATING = ("POST", "PUT", "PATCH", "DELETE")
 

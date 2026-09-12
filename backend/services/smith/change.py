@@ -375,6 +375,7 @@ def apply_change(
     run_agents: bool = True,
     regenerate: bool = True,
     observer: Callable[[dict], None] | None = None,
+    observer_agent: Any = None,
 ) -> ChangeResult:
     """§114 steps 3–7: analyse, update the Blueprint, then run the sub-DAG.
 
@@ -478,6 +479,7 @@ def apply_change(
         report = run_dag(
             svc, executor, plan=impact.plan, commit=False,
             user_request=request, app_root=app_root, observer=observer,
+            observer_agent=observer_agent,
         )
 
     return ChangeResult(

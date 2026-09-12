@@ -41,6 +41,7 @@ network call.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -59,12 +60,36 @@ from services.blueprint.orchestrator import DAG, TaskSpec
 from services.blueprint.references import addendum as reference_addendum
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
-#: Per the claude-api reference: use Claude Opus 5 unless the caller asks
-#: otherwise. Note this deliberately differs from `services.llm_client`'s
-#: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-5"
+#: WHO RUNS ON WHAT — two decisions, not one (user's call, 2026-09-10).
+#:
+#: The §27 specialists and the observer run on Sonnet 5: each fills a tightly
+#: constrained shape from a slice of the Blueprint, the observer only reads and
+#: judges, and Sonnet 5 is $2/$10 against Opus 5's $5/$25. Smith stays on
+#: Opus 5: it interprets the user's words into the product definition, and
+#: everything the specialists do elaborates what it decided — a misread there
+#: is the expensive mistake, not a page composed twice.
+#:
+#: Both are read once, at import, from the environment, so a run can be
+#: pointed elsewhere without a code change — `FORGE_AGENT_MODEL` for the
+#: specialists and the observer, `FORGE_SMITH_MODEL` for Smith. Any current
+#: model id works with the request shape `AnthropicModel` sends; pre-4.6 ids
+#: reject `output_config.effort` with a 400.
+#:
+#: The per-node effort and max_tokens tables below were measured on Opus 5.
+#: Sonnet 5 uses a new tokenizer (roughly 30% more tokens for the same text)
+#: and adaptive thinking counts against `max_tokens` the same way, so the
+#: knees may sit elsewhere — the scoreboard is how to find out, not a guess.
+#: Note this deliberately differs from `services.llm_client`'s
+#: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
+AGENT_MODEL = os.environ.get("FORGE_AGENT_MODEL", "").strip() or "claude-sonnet-5"
+SMITH_MODEL = os.environ.get("FORGE_SMITH_MODEL", "").strip() or "claude-opus-5"
+
+#: What `AnthropicModel()` and `tiered_router()` run on when not told: the
+#: specialists' model. Kept under its old name because the router, the
+#: office and the tests all read it.
+DEFAULT_MODEL = AGENT_MODEL
 
 #: `max_tokens` caps thinking *and* response text together on Opus 5, where
 #: adaptive thinking is on by default.
@@ -352,13 +377,16 @@ class AnthropicModel:
             # anthropic releases vendor `httpx2` and reject an `httpx.Timeout`
             # outright ("this SDK uses httpx2. Use httpx2.Timeout") — a rebuild
             # that pulls the newer SDK then fails EVERY agent node at construction
-            # time, before a single token is requested. Build the Timeout from
-            # whichever module the installed SDK actually uses.
-            try:
-                import httpx2 as _sdk_httpx  # type: ignore
-            except ImportError:
-                import httpx as _sdk_httpx
-
+            # time, before a single token is requested.
+            #
+            # Asking "is httpx2 importable" was the wrong question: the package
+            # outlives the SDK that pulled it in. This machine had anthropic
+            # 0.125 (httpx) beside a leftover httpx2, so every call built an
+            # httpx2.Timeout for an httpx client and died inside the SDK as a
+            # bare APIConnectionError ("'Timeout' object cannot be interpreted
+            # as an integer") — a network-shaped error for a type mismatch,
+            # the same disguise the brotli bug wore. The SDK re-exports the
+            # Timeout it speaks as `anthropic.Timeout` on 0.x and 1.x alike.
             # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
             # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
             # or nothing), and then went silent forever. No timeout was set
@@ -373,8 +401,8 @@ class AnthropicModel:
             # 115-138s each, legitimately.
             self._client = anthropic.Anthropic(
                 default_headers={"accept-encoding": self.accept_encoding},
-                timeout=_sdk_httpx.Timeout(connect=15.0, read=300.0,
-                                           write=60.0, pool=15.0),
+                timeout=anthropic.Timeout(connect=15.0, read=300.0,
+                                          write=60.0, pool=15.0),
                 max_retries=3,
             )
         return self._client
@@ -2658,6 +2686,7 @@ def make_executor(
                 # could read it — so on a page A2UI owns, the correction
                 # reached nobody.
                 feedback=spec.feedback or "",
+                contract=page,
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
