@@ -12,16 +12,22 @@ from services.smith import ui_designer as ud
 
 @pytest.fixture()
 def svc(tmp_path):
+    """A definition as it stands at the approval gate: requirements, no pages.
+    The define run is two nodes; pages arrive with the build."""
     s = BlueprintService.create(output_dir=tmp_path, app_id="a", name="Taskboard", domain="Operations")
-    s.doc["pages"] = [{"id": "PAGE-001", "name": "Tasks", "route": "/tasks",
-                       "purpose": "See every task", "status": "VERIFIED"}]
+    s.doc["requirements"] = [{"id": "REQ-001", "description": "User can add a task.",
+                              "status": "VERIFIED"}]
     s.validate()
     return s
 
 
-def test_asked_only_when_there_are_pages_and_no_answer(svc):
+def test_asked_at_the_gate_where_requirements_exist_and_pages_do_not(svc):
+    assert not svc.doc.get("pages")
     assert ud.undecided(svc.doc) is True
-    assert ud.undecided({"pages": []}) is False
+    assert ud.undecided({}) is False
+    assert ud.undecided({"requirements": [], "pages": []}) is False
+    # A built application re-approved is asked too, once.
+    assert ud.undecided({"pages": [{"id": "PAGE-001", "name": "x"}]}) is True
     svc.doc["application"]["uiDesigner"] = "forge"
     assert ud.undecided(svc.doc) is False and ud.chosen(svc.doc) == "forge"
 
@@ -30,8 +36,10 @@ def test_the_question_names_both_designers_and_the_cost(svc):
     q = ud.question(svc.doc)
     assert ud.is_question(q)
     assert "Forge UI Designer" in q and "UX Pilot" in q
-    assert "1 page" in q and "credit" in q
+    assert "per page the build defines" in q and "credit" in q
     assert list(ud.OPTIONS) == ["Forge UI Designer", "UX Pilot"]
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Tasks", "route": "/tasks", "purpose": "x"}]
+    assert "(1 page)" in ud.question(svc.doc)
 
 
 def test_an_option_counts_only_as_the_answer_to_the_question_just_asked(svc):
