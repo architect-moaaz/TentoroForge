@@ -14,6 +14,7 @@ Final state: crawl as Admin **0 findings**, crawl as Front Office Manager **0 fi
 | 6 | `GET /api/data/users` returns the bcrypt hash | (a) sensitive-columns manifest keyed by Blueprint field `passwordHash` while the platform column is `password`; (b) the engine masked only columns with encrypt-at-rest siblings, so a plain-stored sensitive column fell through | platform · projection + runtime engine | manifest folds platform names (`e2b1327`); engine masks plain-stored sensitive columns unless the caller may unmask (`37ed44f`) |
 | 7 | Queues empty even for the right role | Seed held three generic rows at a generic property; no users had a home property | data | 11 properties, 8 role users, 6 St Giles refund cases across the chain with 14 approvals, 2 support cases |
 | 8 | `drizzle-kit push --force` hung on the live DB | interactive prompt on a rename-vs-add decision the flag does not cover | tooling | columns added with `ALTER TABLE … IF NOT EXISTS` |
+| 9 | Sign-in 401 in ~10 ms for every account immediately after a dev-server restart, fine ~30 s later | Cold compile: the credentials callback answers before the auth route is built, so no bcrypt runs; a race in the harness, not the app | dev workflow | wait for `/api/auth/csrf` and one page compile before signing in |
 
 ## Test accounts (password `Criterion1234`, home property St Giles for the property-scoped roles)
 
