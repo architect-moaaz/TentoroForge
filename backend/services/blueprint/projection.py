@@ -1349,8 +1349,16 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
                    if e.get("status") != "DEPRECATED"]:
         readers = _entity_readers(doc, entity)
         cols: dict[str, dict] = {}
+        # THE COLUMN THE RUNTIME KNOWS, NOT THE FIELD THE BLUEPRINT NAMED. On a
+        # platform table the Blueprint's `passwordHash` folds into the
+        # platform's `password` (reconcile_platform_table); a manifest keyed by
+        # `passwordHash` masks nothing, and the users list returned the bcrypt
+        # hash to every caller.
+        table_name = entity.get("table") or to_snake(entity.get("name") or "")
+        synonyms = _PLATFORM_SYNONYMS.get(table_name, {}) if platform_table(table_name) else {}
         for field in entity.get("fields") or []:
             name = field.get("name") or ""
+            name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
             if not mask:
                 lowered = re.sub(r"[^a-z]", "", name.lower())

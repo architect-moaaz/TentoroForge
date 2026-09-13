@@ -53,3 +53,17 @@ def test_assembly_does_not_overwrite_a_projected_users_file(tmp_path, monkeypatc
     monkeypatch.setattr(assembly, "_template_dirs", lambda: [template_root])
     assembly.copy_scaffold(out, project_short_id="t1")
     assert projected.read_text().startswith("// projected")
+
+
+def test_the_password_column_is_masked_under_the_platforms_name():
+    """`GET /api/data/users` returned the bcrypt hash: the manifest said
+    `passwordHash`, the platform column is `password`."""
+    from services.blueprint.projection import sensitive_columns
+    doc = {"data": {"entities": [
+        {"id": "ENTITY-002", "name": "User", "table": "users", "fields": [
+            {"name": "id", "type": "uuid"}, {"name": "email", "type": "string"},
+            {"name": "passwordHash", "type": "string"}, {"name": "role", "type": "string"}]}]}}
+    manifest = sensitive_columns(doc)
+    assert "password" in manifest["users"]
+    assert "passwordHash" not in manifest["users"]
+    assert manifest["users"]["password"]["readers"] == []
