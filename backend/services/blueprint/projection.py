@@ -335,11 +335,13 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # missed the one it was added for, so the users table was absent from every
     # migration and login failed with "relation does not exist" — the same
     # symptom as before the fix, from the opposite cause.
-    from services.blueprint.assembly import SCAFFOLD_OWNED
+    from services.blueprint.assembly import SCAFFOLD_DEFAULTS, SCAFFOLD_OWNED
 
+    projected = {_module_name(e) for e in entities}
     platform = sorted(
-        Path(rel).stem for rel in SCAFFOLD_OWNED
+        Path(rel).stem for rel in (*SCAFFOLD_OWNED, *SCAFFOLD_DEFAULTS)
         if rel.startswith("src/db/schema/") and rel.endswith(".ts")
+        and Path(rel).stem not in projected   # an entity that claimed it is exported above
     )
     platform += sorted(
         f.stem for f in root.glob("_forge_*.ts") if f.stem not in platform
