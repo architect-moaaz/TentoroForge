@@ -1690,11 +1690,18 @@ async def smith_chat(
                     "the work continues in the background",
                     _turn_timeout, project_id,
                 )
+                # A LONG BUILD IS NOT A STUCK ONE, AND THE USER SHOULD NOT HAVE
+                # TO RELOAD. The turn is released so the panel stops holding one
+                # connection open for an hour, but the DAG keeps running and the
+                # panel keeps its status current by polling the run registry; the
+                # completion message is posted here when it lands. So say what is
+                # actually happening — still working, tracking it, will report —
+                # not "reload in a moment", which read as "something went wrong".
                 emit("message", {
-                    "text": "This is taking longer than expected. It is still "
-                            "running and will finish in the background — reload "
-                            "in a moment to see the result.",
-                    "status": "needs_user",
+                    "text": "Still building — this one's taking a while, but it's "
+                            "moving, not stuck. I'm tracking it and I'll post the "
+                            "result here the moment it's done; you don't need to "
+                            "do anything.",
                 })
                 emit("done", {"status": "timeout"})
         except Exception as exc:  # noqa: BLE001 - the client needs the reason

@@ -193,79 +193,92 @@ export function useBlueprintRun(projectId: string | null) {
   // True while this hook is driving its own stream. A reattached run must not
   // be overwritten by polling, and polling must stop the moment we start one.
   const ownStreamRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollCancelRef = useRef(false);
 
-  // REATTACH. The run's progress arrives over SSE and lives nowhere else, so a
-  // reload — or a session that expired and was signed back in — left the panel
-  // idle while the DAG carried on. The server now says whether a run is in
-  // flight; ask on mount, and keep asking until it is not.
+  // REATTACH BY POLLING. The run's progress arrives over SSE, but that stream
+  // is not the only way it reaches the panel: a reload, an expired-then-restored
+  // session, OR a stream that simply dropped mid-run (a proxy idle-timeout, a
+  // sleep, a flaky network) all leave the DAG running server-side with nobody
+  // listening. The registry keeps every node's state from the same events this
+  // reducer folds, so polling `/run` rebuilds the true state and keeps it
+  // current until the run is no longer active — this is what makes the status
+  // reliable when the stream is not.
+  const pollOnce = useCallback(async () => {
+    if (!projectId || pollCancelRef.current || ownStreamRef.current) return;
+    try {
+      const snap = await api.get<{
+        active?: boolean;
+        phase?: string;
+        stage?: string | null;
+        nodesDone?: number;
+        nodesTotal?: number;
+        callsDone?: number;
+        nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
+        elapsedMs?: number;
+        awaitingApproval?: boolean;
+        status?: string;
+        error?: string | null;
+      }>(`/api/projects/${projectId}/run`);
+      if (pollCancelRef.current || ownStreamRef.current) return;
+
+      if (snap.active) {
+        setRun((prev) => ({
+          ...prev,
+          nodesDone: snap.nodesDone ?? 0,
+          nodesTotal: snap.nodesTotal ?? 0,
+          callsDone: snap.callsDone ?? prev.callsDone,
+          nodes:
+            Array.isArray(snap.nodes) && snap.nodes.length > 0
+              ? snap.nodes.map((n) => ({
+                  key: n.key,
+                  state: n.state,
+                  subject: n.subject,
+                  calls: n.calls ?? 0,
+                }))
+              : prev.nodes,
+          awaitingApproval: Boolean(snap.awaitingApproval),
+          reattachedStage: snap.stage ?? null,
+          reattachedElapsedMs: snap.elapsedMs ?? null,
+          status: "running",
+          // Polling took over — a stream that dropped is no longer an error.
+          error: null,
+        }));
+        pollTimerRef.current = setTimeout(pollOnce, 4000);
+      } else if (snap.status === "error") {
+        setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
+      } else if (snap.status === "complete") {
+        setRun((prev) =>
+          prev.status === "running" ? { ...prev, status: "complete" } : prev,
+        );
+      }
+    } catch {
+      // A project with no run answers plainly; a transient failure is retried
+      // rather than surfaced — the panel must not flicker to an error because
+      // one poll missed.
+      if (!pollCancelRef.current && !ownStreamRef.current) {
+        pollTimerRef.current = setTimeout(pollOnce, 4000);
+      }
+    }
+  }, [projectId]);
+
+  // Hand control back to polling — the stream dropped or detached, but the run
+  // is (or may be) still going. Clears any pending poll and starts a fresh one.
+  const resumePolling = useCallback(() => {
+    ownStreamRef.current = false;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    void pollOnce();
+  }, [pollOnce]);
+
   useEffect(() => {
     if (!projectId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      if (cancelled || ownStreamRef.current) return;
-      try {
-        const snap = await api.get<{
-          active?: boolean;
-          phase?: string;
-          stage?: string | null;
-          nodesDone?: number;
-          nodesTotal?: number;
-          callsDone?: number;
-          nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
-          elapsedMs?: number;
-          awaitingApproval?: boolean;
-          status?: string;
-          error?: string | null;
-        }>(`/api/projects/${projectId}/run`);
-        if (cancelled || ownStreamRef.current) return;
-
-        if (snap.active) {
-          setRun((prev) => ({
-            ...prev,
-            // Nodes are not replayed — only how many. The panel counts, and a
-            // fabricated node list would claim names we were not told.
-            nodesDone: snap.nodesDone ?? 0,
-            nodesTotal: snap.nodesTotal ?? 0,
-            callsDone: snap.callsDone ?? prev.callsDone,
-            // The rows come back with the count: the registry keeps each node's
-            // state from the same events this reducer folds, so a reload no longer
-            // shows a bare counter for the rest of the run.
-            nodes:
-              Array.isArray(snap.nodes) && snap.nodes.length > 0
-                ? snap.nodes.map((n) => ({
-                    key: n.key,
-                    state: n.state,
-                    subject: n.subject,
-                    calls: n.calls ?? 0,
-                  }))
-                : prev.nodes,
-            awaitingApproval: Boolean(snap.awaitingApproval),
-            reattachedStage: snap.stage ?? null,
-            reattachedElapsedMs: snap.elapsedMs ?? null,
-            status: "running",
-          }));
-          timer = setTimeout(poll, 4000);
-        } else if (snap.status === "error") {
-          setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
-        } else if (snap.status === "complete") {
-          setRun((prev) =>
-            prev.status === "running" ? { ...prev, status: "complete" } : prev,
-          );
-        }
-      } catch {
-        // A project with no run answers plainly; anything else is not worth
-        // interrupting the page for.
-      }
-    };
-
-    void poll();
+    pollCancelRef.current = false;
+    void pollOnce();
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      pollCancelRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [projectId]);
+  }, [projectId, pollOnce]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -343,8 +356,20 @@ export function useBlueprintRun(projectId: string | null) {
       const decoder = new TextDecoder();
       let buffer = "";
       let currentEvent = "";
+      // A terminal `done` means the turn is genuinely over; anything else that
+      // ends the stream is a drop, and the run may still be going.
+      let gotTerminal = false;
 
       const apply = (event: string, data: Record<string, unknown>) => {
+        if (event === "done" && data.status === "timeout") {
+          // The turn was released because it ran long — but the DAG is STILL
+          // running server-side. Do not mark it complete; hand back to polling,
+          // which tracks it to the real end and updates the panel the whole way.
+          gotTerminal = true;
+          resumePolling();
+          return;
+        }
+        if (event === "done") gotTerminal = true;
         setRun((prev) => reduce(prev, event, data));
       };
 
@@ -376,15 +401,15 @@ export function useBlueprintRun(projectId: string | null) {
         return;
       }
 
-      // The stream ended without a terminal event: the connection dropped
-      // mid-run. Say so rather than leaving a spinner that never resolves.
-      setRun((r) =>
-        r.status === "running"
-          ? { ...r, status: "error", error: "The run ended unexpectedly." }
-          : r,
-      );
+      // The stream ended without a terminal `done`: the connection dropped
+      // mid-run (proxy idle-timeout, sleep, flaky network). The DAG is almost
+      // certainly still running, so DO NOT call it an error and DO NOT leave the
+      // panel frozen at the last event — hand back to polling, which reads the
+      // registry and tracks the run to its real end. This is the fix for a
+      // status that used to stop updating whenever the stream blinked.
+      if (!gotTerminal) resumePolling();
     },
-    [projectId, stop],
+    [projectId, stop, resumePolling],
   );
 
   return { run, start, stop };
