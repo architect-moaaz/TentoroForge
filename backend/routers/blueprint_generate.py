@@ -1681,7 +1681,11 @@ async def smith_chat(
             # Shielded so the timeout does not cancel the executor future — the
             # background thread cannot be cancelled anyway, and shielding lets it
             # set its result cleanly (no "set result on cancelled future" noise).
-            _fut = asyncio.shield(loop.run_in_executor(None, work))
+            # Keep the INNER future too: `wait_for` cancels the shield on timeout,
+            # but the inner build keeps running, and it is the inner one we wait
+            # on to emit the real completion afterwards.
+            _inner = loop.run_in_executor(None, work)
+            _fut = asyncio.shield(_inner)
             try:
                 emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
             except asyncio.TimeoutError:
@@ -1704,6 +1708,18 @@ async def smith_chat(
                             "do anything.",
                 })
                 emit("done", {"status": "timeout"})
+                # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
+                # was released, but the run registry (which the panel now polls)
+                # must still learn the run ended — otherwise it stays "running"
+                # with every node done. Emit the REAL done on completion; it is a
+                # no-op for the closed stream and the signal the registry (and any
+                # reconnected client) needs to mark the run complete.
+                def _late_done(f: Any) -> None:
+                    try:
+                        emit("done", f.result())
+                    except Exception:  # noqa: BLE001 — the run already ran
+                        pass
+                _inner.add_done_callback(_late_done)
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("smith turn failed for %s", project_id)
             emit("error", {"message": str(exc)})

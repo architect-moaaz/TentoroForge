@@ -87,6 +87,14 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
     elif event in ("node:failed", "node:blocked", "node:skipped"):
         _node(run, data)["state"] = "failed"
     elif event == "done":
+        # A `timeout` done is the panel being RELEASED after a long turn, NOT the
+        # run ending — the DAG carries on in the background. Finishing here marked
+        # the run complete while it was still building, and a snapshot that reads
+        # complete stops updating node states — so the run panel FROZE at whatever
+        # node was current ("Page Design") and looked stuck. Ignore it; the real
+        # `done` the background emits on completion is what finishes the run.
+        if data.get("status") == "timeout":
+            return
         # §25 — the approval gate is a pause, not an end. A client arriving
         # here must see a decision waiting rather than a run in progress.
         #
