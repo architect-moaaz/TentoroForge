@@ -271,6 +271,31 @@ class SmithSession:
             )
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _disconnect_design(self, user_message: str) -> "TurnResult":
+        """Remove the connected design and compose every screen from components.
+
+        The inverse of :meth:`_connect_figma` and :meth:`_connect_uxpilot`.
+        One Blueprint change through `design_disconnect`, then the composer
+        over the pages that lost their frame — in this turn, the way
+        `_compose` runs the composer, so the panel that asked sees it land.
+        """
+        from services.smith.design_disconnect import disconnect_and_recompose
+        out = disconnect_and_recompose(str(self.output_dir), user_message,
+                                       reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="no_op",
+                              answer=str(out.get("reason") or "No design is connected."))
+        sources = ", ".join(out.get("sources") or []) or "the design"
+        failed = out.get("failed") or []
+        answer = (f"Disconnected {sources}. {len(out.get('unbound') or [])} screen(s) no "
+                  f"longer build from a frame; {len(out.get('completed') or [])} step(s) "
+                  "re-ran to compose them from the component library.")
+        if failed:
+            answer += f" These did not finish: {', '.join(failed)}."
+        return TurnResult(status="resolved", answer=answer,
+                          diff_summary=f"version {out.get('version')}: design disconnected, "
+                                       f"{out.get('dropped_layouts', 0)} drawn layout(s) retired")
+
     def _connect_figma(self, understanding: dict) -> "TurnResult":
         """Attach a Figma design, having asked for a URL and a variable NAME.
 
@@ -586,6 +611,8 @@ class SmithSession:
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":
             return self._connect_uxpilot(understanding)
+        if verb == "disconnect_design":
+            return self._disconnect_design(user_message)
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, user_message)
         if verb == "add_field":

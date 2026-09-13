@@ -29,6 +29,8 @@ What falls out of it:
 """
 from __future__ import annotations
 
+from collections import Counter
+
 import json
 import re
 from pathlib import Path
@@ -1432,9 +1434,43 @@ def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
         is_spec = str(source.get("treatAs") or "evidence") == "specification"
         if is_spec is not specification:
             continue
-        for frame in source.get("frames") or []:
-            if frame.get("looksLikeScreen", True) and frame.get("nodeId"):
-                out.append({"source": source.get("id"), **frame})
+        frames = [f for f in source.get("frames") or []
+                  if f.get("looksLikeScreen", True) and f.get("nodeId")]
+        if not specification:
+            frames = identified_frames(frames)
+        for frame in frames:
+            out.append({"source": source.get("id"), **frame})
+    return out
+
+
+def identified_frames(frames: list[dict]) -> list[dict]:
+    """The frames that can be told apart: each says what it shows, or its
+    layer name is its alone.
+
+    A reference frame is a slot the planner MUST answer with the page built
+    from it, so a frame with no identity is a question with no content — and
+    given fifteen frames all named "Refund & Case Management Platform" and
+    nothing else, the planner answered them in file order: the Properties
+    page was built from the Write-off Approval drawing, the posting queue from
+    the Front Desk search, fifteen of fifteen wrong. Such a frame is not a
+    slot. The pages it might have been are composed from components, which is
+    the honest outcome for a drawing nobody can name (§48, §49); `shows` is
+    how a frame earns its way back in.
+    """
+    names = Counter(str(f.get("name") or "").strip().lower() for f in frames)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for frame in frames:
+        shows = str(frame.get("shows") or "").strip()
+        name = str(frame.get("name") or "").strip().lower()
+        identity = shows.lower() or (name if names[name] == 1 else "")
+        # TWO FRAMES SHOWING ONE HEADING ARE ONE SCREEN, drawn in two states —
+        # a list and its detail, a queue and its empty case. One slot; the
+        # second drawing is not a second page and must not become one.
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        out.append(frame)
     return out
 
 

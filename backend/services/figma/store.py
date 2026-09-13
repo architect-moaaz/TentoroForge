@@ -180,36 +180,77 @@ def _from_dict(raw: dict[str, Any]) -> DesignReference:
     return out
 
 
-def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
-    """The rail the screens share, read as brand, groups and destinations."""
+def _screen_tree(screen: ScreenRef) -> dict | None:
+    """The screen as the element tree the chrome and heading readers walk.
+
+    ONE SEAM FOR BOTH CAPTURES. From the hosted MCP's design-context code
+    when the extraction holds it; from the REST node document otherwise —
+    which is every production extraction, the MCP's code being gated to
+    partners. `_frame_headings` and `_chrome_evidence` read only
+    `structure.code`, so a file captured over the REST API recorded no
+    `shows` at all and the planner routed fifteen identically named frames by
+    position again — the exact failure `shows` exists to end. Both captures
+    already compose through `figma_layout`; reading them here through the
+    same two transforms is what makes a frame's identity independent of how
+    it was fetched.
+    """
+    structure = screen.structure or {}
     try:
-        from services.figma import chrome as _chrome
+        w, h = float(screen.width or 0), float(screen.height or 0)
+    except (TypeError, ValueError):
+        w = h = 0.0
+    canvas = (w, h) if w > 0 and h > 0 else None
+    code = str(structure.get("code") or "")
+    if code:
         from services.jsx_to_schema import transform_jsx_to_schema
-    except Exception:  # noqa: BLE001
-        return {}
-    # Neutral context on purpose: a fingerprint is types and text, and a
-    # vocabulary left set by an earlier turn would turn every button here into
-    # a classifier call.
+        return transform_jsx_to_schema(code, {}, canvas=canvas)["children"][0]
+    document = (structure.get("document")
+                if structure.get("source") == "rest_node_document" else None)
+    if isinstance(document, dict):
+        from services.figma_to_schema import build_page_schema
+        page = build_page_schema(document, asset_paths={}).page
+        kids = [c for c in (page.get("children") or []) if isinstance(c, dict)]
+        if not kids:
+            return None
+        return kids[0] if len(kids) == 1 else {"type": "Stack", "props": {}, "children": kids}
+    return None
+
+
+def _screen_trees(ref: DesignReference) -> dict[str, dict]:
+    """node id -> tree, for every screen that can be read; the rest are skipped.
+
+    Neutral context on purpose: the JSX transform binds actions against a
+    process-wide vocabulary, and a vocabulary left set by an earlier turn
+    would turn every button here into a classifier call. Cleared for the
+    read and restored after, so reading a design never leaves another
+    project's routes behind.
+    """
     from services.figma_llm_ctx import (
         get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
     )
     saved = (list(get_routes()), list(get_workflows()))
     reset_figma_llm_context()
-    roots: list[dict] = []
+    trees: dict[str, dict] = {}
     try:
         for screen in ref.screens:
-            code = str((screen.structure or {}).get("code") or "")
-            if not code:
-                continue
             try:
-                w, h = float(screen.width or 0), float(screen.height or 0)
-                tree = transform_jsx_to_schema(
-                    code, {}, canvas=(w, h) if w > 0 and h > 0 else None)
-                roots.append(tree["children"][0])
-            except Exception:  # noqa: BLE001
+                tree = _screen_tree(screen)
+            except Exception:  # noqa: BLE001 — one unreadable screen, never the record
                 continue
+            if tree is not None:
+                trees[screen.node_id] = tree
     finally:
         set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+    return trees
+
+
+def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
+    """The rail the screens share, read as brand, groups and destinations."""
+    try:
+        from services.figma import chrome as _chrome
+    except Exception:  # noqa: BLE001
+        return {}
+    roots: list[dict] = list(_screen_trees(ref).values())
     shared = _chrome.chrome_for(roots)
     if not shared or not roots:
         return {}
@@ -227,28 +268,9 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
     """node id -> the first heading the frame shows once its chrome is gone."""
     try:
         from services.figma import chrome as _chrome
-        from services.figma_llm_ctx import (
-            get_routes, get_workflows, reset_figma_llm_context, set_figma_llm_context,
-        )
-        from services.jsx_to_schema import transform_jsx_to_schema
     except Exception:  # noqa: BLE001
         return {}
-    saved = (list(get_routes()), list(get_workflows()))
-    reset_figma_llm_context()
-    trees: dict[str, dict] = {}
-    try:
-        for screen in ref.screens:
-            code = str((screen.structure or {}).get("code") or "")
-            if not code:
-                continue
-            try:
-                w, h = float(screen.width or 0), float(screen.height or 0)
-                trees[screen.node_id] = transform_jsx_to_schema(
-                    code, {}, canvas=(w, h) if w > 0 and h > 0 else None)["children"][0]
-            except Exception:  # noqa: BLE001
-                continue
-    finally:
-        set_figma_llm_context(routes=saved[0] or None, workflows=saved[1] or None)
+    trees: dict[str, dict] = _screen_trees(ref)
     shared = _chrome.chrome_for(list(trees.values()))
 
     def _words(text) -> bool:
@@ -288,18 +310,29 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
         m = re.search(r"\btext-\[(\d+(?:\.\d+)?)px\]", str((node.get("props") or {}).get("className") or ""))
         return float(m.group(1)) if m else 0.0
 
-    def texts(node, out):
-        """Every lettered text under ``node`` with its drawn size, in order."""
+    def texts(node, out, labels=False):
+        """Every lettered text under ``node`` with its drawn size, in order.
+
+        ``labels`` reads what a Button or Link SAYS as well. A rail drawn in
+        the REST capture types its destinations as buttons — the word is the
+        control's label, not a text node — so read as texts alone the rail
+        named nothing and every frame fell back to its first word, the brand.
+        Only the rail is read this way: a content button that happens to
+        echo a rail entry ("+ New Case") is an action, not the screen's name.
+        """
         if isinstance(node, dict):
             props = node.get("props") or {}
-            content = props.get("content") if node.get("type") in ("Heading", "Text") else None
+            kind = node.get("type")
+            content = props.get("content") if kind in ("Heading", "Text") else None
+            if content is None and labels and kind in ("Button", "Link"):
+                content = props.get("label")
             if _words(content):
                 out.append((content.strip(), _size(node)))
             for child in node.get("children") or []:
-                texts(child, out)
+                texts(child, out, labels)
         elif isinstance(node, list):
             for child in node:
-                texts(child, out)
+                texts(child, out, labels)
         return out
 
     def _norm(text: str) -> str:
@@ -333,11 +366,31 @@ def _frame_headings(ref: DesignReference) -> dict[str, str]:
             content, removed = _chrome.split(tree, shared)
         else:
             content, removed = content_region(tree), beside_content(tree)
-        named = {_norm(t) for t, _ in texts(removed, [])}
+        # THE RAIL'S DESTINATIONS, NOT ITS EVERY WORD. The rail also carries
+        # the brand, and a breadcrumb repeats the brand as its first crumb on
+        # every frame — so a screen whose own title the rail does not list
+        # (Notifications, on one real file) matched the brand and was named
+        # after it. `navigation_from` already tells the brand from the
+        # destinations; a rail it cannot read falls back to every word it
+        # shows, which is what this read before.
+        nav = _chrome.navigation_from(removed) if removed else {}
+        destinations = [str(item.get("label") or "")
+                        for group in (nav.get("groups") or [])
+                        for item in (group.get("items") or [])]
+        named = ({_norm(t) for t in destinations if _words(t)}
+                 or {_norm(t) for t, _ in texts(removed, [], labels=True)})
+        owned = named | {_norm(t) for t, _ in texts(removed, [], labels=True)}
         shown = [(size, i, t) for i, (t, size) in enumerate(texts(content, []))
                  if _norm(t) in named]
-        heading = (max(shown, key=lambda c: (c[0], c[1]))[2] if shown
-                   else first_text(content, ("Heading", "Text")))
+        heading = max(shown, key=lambda c: (c[0], c[1]))[2] if shown else None
+        if heading is None:
+            # A FRAME'S NAME IS NEVER A WORD ITS CHROME ALREADY OWNS. The
+            # first lettered text of a content region is a breadcrumb's first
+            # crumb — the brand — on every frame that has one, so the fallback
+            # skips whatever the rail says (brand, section labels, the signed-in
+            # user) and takes the first word that is the screen's own.
+            heading = next((t for t, _ in texts(content, []) if _norm(t) not in owned),
+                           None) or first_text(content, ("Heading", "Text"))
         if heading:
             out[node_id] = heading
     return out

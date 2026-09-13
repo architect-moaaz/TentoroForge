@@ -43,10 +43,17 @@ def classify(
     if lower.endswith(" title"):
         return "Heading", {"level": 4}
 
-    # Body text — variants
-    if lower in {"paragraph", "body", "description"}:
-        return "Text", {}
-    if lower.endswith(" description") or lower.endswith(" subtitle") or lower.endswith(" text"):
+    # Body text — variants. These names give a TEXT layer its role, or a
+    # childless frame standing in for one. A FRAME named "Body" that holds
+    # children is the body of the page, not a paragraph: one real
+    # fifteen-screen file nested every screen as Screen > Body > Shell > …,
+    # typing Body as Text made it a leaf, and the fold that gives a leaf its
+    # content swallowed the whole screen — sidebar labels, table rows and
+    # headings — into one text node, on all fifteen pages. Structure that
+    # holds children is never a leaf, whatever it is called.
+    text_role = (lower in {"paragraph", "body", "description"}
+                 or lower.endswith((" description", " subtitle", " text")))
+    if text_role and not (figma_type == "FRAME" and child_count > 0):
         return "Text", {}
 
     # Form primitives — specific before generic
