@@ -111,6 +111,14 @@ class RunLedger:
         self._write({"event": "plan", "nodes": nodes, "total": len(nodes),
                      "alreadyComplete": already or [], "at": _now()})
 
+    def heartbeat(self) -> None:
+        """A pulse while a long step runs. A page-layout compose or an observer
+        repair can go minutes between events, and the ledger is silent the whole
+        time — so a live run looks dead to a status poll and to the restart
+        guard, and a build that was still composing got killed as if it had
+        crashed. This keeps the ledger's mtime fresh while the run is alive."""
+        self._write({"event": "run:heartbeat", "at": _now()})
+
     def node_start(self, key: str, subjects: int = 1) -> None:
         self._write({"event": "node:start", "node": key, "subjects": subjects,
                      "at": _now()})

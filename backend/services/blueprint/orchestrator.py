@@ -1121,6 +1121,26 @@ def run(
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
 
+    # A PULSE WHILE THE LONG STEPS RUN. page_layouts and the observer repair go
+    # minutes between events, so the ledger fell silent and a live run looked
+    # dead — a status poll showed no progress and a restart guard killed a build
+    # that was still composing. A daemon heartbeat keeps the ledger's mtime
+    # fresh while the run is alive, and stops with it. Best-effort throughout.
+    import threading
+
+    _hb_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not _hb_stop.wait(_HEARTBEAT_SECONDS):
+            try:
+                ledger.heartbeat()
+            except Exception:  # noqa: BLE001 — a pulse must not break the run
+                pass
+
+    _hb = threading.Thread(target=_heartbeat, name="forge-run-heartbeat",
+                           daemon=True)
+    _hb.start()
+
     # §28's graph declares which nodes are independent; `_execute` starts a
     # node the moment its in-plan dependencies are complete, recomputed there
     # because a plan is a subset and because a node that failed must never
@@ -1138,6 +1158,8 @@ def run(
         # from there and one of them reached the wrong conclusion.
         ledger.crashed(exc)
         raise
+    finally:
+        _hb_stop.set()
 
 
 def _execute(
@@ -1856,6 +1878,11 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: subject waits in the node's own queue and never occupies one of the run's
 #: worker threads doing nothing.
 FANOUT_CONCURRENCY = 12
+
+#: Seconds between ledger heartbeats while a run is alive. Short enough that a
+#: status poll or a restart guard checking a ~90s freshness window always sees a
+#: live run as live, long enough to add nothing meaningful to a run's I/O.
+_HEARTBEAT_SECONDS = 20.0
 
 #: How many model calls the whole run keeps in flight, across every node that
 #: is ready at once. Four fanning-out nodes would otherwise open forty-eight
