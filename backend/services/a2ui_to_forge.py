@@ -226,6 +226,67 @@ def _slug_for(entity: str, registry: dict) -> str:
     return ent.get("slug") or ent.get("camel") or entity.lower()
 
 
+def _source_name_for(entity: str, registry: dict) -> str:
+    """The list source a page reads an entity's rows from, as an identifier:
+    `properties`, `refundCases` — the slug with its dashes folded."""
+    parts = [p for p in _slug_for(entity, registry).replace("_", "-").split("-") if p]
+    return parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:]) if parts else entity.lower()
+
+
+def _label_column(entity: str, registry: dict, preferred: str = "") -> str:
+    """What to show for a row of `entity` in a dropdown."""
+    cols = [str(c.get("name") or "") for c in
+            ((registry.get("entities") or {}).get(entity) or {}).get("columns") or []]
+    if preferred and preferred in cols:
+        return preferred
+    for candidate in ("name", "title", "label", "fullName", "displayName", "code", "email"):
+        if candidate in cols:
+            return candidate
+    return preferred or "name"
+
+
+def option_source(binder: Any, registry: dict, spoken: Any, *,
+                  references: str = "") -> dict | None:
+    """A2UI's way of saying where a dropdown's options come from → Forge's.
+
+    THE COMPOSER THINKS ENTITY-FIRST AND THE CONTRACT READS SOURCE-FIRST. The
+    composer writes `optionsFrom: {entity, labelField, valueField}` — the
+    entity whose rows are the options, named by id or by name. `Select` and a
+    Form field's `interaction.optionsFrom` read `{source, value, label}`,
+    where `source` is a name in the page's `dataSources`. Same meaning, and
+    every intake form on one real build was refused over the difference
+    ("'source' is a required property; 'entity' … were unexpected") while
+    the page's data model held nothing that listed the entity. Translation
+    registers the list the source names, exactly as a bound pointer would.
+
+    `references` is the column's own foreign key, for a field the composer
+    named after one without saying where its options come from.
+    """
+    hint = ""
+    label_pref = ""
+    value = "id"
+    if isinstance(spoken, dict):
+        if spoken.get("source"):
+            return None  # already the contract's shape
+        hint = str(spoken.get("entity") or spoken.get("table") or "")
+        label_pref = str(spoken.get("labelField") or spoken.get("label") or "")
+        value = str(spoken.get("valueField") or spoken.get("value") or "id")
+    entity = None
+    for candidate in (hint, references):
+        if not candidate:
+            continue
+        entity = (registry.get("entityNames") or {}).get(candidate) or candidate
+        entity = entity if entity in (registry.get("entities") or {}) else _resolve_entity(entity, binder.idx)
+        if entity:
+            break
+    if not entity:
+        return None
+    name = binder._add_source({"name": _source_name_for(entity, registry),
+                               "entity": entity, "op": "list"})
+    return {"source": name, "value": value or "id",
+            "label": _label_column(entity, registry, label_pref)}
+
+
 # Words that describe a boolean flag, not an enum member. Checked before enums
 # because "Active Users" against role[admin|user] otherwise matches the literal
 # substring "user" and emits {"role": "user"} — a filter that is plausible,
@@ -719,10 +780,18 @@ class _Binder:
 
         if node_type:
             props.update(extra or {})
-            return node_type, props
-        # `_decide` returns None for foreign keys and for anything it has no
-        # opinion about — the composer's own choice stands there.
-        return str(comp.get("component")), props
+        kind = node_type or str(comp.get("component"))
+        # A SELECT OVER A FOREIGN KEY SAYS WHERE ITS ROWS COME FROM. Rebuilding
+        # the props from the column dropped the composer's `optionsFrom`, and a
+        # column that references another entity said nothing either; the
+        # dropdown shipped with no options and no source. Both are the same
+        # list, registered here so the page fetches it.
+        if kind in ("Select", "Combobox", "MultiSelect") and not props.get("options"):
+            translated = option_source(self, self.registry, comp.get("optionsFrom"),
+                                       references=str(col.get("references") or ""))
+            if translated:
+                props["optionsFrom"] = translated
+        return kind, props
 
     def resolve_breakdown(self, comp: dict, rows: list) -> list[dict] | None:
         """A KPI's breakdown rows → one filtered aggregate each.
@@ -1139,6 +1208,59 @@ def dangling_bindings(schema: dict) -> list[str]:
 
     walk(schema.get("root"))
     return sorted(n for n in found if n and n not in declared)
+
+
+def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
+    """Every place the tree says where options come from, in the contract's words.
+
+    Three shapes, one meaning. A declarative Form field carries `optionsFrom`
+    at the top level or under `interaction`; a Select-like node carries it in
+    `props`; and a list of `items` may name each choice by label alone. The
+    Form field schema reads `interaction.optionsFrom`, the Select contract
+    refuses an empty `options` beside a source (minItems 1), and an item
+    needs a `value` — which, unsaid, is its label. Mutates in place; runs
+    before `dataSources` is sealed so the lists it registers ship with the
+    page.
+    """
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for n in node:
+                walk(n)
+            return
+        if not isinstance(node, dict):
+            return
+        props = node.get("props")
+        if isinstance(props, dict):
+            kind = str(node.get("type") or "")
+            if kind in ("Select", "Combobox", "MultiSelect", "RadioGroup"):
+                translated = option_source(binder, registry, props.get("optionsFrom"))
+                if translated:
+                    props["optionsFrom"] = translated
+                if props.get("optionsFrom") and props.get("options") == []:
+                    props.pop("options")
+            if kind == "Form":
+                for field in props.get("fields") or []:
+                    if not isinstance(field, dict):
+                        continue
+                    spoken = field.pop("optionsFrom", None)
+                    interaction = field.get("interaction") if isinstance(field.get("interaction"), dict) else None
+                    if spoken is None and interaction:
+                        spoken = interaction.get("optionsFrom")
+                    if spoken is None:
+                        continue
+                    translated = option_source(binder, registry, spoken)
+                    final = translated or (spoken if isinstance(spoken, dict) and spoken.get("source") else None)
+                    if final:
+                        field.setdefault("interaction", {})["optionsFrom"] = final
+                        field.setdefault("options", [])
+            items = props.get("items")
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and "value" not in item and item.get("label") is not None:
+                        item["value"] = str(item["label"])
+        for child in node.get("children") or []:
+            walk(child)
+    walk(root)
 
 
 def translate(payload: dict, registry: dict, route: str = "/",
@@ -1810,6 +1932,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
             if n.get("type") == "FilterBar":
                 n.setdefault("props", {})["showSearch"] = False
 
+    _translate_option_sources(root, binder, registry)
     schema: dict[str, Any] = {
         "schemaVersion": "2",
         "id": page_id,

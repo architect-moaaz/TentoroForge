@@ -347,12 +347,30 @@ def launchable(registry: dict, page_id: str) -> list[dict]:
     page, and the contract refused the page for the record input the list
     could never supply.
     """
-    return [
-        w for w in (registry.get("workflows") or [])
-        if isinstance(w, dict) and w.get("id") and page_id
-        and page_id in (w.get("launchedFrom") or [])
-        and str(w.get("trigger") or "") == "manual"
-    ]
+    entity = str((registry.get("pageEntity") or {}).get(page_id) or "")
+    names = registry.get("entityNames") or {}
+    route = str((registry.get("routes") or {}).get(page_id) or "")
+    holds_record = "[" in route  # /records/[id], /records/[id]/edit — the page shows one
+    out = []
+    for w in registry.get("workflows") or []:
+        if not (isinstance(w, dict) and w.get("id") and page_id
+                and page_id in (w.get("launchedFrom") or [])
+                and str(w.get("trigger") or "") == "manual"):
+            continue
+        # A SCREEN THAT HOLDS NO RECORD CANNOT START WHAT NEEDS ONE. "Edit
+        # Property" was declared launchable from the property form, so
+        # /properties/new offered it beside "Create Property" and the composer
+        # bound the Save button to Edit — refused, correctly, for the Property
+        # record a create page can never supply. Declared-launchable is
+        # necessary; a page must also be able to hand over the record.
+        needs_own = any(
+            i.get("kind") == "record" and i.get("required", True)
+            and (i.get("entity") == entity or names.get(i.get("entity")) == entity)
+            for i in (w.get("inputs") or []))
+        if needs_own and entity and not holds_record:
+            continue
+        out.append(w)
+    return out
 
 
 def creates_here(registry: dict, page_id: str) -> dict | None:

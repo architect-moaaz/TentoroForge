@@ -287,3 +287,23 @@ def test_a_select_node_inside_the_form_counts_too():
                           "children": []}]}
     layout = _layout(form, [{"name": "properties", "entity": "Property", "op": "list"}])
     assert unsatisfied_inputs(doc, doc["pages"][0], layout, form, "FLOW-001") == []
+
+
+def test_a_create_page_does_not_offer_a_workflow_that_needs_its_own_record():
+    """"Edit Property" declared launchable from the property form put itself
+    beside "Create Property" on /properties/new, and the composer bound Save
+    to Edit — refused for the record a create page can never supply."""
+    from services.a2ui_authority import launchable
+    reg = {"pageEntity": {"PAGE-013": "Property", "PAGE-012": "Property"},
+           "entityNames": {"ENTITY-001": "Property"},
+           "routes": {"PAGE-013": "/properties/new", "PAGE-012": "/properties/[id]"},
+           "workflows": [
+               {"id": "FLOW-012", "name": "Create Property", "trigger": "manual",
+                "launchedFrom": ["PAGE-013", "PAGE-012"],
+                "inputs": [{"name": "name", "kind": "field", "required": True}]},
+               {"id": "FLOW-013", "name": "Edit Property", "trigger": "manual",
+                "launchedFrom": ["PAGE-013", "PAGE-012"],
+                "inputs": [{"name": "property", "kind": "record", "entity": "ENTITY-001", "required": True},
+                           {"name": "name", "kind": "field", "required": True}]}]}
+    assert [w["id"] for w in launchable(reg, "PAGE-013")] == ["FLOW-012"]
+    assert [w["id"] for w in launchable(reg, "PAGE-012")] == ["FLOW-012", "FLOW-013"]
