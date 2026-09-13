@@ -598,7 +598,84 @@ def check_page_workflow(doc: dict) -> list[Finding]:
                         "Page↔Workflow", section="pages", artifact_id=page.get("id"),
                         detail=f"action targets missing workflow {action}",
                     ))
+
+    # A PAGE'S ACTIONS NEED A WORKFLOW ON ITS OWN ENTITY. A page names its
+    # actions for what they do — "approve", "reject", "resolve" — not for a
+    # FLOW id, so the id check above never sees them. When a page declares such
+    # an action on entity E and NO workflow operates on E, the workflow the
+    # action names does not exist: the composer has nothing correct to wire the
+    # button to, reaches for a workflow on some OTHER entity, and the record
+    # floor refuses the whole page — which is then dropped. Measured on
+    # NeighbourKit: KycVerification, ConditionEvidence and Dispute had zero
+    # workflows touching them, and all six of their pages (KYC approve/reject,
+    # dispute resolve, handover/return capture) dropped for exactly this. The
+    # gap is a DEFINE defect, caught here so it re-asks the workflow agent
+    # before the expensive compose→refuse→drop, not after.
+    #
+    # A workflow touches an entity by taking it as a `record` input. The check
+    # is entity-level (not a per-verb name match): a page whose entity no
+    # workflow touches cannot have ANY of its record actions wired, whatever
+    # they are called.
+    wf_entities = {
+        str(i.get("entity"))
+        for w in workflows for i in (w.get("inputs") or [])
+        if i.get("kind") == "record" and i.get("entity")
+    }
+    ent_name = {e.get("id"): (e.get("name") or e.get("id")) for e in _entities(doc)}
+    for page in _live(doc.get("pages")):
+        entity = str((page.get("data") or {}).get("primaryEntity") or "")
+        if not entity or entity in wf_entities:
+            continue
+        acts = [_action_label(a) for a in (page.get("actions") or [])
+                if _acts_on_existing_record(a)]
+        if not acts:
+            continue
+        en = ent_name.get(entity, entity)
+        out.append(Finding(
+            "Page↔Workflow", section="workflows", artifact_id=page.get("id"),
+            detail=(f"{page.get('route') or page.get('id')} declares action(s) "
+                    f"[{', '.join(acts)}] on {en}, but no workflow operates on "
+                    f"{en} — those actions name workflows that do not exist. "
+                    f"Declare the workflow(s) they run, each acting on {en}."),
+        ))
     return out
+
+
+#: Action words that navigate or dismiss rather than run a workflow.
+_NAVIGATION_ACTIONS = frozenset({
+    "view", "back", "close", "cancel", "next", "previous", "prev", "open",
+    "details", "detail", "done", "go", "list", "search", "filter", "refresh",
+})
+#: Action words that CREATE a new record. Their workflow outputs the entity
+#: rather than taking it as an input, so a create page legitimately has no
+#: workflow that reads its entity — it is not evidence of a missing one. (The
+#: separate record-floor catches a create wired to a mis-entitied workflow.)
+_CREATE_ACTIONS = frozenset({
+    "create", "add", "new", "submit", "register", "request", "raise", "start",
+})
+
+
+def _action_label(a: object) -> str:
+    if isinstance(a, str):
+        return a
+    if isinstance(a, dict):
+        return str(a.get("name") or a.get("label") or a.get("id") or "")
+    return str(a)
+
+
+def _acts_on_existing_record(a: object) -> bool:
+    """Whether an action operates on an EXISTING record of the page's entity —
+    approve, reject, resolve, confirm, delete — and so needs a workflow that
+    reads that entity. FLOW-id actions are checked by id above; a navigation
+    runs nothing; a create/submit makes a NEW record (its workflow outputs the
+    entity, does not read it). Everything else is assumed to act on the record
+    in front of it, so a missing entity workflow is a real gap."""
+    name = _action_label(a).strip().lower()
+    if not name or name.startswith("flow-"):
+        return False
+    first = name.replace("-", " ").replace("_", " ").split()
+    verb = first[0] if first else ""
+    return verb not in _NAVIGATION_ACTIONS and verb not in _CREATE_ACTIONS
 
 
 
