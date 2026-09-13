@@ -611,6 +611,78 @@ def test_the_form_entity_comes_from_the_route_not_the_field():
 
 # ──────────────────────────────────────────────────────────── submit target
 
+def _reg_with_secondary_enum():
+    # A return form: its route entity is Rental, but `mediaType` is a column of
+    # ConditionEvidence (written through the workflow's insert step). `status`
+    # is ambiguous — it exists on both Rental and Dispute with different values.
+    return {"entities": {
+        "Rental": {"columns": [
+            {"name": "status", "type": "varchar", "enum": ["requested", "active", "returned"]},
+            {"name": "returnConfirmed", "type": "boolean"}]},
+        "Dispute": {"columns": [
+            {"name": "status", "type": "varchar", "enum": ["open", "resolved"]}]},
+        "ConditionEvidence": {"columns": [
+            {"name": "mediaType", "type": "enum", "enum": ["PHOTO", "VIDEO"]},
+            {"name": "mediaUrl", "type": "varchar"}]},
+    }}
+
+
+def test_a_declarative_select_over_a_secondary_entity_enum_gets_its_options():
+    """`mediaType` is a ConditionEvidence enum on a form whose route entity is
+    Rental, so the composer ships a bare select with no options and the contract
+    refuses it. The value set is unambiguous across entities — recover it."""
+    from types import SimpleNamespace
+    from services.a2ui_to_forge import _translate_option_sources
+    reg = _reg_with_secondary_enum()
+    root = {"type": "Form", "props": {"fields": [
+        {"kind": "select", "name": "mediaType", "label": "Media Type", "required": True}]}}
+    _translate_option_sources(root, SimpleNamespace(form_entity="Rental"), reg)
+    opts = root["props"]["fields"][0]["options"]
+    assert [o["value"] for o in opts] == ["PHOTO", "VIDEO"]
+
+
+def test_an_ambiguous_enum_name_is_left_alone_not_guessed():
+    """`status` exists on Rental and Dispute with different vocabularies. With no
+    form entity to disambiguate, guessing one would ship the wrong options — so
+    the field is left as authored (and stays refused, correctly)."""
+    from types import SimpleNamespace
+    from services.a2ui_to_forge import _translate_option_sources
+    reg = _reg_with_secondary_enum()
+    root = {"type": "Form", "props": {"fields": [
+        {"kind": "select", "name": "status", "label": "Status", "required": True}]}}
+    _translate_option_sources(root, SimpleNamespace(form_entity=None), reg)
+    assert not root["props"]["fields"][0].get("options")
+
+
+def test_the_form_entity_disambiguates_a_shared_enum_name():
+    """When the name IS on the form's own entity, that entity wins over a unique
+    scan — a Rental form's `status` is Rental's status, not Dispute's."""
+    from types import SimpleNamespace
+    from services.a2ui_to_forge import _translate_option_sources
+    reg = _reg_with_secondary_enum()
+    root = {"type": "Form", "props": {"fields": [
+        {"kind": "select", "name": "status", "label": "Status", "required": True}]}}
+    _translate_option_sources(root, SimpleNamespace(form_entity="Rental"), reg)
+    opts = root["props"]["fields"][0]["options"]
+    assert [o["value"] for o in opts] == ["requested", "active", "returned"]
+
+
+def test_a_declarative_select_with_a_source_is_untouched():
+    """A field that already names where its options come from keeps its source
+    and is not overwritten with a scanned enum."""
+    from types import SimpleNamespace
+    from services.a2ui_to_forge import _translate_option_sources
+    reg = _reg_with_secondary_enum()
+    root = {"type": "Form", "props": {"fields": [
+        {"kind": "select", "name": "status",
+         "interaction": {"optionsFrom": {"source": "rentals"}}}]}}
+    _translate_option_sources(root, SimpleNamespace(form_entity="Rental"), reg)
+    field0 = root["props"]["fields"][0]
+    # options stays the empty runtime-sourced shape, not the scanned enum.
+    assert field0.get("options") in (None, [])
+    assert field0["interaction"]["optionsFrom"]
+
+
 def test_a_real_workflow_target_survives():
     r = translate(form_payload([field("a", "title")],
                                {"workflow": "CreateBillWorkflow"}),

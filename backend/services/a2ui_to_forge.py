@@ -1216,6 +1216,41 @@ def dangling_bindings(schema: dict) -> list[str]:
     return sorted(n for n in found if n and n not in declared)
 
 
+def _enum_options_for_field(registry: dict, field_name: str,
+                            prefer_entity: str | None) -> list[dict] | None:
+    """Declared ``options`` for a Form field that names a schema enum column.
+
+    A workflow field like ``mediaType`` is written to a column the form's route
+    entity does not own — ``ConditionEvidence`` reached through the workflow's
+    insert step, on a ``/rentals/[id]/return`` form whose entity is ``Rental`` —
+    so the composer ships it as a bare ``select`` with neither ``options`` nor a
+    source, and the Form-field contract refuses a select with neither. The enum
+    is still knowable from the schema: resolve the column by the field's name —
+    the form entity first, then a UNIQUE match across entities so an ambiguous
+    name (a ``status`` on Rental AND Dispute, different vocabularies) is left
+    alone rather than guessed. Reads the enum key tolerantly, since the registry
+    has carried it as ``enum``/``enum_values``/``enumValues`` at different times.
+    """
+    ents = (registry or {}).get("entities") or {}
+    want = _slugify(field_name)
+    if not want:
+        return None
+
+    def col_enum(entity: str | None) -> list[str] | None:
+        for c in (ents.get(entity or "") or {}).get("columns") or []:
+            if _slugify(str(c.get("name") or "")) != want:
+                continue
+            vals = c.get("enum") or c.get("enum_values") or c.get("enumValues")
+            return [str(v) for v in vals] if isinstance(vals, list) and vals else None
+        return None
+
+    vals = col_enum(prefer_entity)
+    if not vals:
+        hits = [v for ent in ents if (v := col_enum(ent))]
+        vals = hits[0] if len(hits) == 1 else None
+    return [{"value": v, "label": v} for v in vals] if vals else None
+
+
 def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
     """Every place the tree says where options come from, in the contract's words.
 
@@ -1248,6 +1283,7 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
                 if translated:
                     props["optionsFrom"] = translated
             if kind == "Form":
+                form_entity = getattr(binder, "form_entity", None)
                 for field in props.get("fields") or []:
                     if not isinstance(field, dict):
                         continue
@@ -1255,13 +1291,25 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
                     interaction = field.get("interaction") if isinstance(field.get("interaction"), dict) else None
                     if spoken is None and interaction:
                         spoken = interaction.get("optionsFrom")
-                    if spoken is None:
+                    if spoken is not None:
+                        translated = option_source(binder, registry, spoken)
+                        final = translated or (spoken if isinstance(spoken, dict) and spoken.get("source") else None)
+                        if final:
+                            field.setdefault("interaction", {})["optionsFrom"] = final
+                            field.setdefault("options", [])
                         continue
-                    translated = option_source(binder, registry, spoken)
-                    final = translated or (spoken if isinstance(spoken, dict) and spoken.get("source") else None)
-                    if final:
-                        field.setdefault("interaction", {})["optionsFrom"] = final
-                        field.setdefault("options", [])
+                    # No source named. A select over a schema enum still needs
+                    # its options declared — the composer omits them for a column
+                    # the route entity does not own (a workflow field written to
+                    # a secondary entity), and the contract refuses a select with
+                    # neither options nor a source. Recover them from the schema.
+                    fkind = str(field.get("kind") or field.get("component") or "").lower()
+                    if (fkind in ("select", "multiselect", "radiogroup", "combobox")
+                            and not field.get("options")):
+                        opts = _enum_options_for_field(
+                            registry, str(field.get("name") or ""), form_entity)
+                        if opts:
+                            field["options"] = opts
             items = props.get("items")
             if isinstance(items, list):
                 for item in items:
