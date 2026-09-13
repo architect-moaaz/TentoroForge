@@ -396,7 +396,13 @@ def _input_guidance(w: dict, registry: dict, page_id: str) -> str:
             else:
                 lines.append(
                     f"`{name}` — a {ent} record. When it is the signed-in person, pass it "
-                    f"as `\"args\": {{\"{name}\": \"$user.id\"}}` on the control; otherwise the "
+                    f"as `\"args\": {{\"{name}\": \"$user.id\"}}` on the control. When the "
+                    f"person chooses it on this screen, the Form collects it: a field "
+                    f"`{{\"kind\": \"select\", \"name\": \"{name}\", \"options\": [], "
+                    f"\"interaction\": {{\"optionsFrom\": {{\"source\": \"<a dataSources entry "
+                    f"that lists {ent}>\", \"value\": \"id\", \"label\": \"<its label field>\"}}}}}}` "
+                    f"— `source` names a list in `dataSources`, never an entity id, and "
+                    f"`entity`/`labelField`/`valueField` are not keys. Otherwise the "
                     f"control must sit in a Repeat over {ent} or be a row action of a "
                     f"Table whose data lists {ent}")
         elif i.get("kind") == "field":

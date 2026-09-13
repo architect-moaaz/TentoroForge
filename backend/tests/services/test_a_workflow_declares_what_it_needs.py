@@ -216,3 +216,74 @@ def test_the_refusal_says_where_the_control_sits():
     rules = [d for r, d in _rules(doc) if r == "workflow-inputs-unsatisfied"]
     assert any("(inside Stack > Card)" in d and "`rowActions`" in d for d in rules), rules
 
+
+
+# ---------------------------------------------------------------------------
+# A FORM THAT CHOOSES THE RECORD SUPPLIES IT.
+#
+# An intake form's property is not a record the screen holds; it is picked on
+# the form from the list of properties. Every intake form on one real build —
+# new refund case, guest request, new support case, new property, new user —
+# was refused for "nothing there names one" while the form asked for exactly
+# that. A select named for the input, fed by a source listing the entity, is
+# the record.
+
+def _choosing_doc():
+    return {
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Property", "fields": [{"name": "id", "type": "uuid"}, {"name": "name", "type": "string"}]},
+            {"id": "ENTITY-003", "name": "RefundCase", "fields": [{"name": "id", "type": "uuid"}]},
+        ], "relationships": []},
+        "workflows": [{"id": "FLOW-001", "name": "Refund Case Intake", "status": "PROPOSED", "steps": [],
+                       "inputs": [{"name": "property", "kind": "record", "entity": "ENTITY-001", "required": True},
+                                  {"name": "guestName", "kind": "field", "type": "string", "required": True}]}],
+        "pages": [{"id": "PAGE-007", "route": "/refund-cases/new", "pattern": "form",
+                   "data": {"primaryEntity": "ENTITY-003"}}],
+    }
+
+
+def _intake_form(options_from):
+    field = {"kind": "select", "name": "property", "label": "Property", "required": True, "options": []}
+    if options_from is not None:
+        field["interaction"] = {"optionsFrom": options_from}
+    return {"type": "Form", "props": {"workflow": "FLOW-001", "submitLabel": "Create case",
+                                       "fields": [field, {"kind": "text", "name": "guestName", "label": "Guest"}]},
+            "children": []}
+
+
+def _layout(form, sources):
+    return {"page": "PAGE-007", "dataSources": sources,
+            "root": {"type": "Container", "props": {}, "children": [form]}}
+
+
+def test_a_form_select_fed_by_the_entity_list_satisfies_a_record_input():
+    doc = _choosing_doc()
+    form = _intake_form({"source": "properties", "value": "id", "label": "name"})
+    layout = _layout(form, [{"name": "properties", "entity": "Property", "op": "list"}])
+    assert unsatisfied_inputs(doc, doc["pages"][0], layout, form, "FLOW-001") == []
+
+
+def test_a_select_over_the_wrong_list_does_not():
+    doc = _choosing_doc()
+    form = _intake_form({"source": "cases", "value": "id", "label": "id"})
+    layout = _layout(form, [{"name": "cases", "entity": "RefundCase", "op": "list"}])
+    out = unsatisfied_inputs(doc, doc["pages"][0], layout, form, "FLOW-001")
+    assert out and "needs a Property record" in out[0]
+
+
+def test_a_select_with_no_source_does_not():
+    doc = _choosing_doc()
+    form = _intake_form(None)
+    out = unsatisfied_inputs(doc, doc["pages"][0], _layout(form, []), form, "FLOW-001")
+    assert out and "needs a Property record" in out[0]
+
+
+def test_a_select_node_inside_the_form_counts_too():
+    doc = _choosing_doc()
+    form = {"type": "Form", "props": {"workflow": "FLOW-001", "submitLabel": "Create", "fields": [
+                {"kind": "text", "name": "guestName", "label": "Guest"}]},
+            "children": [{"type": "Select", "props": {"name": "property", "options": [],
+                                                       "optionsFrom": {"source": "properties", "value": "id", "label": "name"}},
+                          "children": []}]}
+    layout = _layout(form, [{"name": "properties", "entity": "Property", "op": "list"}])
+    assert unsatisfied_inputs(doc, doc["pages"][0], layout, form, "FLOW-001") == []

@@ -317,6 +317,59 @@ def _form_fields_of(form: dict) -> set[str]:
     return names
 
 
+def _form_chooses(doc: dict, layout: dict, control: dict, name: str,
+                  wanted: set[str]) -> bool:
+    """A Form that lets the person pick the record supplies it.
+
+    An intake form's property is not a record the screen already holds — it
+    is chosen on the form, from the list of properties. That is a select
+    field named for the input whose options come from a source listing that
+    entity: `interaction.optionsFrom.source` on a declarative field, or
+    `optionsFrom.source` on a Select node inside the Form. The rule accepted
+    only records the page holds, rows and repeats and `args`, so every
+    intake form on one real build — new refund case, guest request, new
+    support case, new property, new user — was refused for "nothing there
+    names one" while the form plainly asked for it.
+    """
+    form = _form_around(layout.get("root"), control)
+    if form is None:
+        return False
+    names = {name, f"{name}Id", f"{name}_id"}
+    for f in (form.get("props") or {}).get("fields") or []:
+        if not isinstance(f, dict) or str(f.get("name") or "") not in names:
+            continue
+        of = (f.get("interaction") or {}).get("optionsFrom") if isinstance(f.get("interaction"), dict) else None
+        of = of if isinstance(of, dict) else f.get("optionsFrom")
+        if isinstance(of, dict) and _entity_of_source(doc, layout, str(of.get("source") or "")) in wanted:
+            return True
+    for inner in _walk(form):
+        props = inner.get("props") or {}
+        if inner.get("type") in ("Select", "Combobox") and str(props.get("name") or "") in names:
+            of = props.get("optionsFrom")
+            if isinstance(of, dict) and _entity_of_source(doc, layout, str(of.get("source") or "")) in wanted:
+                return True
+    return False
+
+
+def _form_around(root: Any, target: dict) -> dict | None:
+    """The nearest Form holding `target`, or `target` when it is the Form."""
+    if target.get("type") == "Form":
+        return target
+
+    def walk(node: Any, form: dict | None):
+        if not isinstance(node, dict):
+            return None
+        here = node if node.get("type") == "Form" else form
+        for child in node.get("children") or []:
+            if child is target:
+                return here
+            found = walk(child, here)
+            if found is not None:
+                return found
+        return None
+    return walk(root, None)
+
+
 def _form_fields_around(root: Any, target: dict) -> set[str] | None:
     """The field names collected by the nearest Form holding `target` — or by
     `target` itself when it is the Form — or None when no Form does."""
@@ -465,6 +518,8 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
             by_name = _entity_id_by_name(doc)
             row_entity = _row_scoped(control, layout, doc)
             if row_entity and row_entity in {entity, by_name.get(entity, "")}:
+                continue
+            if _form_chooses(doc, layout, control, name, {entity, by_name.get(entity, "")} - {""}):
                 continue
             ent_name = next((e.get("name") for e in _live((doc.get("data") or {}).get("entities"))
                              if e.get("id") == entity), entity)
