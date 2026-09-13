@@ -1390,6 +1390,18 @@ export const Requirement = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   /** Recorded when confidence sat in the 0.70–0.90 band (§17). */
   assumption: z.string().optional(),
+  /**
+   * The Blueprint section that SATISFIES this requirement — a `SECTION_OWNER`
+   * key (`designSystem`, `security`, `pageLayouts`, `workflows`, …). A global
+   * requirement (an app-wide colour palette, a security posture) is satisfied
+   * by the one section that implements it, not by every page that merely runs
+   * under it. The observer grades each requirement against the node that owns
+   * it: a `designSystem`-owned palette requirement is judged against the
+   * design tokens, never demanded inside a page's component tree — which never
+   * carries colour and so could never satisfy it. Omitted means page-scoped
+   * (the historical default): judged by whichever artifact cites it.
+   */
+  owner: z.string().optional(),
 });
 
 /** §15 — per-area completeness, 0..1. Drives which questions Smith asks. */

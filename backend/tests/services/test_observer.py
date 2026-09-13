@@ -382,6 +382,63 @@ def test_the_critic_sees_the_slice_not_the_document(svc):
     assert "cannot edit" in system
 
 
+def test_a_requirement_owned_by_another_section_is_not_graded_here(svc):
+    # An app-wide palette requirement, owned by designSystem, must not be shown
+    # to — or cited against — the page-layout node: a component tree carries no
+    # colour and could never satisfy it. That mismatch looped a real page to
+    # `unrepaired` and blocked its projection.
+    svc.upsert("requirements",
+               {"description": "Charcoal and amber palette", "owner": "designSystem"},
+               natural_key="REQ:palette")
+    svc.upsert("requirements",
+               {"description": "A borrower can open the return page"},
+               natural_key="REQ:return")
+    rid = next(r["id"] for r in svc.doc["requirements"]
+               if r["description"].startswith("Charcoal"))
+    page_rid = next(r["id"] for r in svc.doc["requirements"]
+                    if r["description"].startswith("A borrower"))
+    # A page that (wrongly) cites the palette requirement among its own.
+    svc.upsert("pages",
+               {"name": "Return", "route": "/rentals/[id]/return", "purpose": "p",
+                "requirements": [rid, page_rid]},
+               natural_key=page_key("/rentals/[id]/return"))
+    svc.save()
+    pid = next(p["id"] for p in svc.doc["pages"]
+               if p["route"] == "/rentals/[id]/return")
+    ctx = observation_context(svc.doc, agent="a2ui_pages", subject=pid)
+    shown = {r["id"] for r in ctx["requirements"]}
+    assert rid not in shown                      # palette not graded on the layout
+    assert rid not in ctx["requirementsCited"]   # nor cited against it
+    assert page_rid in shown                     # the page-scoped one still is
+
+
+def test_the_owning_section_still_grades_its_requirement(svc):
+    # The palette requirement IS judged where it can be satisfied: designSystem
+    # (the accessibility agent owns that section).
+    svc.upsert("requirements",
+               {"description": "Charcoal and amber palette", "owner": "designSystem"},
+               natural_key="REQ:palette")
+    svc.save()
+    rid = next(r["id"] for r in svc.doc["requirements"]
+               if r["description"].startswith("Charcoal"))
+    ctx = observation_context(svc.doc, agent="accessibility")
+    assert rid in {r["id"] for r in ctx["requirements"]}
+
+
+def test_an_unowned_requirement_is_graded_everywhere_as_before(svc):
+    # No owner declared → page-scoped, the historical default: shown to every
+    # node, judged by whichever artifact cites it. Proves the scoping is the
+    # owner's doing, not a new blanket filter.
+    svc.upsert("requirements", {"description": "Something page-ish"},
+               natural_key="REQ:x")
+    svc.save()
+    rid = next(r["id"] for r in svc.doc["requirements"]
+               if r["description"].startswith("Something"))
+    for agent in ("a2ui_pages", "accessibility", "page_design"):
+        ctx = observation_context(svc.doc, agent=agent)
+        assert rid in {r["id"] for r in ctx["requirements"]}, agent
+
+
 def test_an_unavailable_critic_is_recorded_not_replaced(svc):
     svc.upsert("pages", {"name": "C", "route": "/c", "purpose": "p",
                          "users": ["ROLE-001"]}, natural_key=page_key("/c"))

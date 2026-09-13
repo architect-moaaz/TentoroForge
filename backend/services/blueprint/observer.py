@@ -306,16 +306,38 @@ def observation_context(
     produced = {s: _rows(doc, s, subject) for s in sections}
     produced = {s: v for s, v in produced.items() if v}
 
+    owned = set(sections)
+
+    def _in_scope(req: Mapping[str, Any]) -> bool:
+        """Whether this node is the one that should judge `req`.
+
+        A requirement names the section that SATISFIES it in `owner`. This node
+        judges a requirement when it owns that section, or when no owner is
+        declared — page-scoped, the historical default, judged by whichever
+        artifact cites it. A requirement owned by ANOTHER section is out of
+        scope here: an app-wide colour palette owned by `designSystem` is judged
+        against the design tokens, never demanded inside a page's component
+        tree, which carries no colour and so could never satisfy it. That
+        mismatch looped a page to `unrepaired` and blocked its projection.
+        """
+        owner = str(req.get("owner") or "")
+        return not owner or owner in owned
+
+    by_id = {r.get("id"): r for r in _live(doc.get("requirements"))}
+
     cited: set[str] = set()
     for value in produced.values():
         for row in (value if isinstance(value, list) else [value]):
             if isinstance(row, dict):
                 cited.update(row.get("requirements") or [])
+    # A row may cite a requirement another section owns; grading it here is the
+    # bug, so drop it — the owning node still judges it.
+    cited = {c for c in cited if _in_scope(by_id.get(c) or {})}
 
     requirements = [
         {k: r.get(k) for k in ("id", "title", "statement", "description",
                                "priority", "status") if r.get(k) is not None}
-        for r in _live(doc.get("requirements"))
+        for r in _live(doc.get("requirements")) if _in_scope(r)
     ]
     if subject:
         # A page's contract is the promise its layout is judged against.
