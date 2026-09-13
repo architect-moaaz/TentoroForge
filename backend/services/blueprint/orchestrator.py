@@ -1365,6 +1365,18 @@ def _execute(
                 commit=commit, user_request=user_request,
                 report=report, ledger=ledger,
             )
+            # PERSIST AS GENERATED. A composed page reaches disk the moment its
+            # layout commits — under the same lock that guarded the commit, so it
+            # reads exactly what landed — rather than waiting for the frontend
+            # node. A build interrupted at page_layouts then still has, and can
+            # render, the pages it made. Best-effort; never fail the run over it.
+            if verdict == "applied" and commit and app_root \
+                    and key == "page_layouts" and spec.subject:
+                try:
+                    from services.blueprint.projection import project_page_schema
+                    project_page_schema(svc.doc, spec.subject, app_root)
+                except Exception:  # noqa: BLE001 — the node re-projects at the end
+                    pass
         state.in_flight.discard(spec.subject)
         if verdict == "retry":
             state.queue.append(spec.subject)

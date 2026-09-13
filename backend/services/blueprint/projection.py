@@ -471,6 +471,53 @@ def project_frontend(doc: dict, app_root: str | Path,
     }
 
 
+def project_page_schema(doc: dict, page_id: str, app_root: str | Path) -> str | None:
+    """Persist ONE page's schema to disk the moment its layout is composed.
+
+    The whole-app projection (``apply_frontend_projection``) runs in the frontend
+    node, AFTER every page has composed — so a build interrupted at page_layouts
+    kept the composed pages in the Blueprint but had none of them on disk, and
+    could render nothing. This writes the just-composed page's schema (and keeps
+    the route registry current so it resolves immediately), so a partial build
+    persists — and can render — the pages it has made.
+
+    Best-effort and idempotent: it writes only THIS page, never prunes another,
+    and skips a page that only planned to a placeholder (nothing real yet). The
+    frontend node still re-projects the whole app — shell, tokens, pruning — at
+    the end; this is the incremental head-start, not a replacement.
+
+    Returns the slug written, or ``None`` when there was nothing to persist.
+    """
+    from services.blueprint.page_planner import load_catalog, plan_pages
+
+    if not page_id or not app_root:
+        return None
+    try:
+        planned = (plan_pages(doc, load_catalog()) or {}).get("planned") or {}
+    except Exception:  # noqa: BLE001 — planning must not fail the run it records
+        return None
+    schema = planned.get(page_id)
+    if not isinstance(schema, dict) or (schema.get("meta") or {}).get("fallback"):
+        return None  # not composed to anything real yet — nothing to write
+
+    pages = {p.get("id"): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+    name = _route_slug((pages.get(page_id) or {}).get("route") or page_id)
+    root = Path(app_root) / "src" / "schemas"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{name}.json").write_text(
+            json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
+        # Keep the registry in step with what is on disk, so the route resolves
+        # the instant its schema lands — a schema with no registry entry is a
+        # page that may never render.
+        present = sorted(
+            f"src/schemas/{p.stem}.json" for p in root.glob("*.json"))
+        _write_route_registry(root, present)
+    except Exception:  # noqa: BLE001 — a failed early write is retried at the node
+        return None
+    return name
+
+
 def _route_slug(route: str) -> str:
     """``/roles/[id]`` -> ``roles/[id]``; ``/`` -> ``home``.
 
