@@ -1146,7 +1146,11 @@ NODE_TASKS: dict[str, str] = {
         "user or one workspace needs an ownershipRules entry naming the entity "
         "and the column that scopes it, because that object is what the data "
         "engine turns into a WHERE clause \u2014 a prose rule beside it "
-        "documents the policy and enforces nothing. Where authorisation really "
+        "documents the policy and enforces nothing. A rule scoped to a "
+        "workspace also names `actorColumn`: the users column whose value is "
+        "the actor's workspace (homePropertyId, organisationId), because the "
+        "session carries that column and the engine compares against it. "
+        "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
         "so the absence of a scoping object reads as a decision."
     ),

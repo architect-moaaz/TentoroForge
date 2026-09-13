@@ -66,7 +66,13 @@ export const SelectNode = z.object({
   type: z.literal("Select"),
   props: z.object({
     ...baseField,
-    options: z.array(SelectOption).min(1),
+    // DECLARED OPTIONS, OR A SOURCE. Options written here number at least
+    // one; a dropdown whose rows come from a list at render time names the
+    // list in `optionsFrom` and declares none. `options` was required with
+    // `min(1)` beside an optional `optionsFrom`, so every runtime-sourced
+    // Select node was refused ("'options' is a required property") while the
+    // declarative Form field allowed exactly that shape.
+    options: z.array(SelectOption).min(1).optional(),
     optionsFrom: OptionsFrom.optional(),
     // Inline-add for FK dropdowns — when optionsFrom returns zero rows and
     // the referenced entity has a create route, render "+ Add new <X>"

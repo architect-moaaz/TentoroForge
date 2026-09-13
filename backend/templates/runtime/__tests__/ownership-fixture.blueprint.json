@@ -10,7 +10,13 @@
     "attribution rule: postedByUserId is filled from the session but must never",
     "narrow a read - the case a name-based heuristic would get wrong, and the one",
     "the live ATS blueprint depends on. Ticket is drift: the rule names a column",
-    "the table does not carry, and the engine has to fail closed on it."
+    "the table does not carry, and the engine has to fail closed on it.",
+    "",
+    "RefundCase is scoped to a workspace: propertyId is compared to the users",
+    "column the rule names (actorColumn: homePropertyId), so a hotel group whose",
+    "managers sit at a home property reads only that property's cases. Finance",
+    "is exempt. Without actorColumn the engine fell back to a workspaceId the",
+    "session did not carry and every property-scoped read returned nothing."
   ],
   "data": {
     "entities": [
@@ -82,6 +88,29 @@
             "type": "timestamp"
           }
         ]
+      },
+      {
+        "name": "RefundCase",
+        "table": "refund_cases",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "propertyId",
+            "type": "uuid"
+          },
+          {
+            "name": "guestName",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
       }
     ]
   },
@@ -109,6 +138,17 @@
         "kind": "attribution",
         "scope": "user",
         "note": "Filled from the session; must not narrow any read."
+      },
+      {
+        "entity": "RefundCase",
+        "column": "propertyId",
+        "kind": "scope",
+        "scope": "workspace",
+        "actorColumn": "homePropertyId",
+        "unscopedRoles": [
+          "finance"
+        ],
+        "note": "A refund case belongs to the property it was raised at; the actor's home property is the workspace."
       }
     ]
   }

@@ -276,16 +276,50 @@ def _entity_id_by_name(doc: dict) -> dict:
             for e in _live((doc.get("data") or {}).get("entities"))}
 
 
+def _route_record_entities(doc: dict, route: str) -> set[str]:
+    """The entities a route names through its OWN `[id]` segments.
+
+    `/tools/[id]/request` carries a ToolListing id even though the request it
+    submits is a Rental: the id-bearing prefix `/tools/[id]` is the ToolListing
+    detail page, and that page declares what the `[id]` is. So the record the
+    route holds is not the page's `primaryEntity` (the Rental being created) but
+    the entity of the detail page that owns the prefix. Resolving it from that
+    sibling page's own `primaryEntity` keeps the answer evidence-based rather
+    than parsed from the URL stem. Returns entity ids."""
+    by_route = {str(p.get("route") or ""): p for p in _live(doc.get("pages"))}
+    out: set[str] = set()
+    prefix = ""
+    for seg in route.split("/"):
+        if not seg:
+            continue
+        prefix = f"{prefix}/{seg}"
+        if not _ROUTE_HAS_ID.search(f"/{seg}"):
+            continue
+        owner = by_route.get(prefix)
+        pe = str((owner.get("data") or {}).get("primaryEntity") or "") if owner else ""
+        if pe:
+            out.add(pe)
+    return out
+
+
 def _record_in_scope(doc: dict, page: dict, entity: str) -> bool:
     route = str(page.get("route") or "")
     primary = str((page.get("data") or {}).get("primaryEntity") or "")
     by_name = _entity_id_by_name(doc)
     wanted = {entity, by_name.get(entity, "")} - {""}
+    if not _ROUTE_HAS_ID.search(route):
+        return False
     # A detail route ends with the id (`/records/[id]`); an edit route carries
     # it mid-path (`/records/[id]/edit`). Both hold the record — matching only
     # `endswith("]")` dropped edit pages, whose Save form then read as having no
     # record for its Update workflow to name.
-    return bool(_ROUTE_HAS_ID.search(route)) and primary in wanted
+    if primary in wanted:
+        return True
+    # An action sub-page (`/tools/[id]/request`) is ABOUT the record it creates
+    # (Rental) but still holds the record its `[id]` names (ToolListing), which
+    # is exactly the record its workflow consumes. The page's `primaryEntity`
+    # never sees it — so consult the entity the route itself names.
+    return bool(wanted & _route_record_entities(doc, route))
 
 
 def _form_fields_of(form: dict) -> set[str]:
@@ -488,6 +522,39 @@ def _session_filled_fields(doc: dict) -> set[str]:
     }
 
 
+def _session_filled_records(doc: dict, page: dict) -> set[str]:
+    """Record-input names the RUNTIME supplies from the session, so a Form on
+    this page must NOT be asked to name them.
+
+    The record analog of :func:`_session_filled_fields`. A KYC intake form
+    (`/kyc-verifications/new`) runs a workflow needing a ``member`` record — but
+    that member is the signed-in person filling it in about themselves, never a
+    record the screen displays or the user picks. The page's own primary entity
+    (``KycVerification``) carries a ``scope``/``user`` ownership rule on
+    ``memberId``: the runtime stamps that column from the session, exactly as it
+    fills a ``scope`` field. A ``memberId`` column therefore supplies a
+    ``member`` record. Scoping this to ownership rules on THIS page's primary
+    entity keeps it tight — a KYC officer approving *someone else's* verification
+    (primary ``KycVerification``, no ``member`` record input) is untouched, and a
+    page whose primary has no such rule still must name the record."""
+    primary = str((page.get("data") or {}).get("primaryEntity") or "")
+    id_to_name = {str(e.get("id")): str(e.get("name") or "")
+                  for e in _live((doc.get("data") or {}).get("entities"))}
+    primary_names = {primary, id_to_name.get(primary, "")} - {""}
+    out: set[str] = set()
+    for r in (doc.get("security") or {}).get("ownershipRules") or []:
+        if not isinstance(r, dict) or r.get("kind") not in ("scope", "attribution"):
+            continue
+        if str(r.get("entity") or "") not in primary_names:
+            continue
+        col = str(r.get("column") or "")
+        out.add(col)
+        for suf in ("Id", "_id", "ID"):
+            if col.endswith(suf) and len(col) > len(suf):
+                out.add(col[: -len(suf)])
+    return out
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -498,6 +565,7 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     args = props.get("args") if isinstance(props.get("args"), dict) else {}
     label = props.get("label") or props.get("submitLabel") or control.get("type")
     session_filled = _session_filled_fields(doc)
+    session_records = _session_filled_records(doc, page)
     out: list[str] = []
     fields = None
     for inp in wf.get("inputs") or []:
@@ -514,6 +582,11 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
         if inp.get("kind") == "record":
             entity = str(inp.get("entity") or "")
             if _record_in_scope(doc, page, entity) or _reaches(doc, page, entity):
+                continue
+            if name in session_records:
+                # The signed-in person is this record (a member submitting their
+                # own KYC); the runtime stamps it from the session, so a Form
+                # must not be asked to name it.
                 continue
             by_name = _entity_id_by_name(doc)
             row_entity = _row_scoped(control, layout, doc)

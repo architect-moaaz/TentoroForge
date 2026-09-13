@@ -107,7 +107,7 @@ export interface DataEngineContext {
   /** The acting user. `workspaceId` is read by a scope:"workspace" ownership
    *  rule; a session that does not carry one cannot reach workspace-scoped
    *  rows, which is the safe direction to fail. */
-  user?: { id: string; role?: string; email?: string; workspaceId?: string };
+  user?: { id: string; role?: string; email?: string; workspaceId?: string; [column: string]: unknown };
   /** Slice-4: original (plaintext) column names the CALLER is explicitly
    *  asking to see unmasked. The route parses `?unmask=col1&unmask=col2`
    *  and passes them here. The read path only honours the request when
@@ -262,8 +262,13 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
 
 /** The actor value a rule compares against, or undefined when we have none. */
 function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
+  // THE RULE SAYS WHICH USERS COLUMN IS THE WORKSPACE. `actorColumn` names it
+  // (homePropertyId, organisationId); the session carries the user's row, so
+  // the value is read off it. A rule without one falls back to the session's
+  // `workspaceId`, which a session may still not carry — the safe direction.
+  const user = ctx.user as Record<string, unknown> | undefined;
   const v = rule.scope === "workspace"
-    ? (ctx.user as any)?.workspaceId
+    ? (rule.actorColumn ? user?.[rule.actorColumn] : user?.workspaceId)
     : ctx.user?.id;
   return v === undefined || v === null || v === "" ? undefined : v;
 }

@@ -144,3 +144,15 @@ describe("inputs strict mode", () => {
     expect(r.props.max).toBe("2099-12-31");
   });
 });
+
+describe("SelectNode: declared options, or a source", () => {
+  it("accepts a runtime-sourced Select with no declared options", () => {
+    const r = SelectNode.parse({ type: "Select", props: { name: "propertyId", label: "Property",
+      optionsFrom: { source: "properties", value: "id", label: "name" } } });
+    expect(r.props.options).toBeUndefined();
+    expect(r.props.optionsFrom?.source).toBe("properties");
+  });
+  it("still refuses an empty declared list", () => {
+    expect(() => SelectNode.parse({ type: "Select", props: { name: "x", label: "X", options: [] } })).toThrow();
+  });
+});

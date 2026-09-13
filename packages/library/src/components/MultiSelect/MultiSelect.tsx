@@ -8,9 +8,10 @@ import { useUrlState } from "../../style/useUrlState";
 type Props = z.infer<typeof MultiSelectNode>["props"];
 
 export function MultiSelect({
-  name, label, placeholder = "Select…", options, selected,
+  name, label, placeholder = "Select…", options: declared, selected,
   showSearch, maxSelectionLabel = 3,
 }: Props) {
+  const options = declared ?? [];
   const initialCsv = (selected ?? []).join(",");
   const [valueCsv, setValueCsv] = useUrlState(name, initialCsv);
   const [open, setOpen] = React.useState(false);

@@ -1148,6 +1148,24 @@ export const RecordScopeRule = z.object({
       "where the product genuinely grants it every row.",
     )
     .default([]),
+  /**
+   * WHERE THE ACTOR'S VALUE COMES FROM. A `scope: "workspace"` rule compares
+   * the row's column to "the workspace id the session carries", and nothing
+   * said which users column that is. On a hotel group whose GMs are scoped
+   * to a home property the rule was written, the session carried no
+   * workspace id, and every property-scoped read returned nothing. The
+   * column on the users table names it; the session carries it; the engine
+   * compares to it.
+   */
+  actorColumn: z
+    .string()
+    .describe(
+      "For scope \"workspace\": the column on the users table whose value is " +
+      "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
+      "session carries that column and the engine compares `column` to it. " +
+      "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
   note: z.string().describe("Why this rule exists, in one sentence.").default(""),
 }).describe(
   "An enforceable rule about one column and the acting user. A `scope` rule " +

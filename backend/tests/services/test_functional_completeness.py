@@ -44,6 +44,89 @@ def test_without_the_ownership_rule_the_field_is_demanded():
     assert "organisationId" in msgs
 
 
+def _route_id_doc(with_detail=True):
+    """An action sub-page (`/tools/[id]/request`) that CREATES a Rental but whose
+    `[id]` names the ToolListing being requested; the id-bearing prefix
+    `/tools/[id]` is the ToolListing detail page that declares what the id is."""
+    pages = [{"id": "PAGE-REQ", "route": "/tools/[id]/request",
+              "data": {"primaryEntity": "ENTITY-RENTAL"}}]
+    if with_detail:
+        pages.append({"id": "PAGE-TOOL", "route": "/tools/[id]",
+                      "data": {"primaryEntity": "ENTITY-TOOL"}})
+    return {
+        "pages": pages,
+        "data": {"entities": [{"id": "ENTITY-TOOL", "name": "ToolListing"},
+                              {"id": "ENTITY-RENTAL", "name": "Rental"}]},
+        "workflows": [{"id": "FLOW-REQ", "name": "Request Rental", "inputs": [
+            {"name": "toolListing", "kind": "record", "entity": "ENTITY-TOOL", "required": True},
+        ]}],
+    }
+
+
+def test_a_record_named_by_the_routes_own_id_segment_is_in_scope():
+    # The page's primaryEntity is the Rental it creates, so the ToolListing the
+    # workflow consumes is invisible to a primaryEntity-only check — but the
+    # route's own `[id]` (via the `/tools/[id]` detail page) names it.
+    doc = _route_id_doc(with_detail=True)
+    control = {"type": "Form", "props": {"submitLabel": "Send Request", "workflow": "FLOW-REQ"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-REQ"))
+    assert msgs == ""
+
+
+def test_without_the_detail_page_the_routes_id_names_nothing():
+    # No `/tools/[id]` page exists, so the route's id resolves to no entity and
+    # the ToolListing is genuinely unnamed — still flagged. Proves the scope
+    # comes from the sibling detail page's evidence, not from parsing the URL.
+    doc = _route_id_doc(with_detail=False)
+    control = {"type": "Form", "props": {"submitLabel": "Send Request", "workflow": "FLOW-REQ"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-REQ"))
+    assert "ToolListing" in msgs and "toolListing" in msgs
+
+
+def _kyc_doc(with_rule=True):
+    """A self-service intake (`/kyc-verifications/new`) whose workflow needs a
+    `member` record — the signed-in person, stamped by the runtime from the
+    session via the KycVerification's `memberId` scope column."""
+    rules = ([{"column": "memberId", "entity": "KycVerification",
+               "kind": "scope", "scope": "user"}] if with_rule else [])
+    return {
+        "pages": [{"id": "PAGE-KYC", "route": "/kyc-verifications/new",
+                   "data": {"primaryEntity": "ENTITY-KYC"}}],
+        "data": {"entities": [{"id": "ENTITY-MEMBER", "name": "Member"},
+                              {"id": "ENTITY-KYC", "name": "KycVerification"}]},
+        "security": {"ownershipRules": rules},
+        "workflows": [{"id": "FLOW-KYC", "name": "Submit KYC Verification", "inputs": [
+            {"name": "member", "kind": "record", "entity": "ENTITY-MEMBER", "required": True},
+            {"name": "documentNumber", "kind": "field", "type": "text", "required": True},
+        ]}],
+    }
+
+
+def test_the_acting_users_own_record_is_session_filled():
+    # `member` is the signed-in person filling in their own KYC, supplied from
+    # the session via the primary entity's `memberId` scope column — a Form must
+    # not name it. A genuine field like `documentNumber` is still demanded.
+    doc = _kyc_doc(with_rule=True)
+    control = {"type": "Form", "props": {"submitLabel": "Submit", "workflow": "FLOW-KYC"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-KYC"))
+    assert "Member record" not in msgs
+    assert "documentNumber" in msgs
+
+
+def test_without_the_scope_rule_the_record_is_demanded():
+    # No ownership rule ties the member to the session, and the route names no
+    # Member -> the record is genuinely unnamed and still flagged. Proves the
+    # exemption is the manifest's doing, not a special-cased entity name.
+    doc = _kyc_doc(with_rule=False)
+    control = {"type": "Form", "props": {"submitLabel": "Submit", "workflow": "FLOW-KYC"}}
+    layout = {"root": {"type": "Stack", "props": {}, "children": [control]}}
+    msgs = " ".join(unsatisfied_inputs(doc, doc["pages"][0], layout, control, "FLOW-KYC"))
+    assert "Member record" in msgs
+
+
 def _doc(root, sources=None, workflows=("FLOW-001",)):
     return {
         "pages": [{"id": "PAGE-001", "route": "/plants"}],

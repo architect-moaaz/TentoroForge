@@ -70,8 +70,8 @@ def test_a_select_named_after_a_foreign_key_keeps_its_source():
     schema = translate(_payload(comps), REG, route="/refund-cases/new", page_id="PAGE-007")["schema"]
     sel = _find(schema["root"], "Select")
     assert sel["props"]["optionsFrom"] == {"source": "properties", "value": "id", "label": "name"}
-    # A standalone Select still needs a declared option by contract; the
-    # runtime-sourced dropdown that ships is the declarative Form field above.
+    assert "options" not in sel["props"]
+    assert validate_props({"root": sel}, load_catalog()) == []
 
 
 def test_a_foreign_key_select_with_nothing_said_still_gets_its_list():
