@@ -59,3 +59,30 @@ def translate_layout_vocabulary(result: Any, doc: dict | None) -> None:
         book = _SourceBook(registry, sources)
         _translate_option_sources(body.get("root"), book, registry)
         body["dataSources"] = book.sources
+        _name_the_signed_in_user(body)
+
+
+#: What a composer calls the signed-in person, and what the renderer calls them.
+#: The interpolation scope carries `user: ctx.user` — `{{user.id}}`,
+#: `{{user.homePropertyId}}`. A queue composed with
+#: `{{currentUser.homePropertyId}}` interpolated to nothing, so the filter it
+#: sent was empty and the page showed no cases even to the role it was for.
+_USER_ALIASES = ("currentUser", "sessionUser", "me", "$user")
+
+
+def _name_the_signed_in_user(body: dict) -> None:
+    """Rewrite every `{{<alias>.x}}` binding in a layout to `{{user.x}}`."""
+    import re
+    pattern = re.compile(r"\{\{\s*(?:%s)\." % "|".join(re.escape(a) for a in _USER_ALIASES))
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in list(node.items()):
+                node[k] = walk(v)
+            return node
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str) and "{{" in node:
+            return pattern.sub("{{user.", node)
+        return node
+    walk(body)
