@@ -88,7 +88,12 @@ def _model(dry_run: bool, model_name: str) -> Any:
         )
     from services.blueprint.executors import AnthropicModel
 
-    return AnthropicModel(model=model_name)
+    # A TURN PLAN IS A PROPOSAL PER ARTIFACT, and adaptive thinking shares the
+    # same cap. At the default budget a request for a dozen workflows came
+    # back cut off mid-JSON. The large budget is free when unused (see the
+    # executors' max_tokens table) and a whole change in one plan is what
+    # keeps the proposals consistent with each other.
+    return AnthropicModel(model=model_name, max_tokens=64000)
 
 
 def _open(

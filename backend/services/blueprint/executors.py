@@ -139,6 +139,11 @@ class ModelReply:
 
     text: str
     usage: Usage | None = None
+    #: Why the model stopped — `end_turn`, `max_tokens`, … A reply cut off at
+    #: the output cap is not a malformed reply, and a reader that cannot tell
+    #: the two apart reports "was not JSON" for a plan that was simply longer
+    #: than the budget. None when the transport does not say.
+    stop_reason: str | None = None
 
 
 class ModelRefused(RuntimeError):
@@ -487,7 +492,7 @@ class AnthropicModel:
             output_tokens=getattr(u, "output_tokens", 0) or 0,
             cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
             cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
-        ))
+        ), stop_reason=getattr(response, "stop_reason", None))
 
 
 

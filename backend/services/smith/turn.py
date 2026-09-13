@@ -632,6 +632,17 @@ def interpret(
             prompt += _catalog_addenda(getattr(last, "catalogs", ()))
         raw = client(system=system, user=prompt, schema=TURN_SCHEMA)
         text = raw.text if isinstance(raw, ModelReply) else raw
+        if isinstance(raw, ModelReply) and raw.stop_reason == "max_tokens":
+            # THE PLAN WAS LONGER THAN THE BUDGET, NOT WRONG. A request for a
+            # dozen workflows in one turn came back as 50,000 characters of
+            # valid JSON cut mid-string, was reported as "was not JSON", and
+            # re-asked once with that verdict appended — which produced the
+            # same cut-off reply. Say what happened; asking again the same
+            # way cannot help, and the user can split the request.
+            raise TurnRejected(
+                "the reply was cut off at the output limit "
+                f"({len(text):,} characters) — the change is too large for one "
+                "turn; ask for part of it at a time")
         try:
             plan = parse_turn(text)
             validate_turn(plan, doc, asked=asked, agent=agent)
