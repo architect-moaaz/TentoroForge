@@ -603,6 +603,9 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
+    from services.blueprint.layout_vocabulary import translate_layout_vocabulary
+    translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
     check_workflow_steps(result, svc.doc)
     check_business_rules(result, svc.doc)

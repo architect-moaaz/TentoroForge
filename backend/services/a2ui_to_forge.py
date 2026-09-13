@@ -229,7 +229,13 @@ def _slug_for(entity: str, registry: dict) -> str:
 def _source_name_for(entity: str, registry: dict) -> str:
     """The list source a page reads an entity's rows from, as an identifier:
     `properties`, `refundCases` — the slug with its dashes folded."""
-    parts = [p for p in _slug_for(entity, registry).replace("_", "-").split("-") if p]
+    ent = (registry.get("entities") or {}).get(entity) or {}
+    slug = str(ent.get("slug") or ent.get("plural") or "")
+    if not slug or slug.lower() == entity.lower():
+        # No table name to read the plural off: say it the plain English way.
+        base = ent.get("camel") or (entity[:1].lower() + entity[1:])
+        slug = base[:-1] + "ies" if base.endswith("y") and base[-2:-1] not in "aeiou" else base + "s"
+    parts = [p for p in slug.replace("_", "-").split("-") if p]
     return parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:]) if parts else entity.lower()
 
 
