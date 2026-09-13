@@ -248,8 +248,31 @@ export function useBlueprintRun(projectId: string | null) {
       } else if (snap.status === "error") {
         setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
       } else if (snap.status === "complete") {
+        // Apply the FINAL node states the snapshot carries — every node done,
+        // preview included. Flipping only `status` left the last active poll's
+        // nodes frozen, and that poll caught the run on its last node
+        // (`preview`) still running, so the panel stayed stuck at preview after
+        // the run had actually ended.
         setRun((prev) =>
-          prev.status === "running" ? { ...prev, status: "complete" } : prev,
+          prev.status === "running"
+            ? {
+                ...prev,
+                nodes:
+                  Array.isArray(snap.nodes) && snap.nodes.length > 0
+                    ? snap.nodes.map((n) => ({
+                        key: n.key,
+                        state: n.state,
+                        subject: n.subject,
+                        calls: n.calls ?? 0,
+                      }))
+                    : prev.nodes,
+                nodesDone: snap.nodesDone ?? prev.nodesDone,
+                nodesTotal: snap.nodesTotal ?? prev.nodesTotal,
+                callsDone: snap.callsDone ?? prev.callsDone,
+                awaitingApproval: Boolean(snap.awaitingApproval),
+                status: "complete",
+              }
+            : prev,
         );
       }
     } catch {
@@ -584,11 +607,21 @@ export function reduce(
 
     case "done": {
       const rep = (data.report ?? {}) as Record<string, unknown>;
+      const awaiting = Boolean(data.awaitingApproval);
       return {
         ...prev,
         status: "complete",
-        awaitingApproval: Boolean(data.awaitingApproval),
+        awaitingApproval: awaiting,
         unbuilt: (rep.unbuilt as BlueprintRun["unbuilt"]) ?? [],
+        // A completed run (not a pause at the approval gate) has no node still
+        // running. Mark any lingering one done so the panel never freezes on
+        // the last node — `preview` — if its `node:done` was missed on a stream
+        // that blinked just before the terminal event.
+        nodes: awaiting
+          ? prev.nodes
+          : prev.nodes.map((n) =>
+              n.state === "running" ? { ...n, state: "done", subject: undefined } : n,
+            ),
       };
     }
 
