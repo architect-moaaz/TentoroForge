@@ -55,3 +55,28 @@ On `188b8l0s`, before the verb existed:
 
 `incremental_plan` over "the pages changed" was rejected for this because it seeds every node that writes
 `pages`, including the page-set planner, which is the churn the change exists to avoid.
+
+## Later the same day: what the recomposition and the workflows change surfaced
+
+Each of these was found on Criterion Refunds v2 after route 1 and fixed on the same branch, with tests:
+
+- **A form that chooses the record supplies it** (`functional_completeness._form_chooses`, guidance in
+  `a2ui_authority._input_guidance`). The record rule accepted a required record input only from the page's own
+  record, a table row, a repeat or `args`; every intake form was refused for the property it asked for.
+- **A plan cut off at the output limit says so** (`ModelReply.stop_reason`, `interpret`), and the CLI gives Smith's
+  interpretation the 64k budget. A twelve-workflow request came back as 50,891 characters of JSON cut mid-string.
+- **A plan the Blueprint refuses is re-asked once with the verdict** (`Smith.turn`, `interpret(rejected=…)`), and the
+  workflow catalogue addendum states what a condition may be (FEEL, no subqueries).
+- **A dropdown says where its options come from in the contract's words** (`a2ui_to_forge.option_source`,
+  `_translate_option_sources`, and the composer-agnostic seam `layout_vocabulary.translate_layout_vocabulary` in
+  `apply_agent_result`). Both composers write `optionsFrom: {entity, labelField, valueField}`; the contract reads
+  `interaction.optionsFrom: {source, value, label}`. A placeholder written as an option with value "" becomes
+  `placeholder`; label-only items take their label as value.
+- **A create page offers no workflow that needs its own record** (`a2ui_authority.launchable`, now handed the whole
+  registry). "Edit Property" beside "Create Property" on `/properties/new` bound Save to Edit.
+- **A refused composition is kept for reading** (`blueprint/refusals.py`, `.forge/refused/`). Without it, three rounds
+  of "needs a Property record" could not be diagnosed.
+
+Prompt-to-change on a built app goes through `services.smith.cli --output-dir <project> --run-agents "<request>"`;
+the chat route only builds on approval or runs verbs. Sequence that took v2 from 8 to 15 composed pages: the
+workflows request through the CLI (version 133, 13 new workflows), then `compose_route` turns per refused page.

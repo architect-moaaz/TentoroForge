@@ -1267,9 +1267,32 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
                 for item in items:
                     if isinstance(item, dict) and "value" not in item and item.get("label") is not None:
                         item["value"] = str(item["label"])
+            # A PLACEHOLDER IS NOT AN OPTION. "Select a category" with value ""
+            # is how a composer says what an empty select shows; the contract
+            # says it with `placeholder` and refuses an option with no value.
+            _placeholder_out_of_options(props)
+            if kind == "Form":
+                for field in props.get("fields") or []:
+                    if isinstance(field, dict):
+                        _placeholder_out_of_options(field)
         for child in node.get("children") or []:
             walk(child)
     walk(root)
+
+
+def _placeholder_out_of_options(holder: dict) -> None:
+    options = holder.get("options")
+    if not isinstance(options, list):
+        return
+    kept = []
+    for opt in options:
+        if isinstance(opt, dict) and str(opt.get("value") or "") == "":
+            if opt.get("label") and not holder.get("placeholder"):
+                holder["placeholder"] = str(opt["label"])
+            continue
+        kept.append(opt)
+    if len(kept) != len(options):
+        holder["options"] = kept
 
 
 def translate(payload: dict, registry: dict, route: str = "/",

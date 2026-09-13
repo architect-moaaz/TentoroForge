@@ -89,3 +89,20 @@ def test_items_named_by_label_alone_take_it_as_their_value():
         {"type": "Tabs", "props": {"items": [{"label": "Front desk"}, {"label": "Guest", "value": "guest"}]}, "children": []}]}
     _translate_option_sources(root, _Binder(REG, {}), REG)
     assert [i["value"] for i in root["children"][0]["props"]["items"]] == ["Front desk", "guest"]
+
+
+def test_a_placeholder_option_becomes_the_placeholder():
+    """/support-cases/new was refused for `options.0.value: '' should be
+    non-empty`: the composer wrote the empty select's caption as an option."""
+    from services.a2ui_to_forge import _translate_option_sources, _Binder
+    root = {"type": "Form", "props": {"fields": [
+        {"kind": "select", "name": "caseType", "label": "Type",
+         "options": [{"label": "Select a type", "value": ""}, {"label": "Complaint", "value": "COMPLAINT"}]}]},
+        "children": [{"type": "Select", "props": {"name": "priority", "options": [
+            {"label": "Choose…", "value": ""}, {"label": "High", "value": "HIGH"}]}, "children": []}]}
+    _translate_option_sources(root, _Binder(REG, {}), REG)
+    field = root["props"]["fields"][0]
+    assert field["options"] == [{"label": "Complaint", "value": "COMPLAINT"}]
+    assert field["placeholder"] == "Select a type"
+    sel = root["children"][0]["props"]
+    assert sel["options"] == [{"label": "High", "value": "HIGH"}] and sel["placeholder"] == "Choose…"
