@@ -179,6 +179,63 @@ def _capture_pages(output_dir: str, doc: Mapping[str, Any]) -> list[dict]:
     return shots
 
 
+def _functional_findings(output_dir: str, doc: Mapping[str, Any]) -> list[dict]:
+    """Faults from driving the app's REAL controls — do the buttons, forms,
+    lists and links actually work. forge-verify clicks them against the served
+    app and reports what did nothing or errored. ``[]`` on any failure or when
+    there is nothing to drive, so the visual review still stands on its own.
+
+    Findings share the ``{route, kind, severity, note}`` shape of the visual
+    ones, so the window shows them beside each page and the same bridge turns
+    them into re-compose briefs — a control wired to the wrong action is a page
+    the composer can fix.
+    """
+    try:
+        from services.interaction_extractor import extract_interactions
+        from services.forge_verify_client import ForgeVerifyClient
+    except Exception:  # noqa: BLE001
+        return []
+    short_id = str((doc.get("application") or {}).get("id") or Path(output_dir).name)
+    base = os.getenv(_PREVIEW_BASE, "http://localhost:6503/p").rstrip("/")
+    base_url = f"{base}/{short_id}"
+    try:
+        interactions = extract_interactions(output_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[review] interaction extract failed: %s", exc)
+        return []
+    if not interactions:
+        return []
+
+    async def _go() -> dict:
+        async with ForgeVerifyClient() as c:
+            if not await c.healthz():
+                return {}
+            rid = await c.run(short_id, "preview", base_url, list(interactions))
+            return await c.poll_until_done(rid, timeout=240)
+
+    try:
+        report = _run_async(_go())
+    except Exception as exc:  # noqa: BLE001 — a functional check is best-effort
+        logger.warning("[review] functional check failed: %s", exc)
+        return []
+
+    out: list[dict] = []
+    for f in ((report or {}).get("report") or report or {}).get("faults") or []:
+        if not isinstance(f, dict) or f.get("passed") or f.get("flaky"):
+            continue
+        it = f.get("interaction") or {}
+        route = str(it.get("route") or "").strip()
+        if not route:
+            continue
+        label = str(it.get("label") or it.get("kind") or "control")
+        ev = f.get("evidence") or {}
+        reason = str(ev.get("reason") or ev.get("classification")
+                     or ev.get("note") or "did nothing when used")
+        out.append({"route": route, "kind": "dead_control", "severity": "error",
+                    "note": f"{label} ({it.get('kind')}) — {reason}"[:400]})
+    return out
+
+
 def make_critique(
     output_dir: str,
     read_doc: Callable[[], Mapping[str, Any]],
@@ -201,15 +258,22 @@ def make_critique(
             emit("review", {"phase": "shots", "pages": [
                 {"route": s["route"], "image": _data_uri(s["png"])}
                 for s in shots]})
+        # Visual + domain: does it look right and match what was asked.
         try:
             from services.visual_qa_critic import critique_images
-            findings = _run_async(critique_images(
+            visual = _run_async(critique_images(
                 shots, identity=_domain_identity(doc)))
         except Exception as exc:  # noqa: BLE001 — a failed review is a skipped one
             logger.warning("[review] visual critic failed: %s", exc)
-            if emit is not None:
-                emit("review", {"phase": "analysis", "findings": []})
-            return None
+            visual = []
+        # Functional: do the buttons, forms, lists and links actually work.
+        functional = _functional_findings(output_dir, doc)
+        findings = list(visual) + list(functional)
+        if not visual and not functional:
+            # Nothing rendered a critique AND nothing functional ran — treat as
+            # a review that could not judge, not a clean page.
+            if not shots:
+                return None
         if emit is not None:
             emit("review", {"phase": "analysis", "findings": findings})
         return {"pages_reviewed": [s["route"] for s in shots],
