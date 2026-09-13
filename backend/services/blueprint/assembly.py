@@ -87,9 +87,7 @@ PROJECTED_PATHS: tuple[str, ...] = (
 #:
 #: Directory-level ownership cannot express "these 28 files are generated and
 #: this one is not", so the exception is stated by name.
-SCAFFOLD_OWNED: tuple[str, ...] = (
-    "src/db/schema/user.ts",
-)
+SCAFFOLD_OWNED: tuple[str, ...] = ()
 
 #: Scaffold files that are a DEFAULT for something a projection writes: copied
 #: only when the projection did not write one.
@@ -110,6 +108,15 @@ SCAFFOLD_OWNED: tuple[str, ...] = (
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
+    # projection emits `user.ts` for a Blueprint entity that maps to `users`
+    # — the platform's columns as the platform declares them, then whatever
+    # the Blueprint adds (`role`, `homePropertyId`). Listed as scaffold-OWNED,
+    # this file was copied over that projection on every assembly, so an
+    # application with eight approval roles shipped a users table with no
+    # role column and every queue read as empty. A default fills the hole
+    # when no entity claimed the table; it never replaces one that did.
+    "src/db/schema/user.ts",
 )
 
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";

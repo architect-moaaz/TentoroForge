@@ -335,11 +335,13 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # missed the one it was added for, so the users table was absent from every
     # migration and login failed with "relation does not exist" — the same
     # symptom as before the fix, from the opposite cause.
-    from services.blueprint.assembly import SCAFFOLD_OWNED
+    from services.blueprint.assembly import SCAFFOLD_DEFAULTS, SCAFFOLD_OWNED
 
+    projected = {_module_name(e) for e in entities}
     platform = sorted(
-        Path(rel).stem for rel in SCAFFOLD_OWNED
+        Path(rel).stem for rel in (*SCAFFOLD_OWNED, *SCAFFOLD_DEFAULTS)
         if rel.startswith("src/db/schema/") and rel.endswith(".ts")
+        and Path(rel).stem not in projected   # an entity that claimed it is exported above
     )
     platform += sorted(
         f.stem for f in root.glob("_forge_*.ts") if f.stem not in platform
@@ -1347,8 +1349,16 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
                    if e.get("status") != "DEPRECATED"]:
         readers = _entity_readers(doc, entity)
         cols: dict[str, dict] = {}
+        # THE COLUMN THE RUNTIME KNOWS, NOT THE FIELD THE BLUEPRINT NAMED. On a
+        # platform table the Blueprint's `passwordHash` folds into the
+        # platform's `password` (reconcile_platform_table); a manifest keyed by
+        # `passwordHash` masks nothing, and the users list returned the bcrypt
+        # hash to every caller.
+        table_name = entity.get("table") or to_snake(entity.get("name") or "")
+        synonyms = _PLATFORM_SYNONYMS.get(table_name, {}) if platform_table(table_name) else {}
         for field in entity.get("fields") or []:
             name = field.get("name") or ""
+            name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
             if not mask:
                 lowered = re.sub(r"[^a-z]", "", name.lower())

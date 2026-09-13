@@ -82,3 +82,17 @@ def test_untranslated_it_is_refused_on_both_counts():
     with pytest.raises(InvalidPatternTemplate) as err:
         check_pattern_templates(result, _doc())
     assert "not valid" in str(err.value) or "Property record" in str(err.value)
+
+
+def test_the_signed_in_user_is_called_what_the_renderer_calls_them():
+    """The interpolation scope is `user: ctx.user`; a queue filtered on
+    `{{currentUser.homePropertyId}}` sent an empty filter and showed nothing."""
+    body = {"page": "PAGE-002", "dataSources": [
+        {"entity": "RefundCase", "name": "queueCases", "op": "list",
+         "filter": {"propertyId": "{{currentUser.homePropertyId}}", "status": "Pending approval"}}],
+        "root": {"type": "Text", "props": {"content": "Signed in as {{ currentUser.name }}"}, "children": []}}
+    result = _result(body)
+    translate_layout_vocabulary(result, _doc())
+    b = result.proposals[0].body
+    assert b["dataSources"][0]["filter"]["propertyId"] == "{{user.homePropertyId}}"
+    assert b["root"]["props"]["content"] == "Signed in as {{user.name }}"
