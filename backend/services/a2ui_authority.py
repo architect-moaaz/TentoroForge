@@ -798,7 +798,11 @@ def build_domain_context(root: Path, registry: dict | None = None,
     # pages in `launchedFrom`; listing them unfiltered offers a button for
     # "Evaluate Plant Watering Status" (a derivation that runs on every read)
     # and one for "Seed Plant Catalogue" (database initialisation).
-    mine = launchable({"workflows": flows}, page_id)
+    # THE WHOLE REGISTRY, NOT JUST THE WORKFLOWS. `launchable` reads the
+    # page's entity and route to keep a create page from offering a workflow
+    # that needs the record it does not hold; handed only the workflows it
+    # could not, and /users/new bound Save to "Edit User" a second time.
+    mine = launchable({**reg, "workflows": flows}, page_id)
     # A refusal is worth sending on its own. Without it in this guard, a
     # composition on an application whose registry came back empty would be
     # refused and then recomposed knowing nothing — which is the case most

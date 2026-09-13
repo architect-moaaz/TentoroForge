@@ -1994,6 +1994,9 @@ def _apply_subject(
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
         # no end event written.
+        from services.blueprint.refusals import record_refusal
+        record_refusal(svc.output_dir, subject or key, 0,
+                       list(getattr(outcome, "proposals", None) or []), _reason(exc))
         return _rejected(_reason(exc))
 
     if application.applied:
