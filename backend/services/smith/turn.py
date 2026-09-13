@@ -592,7 +592,21 @@ def _catalog_addenda(catalogs: tuple[str, ...]) -> str:
             "declares it needs, with real values. Connect steps with `next` "
             "(a branching node's first target is the then-branch, its second the "
             "else-branch); the workflow's `trigger.kind` is a catalog trigger and "
-            "an `end` step is the terminal.\n\n" + workflow_nodes().digest()
+            "an `end` step is the terminal.\n\n"
+            # WHAT A CONDITION MAY SAY. The engine evaluates FEEL and nothing
+            # else; a plan that wrote `exists(approvals where …)` for
+            # "never a user who already signed this case" was refused as
+            # unparseable, and the refusal only reached the model after the
+            # plan was drafted. Said up front, with the shape that does work.
+            "A step's `condition` is a FEEL expression over the fields in "
+            "scope: `=` not `==`, `and`/`or`/`not`, field names without braces "
+            "(`caseType`, never `input.caseType`), membership as "
+            "`stage in [\"A\",\"B\"]` with square brackets. There are no "
+            "subqueries: `exists(...)`, `where`, and functions over other "
+            "records are not FEEL. When a decision depends on other records, "
+            "load them with a query step first and compare a field of what it "
+            "returned (`signed_count = 0`).\n\n"
+            + workflow_nodes().digest()
         )
     return out
 
@@ -606,6 +620,7 @@ def interpret(
     agent: str = "smith",
     state: str = "",
     retries: int = 1,
+    rejected: str | None = None,
 ) -> TurnPlan:
     """One interpretation call, re-asked once if the plan does not validate.
 
@@ -613,6 +628,11 @@ def interpret(
     adjust the reply. Compare ``make_executor``, which does the same thing for
     agent envelopes: repair *before* anything is committed is the system
     working, because a rejected plan never became an artifact.
+
+    ``rejected`` is a verdict from AFTER interpretation — the Blueprint refused
+    the plan on apply (a workflow condition the engine cannot parse, a page
+    template the contract refuses). The first ask then already carries it, so
+    the model corrects the plan rather than drafting the same one again.
     """
     system, user = build_interpret_prompt(
         context, agent=agent,
@@ -620,10 +640,14 @@ def interpret(
         state=state,
     )
     last: Exception | None = None
+    if rejected:
+        last = TurnRejected(
+            rejected,
+            catalogs=("workflow_nodes",) if "step" in rejected.lower() else ())
 
     for attempt in range(retries + 1):
         prompt = user
-        if attempt and last:
+        if last:
             prompt = (
                 f"{user}\n\nYour previous reply was rejected: {last}\n"
                 "Return a corrected plan. Do not explain the mistake, and do "

@@ -740,30 +740,54 @@ class Smith:
             turn.recorded = self._record_answers(plan, user_msg)
 
         if plan.proposals or (plan.intent == "change" and plan.anchors):
-            try:
-                turn.change = apply_change(
-                    self.blueprint,
-                    text,
-                    proposals=plan.proposals,
-                    anchors=self._impact_seeds(plan, preview),
-                    interpretation=plan.summary,
-                    executor=self.executor,
-                    app_root=self.app_root,
-                    run_agents=run_agents and self.executor is not None,
-                    regenerate=self.defined,
-                    observer=observer,
-                    observer_agent=self.observer_agent,
-                )
-            except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
-                # The Blueprint refused what the plan proposed. Nothing was
-                # written — apply validates before it commits — so this is an
-                # outcome to report, not an error to surface as a traceback.
-                turn.rejected = str(exc)
-                turn.reply = (
-                    "I drafted that change, but the Blueprint refused it, so I have "
-                    f"not altered anything: {exc}"
-                )
-                turn.smith = self.conversation.append("smith", turn.reply)
+            # RE-ASKED WHEN REFUSED, for the same reason the DAG re-asks. The
+            # Blueprint validates before it commits, so a refusal here costs
+            # nothing but the draft — and the verdict it comes with (a
+            # workflow condition the engine cannot parse, a template the
+            # contract refuses) is exactly what the model needs to correct
+            # the plan. `compose_route` and `make_executor` both thread the
+            # refusal back into the next attempt; a conversation reached
+            # neither, so one unparseable condition ended the turn with the
+            # advice printed to a log the user never sees. One re-ask; a plan
+            # refused twice is reported as before.
+            for attempt in range(2):
+                try:
+                    turn.change = apply_change(
+                        self.blueprint,
+                        text,
+                        proposals=plan.proposals,
+                        anchors=self._impact_seeds(plan, preview),
+                        interpretation=plan.summary,
+                        executor=self.executor,
+                        app_root=self.app_root,
+                        run_agents=run_agents and self.executor is not None,
+                        regenerate=self.defined,
+                        observer=observer,
+                        observer_agent=self.observer_agent,
+                    )
+                    break
+                except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+                    if attempt == 0:
+                        try:
+                            plan = interpret(
+                                self.model, context, self.doc, asked=asked,
+                                state=self.state, rejected=str(exc),
+                            )
+                        except TurnRejected as again:
+                            exc = again
+                        else:
+                            turn.plan = plan
+                            turn.reply = plan.reply
+                            continue
+                    # The Blueprint refused what the plan proposed, twice.
+                    # Nothing was written — apply validates before it commits —
+                    # so this is an outcome to report, not a traceback.
+                    turn.rejected = str(exc)
+                    turn.reply = (
+                        "I drafted that change, but the Blueprint refused it, so I have "
+                        f"not altered anything: {exc}"
+                    )
+                    turn.smith = self.conversation.append("smith", turn.reply)
                 return turn
 
         if plan.intent == "ask" and plan.anchors:
