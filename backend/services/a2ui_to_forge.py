@@ -1216,9 +1216,10 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
     Three shapes, one meaning. A declarative Form field carries `optionsFrom`
     at the top level or under `interaction`; a Select-like node carries it in
     `props`; and a list of `items` may name each choice by label alone. The
-    Form field schema reads `interaction.optionsFrom`, the Select contract
-    refuses an empty `options` beside a source (minItems 1), and an item
-    needs a `value` — which, unsaid, is its label. Mutates in place; runs
+    Form field schema reads `interaction.optionsFrom` and allows an empty
+    `options` beside it — the shape a runtime-sourced dropdown ships in; the
+    Select contract still wants a declared option; and an item needs a
+    `value` — which, unsaid, is its label. Mutates in place; runs
     before `dataSources` is sealed so the lists it registers ship with the
     page.
     """
@@ -1233,11 +1234,13 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
         if isinstance(props, dict):
             kind = str(node.get("type") or "")
             if kind in ("Select", "Combobox", "MultiSelect", "RadioGroup"):
+                # The source is translated; `options` is left alone. The Select
+                # contract requires at least one declared option even beside a
+                # source — the runtime-sourced dropdown is the declarative Form
+                # field below, which is the shape that ships.
                 translated = option_source(binder, registry, props.get("optionsFrom"))
                 if translated:
                     props["optionsFrom"] = translated
-                if props.get("optionsFrom") and props.get("options") == []:
-                    props.pop("options")
             if kind == "Form":
                 for field in props.get("fields") or []:
                     if not isinstance(field, dict):
