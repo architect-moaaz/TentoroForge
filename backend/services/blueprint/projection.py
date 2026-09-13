@@ -1572,6 +1572,11 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             "scope": item.get("scope") or "user",
             "unscopedRoles": list(item.get("unscopedRoles") or []),
         }
+        # WHERE THE ACTOR'S VALUE COMES FROM. The users column a workspace
+        # scope compares against; the session carries it and the engine reads
+        # it. Without one, `scope: "workspace"` compared every row to nothing.
+        if item.get("actorColumn"):
+            rule["actorColumn"] = str(item["actorColumn"])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -1619,6 +1624,8 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         '  scope: "user" | "workspace";\n'
         "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
         "  unscopedRoles: string[];\n"
+        "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
+        "  actorColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"

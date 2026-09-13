@@ -221,7 +221,7 @@ export const MultiSelectNode = z.object({
     options: z.array(z.object({
       value: z.string(),
       label: z.string(),
-    })).min(1),
+    })).min(1).optional(),  // declared options, or an `optionsFrom` source
     // Dynamic-options binding — build options from a page dataSource at render
     // time (relational FK multiselect, e.g. Task→Tags). Mirrors Select.optionsFrom.
     optionsFrom: z.object({

@@ -1275,13 +1275,14 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
         if isinstance(props, dict):
             kind = str(node.get("type") or "")
             if kind in ("Select", "Combobox", "MultiSelect", "RadioGroup"):
-                # The source is translated; `options` is left alone. The Select
-                # contract requires at least one declared option even beside a
-                # source — the runtime-sourced dropdown is the declarative Form
-                # field below, which is the shape that ships.
+                # The source is translated, and an empty `options` beside it
+                # goes: declared options number at least one, and a dropdown
+                # whose rows come from a list at render time declares none.
                 translated = option_source(binder, registry, props.get("optionsFrom"))
                 if translated:
                     props["optionsFrom"] = translated
+                if props.get("optionsFrom") and props.get("options") == []:
+                    props.pop("options")
             if kind == "Form":
                 form_entity = getattr(binder, "form_entity", None)
                 for field in props.get("fields") or []:

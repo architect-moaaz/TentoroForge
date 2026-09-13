@@ -6,6 +6,18 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 
+/** Every scalar column of a users row except the credential and what the
+ *  session already names — the profile the session carries so a workspace
+ *  scope can read its actor column and a page can bind `{{user.<column>}}`. */
+function profileOf(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (["password", "passwordHash", "id", "email", "name", "role", "accountType"].includes(k)) continue;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
+  }
+  return out;
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -34,7 +46,14 @@ export const authOptions: NextAuthOptions = {
           );
           if (!valid) return null;
 
+          // THE ROW, MINUS THE CREDENTIAL. Every scalar column of the users
+          // row rides in the session: an ownership rule's `actorColumn`
+          // (homePropertyId, organisationId) is read off it by the data
+          // engine, and a page binds `{{user.<column>}}`. Only the password
+          // hash stays behind.
+          const profile = profileOf(user as Record<string, unknown>);
           return {
+            ...profile,
             id: user.id,
             email: user.email,
             name: (user as any).name || `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim(),
@@ -59,11 +78,13 @@ export const authOptions: NextAuthOptions = {
         token.id = user.id;
         token.role = (user as any).role;
         token.accountType = (user as any).accountType ?? null;
+        (token as any).profile = profileOf(user as Record<string, unknown>);
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token) {
+        Object.assign(session.user as any, (token as any).profile ?? {});
         (session.user as any).id = token.id;
         (session.user as any).role = token.role;
         (session.user as any).accountType = (token as any).accountType ?? null;

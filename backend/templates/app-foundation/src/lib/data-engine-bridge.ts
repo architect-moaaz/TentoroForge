@@ -21,7 +21,7 @@ type Source = {
 };
 
 /** The caller, in the shape the data engine's ownership rules read. */
-export type ActorCtx = { user?: { id?: string; role?: string; email?: string; workspaceId?: string } };
+export type ActorCtx = { user?: { id?: string; role?: string; email?: string; workspaceId?: string; [column: string]: unknown } };
 
 /** Narrow a session user to the engine's context.
  *
@@ -30,10 +30,19 @@ export type ActorCtx = { user?: { id?: string; role?: string; email?: string; wo
  * or field ACLs fail closed and every ruled field comes back null. A row-scoped
  * entity fails closed on the missing id separately, inside the engine.
  */
-export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown; workspaceId?: unknown }) {
+export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown; workspaceId?: unknown; [column: string]: unknown }) {
   if (!user || !(user.id || user.role)) return undefined;
+  // THE WHOLE ROW TRAVELS. An ownership rule's `actorColumn` names any users
+  // column (homePropertyId, organisationId); narrowing to four fields here
+  // left the engine nothing to compare a workspace scope against.
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(user)) {
+    if (["id", "role", "email", "workspaceId"].includes(k)) continue;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v)) rest[k] = v;
+  }
   return {
     user: {
+      ...rest,
       id: user.id ? String(user.id) : undefined,
       role: user.role as string | undefined,
       email: user.email as string | undefined,
