@@ -271,6 +271,10 @@ export function useBlueprintRun(projectId: string | null) {
                 callsDone: snap.callsDone ?? prev.callsDone,
                 awaitingApproval: Boolean(snap.awaitingApproval),
                 status: "complete",
+                // The `review` events never reach a polling client (the run
+                // registry does not carry them), so a review window caught
+                // mid-phase would spin forever after the run ended. Settle it.
+                review: finalizeReview(prev.review),
               }
             : prev,
         );
@@ -436,6 +440,18 @@ export function useBlueprintRun(projectId: string | null) {
   );
 
   return { run, start, stop };
+}
+
+/** Close out a review left mid-phase. The render review streams its phases —
+ *  shots, analysis, fixing, done — over the same connection as everything else;
+ *  a long re-compose drops the stream, the panel falls back to polling the run
+ *  registry (which carries node state but NOT `review` events), and the window
+ *  never receives its terminal `review:done`, so it spins on "fixing… round 2"
+ *  forever even though the turn ended. When the run itself completes, settle the
+ *  window: stop the spinner, mark it done, keep it up only if it did work. */
+export function finalizeReview(review: ReviewState | null): ReviewState | null {
+  if (!review || review.phase === "done") return review;
+  return { ...review, phase: "done", fixing: [], active: review.round > 0 };
 }
 
 /** One event → the next run state. Pure, so the reducer is testable alone. */
@@ -622,6 +638,9 @@ export function reduce(
           : prev.nodes.map((n) =>
               n.state === "running" ? { ...n, state: "done", subject: undefined } : n,
             ),
+        // The turn ended; a review still mid-phase never got its own terminal
+        // event — settle it so its window stops spinning.
+        review: awaiting ? prev.review : finalizeReview(prev.review),
       };
     }
 
