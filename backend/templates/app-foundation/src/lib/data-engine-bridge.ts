@@ -171,6 +171,23 @@ export const dataEngine: DataEngine = {
           }
         } catch { /* non-URL request */ }
       }
+      // "{{user.<column>}}" — a list source scoped to the signed-in user's own
+      // row: `{propertyId: "{{user.homePropertyId}}"}` is an approver's
+      // sign-offs queue at their home property. The renderer interpolates page
+      // props against `user`, but a source resolves HERE, before anything
+      // renders, so nothing filled the placeholder and the query compared
+      // propertyId to the literal text: an empty queue for every approver.
+      // The session user fills it. A user without the column keeps the
+      // placeholder as the value, so the query matches nothing rather than
+      // leaking the unscoped list.
+      const sessionUser = (ctx?.user ?? {}) as Record<string, unknown>;
+      for (const k of Object.keys(filters)) {
+        const m = /^\{\{\s*user\.([A-Za-z0-9_]+)\s*\}\}$/.exec(filters[k]);
+        if (!m) continue;
+        const v = sessionUser[m[1]];
+        if (v !== undefined && v !== null && v !== "") filters[k] = String(v);
+      }
+
       // Sort — accept either `sort: "field"` (asc default) or
       // `sort: {field, order}` on the source.
       const rawSort = (src as { sort?: unknown }).sort;
