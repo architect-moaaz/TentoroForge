@@ -42,7 +42,8 @@ export type DispatchContext = {
 
 /** Props a component fills from each row (or event, or card), never from
  *  the page: `{{id}}` inside them belongs to the row. */
-const ROW_TEMPLATE_PROPS = new Set(["rowHref", "eventHref", "cardHref", "rowActions", "bulkActions"]);
+// `itemHref`: a List fills it per item, as a Table fills rowHref per row.
+const ROW_TEMPLATE_PROPS = new Set(["rowHref", "itemHref", "eventHref", "cardHref", "rowActions", "bulkActions"]);
 
 /** Input nodes that support `props.optionsFrom` dataSource-driven options. */
 const OPTION_SOURCE_TYPES = new Set(["Select", "Combobox", "MultiSelect"]);
