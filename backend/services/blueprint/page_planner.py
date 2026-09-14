@@ -769,10 +769,15 @@ def bind_workflows(node: dict, workflow: str | None) -> dict:
 #: false: the Approve button and every action form on /refund-cases/[id]
 #: were hidden for the case they were for. Spelling is the planner's to
 #: translate — outside string literals, where `&&` is content.
+#:
+#: `==` is the spelling kept, not `=`: the renderer folds it for FEEL-lite,
+#: the planner's own gates are written with it (`src == null`), and the
+#: Conditional node decides whether a `when` string is an expression at all
+#: by looking for `==`/`!=`/`and`/`or` — a bare `properties = null` read as
+#: a resolved value and showed the error alert on a page that had loaded.
 _JS_SPELLING = (
     (re.compile(r"!=="), "!="),
-    (re.compile(r"==="), "="),
-    (re.compile(r"(?<![!<>=])==(?!=)"), "="),
+    (re.compile(r"==="), "=="),
     (re.compile(r"\s*&&\s*"), " and "),
     (re.compile(r"\s*\|\|\s*"), " or "),
 )
