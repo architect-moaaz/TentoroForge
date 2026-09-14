@@ -36,6 +36,7 @@ Final state (2026-09-14): headless drive of all 15 routes as all 8 accounts — 
 | 28 | An approved task stays in the inbox and can be approved again | The execute route closed the task by writing `response_data`, a column `workflow_tasks` never had; the update failed inside a catch | platform · injected execute route | the route writes `form_data` |
 | 29 | `isServiceRecovery` shows the rule's text instead of true/false | `set_variable` evaluates `expression` and stores `value` as-is; the author wrote the rule into `value` | platform · workflow projection | a `value` that reads as an expression is projected as `expression` |
 | 30 | Dashboard amounts show `$`; the chain trades in pounds | The MetricTile's money format has no currency from the Blueprint | platform · formatting | open — carry a currency on the application model into the tile format |
+| 31 | Every group of buttons touches: the dashboard's four action buttons, the header actions on list pages | Pages write gaps as `sm`/`md`/`lg`; the Cluster component turned a named gap into `var(--token-sm)`, which no stylesheet defines, so every Cluster had no gap. Stack and Grid had been fixed for the same fault; Cluster was missed | platform · library Cluster | named gaps map to sizes (`sm` = 0.5rem …), `tokens.spacing.N` to its step, only a `tokens.…` reference to a variable |
 
 ## Test accounts (password `Criterion1234`, home property St Giles for the property-scoped roles)
 
