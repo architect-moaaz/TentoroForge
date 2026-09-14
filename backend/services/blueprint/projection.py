@@ -1032,6 +1032,37 @@ _OPERATION_ACTION: dict[str, str] = {
 _DB_EVALUATED = {"now()", "current_date", "current_timestamp", "current_time"}
 
 
+#: WHO A HUMAN STEP WAITS ON. The Blueprint states `assignType: "role"` and
+#: `assignTarget: ["Reception", "Front Office Manager"]`; the runtime reads
+#: `assigneeRole` / `assignee` (or `assignment: {strategy, value}`), and with
+#: neither present it filed the task under "admin" — a user that does not
+#: exist — so a guest's refund request created a task no inbox showed
+#: (Criterion Refunds v2, 2026-09-14). Several roles ride as one
+#: comma-joined `assigneeRole`; the inbox matches a role by membership.
+_HUMAN_STEPS = frozenset({"user_task", "approval", "assignment", "task_pool"})
+
+
+def _name_the_assignee(config: dict[str, Any], wf_id: str, step: dict) -> None:
+    if config.get("assignee") or config.get("assigneeRole") or config.get("assignment"):
+        return
+    kind = str(config.get("assignType") or "").strip().lower()
+    target = config.get("assignTarget")
+    targets = [str(t).strip() for t in (target if isinstance(target, list) else [target])
+               if t not in (None, "")]
+    if not targets:
+        return
+    if kind in ("user", "person", "email"):
+        config["assignee"] = targets[0]
+    elif kind in ("role", "roles", "") :
+        config["assigneeRole"] = ",".join(targets)
+    elif kind in ("group", "team"):
+        config["assignmentStrategy"] = "group"
+        config["assigneePool"] = targets
+    else:
+        logger.warning("[projection] %s/%s: assignType %r is not one the runtime "
+                       "resolves — task will be unassigned", wf_id, step.get("key"), kind)
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
                  wf_id: str = "") -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
@@ -1058,6 +1089,8 @@ def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
     config: dict[str, Any] = {**catalog.defaults(ntype, declared), **declared}
     if entity.get("table") and "table" not in config:
         config["table"] = entity["table"]
+    if ntype in _HUMAN_STEPS:
+        _name_the_assignee(config, wf_id, step)
 
     if (ntype == "action" and config.get("actionType") in ("db_insert", "db_update")
             and entity.get("table")):

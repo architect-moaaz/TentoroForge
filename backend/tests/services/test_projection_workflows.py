@@ -117,3 +117,31 @@ def test_trigger_kind_is_a_catalog_trigger_type(tmp_path):
     wf = _load(tmp_path)["definition"]
     assert wf["trigger"] == {"type": "api_event", "event": "ticket.created"}
     assert wf["nodes"][0]["data"]["config"]["type"] == "api_event"
+
+
+# --- who a human step waits on --------------------------------------------------
+
+
+def test_a_role_assigned_task_names_its_roles_for_the_runtime():
+    """The Blueprint states `assignType: role, assignTarget: [...]`; the runtime
+    reads `assigneeRole`. Untranslated, a guest's refund request created a task
+    filed under "admin" that no inbox showed."""
+    from services.blueprint.projection import _name_the_assignee
+
+    config = {"assignType": "role", "assignTarget": ["Reception", "Front Office Manager"]}
+    _name_the_assignee(config, "FLOW-002", {"key": "triage_case"})
+    assert config["assigneeRole"] == "Reception,Front Office Manager"
+    assert "assignee" not in config
+
+    single = {"assignType": "role", "assignTarget": "Finance"}
+    _name_the_assignee(single, "FLOW-003", {"key": "post"})
+    assert single["assigneeRole"] == "Finance"
+
+    person = {"assignType": "user", "assignTarget": ["ceo@criterion.test"]}
+    _name_the_assignee(person, "FLOW-004", {"key": "sign"})
+    assert person["assignee"] == "ceo@criterion.test"
+
+    authored = {"assigneeRole": "CEO", "assignType": "role", "assignTarget": ["Finance"]}
+    _name_the_assignee(authored, "FLOW-005", {"key": "x"})
+    assert authored["assigneeRole"] == "CEO"
+
