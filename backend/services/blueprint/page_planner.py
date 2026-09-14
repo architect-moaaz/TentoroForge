@@ -827,6 +827,36 @@ def speak_feel(node: Any) -> Any:
     return node
 
 
+#: WHERE A FORM GOES WHEN IT SAVES. The Form's default success outcome is
+#: "toast Saved, navigate to the parent path": /refund-cases/new returns to
+#: /refund-cases, which exists. The public /guest/refund-request returned to
+#: /guest, which is no page — a guest who had just submitted a refund request
+#: landed on a 404. A form on a page whose parent is not a route stays where
+#: it is and says so; a page may still author its own `onSuccess`.
+def settle_form_outcomes(root: Any, route: str, routes: set[str]) -> Any:
+    """Give every Form without an `onSuccess` one that lands on a real page."""
+    parts = [seg for seg in (route or "/").split("?")[0].split("/") if seg]
+    parent = "/" + "/".join(parts[:-1]) if len(parts) > 1 else "/"
+    if parent in routes:
+        return root
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        if n.get("type") == "Form":
+            props = n.setdefault("props", {})
+            if not props.get("onSuccess"):
+                props["onSuccess"] = {"toast": "Submitted — thank you", "navigate": route}
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1179,6 +1209,8 @@ def plan_page(doc: dict, page: dict, template: dict,
         root = (gate_states(root, primary) if primary
                 else gate_states(root, single, single=single is not None))
         root = speak_feel(root)
+        root = settle_form_outcomes(root, page.get("route") or "/",
+                                    {p.get("route") for p in _live(doc.get("pages")) if p.get("route")})
     if root is not None:
         root = assign_node_ids(root)
     if root is None:

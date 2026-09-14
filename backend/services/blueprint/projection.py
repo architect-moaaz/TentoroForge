@@ -448,7 +448,10 @@ def project_frontend(doc: dict, app_root: str | Path,
     # A page that stopped planning must not leave its last good schema behind:
     # the directory would still hold eighteen files and read as a complete
     # projection while one of them was silently out of date.
-    written_set = set(written)
+    # `shell.json` is the rail, written by `project_shell`, not a page: the
+    # sweep deleted it on every frontend projection and the layout fell back
+    # to its flat menu.
+    written_set = set(written) | {"src/schemas/shell.json"}
     stale = sorted(
         str(f.relative_to(root)) for f in root.rglob("*.json")
         if f"src/schemas/{f.relative_to(root)}" not in written_set
@@ -1799,6 +1802,45 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
 
 
+def role_routes(doc: dict) -> list[dict[str, Any]]:
+    """Each role-restricted page's route and the role NAMES that may open it.
+
+    A page declares `access: "role_restricted"` and `users: [ROLE-…]`; the
+    middleware compared nothing to those and gated the route on a session
+    alone, so Reception opened the Income Auditor's queue and the Users
+    admin page, and could act there (Criterion Refunds v2, 2026-09-14). The
+    session carries the role's NAME, so that is what is projected.
+    """
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles"))
+             if r.get("id") and r.get("name")}
+    out: list[dict[str, Any]] = []
+    for page in _live(doc.get("pages")):
+        if (page.get("access") or "authenticated") != "role_restricted":
+            continue
+        roles = sorted({names.get(u, u) for u in (page.get("users") or []) if u})
+        if not roles:
+            continue   # nothing to compare to; the session gate still applies
+        out.append({"route": page.get("route") or "/", "roles": roles})
+    return sorted(out, key=lambda r: r["route"])
+
+
+def _route_regex(route: str) -> str:
+    """`/refund-cases/[id]` → `^/refund-cases/[^/]+$`, a regex source string.
+
+    Emitted through `new RegExp(<json string>)`, not a `/…/` literal: a route's
+    own slashes would end a literal early, and `re.escape` spells `-` as `\-`.
+    """
+    parts = []
+    for seg in route.strip("/").split("/"):
+        if not seg:
+            continue
+        if seg.startswith("[") and seg.endswith("]"):
+            parts.append("[^/]+")
+        else:
+            parts.append(re.sub(r"([.+*?^${}()|\[\]\\])", r"\\\1", seg))
+    return "^/" + "/".join(parts) + "$" if parts else "^/$"
+
+
 def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/middleware.ts`` from what the pages declare.
 
@@ -1841,13 +1883,36 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   by role: {route}')
     for route in apis:
         lines.append(f'//   public: /{route}  (reached by a public page)')
+    gated_by_role = role_routes(doc)
+    role_lines = [
+        f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
+        for r in gated_by_role
+    ]
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
+        'import { NextResponse } from "next/server";',
         '',
-        'export default withAuth({',
-        '  pages: { signIn: "/login" },',
-        '});',
+        '// A role-restricted page names the roles that may open it; the session',
+        '// carries the role. Anyone else is sent to the 403 page, signed in or',
+        '// not-yet — a session alone is not a permission.',
+        'const ROLE_ROUTES: Array<{ route: RegExp; roles: string[] }> = [',
+        *role_lines,
+        '];',
+        '',
+        'export default withAuth(',
+        '  function middleware(req) {',
+        '    const role = String((req.nextauth.token as { role?: unknown } | null)?.role ?? "");',
+        '    const path = req.nextUrl.pathname;',
+        '    for (const r of ROLE_ROUTES) {',
+        '      if (r.route.test(path) && !r.roles.includes(role)) {',
+        '        return NextResponse.redirect(new URL("/403", req.url));',
+        '      }',
+        '    }',
+        '    return NextResponse.next();',
+        '  },',
+        '  { pages: { signIn: "/login" } },',
+        ');',
         '',
         'export const config = {',
         f'  matcher: ["{matcher}"],',
@@ -1863,6 +1928,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "public": access["public"],
         "publicApis": apis,
         "gated": len(access["authenticated"]) + len(access["role_restricted"]),
+        "byRole": gated_by_role,
     }
 
 

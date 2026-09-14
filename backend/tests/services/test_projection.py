@@ -467,6 +467,36 @@ def test_a_partly_public_app_is_expressible(tmp_path):
     assert "checkout" not in matcher and "orders" not in matcher
 
 
+def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
+    """Reception opened the Income Auditor's queue and the Users admin page:
+    the middleware gated a role-restricted route on a session alone. The page
+    declares its users; the session carries the role's name; the middleware
+    compares the two and sends everyone else to /403."""
+    from services.blueprint.projection import project_middleware, role_routes
+
+    doc = {
+        "roles": [{"id": "ROLE-005", "name": "Income Auditor"}, {"id": "ROLE-008", "name": "Admin"}],
+        "pages": [
+            {"id": "PAGE-001", "route": "/income-auditor-queue", "access": "role_restricted", "users": ["ROLE-005"]},
+            {"id": "PAGE-002", "route": "/users/[id]", "access": "role_restricted", "users": ["ROLE-008"]},
+            {"id": "PAGE-003", "route": "/refund-cases", "access": "authenticated", "users": ["ROLE-005"]},
+            {"id": "PAGE-004", "route": "/reports", "access": "role_restricted"},
+        ],
+    }
+    assert role_routes(doc) == [
+        {"route": "/income-auditor-queue", "roles": ["Income Auditor"]},
+        {"route": "/users/[id]", "roles": ["Admin"]},
+    ]
+    result = project_middleware(doc, tmp_path / "app")
+    text = (tmp_path / "app" / "src" / "middleware.ts").read_text()
+    assert result["byRole"] == role_routes(doc)
+    assert '{ route: new RegExp("^/income-auditor-queue$"), roles: ["Income Auditor"] }' in text
+    assert '{ route: new RegExp("^/users/[^/]+$"), roles: ["Admin"] }' in text
+    assert "/refund-cases" not in text.split("ROLE_ROUTES")[1].split("];")[0]
+    assert 'NextResponse.redirect(new URL("/403", req.url))' in text
+    assert "req.nextauth.token" in text
+
+
 def test_a_public_landing_route_is_actually_reachable(tmp_path):
     """A negative lookahead cannot exclude the empty path, so `/` stayed gated
     however it was declared — requiring one character after the slash is what

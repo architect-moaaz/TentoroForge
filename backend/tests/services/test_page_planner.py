@@ -793,6 +793,31 @@ def test_every_expression_in_a_tree_is_translated():
     assert field["interaction"]["visibleIf"] == "role == 'Reception' or role == 'GM'"
 
 
+# --- where a form goes when it saves ------------------------------------------
+
+
+def test_a_form_on_a_page_with_no_parent_route_stays_put():
+    """A guest submitted a refund request on /guest/refund-request and landed
+    on /guest — a 404 — because the Form's default is "navigate to the parent
+    path". The parent is no page; the form stays and says so."""
+    root = {"type": "Container", "children": [{"type": "Form", "props": {"entity": "RefundCase"}}]}
+    pp.settle_form_outcomes(root, "/guest/refund-request", {"/guest/refund-request", "/refund-cases"})
+    assert root["children"][0]["props"]["onSuccess"] == {
+        "toast": "Submitted — thank you", "navigate": "/guest/refund-request"}
+
+
+def test_a_form_whose_parent_is_a_page_keeps_the_default():
+    root = {"type": "Container", "children": [{"type": "Form", "props": {"entity": "RefundCase"}}]}
+    pp.settle_form_outcomes(root, "/refund-cases/new", {"/refund-cases/new", "/refund-cases"})
+    assert "onSuccess" not in root["children"][0]["props"]
+
+
+def test_an_authored_outcome_is_kept():
+    root = {"type": "Form", "props": {"onSuccess": {"navigate": "/thanks"}}}
+    pp.settle_form_outcomes(root, "/guest/refund-request", set())
+    assert root["props"]["onSuccess"] == {"navigate": "/thanks"}
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [
