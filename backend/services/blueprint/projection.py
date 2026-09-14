@@ -620,10 +620,26 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
 
-    def item(node: dict) -> dict[str, Any]:
+    # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
+    # reached through a row or an action that fills a concrete id, never from the
+    # sidebar: Next's <Link> refuses a literal "[id]" href ("Dynamic href … not
+    # supported"), and landing there passes the string "[id]" to the database as
+    # a uuid. So a nav node pointing at one carries no route (it drops from the
+    # rail); a group left with no linkable child drops entirely.
+    def _navigable(route: str | None) -> bool:
+        return bool(route) and "[" not in route
+
+    def item(node: dict) -> dict[str, Any] | None:
+        """A rail entry, or None when the node points at a page that cannot be a
+        rail destination. A node with NO page is kept route-less and visible
+        (§49); a node whose page is a DYNAMIC route is dropped — Next refuses a
+        literal "[id]" href and landing there crashes on the uuid."""
+        page_id = str(node.get("page") or "")
+        route = routes.get(page_id)
+        if page_id and route and not _navigable(route):
+            return None
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
-        route = routes.get(str(node.get("page") or ""))
-        if route:
+        if _navigable(route):
             out["route"] = route
         if node.get("icon"):
             out["icon"] = str(node["icon"])
@@ -636,10 +652,13 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             group: dict[str, Any] = {"label": str(node.get("label") or "")}
             if node.get("icon"):
                 group["icon"] = str(node["icon"])
-            group["items"] = [item(k) for k in kids]
-            groups.append(group)
+            group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            if group["items"]:
+                groups.append(group)
         else:
-            groups.append(item(node))
+            leaf = item(node)
+            if leaf is not None:
+                groups.append(leaf)
 
     app_name = str((doc.get("application") or {}).get("name") or "App")
     # WHERE THE APPLICATION OPENS. The scaffold's root page redirected to a
@@ -648,9 +667,12 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # initial route; failing that, the first destination in the rail.
     initial = ((nav.get("initialRoute") or {}).get("default")
                if isinstance(nav.get("initialRoute"), dict) else nav.get("initialRoute"))
-    if not initial or str(initial) in ("/", "/home"):
-        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route") or it.get("href")), None)
-        initial = (first.get("route") or first.get("href")) if first else None
+    # The landing route must be concrete — a dynamic "[id]" initialRoute lands
+    # the app on a route it cannot render. Reject it and fall back to the first
+    # navigable rail destination (which is already dynamic-free above).
+    if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
+        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
+        initial = first.get("route") if first else None
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
@@ -710,7 +732,13 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 if t in by_id and by_id[t].get("route")
             }),
         })
-        if page.get("entry") and access not in entry_by_access:
+        # The GATED entry must be concrete — it is the login redirect and the
+        # landing page, and a dynamic "[id]" route has no id to fill (Next
+        # refuses the href, the DB gets "[id]" as a uuid). A PUBLIC entry may be
+        # a pattern (`/survey/[slug]`, opened via a real link), so it is allowed
+        # to be dynamic; only the authenticated/gated door is held concrete.
+        if page.get("entry") and access not in entry_by_access and (
+                access == "public" or "[" not in route):
             entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
@@ -743,6 +771,15 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if src and dst and (src, dst) not in seen:
                 seen.add((src, dst))
                 transitions.append({"from": src, "to": dst, "trigger": ""})
+
+    # A gated app still needs a concrete front door when no page was marked as
+    # the entry (or the only one marked was dynamic): fall back to the first
+    # non-dynamic gated route, so the login redirect and "back to the app" link
+    # always have a route that renders.
+    if "authenticated" not in entry_by_access:
+        concrete = next((r for r in gated_routes if "[" not in r), None)
+        if concrete:
+            entry_by_access["authenticated"] = concrete
 
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
