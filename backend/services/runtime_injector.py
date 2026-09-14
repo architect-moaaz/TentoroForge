@@ -1376,7 +1376,7 @@ export async function POST(
               completed_by = ${user?.id || null},
               completed_at = NOW(),
               decision = ${input.__decision || null},
-              response_data = ${JSON.stringify(input)}
+              form_data = ${JSON.stringify(input)}::jsonb
           WHERE id = ${taskId}::uuid
         `);
       } catch (dbErr) {
