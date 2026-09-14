@@ -15747,47 +15747,55 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "string"
-                    },
-                    "actor": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "pending",
-                            "approved",
-                            "rejected",
-                            "info",
-                            "completed"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        },
+                        "actor": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "approved",
+                                "rejected",
+                                "info",
+                                "completed"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            }
                           ]
                         },
-                        {
-                          "type": "string",
-                          "minLength": 1
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
                         }
-                      ]
+                      },
+                      "required": [
+                        "timestamp",
+                        "title"
+                      ],
+                      "additionalProperties": false
                     },
-                    "title": {
-                      "type": "string"
-                    },
-                    "detail": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
-                  },
-                  "required": [
-                    "timestamp",
-                    "title"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               {

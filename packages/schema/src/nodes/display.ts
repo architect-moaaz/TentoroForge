@@ -124,11 +124,19 @@ export const ListNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("List"),
   props: z.object({
-    items: z.array(z.object({
-      title:    z.string().min(1),
-      subtitle: z.string().optional(),
-      icon:     z.string().optional(),
-    }).strict()).min(1),
+    // AN ITEM, OR A DATA ROW. A record page binds a List to a child
+    // collection — the notes of a case, each with `body` and `createdAt`.
+    // Admitting only {title, subtitle, icon} had the renderer strip every
+    // column a row actually has and show blank lines; the component shapes a
+    // row into an item by the row's own columns.
+    items: z.array(z.union([
+      z.object({
+        title:    z.string().min(1),
+        subtitle: z.string().optional(),
+        icon:     z.string().optional(),
+      }).strict(),
+      z.record(z.unknown()),
+    ])).min(1),
     divided: z.boolean().optional(),
   }).strict(),
   style: StyleSlot.optional(),
