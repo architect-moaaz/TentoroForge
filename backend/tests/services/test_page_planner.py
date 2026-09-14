@@ -194,10 +194,14 @@ def test_plan_produces_a_renderable_page(doc, page, catalog):
     assert schema["route"] == "/roles"
     assert schema["root"]["type"] == "Stack"
 
-    buttons = schema["root"]["children"][1]["children"]
+    # The Heading and the Cluster of actions are one page header (a headline
+    # Section); the table follows it.
+    head = schema["root"]["children"][0]
+    assert head["type"] == "Section" and head["props"]["role"] == "headline"
+    buttons = head["children"]
     assert [b["props"]["label"] for b in buttons] == ["Create Role", "Close Role"]
 
-    table = schema["root"]["children"][2]
+    table = schema["root"]["children"][1]
     assert isinstance(table["props"]["columns"], list)
     assert table["props"]["columns"][0]["key"] == "title"
 
@@ -401,7 +405,8 @@ def test_an_authored_page_is_what_gets_planned(doc, page, catalog):
     }]
     result = pp.plan_pages(doc, catalog)
     root = result["planned"]["PAGE-001"]["root"]
-    assert root["children"][0]["props"]["content"] == "Bespoke"
+    # The bespoke heading is the page header, spelled as every page's is.
+    assert root["children"][0]["props"]["title"] == "Bespoke"
 
 
 def test_a_page_nobody_composed_gets_a_marked_fallback_not_a_silent_stub(doc, page, catalog):
@@ -994,6 +999,34 @@ def test_an_existing_headline_section_is_kept_and_named():
     ]}
     pp.normalise_page_header(root)
     assert root["children"][0]["props"]["role"] == "headline" and len(root["children"]) == 2
+
+
+def test_a_section_s_content_moves_out_of_the_header():
+    """The support-case intake wrapped its whole form in the headline Section;
+    rendered as the header's actions it sat to the right of the title."""
+    root = {"type": "Stack", "children": [
+        {"type": "Section", "props": {"title": "Report a complaint"}, "children": [
+            {"type": "Stack", "children": [{"type": "Form", "props": {"fields": []}}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    assert "children" not in root["children"][0]
+    assert root["children"][1]["type"] == "Stack"
+
+
+def test_the_header_is_found_inside_a_grid_and_after_a_leading_alert():
+    root = {"type": "Stack", "children": [
+        {"type": "Alert", "props": {"title": "Error"}},
+        {"type": "Container", "children": [
+            {"type": "Grid", "children": [
+                {"type": "Row", "children": [
+                    {"type": "Stack", "children": [{"type": "Text", "props": {"content": "New Property"}}]},
+                    {"type": "Button", "props": {"label": "Cancel"}}]},
+                {"type": "Card", "children": []}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    grid = root["children"][1]["children"][0]
+    assert grid["children"][0]["type"] == "Section" and grid["children"][0]["props"]["title"] == "New Property"
+    assert grid["children"][1]["type"] == "Card"
 
 
 # --- §33: a create form asks about a record that does not exist yet ---------

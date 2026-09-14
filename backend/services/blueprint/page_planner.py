@@ -1024,27 +1024,28 @@ def link_lists_to_records(root: Any, doc: dict, sources: list[dict]) -> Any:
     return root
 
 
-#: EVERY PAGE OPENS THE SAME WAY. Composed pages opened with a headline
-#: Section, or a Heading and a Text, or a Row of two Texts and a Button, or a
-#: Breadcrumb over a Row holding a Heading and a Badge — five spellings of
-#: "title, subtitle, actions" (Criterion Refunds v2, 2026-09-14). One page
-#: header: a Section with role "headline", the title, the subtitle, and the
-#: actions as its children; a Breadcrumb stays above it.
-_WRAPPERS = frozenset({"Container", "Stack", "Box", "Column", "Page", "Main"})
+#: EVERY PAGE OPENS THE SAME WAY. Composed pages opened five ways — a headline
+#: Section, a Heading and a Text, a Row of two Texts and a Button, a Breadcrumb
+#: over a Row holding a Heading and a Badge, a Grid whose first row held them —
+#: five spellings of "title, subtitle, actions" (Criterion Refunds v2,
+#: 2026-09-14). One page header: a Section with role "headline", the title,
+#: the subtitle, and the actions as its children; a Breadcrumb stays above it.
+_CONTAINERS = frozenset({"Container", "Stack", "Box", "Column", "Page", "Main", "Grid", "Split", "Row", "Cluster"})
 _HEADER_LEAVES = frozenset({"Heading", "Text", "Badge", "Button", "Link", "Breadcrumb"})
-_HEADER_GROUPS = frozenset({"Row", "Cluster", "Inline", "Split"})
+_HEADER_GROUPS = frozenset({"Row", "Cluster", "Inline", "Stack", "Box"})
+_STATE_LEADS = frozenset({"Alert", "Conditional", "EmptyState", "LoadingState", "Skeleton"})
 
 
-def _header_leaves(node: dict) -> list[dict] | None:
+def _header_leaves(node: Any) -> list[dict] | None:
     """The leaves of a header-shaped node, or None if it holds content."""
+    if not isinstance(node, dict):
+        return None
     t = node.get("type")
     if t in _HEADER_LEAVES:
         return [node]
     if t in _HEADER_GROUPS:
         out: list[dict] = []
         for c in node.get("children") or []:
-            if not isinstance(c, dict):
-                return None
             leaves = _header_leaves(c)
             if leaves is None:
                 return None
@@ -1058,39 +1059,53 @@ def _text_of(n: dict) -> str:
     return str(p.get("content") or p.get("text") or p.get("title") or "").strip()
 
 
+def _find_header_host(node: Any) -> tuple[dict, int] | None:
+    """The container whose children open with the page header, and where."""
+    if not isinstance(node, dict) or not isinstance(node.get("children"), list):
+        return None
+    kids = node["children"]
+    for i, k in enumerate(kids):
+        if not isinstance(k, dict):
+            return None
+        if k.get("type") in _STATE_LEADS:
+            continue
+        if k.get("type") == "Section" and (k.get("props") or {}).get("title"):
+            return node, i
+        if _header_leaves(k) is not None:
+            return node, i
+        if k.get("type") in _CONTAINERS and k.get("children"):
+            return _find_header_host(k)
+        return None
+    return None
+
+
 def normalise_page_header(root: Any) -> Any:
-    host = root
-    while isinstance(host, dict) and host.get("type") in _WRAPPERS \
-            and len(host.get("children") or []) == 1 \
-            and isinstance(host["children"][0], dict) \
-            and host["children"][0].get("type") in _WRAPPERS:
-        host = host["children"][0]
-    if not isinstance(host, dict) or not isinstance(host.get("children"), list) or not host["children"]:
+    found = _find_header_host(root)
+    if not found:
         return root
+    host, start = found
     kids = host["children"]
-    first = kids[0] if isinstance(kids[0], dict) else None
-    if not first:
-        return root
-    # Already a headline Section: only make sure it says so.
-    if first.get("type") == "Section" and (first.get("props") or {}).get("title"):
+    first = kids[start]
+    if first.get("type") == "Section":
+        # Already the header. Its children are actions only if they are
+        # header-shaped; a form or a stack of content moves out after it.
         props = first.setdefault("props", {})
-        if not props.get("role"):
-            props["role"] = "headline"
+        props.setdefault("role", "headline")
+        content = [c for c in (first.get("children") or []) if _header_leaves(c) is None]
+        if content:
+            first["children"] = [c for c in (first.get("children") or []) if _header_leaves(c) is not None]
+            if not first["children"]:
+                first.pop("children", None)
+            host["children"] = kids[:start + 1] + content + kids[start + 1:]
         return root
-    # A leading run of header-shaped nodes, stopping at the first content.
     run: list[dict] = []
-    for k in kids:
-        if isinstance(k, dict) and k.get("type") == "Section":
-            break
-        leaves = _header_leaves(k) if isinstance(k, dict) else None
-        if leaves is None:
+    for k in kids[start:]:
+        if k.get("type") == "Section" or _header_leaves(k) is None:
             break
         run.append(k)
         if len(run) >= 4:
             break
     leaves = [leaf for k in run for leaf in (_header_leaves(k) or [])]
-    if not leaves:
-        return root
     heading = next((l for l in leaves if l.get("type") == "Heading" and _text_of(l)), None)
     texts = [l for l in leaves if l.get("type") == "Text" and _text_of(l)]
     title_node = heading or (texts.pop(0) if texts else None)
@@ -1104,10 +1119,9 @@ def normalise_page_header(root: Any) -> Any:
         section["props"]["subtitle"] = _text_of(subtitle)
     if actions:
         section["children"] = actions
-    for key in ("id", "visibleIf"):
-        if run[0].get(key) is not None and key == "id":
-            section[key] = run[0][key]
-    host["children"] = crumbs + [section] + kids[len(run):]
+    if run[0].get("id"):
+        section["id"] = run[0]["id"]
+    host["children"] = kids[:start] + crumbs + [section] + kids[start + len(run):]
     return root
 
 
@@ -1471,7 +1485,6 @@ def plan_page(doc: dict, page: dict, template: dict,
                                     record=single)
         root = carry_the_record(root, doc, page, sources)
         root = link_lists_to_records(root, doc, sources)
-        root = normalise_page_header(root)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
@@ -1499,6 +1512,8 @@ def plan_page(doc: dict, page: dict, template: dict,
         **({"_figmaCanvas": template["canvas"]} if template.get("canvas") else {}),
     }
     errors = validate_props(schema, catalog)
+    if not errors and schema.get("root"):
+        schema["root"] = normalise_page_header(schema["root"])
     if errors:
         raise PlanError(f"{page.get('id')}: " + "; ".join(errors[:4]))
 
