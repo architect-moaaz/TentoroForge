@@ -149,6 +149,15 @@ honestly, and say nothing when it does look right:
   satisfy is not visible on it — a field, column, action, filter or state the
   requirement calls for and the page does not show. Name the requirement.
 
+A STATIC SCREENSHOT DOES NOT SHOW EVERYTHING, so do not fault a page for what a
+still image cannot reveal. A closed dropdown / select shows only its current or
+placeholder value (often "—", "Select…", or blank); its options appear on click,
+which this screenshot did not do. Do NOT report a dropdown as empty, unpopulated,
+missing its choices, or non-functional from the screenshot — whether its options
+are correct is checked separately by driving the control, not judged here. The
+same holds for anything that only appears on hover, focus, open or scroll (menus,
+tooltips, validation messages, expanded rows).
+
 Return STRICT JSON: {{"findings": [{{"route": "...", "kind": "...",
 "severity": "error|warn|info", "note": "..."}}]}}. Each note must say WHAT is
 wrong and WHERE, concretely enough to fix. An empty findings list is a valid
