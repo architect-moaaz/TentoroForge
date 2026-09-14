@@ -42,11 +42,15 @@ console.log("a {{user.<column>}} filter is filled from the session user");
     "the approver's home property is the value compared");
 }
 
-console.log("a user without the column matches nothing, not everything");
+console.log("a user without the column is not narrowed by it");
 {
+  // "scoped to their home property where they have one": Finance has none
+  // and reads the chain. The ownership rules stay the boundary — a scoped
+  // role with no home property reads nothing there. Left as text, the
+  // placeholder reached Postgres as a uuid and the whole source failed.
   await dataEngine.run(source, { user: { id: "u2", role: "Finance" } });
-  eqJson(queries.at(-1).filters, { propertyId: "{{user.homePropertyId}}", status: "Pending approval" },
-    "the placeholder stays as the value, so the query is not unscoped");
+  eqJson(queries.at(-1).filters, { status: "Pending approval" },
+    "the filter naming the missing column is dropped; the rest stays");
 }
 
 console.log("a literal filter is untouched");

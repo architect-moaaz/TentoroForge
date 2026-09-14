@@ -177,15 +177,19 @@ export const dataEngine: DataEngine = {
       // props against `user`, but a source resolves HERE, before anything
       // renders, so nothing filled the placeholder and the query compared
       // propertyId to the literal text: an empty queue for every approver.
-      // The session user fills it. A user without the column keeps the
-      // placeholder as the value, so the query matches nothing rather than
-      // leaking the unscoped list.
+      // The session user fills it. A user without the column is not narrowed
+      // by it — "scoped to their home property where they have one" — and the
+      // ownership rules, not a page filter, remain the boundary: a scoped role
+      // with no home property still reads nothing, a chain-wide role reads the
+      // chain. Left in place, the literal text reached Postgres as a uuid and
+      // the whole source failed.
       const sessionUser = (ctx?.user ?? {}) as Record<string, unknown>;
       for (const k of Object.keys(filters)) {
         const m = /^\{\{\s*user\.([A-Za-z0-9_]+)\s*\}\}$/.exec(filters[k]);
         if (!m) continue;
         const v = sessionUser[m[1]];
         if (v !== undefined && v !== null && v !== "") filters[k] = String(v);
+        else delete filters[k];
       }
 
       // Sort — accept either `sort: "field"` (asc default) or

@@ -787,6 +787,7 @@ function FormFieldImpl({
         <input
           id={id}
           type={field.kind === "number" ? "number" : "text"}
+          step={field.kind === "number" ? "any" : undefined}
           className={FIELD_CONTROL + " bg-muted text-muted-foreground"}
           readOnly
           aria-readonly="true"
@@ -808,6 +809,10 @@ function FormFieldImpl({
           <input
             id={id}
             type={field.kind}
+            // A number field takes any number. Without a step the browser's
+            // default is 1, and a decimal amount — 88.50 requested by a guest
+            // — is refused by native validation before submit ever runs.
+            step={field.kind === "number" ? "any" : undefined}
             placeholder={field.placeholder}
             className={FIELD_CONTROL}
             {...register(name, {
