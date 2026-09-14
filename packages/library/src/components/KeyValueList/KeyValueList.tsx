@@ -34,7 +34,7 @@ export interface KeyValueListProps extends KeyValueListPropsType {
 
 export function KeyValueList({ items, style }: KeyValueListProps) {
   // A data row (a support case) is shaped into a pair by its own columns.
-  items = (Array.isArray(items) ? items : []).map(asKeyValue) as typeof items;
+  const pairs = (Array.isArray(items) ? items : []).map(asKeyValue);
   const density = useDensity();
   const rowCls = DENSITY_ROW[density];
 
@@ -44,7 +44,7 @@ export function KeyValueList({ items, style }: KeyValueListProps) {
       style={resolveStyle(style)}
       {...useMotion(style?.motion)}
     >
-      {items.map((item, i) => {
+      {pairs.map((item, i) => {
         // A bound value may be a Date/number/null the schema didn't predict —
         // coerce so rendering (and clipboard) never crash on a non-string child.
         const display = formatValue(item.value);
