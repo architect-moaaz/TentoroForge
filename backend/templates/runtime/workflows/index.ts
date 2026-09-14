@@ -508,6 +508,11 @@ function _walkPath(root: unknown, path: string): unknown {
   let cur: any = root;
   for (const seg of parts) {
     if (cur == null) return undefined;
+    // AN ID IS ITS OWN ID. A form's foreign-key field carries the related
+    // row's id as a string (`property: "7d85…"`), and the Blueprint reads it
+    // as the row (`{{property.id}}`). Walking `.id` into a string gave
+    // undefined, and the case's property_id was inserted as null.
+    if (seg === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
     cur = cur[seg as any];
   }
   return cur;

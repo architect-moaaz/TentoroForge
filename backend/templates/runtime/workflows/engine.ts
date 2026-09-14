@@ -218,7 +218,12 @@ export async function executeWorkflow(
 function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
   if (typeof value !== "string" || !value.includes("{{")) return value;
   const read = (path: string) =>
-    path.trim().split(".").reduce<any>((cur, p) => (cur === null || cur === undefined ? undefined : cur[p]), variables);
+    path.trim().split(".").reduce<any>((cur, p) => {
+      if (cur === null || cur === undefined) return undefined;
+      // An id is its own id: `{{property.id}}` over a foreign-key value.
+      if (p === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
+      return cur[p];
+    }, variables);
   const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
   if (whole) {
     const v = read(whole[1]);
