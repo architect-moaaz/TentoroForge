@@ -85,6 +85,14 @@ export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Ar
 // way in so both shapes work.
 const SCALAR_OPS = new Set(["max", "avg", "sum", "count", "min"]);
 
+// AN UNRESOLVED ROUTE PARAM IS NOT A RECORD ID. A detail/action route reached
+// at its literal template (`/rentals/[id]/return`, id="[id]") — no real record
+// selected — passed "[id]" straight to a get-by-id, and Postgres rejected it as
+// an invalid uuid, failing the whole page load with a 500 instead of showing a
+// "not found" state. Any id still carrying the `[…]` placeholder brackets is
+// unresolved; treat it as no record rather than a query.
+const isUnresolvedRouteParam = (v: string): boolean => /[[\]]/.test(v);
+
 export const dataEngine: DataEngine = {
   async run(source: unknown, ctx?: { request?: Request; user?: { id?: string; role?: string; email?: string; workspaceId?: string } }) {
     const src = (source ?? {}) as Source & { op?: string; field?: string; metrics?: Record<string, unknown> };
@@ -122,6 +130,7 @@ export const dataEngine: DataEngine = {
 
       // Detail load — { type: "detail", entity, id } or { id } in query
       if (src.id !== undefined) {
+        if (isUnresolvedRouteParam(String(src.id))) return [];
         const item = await engine.findById(entity, String(src.id), userCtx);
         return item ? [item] : [];
       }
@@ -139,6 +148,7 @@ export const dataEngine: DataEngine = {
         try { id = new URL(ctx.request.url).searchParams.get("id") ?? undefined; } catch { /* non-URL request */ }
       }
       if (id !== undefined && typeof id !== "object" && id !== null && id !== "") {
+        if (isUnresolvedRouteParam(String(id))) return [];
         const item = await engine.findById(entity, String(id), userCtx);
         return item ? [item] : [];
       }
