@@ -214,6 +214,22 @@ export async function executeWorkflow(
 /**
  * Resolve input parameters for a node from process variables.
  */
+/** `{{path}}` inside a config string, read from ctx.variables. */
+function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
+  if (typeof value !== "string" || !value.includes("{{")) return value;
+  const read = (path: string) =>
+    path.trim().split(".").reduce<any>((cur, p) => (cur === null || cur === undefined ? undefined : cur[p]), variables);
+  const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
+  if (whole) {
+    const v = read(whole[1]);
+    return v === undefined ? null : v;
+  }
+  return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, p) => {
+    const v = read(p);
+    return v === null || v === undefined ? "" : String(v);
+  });
+}
+
 function resolveInputParams(
   node: WorkflowNode,
   ctx: WorkflowExecutionContext,
@@ -1082,9 +1098,14 @@ async function handleAction(
   if (actionType === "set_variable" && config.variableName) {
     let value: unknown;
     if ("variableValue" in config) {
-      value = (config as any).variableValue;
+      value = interpolateValue((config as any).variableValue, ctx.variables);
     } else if ("value" in (config as any)) {
-      value = (config as any).value;
+      // A `value` written as `{{triage_case.userId}}` is a reference, not
+      // the text: stored as text, it reached a uuid column as the placeholder
+      // and the insert failed. A lone reference yields the RAW value (an id,
+      // an object); a reference inside prose yields the text; an unresolved
+      // reference yields null, never its own spelling.
+      value = interpolateValue((config as any).value, ctx.variables);
     } else if (preEvaluated.has("expression")) {
       // A14-3: already evaluated by the input mapper — using it directly is
       // the whole fix. Re-evaluating would be the double-evaluation bug.
