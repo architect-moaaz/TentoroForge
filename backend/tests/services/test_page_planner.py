@@ -862,6 +862,60 @@ def test_a_list_page_carries_nothing():
     assert "args" not in root["props"]
 
 
+# --- a record's child collections are fetches of their own ---------------------
+
+
+_CASE_DOC = {
+    "data": {
+        "entities": [
+            {"id": "ENTITY-003", "name": "RefundCase", "table": "refund_cases",
+             "fields": [{"name": "id"}, {"name": "status"}, {"name": "guestName"}]},
+            {"id": "ENTITY-007", "name": "Note", "table": "notes",
+             "fields": [{"name": "id"}, {"name": "body"}, {"name": "refundCaseId"}]},
+            {"id": "ENTITY-008", "name": "ActivityLogEntry", "table": "activity_log_entries",
+             "fields": [{"name": "id"}, {"name": "summary"}, {"name": "refundCaseId"}]},
+        ],
+        "relationships": [
+            {"from": "ENTITY-007", "fromField": "refundCaseId", "to": "ENTITY-003", "toField": "refundCaseId", "kind": "one_to_many"},
+        ],
+    },
+}
+
+
+def test_a_record_s_child_collection_becomes_a_filtered_list_source():
+    """`{{record.notes}}` read a relation off a `get` that returns one row: the
+    list was always empty, and a note added was never shown."""
+    entity = _CASE_DOC["data"]["entities"][0]
+    root = {"type": "Stack", "children": [
+        {"type": "List", "props": {"items": "{{record.notes}}"}},
+        {"type": "Timeline", "props": {"entries": "{{record.activity}}"}},
+        {"type": "Heading", "props": {"text": "{{record.guestName}}"}},
+    ]}
+    sources = pp.attach_related_collections(root, _CASE_DOC, entity,
+                                            [{"name": "record", "entity": "RefundCase", "op": "get"}])
+    assert root["children"][0]["props"]["items"] == "{{notes}}"
+    assert root["children"][1]["props"]["entries"] == "{{activity}}"
+    assert root["children"][2]["props"]["text"] == "{{record.guestName}}"
+    by = {s["name"]: s for s in sources}
+    assert by["notes"] == {"name": "notes", "entity": "Note", "op": "list", "filter": {"refundCaseId": "$routeId"}}
+    # ActivityLogEntry has no relationship row; its refundCaseId column names the case.
+    assert by["activity"] == {"name": "activity", "entity": "ActivityLogEntry", "op": "list",
+                              "filter": {"refundCaseId": "$routeId"}}
+
+
+def test_a_binding_that_names_no_child_is_left_alone():
+    entity = _CASE_DOC["data"]["entities"][0]
+    root = {"type": "Text", "props": {"content": "{{record.mystery}}"}}
+    sources = pp.attach_related_collections(root, _CASE_DOC, entity, [{"name": "record", "op": "get"}])
+    assert root["props"]["content"] == "{{record.mystery}}" and len(sources) == 1
+
+
+def test_a_form_on_a_record_page_stays_on_the_record():
+    root = {"type": "Form", "props": {"workflow": "FLOW-010"}}
+    pp.settle_form_outcomes(root, "/refund-cases/[id]", {"/refund-cases", "/refund-cases/[id]"}, record="record")
+    assert root["props"]["onSuccess"] == {"toast": "Saved", "navigate": "/refund-cases/{{record.id}}"}
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [

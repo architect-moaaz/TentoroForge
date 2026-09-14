@@ -6,6 +6,7 @@ import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
 import { SCROLL_X } from "../../style/scroll";
 import { applyRowCap } from "../../style/rowCap";
+import { asListItem } from "../../style/rowShape";
 
 export interface ListProps extends ListPropsType {
   /** Max rows to render; set by the dashboard composer. */
@@ -16,7 +17,8 @@ export interface ListProps extends ListPropsType {
 
 export function List({ items = [], divided = true, style, onItemClick, limit }: ListProps) {
   // See ActivityFeed: the composer caps a list that shares a grid row.
-  const rows = applyRowCap(items, limit);
+  // A data row (a note, an attachment) is shaped into an item by its own columns.
+  const rows = applyRowCap((Array.isArray(items) ? items : []).map(asListItem), limit);
   return (
     <ul
       className={`rounded-lg border border-border ${SCROLL_X} ${divided ? "divide-y divide-border" : ""}`}

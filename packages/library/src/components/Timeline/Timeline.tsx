@@ -1,4 +1,5 @@
 import * as React from "react";
+import { asTimelineEntry } from "../../style/rowShape";
 import type { TimelineNode } from "@tentoroforge/schema";
 import { z } from "zod";
 
@@ -14,7 +15,7 @@ const STATUS_DOT: Record<string, string> = {
 
 export function Timeline({ entries, orientation = "vertical" }: Props) {
   // entries can now be a Mustache binding string OR an array (including empty default)
-  const list = Array.isArray(entries) ? entries : [];
+  const list = (Array.isArray(entries) ? entries : []).map(asTimelineEntry) as any[];
   const isUnresolvedBinding = typeof entries === "string";
 
   if (isUnresolvedBinding) {

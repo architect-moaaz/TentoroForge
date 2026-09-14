@@ -833,11 +833,21 @@ def speak_feel(node: Any) -> Any:
 #: /guest, which is no page — a guest who had just submitted a refund request
 #: landed on a 404. A form on a page whose parent is not a route stays where
 #: it is and says so; a page may still author its own `onSuccess`.
-def settle_form_outcomes(root: Any, route: str, routes: set[str]) -> Any:
-    """Give every Form without an `onSuccess` one that lands on a real page."""
+def settle_form_outcomes(root: Any, route: str, routes: set[str],
+                         record: str | None = None) -> Any:
+    """Give every Form without an `onSuccess` one that lands on a real page.
+
+    On a record page — `/refund-cases/[id]` with a `get` source — a form adds
+    to the record (a note, an attachment, a decision), and the default
+    "return to the parent" sent the person to the list they had just left.
+    The form stays on the record, reloaded, so what it added is shown.
+    """
     parts = [seg for seg in (route or "/").split("?")[0].split("/") if seg]
     parent = "/" + "/".join(parts[:-1]) if len(parts) > 1 else "/"
-    if parent in routes:
+    stay = None
+    if record and parts and parts[-1].startswith("["):
+        stay = "/" + "/".join(parts[:-1] + [f"{{{{{record}.id}}}}"])
+    elif parent in routes:
         return root
 
     def walk(n: Any) -> None:
@@ -850,7 +860,8 @@ def settle_form_outcomes(root: Any, route: str, routes: set[str]) -> Any:
         if n.get("type") == "Form":
             props = n.setdefault("props", {})
             if not props.get("onSuccess"):
-                props["onSuccess"] = {"toast": "Submitted — thank you", "navigate": route}
+                props["onSuccess"] = ({"toast": "Saved", "navigate": stay} if stay
+                                      else {"toast": "Submitted — thank you", "navigate": route})
         for c in n.get("children") or []:
             walk(c)
     walk(root)
@@ -894,6 +905,88 @@ def carry_the_record(root: Any, doc: dict, page: dict, sources: list[dict]) -> A
             walk(c)
     walk(root)
     return root
+
+
+#: A RECORD'S CHILD COLLECTIONS ARE FETCHES OF THEIR OWN. A record page binds
+#: `{{record.notes}}`, `{{record.attachments}}`, `{{record.activity}}`: the
+#: composer reads them as relations of the record, but a `get` returns one
+#: row and no relation, so every such list rendered empty — a note was added,
+#: written, logged, and never shown (Criterion Refunds v2, 2026-09-14). The
+#: Blueprint's relationships say which entities point at this one and by
+#: which column; each becomes a list source filtered to the route's record.
+_RECORD_CHILD = re.compile(r"\{\{\s*(\w+)\.(\w+)((?:\.\w+)*)\s*\}\}")
+
+
+def _slugify_word(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def attach_related_collections(root: Any, doc: dict, entity: dict | None,
+                               sources: list[dict]) -> list[dict]:
+    record = next((s for s in sources if isinstance(s, dict)
+                   and s.get("op") in ("get", "detail", "find", "one")), None)
+    if not entity or not record:
+        return sources
+    rec = str(record.get("name"))
+    fields = {f.get("name") for f in (entity.get("fields") or []) if f.get("name")}
+    entities = _entities(doc)
+    children: dict[str, tuple[dict, str]] = {}
+    for rel in _live((doc.get("data") or {}).get("relationships")):
+        if rel.get("to") == entity.get("id") and rel.get("from") in entities and rel.get("toField"):
+            children[rel["from"]] = (entities[rel["from"]], str(rel["toField"]))
+    fk_by_name = f"{_lower_first(str(entity.get('name') or ''))}Id"
+    for eid, child in entities.items():
+        if eid == entity.get("id") or eid in children:
+            continue
+        if any(f.get("name") == fk_by_name for f in (child.get("fields") or [])):
+            children[eid] = (child, fk_by_name)
+
+    def child_for(key: str) -> tuple[dict, str] | None:
+        want = _slugify_word(key)
+        for child, fk in children.values():
+            cname = _slugify_word(str(child.get("name") or ""))
+            if cname in (want, want.rstrip("s")) or cname.startswith(want.rstrip("s")):
+                return child, fk
+        return None
+
+    added: dict[str, dict] = {}
+
+    def rebind(value: Any) -> Any:
+        if isinstance(value, str):
+            def sub(m: "re.Match[str]") -> str:
+                base, key, rest = m.group(1), m.group(2), m.group(3) or ""
+                if base != rec or key in fields:
+                    return m.group(0)
+                found = child_for(key)
+                if not found:
+                    return m.group(0)
+                child, fk = found
+                if key not in added and not any(s.get("name") == key for s in sources):
+                    added[key] = {"name": key, "entity": child.get("name"), "op": "list",
+                                  "filter": {fk: "$routeId"}}
+                return "{{" + key + rest + "}}"
+            return _RECORD_CHILD.sub(sub, value)
+        if isinstance(value, list):
+            return [rebind(v) for v in value]
+        if isinstance(value, dict):
+            return {k: rebind(v) for k, v in value.items()}
+        return value
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        if isinstance(n.get("props"), dict):
+            n["props"] = rebind(n["props"])
+        if isinstance(n.get("visibleIf"), str):
+            n["visibleIf"] = rebind(n["visibleIf"])
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return list(sources) + list(added.values())
 
 
 #: What each authored state node is for. A2UI writes all four as siblings in
@@ -1240,16 +1333,20 @@ def plan_page(doc: dict, page: dict, template: dict,
         x["entity"] = by_id.get(x.get("entity"), x.get("entity"))
         carried.append(x)
     sources = carried or (data_sources(doc, page, entity, root) if root else [])
+    if root:
+        sources = attach_related_collections(root, doc, entity, sources)
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
-    # A detail page has no list: its one record is what "populated" means.
+    # A detail page is about its one record: that is what "populated" means,
+    # whatever child collections it also lists.
     single = next((s["name"] for s in sources
                    if s.get("op") in ("get", "detail", "find", "one")), None)
     if root:
-        root = (gate_states(root, primary) if primary
-                else gate_states(root, single, single=single is not None))
+        root = (gate_states(root, single, single=True) if single
+                else gate_states(root, primary))
         root = speak_feel(root)
         root = settle_form_outcomes(root, page.get("route") or "/",
-                                    {p.get("route") for p in _live(doc.get("pages")) if p.get("route")})
+                                    {p.get("route") for p in _live(doc.get("pages")) if p.get("route")},
+                                    record=single)
         root = carry_the_record(root, doc, page, sources)
     if root is not None:
         root = assign_node_ids(root)
