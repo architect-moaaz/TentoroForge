@@ -271,6 +271,51 @@ export function SmithPanel({
       // left: the tab title carries it back, and a notification reaches them
       // outside the browser when they have already allowed one.
       notifyDone(run.awaitingApproval, run.nodesTotal > 0);
+      // PULL THE TRAILING MESSAGES THE STREAM COULD NOT DELIVER. A long build
+      // drops its SSE and the panel polls the run registry, which carries node
+      // states but not messages — so the "your application is built" line and
+      // the "verify & fix" offer, emitted after the drop, are persisted to the
+      // transcript but never streamed here. Without this they appear only on a
+      // manual reload; the user saw the build finish and no offer. Fetch the
+      // transcript and append whatever is not already shown (deduped by
+      // role+text, so a message that WAS streamed is not doubled).
+      if (projectId) {
+        void (async () => {
+          try {
+            const token =
+              typeof window !== "undefined" ? localStorage.getItem("token") : null;
+            const res = await fetch(
+              `${API_BASE}/api/projects/${projectId}/conversations`,
+              {
+                credentials: "include",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+            );
+            if (!res.ok) return;
+            const rows = (await res.json()) as Array<Record<string, unknown>>;
+            if (!Array.isArray(rows)) return;
+            setMessages((cur) => {
+              const seen = new Set(cur.map((m) => `${m.role} ${m.text}`));
+              const add = rows
+                .filter((r) => String(r.content ?? "").trim())
+                .map((r) => {
+                  const meta = (r.metadata ?? {}) as Record<string, unknown>;
+                  return {
+                    role: r.role === "user" ? ("user" as const) : ("smith" as const),
+                    text: String(r.content ?? ""),
+                    options: (meta.options as string[]) ?? undefined,
+                    diffSummary: (meta.diffSummary as string) || undefined,
+                    at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
+                  };
+                })
+                .filter((m) => !seen.has(`${m.role} ${m.text}`));
+              return add.length ? [...cur, ...add] : cur;
+            });
+          } catch {
+            /* a missed sync is not an error — a reload still recovers it */
+          }
+        })();
+      }
     }
     if (run.status === "running") {
       completedRef.current = false;
@@ -280,7 +325,7 @@ export function SmithPanel({
       // that had just been approved, while twenty stages ran unseen behind it.
       setOpenPlan(null);
     }
-  }, [run.status, run.awaitingApproval, onRunComplete]);
+  }, [run.status, run.awaitingApproval, onRunComplete, projectId]);
 
   /**
    * §107 step 1 — Smith speaks first.

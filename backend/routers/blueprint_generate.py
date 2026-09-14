@@ -678,6 +678,47 @@ def _build_complete_message(doc: dict | None) -> str | None:
             f"retry {'it' if n == 1 else 'them'}.")
 
 
+#: What Smith offers after a build. The first is the consent that runs the
+#: review; the second declines. Frontend sends the picked option back as the
+#: message, so the consent test matches the option text exactly (plus the
+#: obvious typed phrasings).
+_VERIFY_OFFER_OPTIONS = ("Verify & fix", "Not now")
+
+_VERIFY_OFFER_TEXT = (
+    "Want me to auto-verify and fix it? I'll look at every page as it renders — "
+    "is it laid out well, does it match what you asked for — and check the "
+    "buttons, search and links actually work, then re-compose anything that's off."
+)
+
+
+def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
+                             where: str = "") -> None:
+    """Say the build finished and, when offered, ask to verify — as ONE act.
+
+    Both go through the same ``emit`` at the same moment, so both are persisted
+    (the chat path writes every ``message`` to the transcript) and both reach a
+    panel that reloads after a long build. The offer used to be emitted by the
+    caller *after* ``_run_dag`` returned; a build that outran its turn released
+    the panel, finished in the background, announced completion from here, and
+    the offer — a few lines later, with the stream already gone and nothing
+    persisting it — never arrived. The user never saw the option to verify.
+
+    Best-effort: an announcement that cannot be worded must not fail a build
+    that succeeded.
+    """
+    try:
+        done = _build_complete_message(doc)
+        if not done:
+            return
+        emit("message", {"text": done})
+        if offer_verify:
+            emit("message", {"text": _VERIFY_OFFER_TEXT,
+                             "options": list(_VERIFY_OFFER_OPTIONS),
+                             "status": "asked"})
+    except Exception:  # noqa: BLE001 — never let the announcement fail the build
+        logger.warning("[blueprint] %s: could not announce completion", where)
+
+
 def _output_dir(project: Any) -> Path:
     """Where this project's application lives.
 
@@ -1448,25 +1489,14 @@ async def smith_chat(
                         emit("message", {"text": ui_designer.CONFIGURE_TEXT,
                                          "status": "needs_user"})
                         return {"status": "needs_user"}
+                # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
+                # offers it beside the completion line for every approved build
+                # (see there), so a build that outran its turn still delivers the
+                # offer. The review runs on the next turn, only if the user takes
+                # it (see `_is_verify_consent`).
                 built = _run_dag(str(output_dir), app_root, req.message,
                                  approved=True, emit=emit,
                                  app_name=getattr(project, "name", "") or "")
-                # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. The
-                # build finished; Smith says so (in _run_dag) and OFFERS to check
-                # the app and fix what it finds — screenshots + a design review
-                # of every page, and that the buttons, search and links actually
-                # work — rather than spending the minutes and the tokens without
-                # being asked. The review runs on the next turn, only if the user
-                # takes the offer (see `_is_verify_consent`).
-                emit("message", {
-                    "text": "Want me to auto-verify and fix it? I'll look at "
-                            "every page as it renders — is it laid out well, "
-                            "does it match what you asked for — and check the "
-                            "buttons, search and links actually work, then "
-                            "re-compose anything that's off.",
-                    "options": list(_VERIFY_OFFER_OPTIONS),
-                    "status": "asked",
-                })
                 return built
 
             # THE USER TOOK THE VERIFY OFFER. A built application and a message
@@ -1797,7 +1827,19 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
              announce_completion: bool = True) -> dict:
-    """Invoke §28's graph and narrate it. Never reorders it (§116)."""
+    """Invoke §28's graph and narrate it. Never reorders it (§116).
+
+    When an approved build reaches completion it offers to verify — as part of
+    the completion announcement, the same emit at the same moment, so the offer
+    is persisted and reaches a reloaded panel exactly as the "your application is
+    built" line does. Offering it *after* ``_run_dag`` returned (in one of the
+    several callers) meant a build that outran its turn — the common case —
+    released the panel, finished in the background, announced completion from
+    here, but the offer, emitted later in the caller with the stream gone and
+    nothing persisting it, never arrived. Gating on ``approved`` here covers
+    every build entry point at once; the review re-compose passes
+    ``announce_completion=False`` and so never re-offers.
+    """
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.observer import anthropic_observer
@@ -1898,13 +1940,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # gone by the time it landed. Best-effort: a completion that cannot be
         # worded must not fail a build that succeeded.
         if announce_completion:
-            try:
-                _done = _build_complete_message(svc.doc)
-                if _done:
-                    emit("message", {"text": _done})
-            except Exception:  # noqa: BLE001 — never let the announcement fail the build
-                logger.warning("[blueprint] %s: could not announce completion",
-                               Path(output_dir).name)
+            _announce_build_complete(svc.doc, emit, offer_verify=approved,
+                                     where=Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
@@ -1912,13 +1949,6 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": not approved, "forecast": counts,
             "state": state,
             "report": _report_payload(report, svc.doc)}
-
-
-#: What Smith offers after a build. The first is the consent that runs the
-#: review; the second declines. Frontend sends the picked option back as the
-#: message, so the consent test matches the option text exactly (plus the
-#: obvious typed phrasings).
-_VERIFY_OFFER_OPTIONS = ("Verify & fix", "Not now")
 
 
 def _is_verify_consent(message: str) -> bool:
