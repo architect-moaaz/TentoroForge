@@ -857,6 +857,45 @@ def settle_form_outcomes(root: Any, route: str, routes: set[str]) -> Any:
     return root
 
 
+#: A LAUNCHER ON A RECORD PAGE CARRIES THE RECORD. A workflow declares its
+#: inputs — `{kind: "record", entity: ENTITY-003, name: "refundCase"}` — and
+#: reads `{{refundCase.id}}` in every step. The Approve button on the case
+#: page was authored with `args: {stage: …}` and no case, so the approval
+#: row was inserted with a null refund_case_id and the button did nothing
+#: visible (Criterion Refunds v2, 2026-09-14). The page has one record; the
+#: workflow says what it calls it; the planner passes it.
+def carry_the_record(root: Any, doc: dict, page: dict, sources: list[dict]) -> Any:
+    record = next((s.get("name") for s in sources
+                   if isinstance(s, dict) and s.get("op") in ("get", "detail", "find", "one")), None)
+    entity_id = (page.get("data") or {}).get("primaryEntity")
+    if not record or not entity_id:
+        return root
+    workflows = {w.get("id"): w for w in _live(doc.get("workflows")) if w.get("id")}
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        props = n.get("props")
+        wf = workflows.get((props or {}).get("workflow")) if isinstance(props, dict) else None
+        if wf:
+            args = props.get("args") if isinstance(props.get("args"), dict) else {}
+            for inp in wf.get("inputs") or []:
+                if (isinstance(inp, dict) and inp.get("kind") == "record"
+                        and inp.get("entity") == entity_id and inp.get("name")
+                        and inp["name"] not in args):
+                    args[inp["name"]] = f"{{{{{record}.id}}}}"
+            if args:
+                props["args"] = args
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1211,6 +1250,7 @@ def plan_page(doc: dict, page: dict, template: dict,
         root = speak_feel(root)
         root = settle_form_outcomes(root, page.get("route") or "/",
                                     {p.get("route") for p in _live(doc.get("pages")) if p.get("route")})
+        root = carry_the_record(root, doc, page, sources)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:

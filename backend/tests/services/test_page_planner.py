@@ -818,6 +818,50 @@ def test_an_authored_outcome_is_kept():
     assert root["props"]["onSuccess"] == {"navigate": "/thanks"}
 
 
+# --- a launcher on a record page carries the record -----------------------------
+
+
+_DOC_WITH_WORKFLOWS = {
+    "workflows": [
+        {"id": "FLOW-004", "name": "Approve", "inputs": [
+            {"kind": "record", "entity": "ENTITY-003", "name": "refundCase", "required": True},
+            {"kind": "field", "name": "stage", "type": "string"}]},
+        {"id": "FLOW-020", "name": "Add note", "inputs": [
+            {"kind": "record", "entity": "ENTITY-009", "name": "supportCase"}]},
+    ],
+}
+_CASE_PAGE = {"id": "PAGE-006", "route": "/refund-cases/[id]", "data": {"primaryEntity": "ENTITY-003"}}
+
+
+def test_a_launcher_on_a_record_page_carries_the_record():
+    """The Approve button was authored with `args: {stage}` and no case; the
+    workflow reads `{{refundCase.id}}` in every step; the approval row was
+    inserted with a null refund_case_id."""
+    root = {"type": "Stack", "children": [
+        {"type": "Button", "props": {"label": "Approve", "workflow": "FLOW-004", "args": {"stage": "{{record.status}}"}}},
+        {"type": "Form", "props": {"workflow": "FLOW-004", "fields": []}},
+    ]}
+    pp.carry_the_record(root, _DOC_WITH_WORKFLOWS, _CASE_PAGE, [{"name": "record", "entity": "RefundCase", "op": "get"}])
+    assert root["children"][0]["props"]["args"] == {"stage": "{{record.status}}", "refundCase": "{{record.id}}"}
+    assert root["children"][1]["props"]["args"] == {"refundCase": "{{record.id}}"}
+
+
+def test_an_authored_record_argument_is_kept_and_another_entity_s_input_is_not_filled():
+    root = {"type": "Stack", "children": [
+        {"type": "Button", "props": {"workflow": "FLOW-004", "args": {"refundCase": "{{record.caseId}}"}}},
+        {"type": "Form", "props": {"workflow": "FLOW-020"}},
+    ]}
+    pp.carry_the_record(root, _DOC_WITH_WORKFLOWS, _CASE_PAGE, [{"name": "record", "op": "get"}])
+    assert root["children"][0]["props"]["args"] == {"refundCase": "{{record.caseId}}"}
+    assert "args" not in root["children"][1]["props"]
+
+
+def test_a_list_page_carries_nothing():
+    root = {"type": "Button", "props": {"workflow": "FLOW-004"}}
+    pp.carry_the_record(root, _DOC_WITH_WORKFLOWS, _CASE_PAGE, [{"name": "cases", "op": "list"}])
+    assert "args" not in root["props"]
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [
