@@ -9281,24 +9281,32 @@
           "items": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "label": {
-                  "type": "string",
-                  "minLength": 1
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "copyable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value"
+                  ],
+                  "additionalProperties": false
                 },
-                "value": {
-                  "type": "string"
-                },
-                "copyable": {
-                  "type": "boolean"
+                {
+                  "type": "object",
+                  "additionalProperties": {}
                 }
-              },
-              "required": [
-                "label",
-                "value"
-              ],
-              "additionalProperties": false
+              ]
             },
             "minItems": 1
           }

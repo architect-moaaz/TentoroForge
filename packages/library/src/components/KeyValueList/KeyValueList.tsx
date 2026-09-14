@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { asKeyValue } from "../../style/rowShape";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import type { KeyValueListPropsType } from "./KeyValueList.schema";
 import { resolveStyle } from "../../style/resolveStyle";
@@ -32,6 +33,8 @@ export interface KeyValueListProps extends KeyValueListPropsType {
 }
 
 export function KeyValueList({ items, style }: KeyValueListProps) {
+  // A data row (a support case) is shaped into a pair by its own columns.
+  items = (Array.isArray(items) ? items : []).map(asKeyValue) as typeof items;
   const density = useDensity();
   const rowCls = DENSITY_ROW[density];
 

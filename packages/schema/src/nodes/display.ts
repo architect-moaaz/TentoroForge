@@ -34,13 +34,20 @@ export const KeyValueListNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("KeyValueList"),
   props: z.object({
-    items: z.array(z.object({
-      label: z.string().min(1),
-      // value can be empty — the renderer handles empty-state UI
-      // (greyed dash, "Not set", etc.). label stays .min(1).
-      value: z.string(),
-      copyable: z.boolean().optional(),
-    }).strict()).min(1),
+    // A pair, or a data row: a dashboard card bound this to the support
+    // cases of a property, and validation stripped every column a case has,
+    // leaving "— —". The component shapes a row into a pair by its own
+    // columns (style/rowShape.ts).
+    items: z.array(z.union([
+      z.object({
+        label: z.string().min(1),
+        // value can be empty — the renderer handles empty-state UI
+        // (greyed dash, "Not set", etc.). label stays .min(1).
+        value: z.string(),
+        copyable: z.boolean().optional(),
+      }).strict(),
+      z.record(z.unknown()),
+    ])).min(1),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

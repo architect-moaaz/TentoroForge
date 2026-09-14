@@ -60,3 +60,15 @@ export function asTimelineEntry(row: unknown, i: number): Row {
   return { ...r, id: r.id ?? String(i), title: text(r.title) ?? rowTitle(r), timestamp: r.timestamp ?? rowTime(r) ?? "",
            actor: r.actor ?? ACTOR_KEYS.map((k) => text(r[k])).find(Boolean), detail };
 }
+
+const VALUE_KEYS = ["status", "state", "stage", "currentStage", "caseType", "type", "kind", "priority", "amountRequested", "amount", "value"];
+
+/** A KeyValueList pair from whatever the row is: a case becomes
+ *  "SC-STG-0001 · Open". An authored pair stays as it is. */
+export function asKeyValue(row: unknown): { label: string; value: string; copyable?: boolean } {
+  if (!row || typeof row !== "object") return { label: row == null ? "" : String(row), value: "" };
+  const r = row as Row;
+  if (text(r.label) !== undefined && "value" in r) return { label: String(r.label), value: r.value == null ? "" : String(r.value), copyable: r.copyable as boolean | undefined };
+  const value = VALUE_KEYS.map((k) => text(r[k])).find(Boolean) ?? rowSubtitle(r) ?? "";
+  return { label: rowTitle(r), value };
+}
