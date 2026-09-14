@@ -247,6 +247,14 @@ export async function renderSchemaPage(
   // still !== undefined, which flips the Engine into preview mode and makes its
   // workflow dispatch inert (so form submits silently no-op). Form/create pages
   // have no dataSources, so they MUST render live to dispatch real workflows.
+  // THE SIGNED-IN USER IS PAGE DATA. The renderer evaluates a visibility rule
+  // such as `record.currentStage == user.role`, and a binding such as
+  // `{{user.name}}`, over the page's data — and nothing put the user there,
+  // so every rule on the user was false and every binding to the user was
+  // empty (the Approve button never showed for the stage that held the
+  // case, Criterion Refunds v2). The session user is what the page knows;
+  // it carries no credential.
+  if (user) previewData.user = user;
   const hasPreview = Object.keys(previewData).length > 0;
 
   // Wizard pages carry a ``wizard`` metadata block emitted by
