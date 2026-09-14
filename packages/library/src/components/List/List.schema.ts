@@ -10,6 +10,8 @@ const ItemOrRow = z.union([Item.strict(), z.record(z.unknown())]);
 export const ListProps = z.object({
   items:     z.array(ItemOrRow).default([]),
   divided:   z.boolean().optional(),
+  /** Route template filled per item (`/refund-cases/{{id}}`); the item opens its record. */
+  itemHref:  z.string().optional(),
   /** Max rows to render — see ActivityFeedNode.limit. */
   limit:     z.number().int().positive().optional(),
   className: z.string().optional(),

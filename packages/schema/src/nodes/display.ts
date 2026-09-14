@@ -138,6 +138,10 @@ export const ListNode = z.object({
       z.record(z.unknown()),
     ])).min(1),
     divided: z.boolean().optional(),
+    /** A route template filled per item — `/refund-cases/{{id}}` — so an
+     *  item opens its record. Set by the planner when the bound entity has a
+     *  detail page; an authored value wins. */
+    itemHref: z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
