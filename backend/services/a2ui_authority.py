@@ -524,14 +524,25 @@ def build_requirement(root: Path, kind: str = "dashboard",
     parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind, route)]]
 
     # CREATE AND EDIT ARE ONE FORM, NOT TWO. The `form` job reads "collects or
-    # edits ONE record" for both, so on a `/new` page the composer hedged and
-    # authored BOTH a create form and a "Save Changes" edit form (plus a table
-    # of existing records), which the render review then flagged as a duplicate
-    # control and off-brief and could not get removed in two rounds. The route
-    # says which it is; say so, unambiguously, so one form is authored.
+    # edits ONE record" for both, so the composer hedged and authored BOTH a
+    # create form and a "Save Changes" edit form (plus a roster of existing
+    # records), which the render review then flagged as a duplicate control and
+    # off-brief and could not get removed in two rounds.
+    #
+    # Which one it is comes from the RECORD, not the route spelling: a form over
+    # an existing record carries an `[id]` (`/x/[id]/edit`); a form with no id
+    # creates one (`/x/new`, but also custom routes like `/add-data` — matching
+    # only `/new` missed those and let the duplicate back in). So: an id in the
+    # route → edit; no id → create.
     if _family_of(kind, route) == "form":
-        _r = str(route or "").rstrip("/")
-        if _r.endswith("/new"):
+        if "[" in str(route or ""):
+            parts.append(
+                "\nThis is an EDIT screen: it changes ONE EXISTING record, its "
+                "form pre-filled with the current values. Author exactly ONE "
+                "form, whose submit saves the changes — no second create form "
+                "beside it."
+            )
+        else:
             # NAMES NO COMPONENTS. The A2UI capability checker scans this text
             # for words like "table" and "list" and makes any it finds
             # mandatory — so "do NOT show a table" READS AS a demand for one,
@@ -543,13 +554,6 @@ def build_requirement(root: Path, kind: str = "dashboard",
                 "edit yet — do NOT add a second 'Save Changes' or edit form, and "
                 "do NOT show a roster of already-submitted records beside it. "
                 "This page IS the form."
-            )
-        elif _r.endswith("/edit"):
-            parts.append(
-                "\nThis is an EDIT screen: it changes ONE EXISTING record, its "
-                "form pre-filled with the current values. Author exactly ONE "
-                "form, whose submit saves the changes — no second create form "
-                "beside it."
             )
 
     if presentation in ("drawer", "modal"):

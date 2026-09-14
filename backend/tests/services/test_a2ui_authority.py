@@ -1151,3 +1151,13 @@ def test_a_non_form_screen_gets_no_create_or_edit_clause(tmp_path):
     root = _app(tmp_path)
     req = build_requirement(root, kind="collection", route="/members")
     assert "CREATE screen" not in req and "EDIT screen" not in req
+
+
+def test_a_custom_create_route_still_gets_the_one_form_brief(tmp_path):
+    # A create page whose route is not spelled `/new` (e.g. `/add-data`) still
+    # has no `[id]`, so it must get the CREATE (one-form) brief — matching only
+    # `/new` let the duplicate create+edit form back in on these routes.
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/add-data")
+    assert "CREATE screen" in req and "EDIT screen" not in req
+    assert "exactly ONE form" in req
