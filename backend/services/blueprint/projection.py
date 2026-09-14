@@ -1390,8 +1390,9 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
         for eid in (pg.get("data") or {}).get("supportingEntities") or []:
             if eid in entities:
                 readers[eid] |= roles
-    for rule in _live((doc.get("security") or {}).get("ownershipRules")):
-        if isinstance(rule, dict) and by_name.get(rule.get("entity")) in entities:
+    # Ownership rules are dicts beside prose notes.
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
             readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
     return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])} for eid in entities}
 
