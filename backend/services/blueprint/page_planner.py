@@ -1067,6 +1067,15 @@ def _find_header_host(node: Any) -> tuple[dict, int] | None:
     for i, k in enumerate(kids):
         if not isinstance(k, dict):
             return None
+        if k.get("type") == "Conditional":
+            # A detail page's whole body sits inside its "populated" gate;
+            # the error and empty gates hold only a state node.
+            inner = [c for c in (k.get("children") or []) if isinstance(c, dict)]
+            if any(c.get("type") not in _STATE_LEADS for c in inner):
+                found = _find_header_host(k)
+                if found:
+                    return found
+            continue
         if k.get("type") in _STATE_LEADS:
             continue
         if k.get("type") == "Section" and (k.get("props") or {}).get("title"):

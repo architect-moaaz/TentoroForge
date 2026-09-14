@@ -1013,6 +1013,22 @@ def test_a_section_s_content_moves_out_of_the_header():
     assert root["children"][1]["type"] == "Stack"
 
 
+def test_the_header_is_found_inside_a_detail_page_s_populated_gate():
+    root = {"type": "Stack", "children": [
+        {"type": "Conditional", "props": {"when": "record == null"}, "children": [{"type": "Alert", "props": {"title": "Error"}}]},
+        {"type": "Conditional", "props": {"when": "record != null"}, "children": [
+            {"type": "Container", "children": [
+                {"type": "Breadcrumb", "props": {"items": []}},
+                {"type": "Row", "children": [{"type": "Heading", "props": {"content": "{{record.guestName}}"}},
+                                             {"type": "Badge", "props": {"label": "{{record.status}}"}}]},
+                {"type": "Tabs", "children": []}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    body = root["children"][1]["children"][0]["children"]
+    assert [c["type"] for c in body] == ["Breadcrumb", "Section", "Tabs"]
+    assert body[1]["props"]["title"] == "{{record.guestName}}"
+
+
 def test_the_header_is_found_inside_a_grid_and_after_a_leading_alert():
     root = {"type": "Stack", "children": [
         {"type": "Alert", "props": {"title": "Error"}},
