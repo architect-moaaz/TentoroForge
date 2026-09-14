@@ -60,6 +60,12 @@ def translate_layout_vocabulary(result: Any, doc: dict | None) -> None:
         _translate_option_sources(body.get("root"), book, registry)
         body["dataSources"] = book.sources
         _name_the_signed_in_user(body)
+        # The renderer evaluates visibleIf/when with FEEL-lite; an author
+        # writes `===`, `!==`, `&&`, `||`. Stored translated, so the Blueprint
+        # speaks the contract's language (the planner translates again for
+        # layouts that landed before this seam did).
+        from services.blueprint.page_planner import speak_feel
+        speak_feel(body.get("root"))
 
 
 #: What a composer calls the signed-in person, and what the renderer calls them.

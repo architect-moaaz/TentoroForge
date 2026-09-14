@@ -754,6 +754,44 @@ def test_with_no_source_populated_content_simply_shows():
     assert "visibleIf" not in out["children"][1]
 
 
+# --- the author writes JavaScript; the renderer speaks FEEL -------------------
+
+
+@pytest.mark.parametrize("js, feel", [
+    ("record.status === 'Pending approval'", "record.status = 'Pending approval'"),
+    ("record.status !== 'Issued' && record.status !== 'Denied'",
+     "record.status != 'Issued' and record.status != 'Denied'"),
+    ("role === 'Reception' || role === 'General Manager'",
+     "role = 'Reception' or role = 'General Manager'"),
+    ("count(items) == 0", "count(items) = 0"),
+    ("a >= 1 and b <= 2 and c != 3", "a >= 1 and b <= 2 and c != 3"),
+    ('note = "fish && chips"', 'note = "fish && chips"'),
+    ("record != null", "record != null"),
+])
+def test_javascript_spelling_becomes_feel(js, feel):
+    """The Approve button on /refund-cases/[id] carried
+    `record.status === 'Pending approval'`; the renderer folds `==` to `=`
+    and nothing else, so `===` became `==`, failed to parse, and the button
+    was hidden for exactly the case it was for."""
+    assert pp.feel_expression(js) == feel
+
+
+def test_every_expression_in_a_tree_is_translated():
+    tree = {"type": "Stack", "children": [
+        {"type": "Conditional", "props": {"when": "a === 1 && b === 2"},
+         "children": [{"type": "Button", "visibleIf": "x !== 'y' || z"}]},
+        {"type": "Form", "props": {"fields": [
+            {"name": "homePropertyId",
+             "interaction": {"visibleIf": "role === 'Reception' || role === 'GM'"}}]}},
+    ]}
+    pp.speak_feel(tree)
+    cond = tree["children"][0]
+    assert cond["props"]["when"] == "a = 1 and b = 2"
+    assert cond["children"][0]["visibleIf"] == "x != 'y' or z"
+    field = tree["children"][1]["props"]["fields"][0]
+    assert field["interaction"]["visibleIf"] == "role = 'Reception' or role = 'GM'"
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [

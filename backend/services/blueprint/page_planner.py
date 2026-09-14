@@ -760,6 +760,68 @@ def bind_workflows(node: dict, workflow: str | None) -> dict:
     return node
 
 
+#: THE AUTHOR WRITES JAVASCRIPT; THE RENDERER SPEAKS FEEL. `visibleIf` and a
+#: Conditional's `when` are evaluated by FEEL-lite, whose comparison is `=`
+#: and whose connectives are `and`/`or`. An author raised on JavaScript
+#: writes `record.status === 'Pending approval'`, `!==`, `&&` and `||`; the
+#: renderer folds `==` to `=` and nothing else, so `===` became `==` and
+#: failed to parse, `!==` and `&&` never parsed at all, and every failure is
+#: false: the Approve button and every action form on /refund-cases/[id]
+#: were hidden for the case they were for. Spelling is the planner's to
+#: translate — outside string literals, where `&&` is content.
+_JS_SPELLING = (
+    (re.compile(r"!=="), "!="),
+    (re.compile(r"==="), "="),
+    (re.compile(r"(?<![!<>=])==(?!=)"), "="),
+    (re.compile(r"\s*&&\s*"), " and "),
+    (re.compile(r"\s*\|\|\s*"), " or "),
+)
+_STRING_LITERAL = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+
+
+def feel_expression(expr: str) -> str:
+    """`expr` in FEEL-lite's spelling, JavaScript operators translated."""
+    if not isinstance(expr, str) or not expr.strip():
+        return expr
+    out: list[str] = []
+    for i, part in enumerate(_STRING_LITERAL.split(expr)):
+        if i % 2 == 0:
+            for pat, rep in _JS_SPELLING:
+                part = pat.sub(rep, part)
+        out.append(part)
+    return "".join(out)
+
+
+#: Where a layout carries an expression: a node's `visibleIf`, a Conditional's
+#: `when`, and a form field's interaction predicates.
+_INTERACTION_PREDICATES = ("visibleIf", "enabledIf", "disabledIf", "requiredIf", "readOnlyIf")
+
+
+def speak_feel(node: Any) -> Any:
+    """Translate every expression in a tree in place; returns the tree."""
+    if isinstance(node, list):
+        for child in node:
+            speak_feel(child)
+        return node
+    if not isinstance(node, dict):
+        return node
+    if isinstance(node.get("visibleIf"), str):
+        node["visibleIf"] = feel_expression(node["visibleIf"])
+    props = node.get("props")
+    if isinstance(props, dict):
+        if isinstance(props.get("when"), str):
+            props["when"] = feel_expression(props["when"])
+        for field in (props.get("fields") or []) if isinstance(props.get("fields"), list) else []:
+            inter = field.get("interaction") if isinstance(field, dict) else None
+            if isinstance(inter, dict):
+                for key in _INTERACTION_PREDICATES:
+                    if isinstance(inter.get(key), str):
+                        inter[key] = feel_expression(inter[key])
+    for child in node.get("children") or []:
+        speak_feel(child)
+    return node
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1111,6 +1173,7 @@ def plan_page(doc: dict, page: dict, template: dict,
     if root:
         root = (gate_states(root, primary) if primary
                 else gate_states(root, single, single=single is not None))
+        root = speak_feel(root)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
