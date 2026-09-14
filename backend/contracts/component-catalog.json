@@ -9598,33 +9598,40 @@
         "type": "object",
         "properties": {
           "items": {
-            "type": "array",
-            "items": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "subtitle": {
+                          "type": "string"
+                        },
+                        "icon": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "title"
+                      ],
+                      "additionalProperties": false
                     },
-                    "subtitle": {
-                      "type": "string"
-                    },
-                    "icon": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
-                  },
-                  "required": [
-                    "title"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
+                  ]
                 }
-              ]
-            },
+              }
+            ],
             "default": []
           },
           "divided": {

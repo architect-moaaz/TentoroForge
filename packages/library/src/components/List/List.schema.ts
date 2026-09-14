@@ -8,7 +8,11 @@ const Item = z.object({ title: z.string(), subtitle: z.string().optional(), icon
 const ItemOrRow = z.union([Item.strict(), z.record(z.unknown())]);
 
 export const ListProps = z.object({
-  items:     z.array(ItemOrRow).default([]),
+  // A BOUND SOURCE, OR A LITERAL LIST. Like `Table.rows`, `items` may be a data
+  // binding (`{{condition_evidences}}`) resolved at render, or a literal array.
+  // Admitting only the array made every data-bound List fail validation and the
+  // whole page fall back to "rendering as-is".
+  items:     z.union([z.string(), z.array(ItemOrRow)]).default([]),
   divided:   z.boolean().optional(),
   /** Route template filled per item (`/refund-cases/{{id}}`); the item opens its record. */
   itemHref:  z.string().optional(),

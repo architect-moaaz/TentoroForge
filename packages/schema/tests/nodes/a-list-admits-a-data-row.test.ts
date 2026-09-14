@@ -14,6 +14,15 @@ describe("a List item may be a data row", () => {
   it("still refuses an empty list", () => {
     expect(ListNode.safeParse({ type: "List", props: { items: [] } }).success).toBe(false);
   });
+  it("admits a bound data source, like Table.rows", () => {
+    // A record page binds a List to a child collection. The composer writes
+    // `items: "{{condition_evidences}}"`; admitting only a literal array made
+    // that fail strict validation and the whole page fell back to "as-is".
+    const r = ListNode.safeParse({
+      type: "List", props: { divided: true, items: "{{condition_evidences}}" },
+    });
+    expect(r.success).toBe(true);
+  });
 });
 
 describe("a Timeline entry may be a data row", () => {

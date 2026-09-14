@@ -136,14 +136,24 @@ export const ListNode = z.object({
     // Admitting only {title, subtitle, icon} had the renderer strip every
     // column a row actually has and show blank lines; the component shapes a
     // row into an item by the row's own columns.
-    items: z.array(z.union([
-      z.object({
-        title:    z.string().min(1),
-        subtitle: z.string().optional(),
-        icon:     z.string().optional(),
-      }).strict(),
-      z.record(z.unknown()),
-    ])).min(1),
+    //
+    // A BOUND SOURCE, OR A LITERAL LIST. Like `Table.rows`, `items` may be a
+    // data binding (`{{condition_evidences}}`) resolved at render — the
+    // converter binds `items` as a data prop and the renderer honours a bound
+    // List as an iterator, but the shape here admitted only a literal array, so
+    // every data-bound List failed strict validation, collided with the
+    // fallback, and the whole page "did not strictly validate; rendering as-is".
+    items: z.union([
+      z.string(),
+      z.array(z.union([
+        z.object({
+          title:    z.string().min(1),
+          subtitle: z.string().optional(),
+          icon:     z.string().optional(),
+        }).strict(),
+        z.record(z.unknown()),
+      ])).min(1),
+    ]),
     divided: z.boolean().optional(),
     /** A route template filled per item — `/refund-cases/{{id}}` — so an
      *  item opens its record. Set by the planner when the bound entity has a
