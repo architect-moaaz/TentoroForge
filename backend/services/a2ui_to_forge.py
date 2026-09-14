@@ -192,6 +192,86 @@ def _humanize(name: str) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in spaced.split()) or "Value"
 
 
+#: A KPI LABEL NAMES ITS MEASURE. "Amount requested outstanding" is a SUM of
+#: `amountRequested` over the cases that are outstanding; the converter bound
+#: every tile to `count` of a guessed entity, so a dashboard whose contract
+#: asked for issued value, denied value and pending value showed counts —
+#: of Approvals. The label's words against the entities' numeric columns say
+#: which measure, and which entity carries it.
+_MEASURE_WORDS = frozenset({"amount", "value", "total", "sum", "revenue", "spend",
+                            "cost", "balance", "price", "fee", "worth", "refunded"})
+_COUNT_WORDS = frozenset({"count", "number", "cases", "requests", "items", "open"})
+_NUMERIC_TYPES = frozenset({"decimal", "numeric", "integer", "int", "float", "money",
+                            "currency", "double", "bigint", "real", "number", "smallint"})
+
+
+def _words(text: str) -> list[str]:
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(text or "").replace("_", " "))
+    return [w for w in re.split(r"[^a-z0-9]+", spaced.lower()) if w]
+
+
+def _measure_for_label(label: str, entity: str | None, registry: dict) -> tuple[str | None, dict]:
+    """(entity, metric): a sum/avg over the numeric column the label names,
+    on the entity that carries it; otherwise a count on `entity`."""
+    words = set(_words(label))
+    if not (words & _MEASURE_WORDS) or (words & {"count", "number"}):
+        return entity, {"fn": "count"}
+    ents = registry.get("entities") or {}
+    order = ([entity] if entity in ents else []) + [e for e in ents if e != entity]
+    best: tuple[int, str, str] | None = None
+    for ename in order:
+        for col in (ents.get(ename) or {}).get("columns") or []:
+            if str(col.get("type") or "").lower() not in _NUMERIC_TYPES:
+                continue
+            score = len(set(_words(col["name"])) & words)
+            if score and (best is None or score > best[0]):
+                best = (score, ename, col["name"])
+    fn = "avg" if words & {"average", "avg", "mean"} else "sum"
+    if best is None:
+        # "Issued value" names no column by word; the entity's own amount
+        # column is the measure a value of it means.
+        for col in (ents.get(entity or "") or {}).get("columns") or []:
+            if (str(col.get("type") or "").lower() in _NUMERIC_TYPES
+                    and set(_words(col["name"])) & _MEASURE_WORDS):
+                return entity, {"fn": fn, "field": col["name"]}
+        return entity, {"fn": "count"}
+    return best[1], {"fn": fn, "field": best[2]}
+
+
+def _filter_owner(label: str, entity: str | None, registry: dict, first: str = "") -> tuple[str | None, dict | None]:
+    """(entity, filter): the entity whose enum the label names — the current
+    one first, then the page's, then any. "Awaiting posting" names a status
+    of RefundCase, whatever pointer the composer hung the tile on."""
+    ents = registry.get("entities") or {}
+    order = [e for e in (entity, first) if e in ents]
+    order += [e for e in ents if e not in order]
+    for ename in order:
+        filt = _enum_filter(label, ename, registry)
+        if filt:
+            return ename, filt
+    return entity, None
+
+
+def _entity_owning_columns(keys: list[str], entity: str | None, registry: dict) -> str | None:
+    """The entity whose columns the table's own column keys name best.
+
+    "Cases needing attention" was bound to the approvals list and drew
+    refund-case columns — every cell a dash. The columns the composer chose
+    are the strongest statement of what the rows are."""
+    ents = registry.get("entities") or {}
+    want = {_slugify(k) for k in keys if k}
+    if not want:
+        return None
+    def score(ename: str) -> int:
+        cols = {_slugify(c.get("name", "")) for c in (ents.get(ename) or {}).get("columns") or []}
+        return len(want & cols)
+    current = score(entity) if entity in ents else 0
+    best = max(ents, key=score, default=None)
+    if best and score(best) > current:
+        return best
+    return None
+
+
 def _entity_index(registry: dict) -> dict[str, str]:
     """Every reasonable alias for an entity → its canonical name."""
     idx: dict[str, str] = {}
@@ -314,6 +394,7 @@ _ENUM_LABEL_SYNONYMS: dict[str, tuple[str, ...]] = {
     "cancelled": ("canceled", "voided"),
     "approved": ("accepted",),
     "rejected": ("declined", "denied"),
+    "pendingapproval": ("outstanding", "awaitingapproval"),
 }
 
 
@@ -354,6 +435,10 @@ def _enum_filter(label: str, entity: str, registry: dict) -> dict | None:
             if not v:
                 continue
             if v in want:
+                return {col["name"]: value}
+            # "Awaiting posting" names the value "Approved awaiting posting"
+            # by its distinctive tail; the whole value need not be spelled.
+            if len(want) >= 6 and want in v:
                 return {col["name"]: value}
             if any(syn in want for syn in _ENUM_LABEL_SYNONYMS.get(v, ())):
                 return {col["name"]: value}
@@ -516,19 +601,44 @@ class _Binder:
             )
             return None
 
-        self.entity_of[str(comp.get("id"))] = entity
-        slug = _slug_for(entity, self.registry)
         kind = comp.get("component")
 
+        if kind == "Table" and prop == "rows":
+            raw_cols = comp.get("columns")
+            if isinstance(raw_cols, dict) and raw_cols.get("path"):
+                raw_cols = self._at(str(raw_cols["path"]))
+            keys = [str(c.get("key") or c.get("field") or "")
+                    for c in (raw_cols if isinstance(raw_cols, list) else []) if isinstance(c, dict)]
+            owner = _entity_owning_columns(keys, entity, self.registry)
+            if owner and owner != entity:
+                self.assumptions.append(
+                    f'{comp.get("id")}.rows: "{path}" resolved to {entity}, but the '
+                    f"table's columns are {owner}'s — bound to {owner}.")
+                entity = owner
+
         if kind == "MetricTile" or prop == "value":
-            filt = _enum_filter(label, entity, self.registry)
+            owner, filt = _filter_owner(label, entity, self.registry,
+                                        str(getattr(self, "page_entity", "") or ""))
+            measured, metric = _measure_for_label(label, owner, self.registry)
+            if measured and measured != owner:
+                owner = measured
+                filt = _enum_filter(label, owner, self.registry)
+            if owner and owner != entity:
+                self.assumptions.append(
+                    f'{comp.get("id")}.{prop}: label {label!r} names {owner}\'s '
+                    f"{'measure' if metric.get('field') else 'status'}, not {entity}'s — bound to {owner}.")
+                entity = owner
+
+        self.entity_of[str(comp.get("id"))] = entity
+        slug = _slug_for(entity, self.registry)
+
+        if kind == "MetricTile" or prop == "value":
             base = _slugify(label) or f"{slug}Count"
             name = self._unique(base)
             # The filter belongs INSIDE the metric. `AggregateSource` has no
             # source-level `filter` field, so putting it there is silently
             # dropped and every KPI reports the unfiltered total — which is how
             # "In Progress" first rendered 10 against 3 real rows.
-            metric: dict[str, Any] = {"fn": "count"}
             if filt:
                 metric["filter"] = filt
             src: dict[str, Any] = {
@@ -703,9 +813,17 @@ class _Binder:
                 f"binding a raw count, which would render 40 rows as \"40%\".")
             return None
 
+        owner, filt = _filter_owner(label, entity, self.registry,
+                                    str(getattr(self, "page_entity", "") or ""))
+        measured, metric = _measure_for_label(label, owner, self.registry)
+        if measured and measured != owner:
+            owner = measured
+            filt = _enum_filter(label, owner, self.registry)
+        entity = owner or entity
         slug = _slug_for(entity, self.registry)
         name = self._unique(_slugify(label) or f"{slug}Measure")
-        metric: dict[str, Any] = {"fn": "ratio" if pct else "count"}
+        if pct:
+            metric = {"fn": "ratio"}
         if filt:
             metric["filter"] = filt
         self.sources.append({"name": name, "entity": entity, "op": "aggregate",
