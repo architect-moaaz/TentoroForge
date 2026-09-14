@@ -1629,7 +1629,9 @@ export async function GET(request: Request) {
       LIMIT 50
     `);
 
-    return NextResponse.json(tasks.rows || []);
+    // postgres-js returns the rows themselves; node-postgres wraps them in `.rows`.
+    // Read `.rows` alone and this inbox was empty on every postgres-js app.
+    return NextResponse.json(((tasks as any).rows ?? tasks) || []);
   } catch (error) {
     // Table may not exist — return empty
     return NextResponse.json([]);
