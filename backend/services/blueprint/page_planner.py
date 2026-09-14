@@ -1024,6 +1024,93 @@ def link_lists_to_records(root: Any, doc: dict, sources: list[dict]) -> Any:
     return root
 
 
+#: EVERY PAGE OPENS THE SAME WAY. Composed pages opened with a headline
+#: Section, or a Heading and a Text, or a Row of two Texts and a Button, or a
+#: Breadcrumb over a Row holding a Heading and a Badge — five spellings of
+#: "title, subtitle, actions" (Criterion Refunds v2, 2026-09-14). One page
+#: header: a Section with role "headline", the title, the subtitle, and the
+#: actions as its children; a Breadcrumb stays above it.
+_WRAPPERS = frozenset({"Container", "Stack", "Box", "Column", "Page", "Main"})
+_HEADER_LEAVES = frozenset({"Heading", "Text", "Badge", "Button", "Link", "Breadcrumb"})
+_HEADER_GROUPS = frozenset({"Row", "Cluster", "Inline", "Split"})
+
+
+def _header_leaves(node: dict) -> list[dict] | None:
+    """The leaves of a header-shaped node, or None if it holds content."""
+    t = node.get("type")
+    if t in _HEADER_LEAVES:
+        return [node]
+    if t in _HEADER_GROUPS:
+        out: list[dict] = []
+        for c in node.get("children") or []:
+            if not isinstance(c, dict):
+                return None
+            leaves = _header_leaves(c)
+            if leaves is None:
+                return None
+            out.extend(leaves)
+        return out
+    return None
+
+
+def _text_of(n: dict) -> str:
+    p = n.get("props") or {}
+    return str(p.get("content") or p.get("text") or p.get("title") or "").strip()
+
+
+def normalise_page_header(root: Any) -> Any:
+    host = root
+    while isinstance(host, dict) and host.get("type") in _WRAPPERS \
+            and len(host.get("children") or []) == 1 \
+            and isinstance(host["children"][0], dict) \
+            and host["children"][0].get("type") in _WRAPPERS:
+        host = host["children"][0]
+    if not isinstance(host, dict) or not isinstance(host.get("children"), list) or not host["children"]:
+        return root
+    kids = host["children"]
+    first = kids[0] if isinstance(kids[0], dict) else None
+    if not first:
+        return root
+    # Already a headline Section: only make sure it says so.
+    if first.get("type") == "Section" and (first.get("props") or {}).get("title"):
+        props = first.setdefault("props", {})
+        if not props.get("role"):
+            props["role"] = "headline"
+        return root
+    # A leading run of header-shaped nodes, stopping at the first content.
+    run: list[dict] = []
+    for k in kids:
+        if isinstance(k, dict) and k.get("type") == "Section":
+            break
+        leaves = _header_leaves(k) if isinstance(k, dict) else None
+        if leaves is None:
+            break
+        run.append(k)
+        if len(run) >= 4:
+            break
+    leaves = [leaf for k in run for leaf in (_header_leaves(k) or [])]
+    if not leaves:
+        return root
+    heading = next((l for l in leaves if l.get("type") == "Heading" and _text_of(l)), None)
+    texts = [l for l in leaves if l.get("type") == "Text" and _text_of(l)]
+    title_node = heading or (texts.pop(0) if texts else None)
+    if title_node is None:
+        return root
+    subtitle = next((t for t in texts if len(_text_of(t).split()) > 2), texts[0] if texts else None)
+    crumbs = [l for l in leaves if l.get("type") == "Breadcrumb"]
+    actions = [l for l in leaves if l.get("type") in ("Button", "Link", "Badge")]
+    section: dict[str, Any] = {"type": "Section", "props": {"role": "headline", "title": _text_of(title_node)}}
+    if subtitle is not None:
+        section["props"]["subtitle"] = _text_of(subtitle)
+    if actions:
+        section["children"] = actions
+    for key in ("id", "visibleIf"):
+        if run[0].get(key) is not None and key == "id":
+            section[key] = run[0][key]
+    host["children"] = crumbs + [section] + kids[len(run):]
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1384,6 +1471,7 @@ def plan_page(doc: dict, page: dict, template: dict,
                                     record=single)
         root = carry_the_record(root, doc, page, sources)
         root = link_lists_to_records(root, doc, sources)
+        root = normalise_page_header(root)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:

@@ -934,6 +934,68 @@ def test_a_list_bound_to_an_entity_with_a_detail_page_opens_its_record():
     assert "itemHref" not in root["children"][2]["props"]
 
 
+# --- every page opens the same way ---------------------------------------------
+
+
+def _first(root):
+    return root["children"][0]
+
+
+def test_a_heading_and_a_text_and_a_row_of_buttons_become_the_page_header():
+    root = {"type": "Stack", "children": [
+        {"type": "Heading", "props": {"content": "My Sign-offs", "level": 1}},
+        {"type": "Text", "props": {"content": "The cases waiting on your stage."}},
+        {"type": "Row", "children": [{"type": "Button", "props": {"label": "Export", "navigate": "/x"}}]},
+        {"type": "Table", "props": {"rows": "{{queueCases}}"}},
+    ]}
+    pp.normalise_page_header(root)
+    head = _first(root)
+    assert head["type"] == "Section" and head["props"] == {
+        "role": "headline", "title": "My Sign-offs", "subtitle": "The cases waiting on your stage."}
+    assert [c["type"] for c in head["children"]] == ["Button"]
+    assert root["children"][1]["type"] == "Table"
+
+
+def test_a_row_of_two_texts_and_a_button_becomes_the_page_header():
+    root = {"type": "Container", "children": [{"type": "Stack", "children": [
+        {"type": "Row", "children": [
+            {"type": "Text", "props": {"content": "New Property"}},
+            {"type": "Text", "props": {"content": "Add a property to the maintained list."}},
+            {"type": "Button", "props": {"label": "Cancel", "navigate": "/properties"}},
+        ]},
+        {"type": "Form", "props": {"fields": []}},
+    ]}]}
+    pp.normalise_page_header(root)
+    head = root["children"][0]["children"][0]
+    assert head["props"]["title"] == "New Property"
+    assert head["props"]["subtitle"] == "Add a property to the maintained list."
+    assert head["children"][0]["props"]["label"] == "Cancel"
+
+
+def test_a_breadcrumb_stays_above_the_header_and_a_badge_becomes_an_action():
+    root = {"type": "Stack", "children": [
+        {"type": "Breadcrumb", "props": {"items": []}},
+        {"type": "Row", "children": [
+            {"type": "Heading", "props": {"content": "{{record.guestName}}"}},
+            {"type": "Badge", "props": {"label": "{{record.status}}"}},
+        ]},
+        {"type": "Tabs", "children": []},
+    ]}
+    pp.normalise_page_header(root)
+    assert [c["type"] for c in root["children"]] == ["Breadcrumb", "Section", "Tabs"]
+    assert root["children"][1]["props"]["title"] == "{{record.guestName}}"
+    assert root["children"][1]["children"][0]["type"] == "Badge"
+
+
+def test_an_existing_headline_section_is_kept_and_named():
+    root = {"type": "Stack", "children": [
+        {"type": "Section", "props": {"title": "Refund Cases"}, "children": [{"type": "Row", "children": []}]},
+        {"type": "Table", "props": {}},
+    ]}
+    pp.normalise_page_header(root)
+    assert root["children"][0]["props"]["role"] == "headline" and len(root["children"]) == 2
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [
