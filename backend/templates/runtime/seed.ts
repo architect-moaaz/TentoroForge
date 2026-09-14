@@ -352,11 +352,39 @@ async function seedDomain(adminId: string | null): Promise<void> {
       if (c > 0) {
         // Already populated — load its ids so child tables can still resolve
         // FK refs to it on a re-run (otherwise ref:parent[i] can't resolve).
+        let existingIds: string[] = [];
         try {
           const existing: any[] = await db.select({ id: table.id }).from(table);
-          ids[norm(t.name)] = existing.map((r) => String(r.id));
+          existingIds = existing.map((r) => String(r.id));
+          ids[norm(t.name)] = existingIds;
         } catch {
           /* table has no simple id column — leave pool empty */
+        }
+        // A table keyed by email (users) is occupied by the admin backstop
+        // before the declared logins ever land, so "has rows" is not "is
+        // seeded". Rows that carry an email join the table beside whatever is
+        // there; the email conflict target keeps a re-run idempotent.
+        const emailCol: any = (table as any).email;
+        const planned: Record<string, unknown>[] =
+          ((t.seed_data as Record<string, unknown>[] | undefined) ||
+            (bag[t.name] as Record<string, unknown>[] | undefined) || []);
+        const keyed = emailCol ? planned.filter((r) => typeof r.email === "string" && r.email) : [];
+        if (keyed.length) {
+          const got: string[] = [];
+          for (let i = 0; i < keyed.length; i++) {
+            try {
+              const values = prepRow(table, keyed[i], ids, i);
+              const res: any = await db.insert(table).values(values)
+                .onConflictDoNothing({ target: emailCol }).returning();
+              const id = res?.[0]?.id;
+              if (id != null) got.push(String(id));
+            } catch (e: any) {
+              console.warn(`[seed] ${t.name} row ${i} (${String(keyed[i].email)}):`, String(e?.message || e).slice(0, 200));
+            }
+          }
+          ids[norm(t.name)] = [...existingIds, ...got];
+          console.log(`✅ ${t.name} already had ${c} rows — added ${got.length}/${keyed.length} keyed by email`);
+          return got.length;
         }
         console.log(`ℹ️  ${t.name} already has ${c} rows — skipping insert`);
         return null;
