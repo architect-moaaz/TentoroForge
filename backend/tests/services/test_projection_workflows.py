@@ -71,10 +71,10 @@ def test_a_step_is_its_catalog_node_with_defaults_under_the_declared_config(tmp_
 def test_condition_rule_lands_on_the_key_the_engine_evaluates(tmp_path):
     project_workflows(_doc([
         {"key": "urgent", "name": "Is it urgent?", "type": "condition",
-         "config": {"condition": "priority == 'high'"}},
+         "config": {"condition": "priority = 'high'"}},
     ]), tmp_path)
     cond = _load(tmp_path)["definition"]["nodes"][1]
-    assert cond["data"]["config"]["expression"] == "priority == 'high'"
+    assert cond["data"]["config"]["expression"] == "priority = 'high'"
     assert "condition" not in cond["data"]["config"]
 
 
