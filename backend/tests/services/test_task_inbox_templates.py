@@ -24,13 +24,13 @@ _BACKEND = Path(__file__).parent.parent.parent
 # ─────────────────────────────────────────────────────────────────────
 
 def test_inbox_page_template_exists():
-    tmpl = _BACKEND / "templates" / "app-foundation" / "src" / "app" / "tasks" / "page.tsx"
+    tmpl = _BACKEND / "templates" / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
     assert tmpl.is_file(), f"expected task-inbox page template at {tmpl}"
 
 
 def test_detail_page_template_exists():
     tmpl = (
-        _BACKEND / "templates" / "app-foundation" / "src" / "app" / "tasks"
+        _BACKEND / "templates" / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks"
         / "[id]" / "page.tsx"
     )
     assert tmpl.is_file(), f"expected task-detail page template at {tmpl}"
@@ -44,7 +44,7 @@ def test_single_task_api_route_template_exists():
 
 
 def test_inbox_page_reads_tasks_api():
-    tmpl = _BACKEND / "templates" / "app-foundation" / "src" / "app" / "tasks" / "page.tsx"
+    tmpl = _BACKEND / "templates" / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
     text = tmpl.read_text(encoding="utf-8")
     # Server-side fetch of the tasks route so no client-only auth pain.
     assert "/api/tasks" in text
@@ -54,7 +54,7 @@ def test_inbox_page_reads_tasks_api():
 
 def test_detail_page_dispatches_to_workflow_execute():
     tmpl = (
-        _BACKEND / "templates" / "app-foundation" / "src" / "app" / "tasks"
+        _BACKEND / "templates" / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks"
         / "[id]" / "page.tsx"
     )
     text = tmpl.read_text(encoding="utf-8")
@@ -90,8 +90,8 @@ def test_runtime_injector_ships_all_three_templates(tmp_path):
 
     runtime_injector._inject_task_inbox_pages(tmp_path)
 
-    inbox = tmp_path / "src" / "app" / "tasks" / "page.tsx"
-    detail = tmp_path / "src" / "app" / "tasks" / "[id]" / "page.tsx"
+    inbox = tmp_path / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
+    detail = tmp_path / "src" / "app" / "(dashboard)" / "tasks" / "[id]" / "page.tsx"
     api = tmp_path / "src" / "app" / "api" / "tasks" / "[id]" / "route.ts"
 
     assert inbox.is_file(), f"missing inbox page at {inbox}"
@@ -107,7 +107,7 @@ def test_runtime_injector_task_inbox_is_idempotent(tmp_path):
     (tmp_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
 
     runtime_injector._inject_task_inbox_pages(tmp_path)
-    inbox = tmp_path / "src" / "app" / "tasks" / "page.tsx"
+    inbox = tmp_path / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
     first = inbox.read_text(encoding="utf-8")
     # Second call must not blow away or duplicate.
     runtime_injector._inject_task_inbox_pages(tmp_path)
