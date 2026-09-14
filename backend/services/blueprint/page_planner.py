@@ -62,6 +62,7 @@ INTERNAL_FIELDS = frozenset({"id", "createdAt", "updatedAt", "deletedAt"})
 #: The dataSource name a template binds the primary collection / record to.
 ROWS = "rows"
 RECORD = "record"
+_SESSION_BINDINGS = frozenset({"user", "currentUser", "sessionUser", "me"})
 
 
 class PlanError(RuntimeError):
@@ -1265,6 +1266,10 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
     out: list[dict] = []
 
     unresolved: list[str] = []
+    # `{{user.x}}` is the session user the page carries, not a list of User
+    # rows to fetch - resolving it as an entity had every case page pull the
+    # whole users table for every role.
+    used = {n for n in used if n not in _SESSION_BINDINGS}
     for name in sorted(used):
         # A binding that names an entity resolves to it; anything else falls
         # back to the page's own entity, which is what `rows`/`record` mean.

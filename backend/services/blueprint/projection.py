@@ -1302,7 +1302,116 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         written.append(rel)
         code_map.append({"artifact": wf.get("id"), "service": [rel]})
 
+    written.append(project_launch_roles(doc, app_root)["files"][0])
     return {"files": written, "workflows": len(written), "codeMap": code_map}
+
+
+def launch_roles(doc: dict) -> dict[str, list[str] | None]:
+    """Each workflow -> the role names allowed to launch it: the union of the
+    roles the pages it launches from serve; "*" when one of them is public;
+    None when the Blueprint names no launching page (unrestricted)."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
+    pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
+    out: dict[str, list[str] | None] = {}
+    for w in _live(doc.get("workflows")):
+        if not w.get("id"):
+            continue
+        launched = [pages[pid] for pid in (w.get("launchedFrom") or []) if pid in pages]
+        if not launched:
+            out[w["id"]] = None
+            continue
+        roles: set[str] = set()
+        for pg in launched:
+            if (pg.get("access") or "authenticated") == "public":
+                roles.add("*")
+            for u in pg.get("users") or []:
+                nm = names.get(u, u)
+                roles.add("*" if nm == "Guest" else str(nm))
+        out[w["id"]] = sorted(roles)
+    return out
+
+
+def _workflow_slug(w: dict) -> str:
+    return to_snake(w.get("name") or w.get("id") or "workflow").replace("_", "-")
+
+
+def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/workflows/launch-roles.ts`` - who may launch each workflow."""
+    roles = launch_roles(doc)
+    slugs = {w.get("id"): _workflow_slug(w) for w in _live(doc.get("workflows")) if w.get("id")}
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// A workflow may be launched by the roles the pages it launches from serve;",
+        '// "*" admits an anonymous caller (a public page); null leaves it open.',
+        "export const LAUNCH_ROLES: Record<string, string[] | null> = {",
+    ]
+    for wid, allowed in roles.items():
+        val = "null" if allowed is None else json.dumps(allowed)
+        lines.append(f"  {json.dumps(wid)}: {val},")
+        if slugs.get(wid) and slugs[wid] != wid:
+            lines.append(f"  {json.dumps(slugs[wid])}: {val},")
+    lines += ["};", ""]
+    out = Path(app_root) / "src" / "lib" / "workflows"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "launch-roles.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": ["src/lib/workflows/launch-roles.ts"], "workflows": len(roles)}
+
+
+def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
+    """Each entity slug -> the roles that may read it and the roles that may
+    write it, from the pages that use it.
+
+    Reception read every user account through the data API: the Users page
+    was Admin's, but nothing carried that to the endpoint. A role may read an
+    entity when one of its pages binds it (a list, a record, a dropdown's
+    source) or an ownership rule names it unscoped; it may write an entity
+    when one of its pages is ABOUT it. "*" admits an anonymous reader for an
+    entity a public page reads."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
+    entities = {e.get("id"): e for e in (doc.get("data") or {}).get("entities") or [] if e.get("id")}
+    by_name = {e.get("name"): eid for eid, e in entities.items()}
+    slug_of = {eid: str(e.get("table") or str(e.get("name")).lower()) for eid, e in entities.items()}
+    layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    readers: dict[str, set[str]] = {eid: set() for eid in entities}
+    writers: dict[str, set[str]] = {eid: set() for eid in entities}
+    for pg in _live(doc.get("pages")):
+        roles = {("*" if names.get(u, u) == "Guest" else str(names.get(u, u))) for u in (pg.get("users") or [])}
+        if (pg.get("access") or "authenticated") == "public":
+            roles.add("*")
+        primary = (pg.get("data") or {}).get("primaryEntity")
+        if primary in entities:
+            readers[primary] |= roles
+            writers[primary] |= roles
+        for s in (layouts.get(pg.get("id"), {}).get("dataSources") or []):
+            eid = by_name.get(s.get("entity"), s.get("entity"))
+            if eid in entities:
+                readers[eid] |= roles
+        for eid in (pg.get("data") or {}).get("supportingEntities") or []:
+            if eid in entities:
+                readers[eid] |= roles
+    for rule in _live((doc.get("security") or {}).get("ownershipRules")):
+        if isinstance(rule, dict) and by_name.get(rule.get("entity")) in entities:
+            readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
+    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])} for eid in entities}
+
+
+def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/entity-access.ts`` - who may read and write each entity."""
+    access = entity_access(doc)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// The roles that may read and write each entity, from the pages that use",
+        "// it. An entity absent here is open to any signed-in role.",
+        "export const ENTITY_ACCESS: Record<string, { read: string[]; write: string[] }> = "
+        + json.dumps(access, indent=2) + ";",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "entity-access.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": ["src/lib/entity-access.ts"], "entities": len(access)}
 
 
 # ---------------------------------------------------------------------------
@@ -1887,7 +1996,8 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out = Path(app_root) / "src" / "lib"
     out.mkdir(parents=True, exist_ok=True)
     (out / "public-resources.ts").write_text("\n".join(lines), "utf-8")
-    return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
+    project_entity_access(doc, app_root)
+    return {"files": ["src/lib/public-resources.ts", "src/lib/entity-access.ts"], "resources": slugs}
 
 
 def role_routes(doc: dict) -> list[dict[str, Any]]:

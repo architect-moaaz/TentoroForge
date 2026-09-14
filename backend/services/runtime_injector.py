@@ -1251,6 +1251,7 @@ export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 import { triggerWorkflow } from "@/lib/workflows";
+import { LAUNCH_ROLES } from "@/lib/workflows/launch-roles";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
@@ -1270,8 +1271,21 @@ export async function POST(
     // workflow runtime defaults owner FKs (ownerId/landlordId/userId/…) from
     // ctx.user.id; without this an authed create hits a NOT NULL FK error.
     const session = await auth();
-    const su = session?.user as { id?: string; role?: string; email?: string | null } | undefined;
-    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : body.user;
+    const su = session?.user as { id?: string; role?: string; email?: string | null; [k: string]: unknown } | undefined;
+    // Every scalar column of the session user rides into the workflow — a
+    // gate compares the case's property to the actor's home property.
+    const user = su?.id
+      ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
+          id: String(su.id), role: su.role, email: su.email ?? undefined }
+      : body.user;
+    // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
+    // the pages a workflow launches from and the roles those pages serve;
+    // Reception could post a refund through the API because nothing here
+    // compared the two. "*" admits an anonymous caller (a public page).
+    const allowed = LAUNCH_ROLES[id] ?? null;
+    if (allowed && !allowed.includes(String(user?.role ?? "")) && !(allowed.includes("*") && !su?.id)) {
+      return NextResponse.json({ error: "This action is not available to your role" }, { status: 403 });
+    }
     let taskId = body.taskId;
 
     // ─── RESUME PATH ──────────────────────────────────────────────────────
@@ -1402,6 +1416,13 @@ export async function POST(
 }
 '''
     (api_dir / "route.ts").write_text(route_content, encoding="utf-8")
+    roles_file = output_path / "src" / "lib" / "workflows" / "launch-roles.ts"
+    if not roles_file.exists():
+        roles_file.parent.mkdir(parents=True, exist_ok=True)
+        roles_file.write_text(
+            "// Written by the Blueprint projection (project_workflows). Empty: no launch is" + chr(10)
+            + "// restricted until the projection names the roles each workflow's pages serve." + chr(10)
+            + "export const LAUNCH_ROLES: Record<string, string[] | null> = {};" + chr(10), encoding="utf-8")
 
     # Also create the event-based trigger route
     event_dir = output_path / "src" / "app" / "api" / "workflows" / "event" / "[event]"

@@ -65,9 +65,12 @@ export async function executeWorkflow(
 ): Promise<WorkflowExecutionResult> {
   const startedAt = new Date().toISOString();
 
+  // THE ACTING USER IS A VARIABLE. A step reads `{{user.role}}` and a gate
+  // reads `user.homePropertyId`; the server's user wins over anything the
+  // request carried under that name, so a caller cannot pose as a stage.
   const ctx: WorkflowExecutionContext = {
     input,
-    variables: { ...input },
+    variables: { ...input, ...(user ? { user: { ...user } } : {}) },
     log: [],
     user,
   };

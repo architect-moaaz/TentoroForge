@@ -1045,6 +1045,23 @@ def test_the_header_is_found_inside_a_grid_and_after_a_leading_alert():
     assert grid["children"][1]["type"] == "Card"
 
 
+# --- the session user is not a fetch ------------------------------------------
+
+
+def test_the_session_user_binding_is_not_fetched_as_an_entity(doc, page, catalog):
+    """`{{user.role}}` on a page had the planner fetch the whole User table
+    as a list source named `user`, for every role that opened the page."""
+    doc["data"]["entities"].append({"id": "ENTITY-USER", "name": "User", "table": "users",
+                                     "fields": [{"name": "id"}, {"name": "role"}]})
+    root = {"type": "Stack", "children": [
+        {"type": "Text", "props": {"content": "Signed in as {{user.role}}"}},
+        {"type": "Table", "props": {"rows": "{{rows}}", "columns": []}},
+    ]}
+    entity = next(e for e in doc["data"]["entities"] if e.get("id") == (page.get("data") or {}).get("primaryEntity"))
+    sources = pp.data_sources(doc, page, entity, root)
+    assert [s["name"] for s in sources] == ["rows"]
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [

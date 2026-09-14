@@ -28,6 +28,26 @@ import {
 // the derived history.
 import { isAppendOnly } from "@/lib/append-only-entities";
 import { PUBLIC_RESOURCES } from "@/lib/public-resources";
+import { ENTITY_ACCESS } from "@/lib/entity-access";
+
+/**
+ * AN ENTITY IS READ BY THE ROLES ITS PAGES DECLARE. Reception read every user
+ * account through this route: the Users page was Admin's, but nothing carried
+ * that to the endpoint. The projection lists, per entity, the roles whose
+ * pages read it and the roles whose pages are about it; a signed-in role
+ * outside the list is refused. An entity the projection does not list stays
+ * open to any signed-in role, and a public resource stays open to anyone.
+ */
+function deniedFor(entity: string | undefined, session: { user?: { role?: unknown } } | null, op: "read" | "write"): boolean {
+  if (!entity) return false;
+  const access = ENTITY_ACCESS[entity];
+  if (!access) return false;
+  const roles = access[op] ?? [];
+  if (roles.includes("*") && op === "read") return false;
+  const role = String(session?.user?.role ?? "");
+  if (!session?.user) return !roles.includes("*");
+  return !roles.includes(role);
+}
 
 // Auto-register all entities on first request
 async function ensureInitialized() {
@@ -147,6 +167,9 @@ export async function GET(
 
   const { path } = await params;
   const [entity, ...rest] = path;
+  if (session?.user && deniedFor(entity, session as any, "read")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (!session?.user && !isPublicResource(entity)) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   }
@@ -210,6 +233,9 @@ export async function POST(
 
   const { path } = await params;
   const [entity] = path;
+  if (deniedFor(entity, session as any, "write")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const ctx = { user: session.user as any };
 
   try {
@@ -248,6 +274,9 @@ export async function PUT(
 
   const { path } = await params;
   const [entity, id] = path;
+  if (deniedFor(entity, session as any, "write")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (!id) {
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
@@ -275,6 +304,9 @@ export async function DELETE(
 
   const { path } = await params;
   const [entity, id] = path;
+  if (deniedFor(entity, session as any, "write")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   if (!id) {
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
