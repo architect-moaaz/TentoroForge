@@ -919,7 +919,7 @@ export function SmithPanel({
           </div>
         ))}
 
-        <ThinkingTrail thoughts={run.thoughts} busy={busy} />
+        <ThinkingTrail thoughts={run.thoughts} nodes={run.nodes} busy={busy} />
 
         {run.status === "error" && (
           <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1304,33 +1304,80 @@ function StageList({
  */
 export function ThinkingTrail({
   thoughts,
+  nodes,
   busy,
 }: {
   thoughts: RunThought[];
+  nodes: RunNode[];
   busy: boolean;
 }) {
-  if (!thoughts.length) return null;
-  const last = thoughts[thoughts.length - 1];
+  // A live elapsed clock, so a turn that runs for minutes reads as working
+  // rather than hung — the reassurance the stage list gives, in the chat. Runs
+  // only while busy; resets the moment the turn ends.
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!busy) {
+      startRef.current = null;
+      setElapsed(0);
+      return;
+    }
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => {
+      if (startRef.current) setElapsed(Date.now() - startRef.current);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [busy]);
+
   // §111 — "Do not expose hidden model reasoning." The raw first-person
   // chain-of-thought ("Let me analyze this: 1. This is a change request…") was
   // being painted straight into the chat and read as Smith's answer before the
   // real one arrived (DEFECT-THINKING-LEAK, seen on K-01 `deploy` and L-05).
   // Deterministic `step` events ARE observable status — the compose stages,
   // labelled from the same table the build stage list uses — so those stay;
-  // the model's reasoning does not. A pure-reasoning turn then shows only the
-  // "Thinking" header and its spinner, which is the honest busy indicator.
+  // the model's reasoning does not.
   const steps = thoughts.filter((t) => t.kind === "step");
+  const last = thoughts[thoughts.length - 1];
+
+  // Nothing happening and nothing to leave behind — render nothing.
+  if (!busy && !steps.length) return null;
+
+  // WHAT SMITH IS DOING, AS AN ACTION — a present participle, never a noun. The
+  // running stage names it best ("Composing the screens"); failing that, the
+  // last deterministic step; and when Smith is only reasoning, the honest word
+  // is "Thinking". A "Thinking" header over "Generating the frontend" would
+  // describe the wrong half of the turn.
+  const running = nodes.find((n) => n.state === "running");
+  const stepNode = last?.kind === "step" ? last.node : undefined;
+  const activity =
+    (running && (STAGE_VERB[running.key] ?? labelFor(running.key))) ||
+    (stepNode && (STAGE_VERB[stepNode] ?? labelFor(stepNode))) ||
+    "Thinking";
+
   return (
     <div className="max-w-[90%] space-y-1 border-l-2 border-muted pl-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-        {/* Named for what is happening now: a turn moves from thinking to
-            doing, and a "Thinking" header over "Regenerating the frontend"
-            describes the wrong half of it. */}
-        <span className="font-medium">
-          {last?.kind === "step" ? "Working" : "Thinking"}
-        </span>
-      </div>
+      {busy && (
+        <div className="flex items-center gap-2 whitespace-nowrap text-xs leading-none text-muted-foreground">
+          {/* The Tentoro Forge loader — an anvil being struck. Its own
+              animation is the working signal, so no spinner is needed; rendered
+              only while busy, it stops the moment the turn ends. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/tentoro-forge-loader.gif"
+            alt=""
+            aria-hidden="true"
+            className="h-9 w-9 shrink-0"
+          />
+          <span className="font-medium text-foreground">{activity}</span>
+          <span aria-hidden="true">…</span>
+          {elapsed >= 1000 && (
+            <span className="tabular-nums text-muted-foreground/70">
+              · {human(elapsed)}
+            </span>
+          )}
+        </div>
+      )}
       {steps.map((t, i) => (
         // Deterministic work, so it reads as status rather than thought —
         // upright, and labelled from the same table the stage list uses.
