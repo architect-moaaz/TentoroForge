@@ -1101,6 +1101,33 @@ def _reads_as_expression(value: Any) -> bool:
             and bool(_EXPRESSION_MARKS.search(value)))
 
 
+#: A WORKFLOW CONDITION SPEAKS FEEL. The engine evaluates `expression` with
+#: FEEL-lite and, unlike the page renderer, folds nothing: `caseRow == null`
+#: failed to parse and the gate that was meant to bar a poster failed the
+#: whole run instead. JavaScript spelling — `==`, `===`, `!==`, `&&`, `||` —
+#: is translated outside string literals.
+_WF_JS_SPELLING = (
+    (re.compile(r"!=="), "!="),
+    (re.compile(r"==="), "="),
+    (re.compile(r"(?<![!<>=])==(?!=)"), "="),
+    (re.compile(r"\s*&&\s*"), " and "),
+    (re.compile(r"\s*\|\|\s*"), " or "),
+)
+_WF_STRING_LITERAL = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+
+
+def feel_condition(expr: Any) -> Any:
+    if not isinstance(expr, str) or not expr.strip():
+        return expr
+    out: list[str] = []
+    for i, part in enumerate(_WF_STRING_LITERAL.split(expr)):
+        if i % 2 == 0:
+            for pat, rep in _WF_JS_SPELLING:
+                part = pat.sub(rep, part)
+        out.append(part)
+    return "".join(out)
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
                  wf_id: str = "", steps: list[dict] | None = None) -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
@@ -1136,6 +1163,10 @@ def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
     if ntype == "action" and config.get("actionType") == "set_variable":
         if "expression" not in config and _reads_as_expression(config.get("value")):
             config["expression"] = config.pop("value")
+    if ntype == "condition" and isinstance(config.get("expression"), str):
+        config["expression"] = feel_condition(config["expression"])
+    if ntype == "action" and config.get("actionType") == "set_variable" and isinstance(config.get("expression"), str):
+        config["expression"] = feel_condition(config["expression"])
     if ntype == "condition" and steps and isinstance(config.get("expression"), str):
         # A db_query answers `{rows, count}`; `count(<step>)` counted the
         # object's keys, so "Duplicate case found?" was always yes.
