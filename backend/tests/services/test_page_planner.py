@@ -682,6 +682,78 @@ def test_a_page_with_no_list_source_is_untouched():
     assert pp.gate_states(tree, None) is tree
 
 
+# --- §33: the author gates on the state WORD, and the planner translates it --
+
+
+def _state_gated_tree():
+    """/refund-cases/new as the agent authored it: the contract's states written
+    onto the nodes' visibleIf, bare and in JavaScript spelling."""
+    return {"type": "Container", "children": [
+        {"type": "Heading", "props": {"text": "New Refund Case"}},
+        {"type": "Alert", "props": {"title": "Case not saved"}, "visibleIf": "error"},
+        {"type": "EmptyState", "props": {"message": "No properties"}, "visibleIf": "state === 'empty'"},
+        {"type": "Alert", "props": {"title": "Access denied"}, "visibleIf": "state === 'permission_denied'"},
+        {"type": "Form", "props": {"entity": "RefundCase"}, "visibleIf": "populated"},
+    ]}
+
+
+def test_a_state_word_is_a_gate_not_a_data_expression():
+    assert pp.state_gate({"visibleIf": "populated"}) == "populated"
+    assert pp.state_gate({"visibleIf": "state === 'empty'"}) == "empty"
+    assert pp.state_gate({"visibleIf": 'state == "error"'}) == "error"
+    assert pp.state_gate({"visibleIf": "properties != null"}) is None
+    assert pp.state_gate({"type": "Form"}) is None
+
+
+def test_content_gated_on_populated_shows_when_the_source_has_rows():
+    """The form on /refund-cases/new carried `visibleIf: "populated"`; the
+    renderer evaluated it over the page data, found no `populated`, and hid
+    the form. The page rendered its heading and nothing else."""
+    out = pp.gate_states(_state_gated_tree(), "properties")
+    form = next(c for c in out["children"]
+                if c["type"] == "Conditional" and c["children"][0]["type"] == "Form")
+    assert form["props"]["when"] == "properties != null and count(properties) > 0"
+    assert "visibleIf" not in form["children"][0]
+
+
+def test_the_state_word_leaves_the_node_the_planner_gates():
+    """An Alert wrapped in `properties == null` that still carried
+    `visibleIf: "error"` would never show: the word is null in data scope."""
+    out = pp.gate_states(_state_gated_tree(), "properties")
+    for gate in (c for c in out["children"] if c["type"] == "Conditional"):
+        assert "visibleIf" not in gate["children"][0]
+    empty = next(c for c in out["children"]
+                 if c["type"] == "Conditional" and c["children"][0]["type"] == "EmptyState")
+    assert empty["props"]["when"] == "properties != null and count(properties) == 0"
+
+
+def test_a_permission_denied_state_is_unreachable_on_a_rendered_page():
+    out = pp.gate_states(_state_gated_tree(), "properties")
+    assert not any("Access denied" in str(c) for c in out["children"])
+
+
+def test_a_detail_page_is_populated_when_its_record_resolved():
+    """/refund-cases/[id] had its whole Container gated on
+    `state === 'populated'` and no list source, so nothing gated it and the
+    page was blank. Its one `get` source is what populated means."""
+    tree = {"type": "Stack", "children": [
+        {"type": "Alert", "props": {"title": "Error"}, "visibleIf": "state === 'error'"},
+        {"type": "Container", "visibleIf": "state === 'populated'",
+         "children": [{"type": "DescriptionList", "props": {"bind": "{{record}}"}}]},
+    ]}
+    out = pp.gate_states(tree, "record", single=True)
+    whens = [c["props"]["when"] for c in out["children"]]
+    assert whens == ["record == null", "record != null"]
+
+
+def test_with_no_source_populated_content_simply_shows():
+    """A form page that fetches nothing has nothing to wait on."""
+    out = pp.gate_states(_state_gated_tree(), None)
+    types = [c["type"] for c in out["children"]]
+    assert types == ["Heading", "Form"]
+    assert "visibleIf" not in out["children"][1]
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [

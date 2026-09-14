@@ -768,8 +768,38 @@ STATE_NODES = {
     "EmptyState": "empty", "IllustratedEmpty": "empty", "Alert": "error",
 }
 
+#: THE PAGE-STATE VOCABULARY, AS AN AUTHOR GATES ON IT. The page contract
+#: declares `states` (loading, empty, populated, error, permission_denied)
+#: and the author is told they are gated for them — so the author writes the
+#: state onto the node: `visibleIf: "populated"`, or in JavaScript spelling,
+#: `visibleIf: "state === 'empty'"`. The renderer evaluates visibleIf as a
+#: FEEL expression over the page's DATA, where no `state` exists: the bare
+#: word was null and the comparison a parse error, both false, so the form on
+#: /refund-cases/new, the whole of /refund-cases/[id] and the sign-offs table
+#: rendered nothing (Criterion Refunds v2, 2026-09-14). A state gate is the
+#: planner's to translate, exactly as a state NODE is.
+_STATE_GATE = re.compile(
+    r"^\s*(?:state\s*={2,3}\s*)?['\"]?"
+    r"(loading|error|empty|populated|permission_denied|forbidden|denied)"
+    r"['\"]?\s*$")
 
-def gate_states(node: dict, source: str | None) -> dict:
+#: States a rendered page can never be in. Sources resolve server-side before
+#: the page renders, so nothing is in flight; and permission is decided by the
+#: route guard before the page renders, so a denied reader never reaches it —
+#: the app's forbidden page answers them.
+_UNREACHABLE_STATES = frozenset({"loading", "permission_denied", "forbidden", "denied"})
+
+
+def state_gate(node: dict) -> str | None:
+    """The page state a node's `visibleIf` names, or None for a data expression."""
+    cond = node.get("visibleIf") if isinstance(node, dict) else None
+    if not isinstance(cond, str):
+        return None
+    m = _STATE_GATE.match(cond)
+    return m.group(1) if m else None
+
+
+def gate_states(node: dict, source: str | None, *, single: bool = False) -> dict:
     """Gate the authored state nodes on the data source, and drop the unreachable.
 
     `ctx.data` distinguishes three cases, not four: a resolved source is present
@@ -781,23 +811,50 @@ def gate_states(node: dict, source: str | None) -> dict:
     LoadingState on a server-rendered page is a node for a state that cannot
     occur, which is why "Loading customers" sat permanently under a table that
     had already loaded. Dropped rather than gated: no expression selects it.
+
+    A node is a state node by its TYPE (`STATE_NODES`) or by the state its
+    `visibleIf` names (`state_gate`); either way the state word leaves the
+    node and the source decides. `single` says the source is one record (a
+    `get`), which schema-page.tsx unwraps, so "populated" is `!= null` rather
+    than a count. With no source at all, content gated on "populated" simply
+    shows — nothing was fetched, so there is nothing for it to wait on — and
+    the empty/error nodes, which describe a fetch, are dropped.
     """
-    if not source or not isinstance(node, dict):
+    if not isinstance(node, dict):
         return node
     kept: list[dict] = []
     for child in node.get("children") or []:
-        state = STATE_NODES.get(child.get("type")) if isinstance(child, dict) else None
-        if state == "loading":
+        if not isinstance(child, dict):
+            kept.append(child)
+            continue
+        # The author's own word wins over the node's type: an Alert gated on
+        # permission_denied is not the error alert.
+        authored = state_gate(child)
+        state = authored or STATE_NODES.get(child.get("type"))
+        if not source and not authored:
+            # Nothing fetched and nothing said: the node is content, as before.
+            kept.append(gate_states(child, source, single=single))
+            continue
+        if state in _UNREACHABLE_STATES:
             continue
         if state:
-            kept.append({
-                "type": "Conditional",
-                "props": {"when": (f"{source} == null" if state == "error"
-                                   else f"{source} != null and count({source}) == 0")},
-                "children": [child],
-            })
+            child = {k: v for k, v in child.items() if k != "visibleIf"}
+            if not source:
+                if state == "populated":
+                    kept.append(gate_states(child, source, single=single))
+                continue
+            if state == "error":
+                when = f"{source} == null"
+            elif state == "empty":
+                when = (f"{source} == null" if single
+                        else f"{source} != null and count({source}) == 0")
+            else:  # populated
+                when = (f"{source} != null" if single
+                        else f"{source} != null and count({source}) > 0")
+            kept.append({"type": "Conditional", "props": {"when": when},
+                         "children": [gate_states(child, source, single=single)]})
             continue
-        kept.append(gate_states(child, source))
+        kept.append(gate_states(child, source, single=single))
     if node.get("children") is not None:
         node["children"] = kept
     return node
@@ -1048,7 +1105,12 @@ def plan_page(doc: dict, page: dict, template: dict,
         carried.append(x)
     sources = carried or (data_sources(doc, page, entity, root) if root else [])
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
-    root = gate_states(root, primary) if root else root
+    # A detail page has no list: its one record is what "populated" means.
+    single = next((s["name"] for s in sources
+                   if s.get("op") in ("get", "detail", "find", "one")), None)
+    if root:
+        root = (gate_states(root, primary) if primary
+                else gate_states(root, single, single=single is not None))
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
