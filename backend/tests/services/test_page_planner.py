@@ -194,10 +194,14 @@ def test_plan_produces_a_renderable_page(doc, page, catalog):
     assert schema["route"] == "/roles"
     assert schema["root"]["type"] == "Stack"
 
-    buttons = schema["root"]["children"][1]["children"]
+    # The Heading and the Cluster of actions are one page header (a headline
+    # Section); the table follows it.
+    head = schema["root"]["children"][0]
+    assert head["type"] == "Section" and head["props"]["role"] == "headline"
+    buttons = head["children"]
     assert [b["props"]["label"] for b in buttons] == ["Create Role", "Close Role"]
 
-    table = schema["root"]["children"][2]
+    table = schema["root"]["children"][1]
     assert isinstance(table["props"]["columns"], list)
     assert table["props"]["columns"][0]["key"] == "title"
 
@@ -401,7 +405,8 @@ def test_an_authored_page_is_what_gets_planned(doc, page, catalog):
     }]
     result = pp.plan_pages(doc, catalog)
     root = result["planned"]["PAGE-001"]["root"]
-    assert root["children"][0]["props"]["content"] == "Bespoke"
+    # The bespoke heading is the page header, spelled as every page's is.
+    assert root["children"][0]["props"]["title"] == "Bespoke"
 
 
 def test_a_page_nobody_composed_gets_a_marked_fallback_not_a_silent_stub(doc, page, catalog):
@@ -914,6 +919,147 @@ def test_a_form_on_a_record_page_stays_on_the_record():
     root = {"type": "Form", "props": {"workflow": "FLOW-010"}}
     pp.settle_form_outcomes(root, "/refund-cases/[id]", {"/refund-cases", "/refund-cases/[id]"}, record="record")
     assert root["props"]["onSuccess"] == {"toast": "Saved", "navigate": "/refund-cases/{{record.id}}"}
+
+
+# --- a list of records opens them -------------------------------------------
+
+
+def test_a_list_bound_to_an_entity_with_a_detail_page_opens_its_record():
+    doc = {"data": {"entities": [{"id": "ENTITY-003", "name": "RefundCase", "fields": []}]},
+           "pages": [{"id": "P1", "route": "/refund-cases", "data": {"primaryEntity": "ENTITY-003"}},
+                     {"id": "P2", "route": "/refund-cases/[id]", "data": {"primaryEntity": "ENTITY-003"}}]}
+    root = {"type": "Card", "children": [
+        {"type": "List", "props": {"items": "{{approvals}}"}},
+        {"type": "List", "props": {"items": "{{approvals}}", "itemHref": "/queues/{{id}}"}},
+        {"type": "List", "props": {"items": [{"title": "static"}]}},
+    ]}
+    pp.link_lists_to_records(root, doc, [{"name": "approvals", "entity": "RefundCase", "op": "list"}])
+    assert root["children"][0]["props"]["itemHref"] == "/refund-cases/{{id}}"
+    assert root["children"][1]["props"]["itemHref"] == "/queues/{{id}}"
+    assert "itemHref" not in root["children"][2]["props"]
+
+
+# --- every page opens the same way ---------------------------------------------
+
+
+def _first(root):
+    return root["children"][0]
+
+
+def test_a_heading_and_a_text_and_a_row_of_buttons_become_the_page_header():
+    root = {"type": "Stack", "children": [
+        {"type": "Heading", "props": {"content": "My Sign-offs", "level": 1}},
+        {"type": "Text", "props": {"content": "The cases waiting on your stage."}},
+        {"type": "Row", "children": [{"type": "Button", "props": {"label": "Export", "navigate": "/x"}}]},
+        {"type": "Table", "props": {"rows": "{{queueCases}}"}},
+    ]}
+    pp.normalise_page_header(root)
+    head = _first(root)
+    assert head["type"] == "Section" and head["props"] == {
+        "role": "headline", "title": "My Sign-offs", "subtitle": "The cases waiting on your stage."}
+    assert [c["type"] for c in head["children"]] == ["Button"]
+    assert root["children"][1]["type"] == "Table"
+
+
+def test_a_row_of_two_texts_and_a_button_becomes_the_page_header():
+    root = {"type": "Container", "children": [{"type": "Stack", "children": [
+        {"type": "Row", "children": [
+            {"type": "Text", "props": {"content": "New Property"}},
+            {"type": "Text", "props": {"content": "Add a property to the maintained list."}},
+            {"type": "Button", "props": {"label": "Cancel", "navigate": "/properties"}},
+        ]},
+        {"type": "Form", "props": {"fields": []}},
+    ]}]}
+    pp.normalise_page_header(root)
+    head = root["children"][0]["children"][0]
+    assert head["props"]["title"] == "New Property"
+    assert head["props"]["subtitle"] == "Add a property to the maintained list."
+    assert head["children"][0]["props"]["label"] == "Cancel"
+
+
+def test_a_breadcrumb_stays_above_the_header_and_a_badge_becomes_an_action():
+    root = {"type": "Stack", "children": [
+        {"type": "Breadcrumb", "props": {"items": []}},
+        {"type": "Row", "children": [
+            {"type": "Heading", "props": {"content": "{{record.guestName}}"}},
+            {"type": "Badge", "props": {"label": "{{record.status}}"}},
+        ]},
+        {"type": "Tabs", "children": []},
+    ]}
+    pp.normalise_page_header(root)
+    assert [c["type"] for c in root["children"]] == ["Breadcrumb", "Section", "Tabs"]
+    assert root["children"][1]["props"]["title"] == "{{record.guestName}}"
+    assert root["children"][1]["children"][0]["type"] == "Badge"
+
+
+def test_an_existing_headline_section_is_kept_and_named():
+    root = {"type": "Stack", "children": [
+        {"type": "Section", "props": {"title": "Refund Cases"}, "children": [{"type": "Row", "children": []}]},
+        {"type": "Table", "props": {}},
+    ]}
+    pp.normalise_page_header(root)
+    assert root["children"][0]["props"]["role"] == "headline" and len(root["children"]) == 2
+
+
+def test_a_section_s_content_moves_out_of_the_header():
+    """The support-case intake wrapped its whole form in the headline Section;
+    rendered as the header's actions it sat to the right of the title."""
+    root = {"type": "Stack", "children": [
+        {"type": "Section", "props": {"title": "Report a complaint"}, "children": [
+            {"type": "Stack", "children": [{"type": "Form", "props": {"fields": []}}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    assert "children" not in root["children"][0]
+    assert root["children"][1]["type"] == "Stack"
+
+
+def test_the_header_is_found_inside_a_detail_page_s_populated_gate():
+    root = {"type": "Stack", "children": [
+        {"type": "Conditional", "props": {"when": "record == null"}, "children": [{"type": "Alert", "props": {"title": "Error"}}]},
+        {"type": "Conditional", "props": {"when": "record != null"}, "children": [
+            {"type": "Container", "children": [
+                {"type": "Breadcrumb", "props": {"items": []}},
+                {"type": "Row", "children": [{"type": "Heading", "props": {"content": "{{record.guestName}}"}},
+                                             {"type": "Badge", "props": {"label": "{{record.status}}"}}]},
+                {"type": "Tabs", "children": []}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    body = root["children"][1]["children"][0]["children"]
+    assert [c["type"] for c in body] == ["Breadcrumb", "Section", "Tabs"]
+    assert body[1]["props"]["title"] == "{{record.guestName}}"
+
+
+def test_the_header_is_found_inside_a_grid_and_after_a_leading_alert():
+    root = {"type": "Stack", "children": [
+        {"type": "Alert", "props": {"title": "Error"}},
+        {"type": "Container", "children": [
+            {"type": "Grid", "children": [
+                {"type": "Row", "children": [
+                    {"type": "Stack", "children": [{"type": "Text", "props": {"content": "New Property"}}]},
+                    {"type": "Button", "props": {"label": "Cancel"}}]},
+                {"type": "Card", "children": []}]}]},
+    ]}
+    pp.normalise_page_header(root)
+    grid = root["children"][1]["children"][0]
+    assert grid["children"][0]["type"] == "Section" and grid["children"][0]["props"]["title"] == "New Property"
+    assert grid["children"][1]["type"] == "Card"
+
+
+# --- the session user is not a fetch ------------------------------------------
+
+
+def test_the_session_user_binding_is_not_fetched_as_an_entity(doc, page, catalog):
+    """`{{user.role}}` on a page had the planner fetch the whole User table
+    as a list source named `user`, for every role that opened the page."""
+    doc["data"]["entities"].append({"id": "ENTITY-USER", "name": "User", "table": "users",
+                                     "fields": [{"name": "id"}, {"name": "role"}]})
+    root = {"type": "Stack", "children": [
+        {"type": "Text", "props": {"content": "Signed in as {{user.role}}"}},
+        {"type": "Table", "props": {"rows": "{{rows}}", "columns": []}},
+    ]}
+    entity = next(e for e in doc["data"]["entities"] if e.get("id") == (page.get("data") or {}).get("primaryEntity"))
+    sources = pp.data_sources(doc, page, entity, root)
+    assert [s["name"] for s in sources] == ["rows"]
 
 
 # --- §33: a create form asks about a record that does not exist yet ---------

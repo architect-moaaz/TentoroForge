@@ -71,10 +71,10 @@ def test_a_step_is_its_catalog_node_with_defaults_under_the_declared_config(tmp_
 def test_condition_rule_lands_on_the_key_the_engine_evaluates(tmp_path):
     project_workflows(_doc([
         {"key": "urgent", "name": "Is it urgent?", "type": "condition",
-         "config": {"condition": "priority == 'high'"}},
+         "config": {"condition": "priority = 'high'"}},
     ]), tmp_path)
     cond = _load(tmp_path)["definition"]["nodes"][1]
-    assert cond["data"]["config"]["expression"] == "priority == 'high'"
+    assert cond["data"]["config"]["expression"] == "priority = 'high'"
     assert "condition" not in cond["data"]["config"]
 
 
@@ -210,3 +210,17 @@ def test_a_gateway_counts_a_query_s_rows_not_its_keys():
     assert triage["assigneeRole"] == "Reception"
     assert triage["formBinding"] == {"fields": [
         {"name": "overrideReason", "label": "Override reason", "kind": "textarea", "required": True}]}
+
+
+def test_a_workflow_condition_written_in_javascript_speaks_feel():
+    """The engine folds nothing: `caseRow == null` failed to parse and the gate
+    meant to bar a poster failed the whole run instead."""
+    from services.blueprint.projection import feel_condition, _step_config
+    from services.catalog import workflow_nodes
+
+    assert feel_condition('user.role != "Finance" or caseRow == null') == 'user.role != "Finance" or caseRow = null'
+    assert feel_condition("a === 1 && b !== 2 || c") == "a = 1 and b != 2 or c"
+    assert feel_condition('note = "a == b"') == 'note = "a == b"'
+    gate = _step_config({"key": "g", "type": "condition", "config": {"expression": "x == null"}}, {}, workflow_nodes(), wf_id="F", steps=[])
+    assert gate["expression"] == "x = null"
+

@@ -826,3 +826,63 @@ def test_a_select_offers_the_values_the_entity_declares():
     assert status is not None
     assert [o["value"] for o in status.get("options") or []] == [
         "draft", "submitted"]
+
+
+# --- who may launch a workflow, who may read an entity --------------------------
+
+
+def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
+    """Reception posted a refund through the API: the posting queue page was
+    Finance's, but nothing compared the caller to it."""
+    from services.blueprint.projection import launch_roles, project_launch_roles
+
+    doc = {
+        "roles": [{"id": "ROLE-001", "name": "Reception"}, {"id": "ROLE-006", "name": "Finance"}, {"id": "ROLE-009", "name": "Guest"}],
+        "pages": [
+            {"id": "PAGE-004", "route": "/posting-queue", "access": "role_restricted", "users": ["ROLE-006"]},
+            {"id": "PAGE-008", "route": "/guest/refund-request", "access": "public", "users": ["ROLE-009"]},
+            {"id": "PAGE-007", "route": "/refund-cases/new", "access": "authenticated", "users": ["ROLE-001"]},
+        ],
+        "workflows": [
+            {"id": "FLOW-008", "name": "Post Refund", "launchedFrom": ["PAGE-004"], "steps": []},
+            {"id": "FLOW-002", "name": "Guest Refund Request Submission", "launchedFrom": ["PAGE-008"], "steps": []},
+            {"id": "FLOW-001", "name": "Refund Case Intake", "launchedFrom": ["PAGE-007"], "steps": []},
+            {"id": "FLOW-099", "name": "Nightly sweep", "steps": []},
+        ],
+    }
+    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"], "FLOW-001": ["Reception"], "FLOW-099": None}
+    project_launch_roles(doc, tmp_path / "app")
+    text = (tmp_path / "app" / "src" / "lib" / "workflows" / "launch-roles.ts").read_text()
+    assert '"FLOW-008": ["Finance"]' in text and '"post-refund": ["Finance"]' in text
+    assert '"FLOW-002": ["*"]' in text and '"FLOW-099": null' in text
+
+
+def test_entity_access_comes_from_the_pages_that_use_an_entity(tmp_path):
+    """Reception read every user account: the Users page was Admin's, but
+    nothing carried that to the data endpoint."""
+    from services.blueprint.projection import entity_access, project_entity_access
+
+    doc = {
+        "roles": [{"id": "ROLE-001", "name": "Reception"}, {"id": "ROLE-006", "name": "Finance"},
+                  {"id": "ROLE-008", "name": "Admin"}, {"id": "ROLE-009", "name": "Guest"}],
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Property", "table": "properties"},
+            {"id": "ENTITY-002", "name": "User", "table": "users"},
+            {"id": "ENTITY-003", "name": "RefundCase", "table": "refund_cases"},
+        ]},
+        "pages": [
+            {"id": "P-USERS", "route": "/users", "access": "role_restricted", "users": ["ROLE-008"], "data": {"primaryEntity": "ENTITY-002"}},
+            {"id": "P-CASES", "route": "/refund-cases", "access": "authenticated", "users": ["ROLE-001", "ROLE-006"], "data": {"primaryEntity": "ENTITY-003"}},
+            {"id": "P-GUEST", "route": "/guest/refund-request", "access": "public", "users": ["ROLE-009"], "data": {"primaryEntity": "ENTITY-003"}},
+        ],
+        "pageLayouts": [{"page": "P-GUEST", "root": {}, "dataSources": [{"name": "properties", "entity": "Property", "op": "list"}]}],
+        "security": {"ownershipRules": [{"entity": "RefundCase", "column": "propertyId", "kind": "scope", "scope": "workspace", "unscopedRoles": ["Finance", "CEO"]}]},
+    }
+    access = entity_access(doc)
+    assert access["users"] == {"read": ["Admin"], "write": ["Admin"]}
+    assert access["properties"]["read"] == ["*"]
+    assert set(access["refund_cases"]["read"]) == {"*", "CEO", "Finance", "Reception"}
+    assert set(access["refund_cases"]["write"]) == {"*", "Finance", "Reception"}
+    project_entity_access(doc, tmp_path / "app")
+    assert '"users"' in (tmp_path / "app" / "src" / "lib" / "entity-access.ts").read_text()
+

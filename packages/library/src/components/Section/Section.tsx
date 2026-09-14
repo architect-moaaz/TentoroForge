@@ -118,21 +118,40 @@ export function Section(props: SectionProps) {
     wrapClass = ["bg-background", py, elClass].filter(Boolean).join(" ");
   }
   const hasIllustration = !!illustration?.slug;
+  // Standard utilities that always resolve. The earlier `text-section-title`
+  // / `text-body` tokens needed a fontSize block in the app's Tailwind
+  // config that the foundation never carried, so every page title rendered
+  // as 16px body text (see Heading.tsx for the same finding).
+  const isHeadline = role === "headline";
+  const titleClass = isHeadline
+    ? "text-2xl md:text-3xl font-semibold tracking-tight leading-tight text-foreground break-words [overflow-wrap:anywhere]"
+    : "text-lg font-semibold leading-snug text-foreground break-words [overflow-wrap:anywhere]";
+  const subtitleClass = isHeadline
+    ? "mt-1.5 max-w-prose text-sm text-muted-foreground"
+    : "mt-1 text-sm text-muted-foreground";
+  const TitleTag = isHeadline ? "h1" : "h2";
   const header = (title || subtitle) && (
-    // Use the platform type-scale (Tier S) — section titles are smaller
-    // than page-titles by design so the hierarchy reads page → section →
-    // card without ambiguity. Editing once in tailwind.config.ts ripples
-    // platform-wide.
     <header className="mb-2">
-      {title && (
-        <h2 className="text-section-title text-foreground">{title}</h2>
-      )}
-      {subtitle && (
-        <p className="text-body text-muted-foreground mt-1.5">{subtitle}</p>
+      {title && <TitleTag className={titleClass}>{title}</TitleTag>}
+      {subtitle && <p className={subtitleClass}>{subtitle}</p>}
+    </header>
+  );
+  // THE PAGE HEADER IS ONE ROW. A headline section's children are its
+  // actions — the New Case button, a status badge — and they sit to the
+  // right of the title, wrapping beneath it only when the width runs out.
+  // Rendered under the title they read as a stray row of buttons.
+  const headlineBody = (
+    <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+      <div className="min-w-0 flex-1">
+        {title && <TitleTag className={titleClass}>{title}</TitleTag>}
+        {subtitle && <p className={subtitleClass}>{subtitle}</p>}
+      </div>
+      {children != null && children !== false && (
+        <div data-section-actions="" className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
       )}
     </header>
   );
-  const sectionBody = hasIllustration && illustration ? (
+  const sectionBody = isHeadline && !hasIllustration ? headlineBody : hasIllustration && illustration ? (
     // Illustration mode — side-by-side grid. Enables the canonical login
     // split layout: illustration on one side, children form on the other.
     <div className="grid gap-8 md:grid-cols-2 md:items-center">

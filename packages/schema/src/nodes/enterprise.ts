@@ -87,7 +87,7 @@ export const ActivityFeedNode = z.object({
     // like `"{{stats.latestReviews}}"` that the runtime resolves to a
     // real array. Same pattern as Form-C and Chart.data.
     // Optional with default [] so minimal { type: "ActivityFeed" } nodes render.
-    entries: z.union([z.array(ActivityEntry), z.string().min(1)]).optional().default([]),
+    entries: z.union([z.array(z.union([ActivityEntry, z.record(z.unknown())])), z.string().min(1)]).optional().default([]),
     title: z.string().optional(),
     showFilter: z.boolean().optional(),
     /** Max rows to render. Written by the dashboard composer when this

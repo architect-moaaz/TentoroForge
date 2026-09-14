@@ -62,6 +62,7 @@ INTERNAL_FIELDS = frozenset({"id", "createdAt", "updatedAt", "deletedAt"})
 #: The dataSource name a template binds the primary collection / record to.
 ROWS = "rows"
 RECORD = "record"
+_SESSION_BINDINGS = frozenset({"user", "currentUser", "sessionUser", "me"})
 
 
 class PlanError(RuntimeError):
@@ -989,6 +990,151 @@ def attach_related_collections(root: Any, doc: dict, entity: dict | None,
     return list(sources) + list(added.values())
 
 
+#: A LIST OF RECORDS OPENS THEM. The dashboard's "Approval queues" was a List
+#: of pending cases nothing could click; a Table gets `rowHref`, a List had no
+#: way to say where an item goes. When the bound source's entity has a detail
+#: page, each item opens its record — the same rule a Table follows.
+def link_lists_to_records(root: Any, doc: dict, sources: list[dict]) -> Any:
+    entities = _entities(doc)
+    detail_routes: dict[str, str] = {}
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        eid = (page.get("data") or {}).get("primaryEntity")
+        if route.endswith("/[id]") and eid and eid not in detail_routes:
+            detail_routes[eid] = route.replace("[id]", "{{id}}")
+    by_name = {e.get("name"): eid for eid, e in entities.items()}
+    source_entity = {str(s.get("name")): by_name.get(s.get("entity"), s.get("entity"))
+                     for s in sources if isinstance(s, dict) and s.get("op") == "list"}
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        props = n.get("props")
+        if n.get("type") == "List" and isinstance(props, dict) and not props.get("itemHref"):
+            m = re.fullmatch(r"\{\{\s*(\w+)\s*\}\}", str(props.get("items") or ""))
+            eid = source_entity.get(m.group(1)) if m else None
+            if eid in detail_routes:
+                props["itemHref"] = detail_routes[eid]
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
+#: EVERY PAGE OPENS THE SAME WAY. Composed pages opened five ways — a headline
+#: Section, a Heading and a Text, a Row of two Texts and a Button, a Breadcrumb
+#: over a Row holding a Heading and a Badge, a Grid whose first row held them —
+#: five spellings of "title, subtitle, actions" (Criterion Refunds v2,
+#: 2026-09-14). One page header: a Section with role "headline", the title,
+#: the subtitle, and the actions as its children; a Breadcrumb stays above it.
+_CONTAINERS = frozenset({"Container", "Stack", "Box", "Column", "Page", "Main", "Grid", "Split", "Row", "Cluster"})
+_HEADER_LEAVES = frozenset({"Heading", "Text", "Badge", "Button", "Link", "Breadcrumb"})
+_HEADER_GROUPS = frozenset({"Row", "Cluster", "Inline", "Stack", "Box"})
+_STATE_LEADS = frozenset({"Alert", "Conditional", "EmptyState", "LoadingState", "Skeleton"})
+
+
+def _header_leaves(node: Any) -> list[dict] | None:
+    """The leaves of a header-shaped node, or None if it holds content."""
+    if not isinstance(node, dict):
+        return None
+    t = node.get("type")
+    if t in _HEADER_LEAVES:
+        return [node]
+    if t in _HEADER_GROUPS:
+        out: list[dict] = []
+        for c in node.get("children") or []:
+            leaves = _header_leaves(c)
+            if leaves is None:
+                return None
+            out.extend(leaves)
+        return out
+    return None
+
+
+def _text_of(n: dict) -> str:
+    p = n.get("props") or {}
+    return str(p.get("content") or p.get("text") or p.get("title") or "").strip()
+
+
+def _find_header_host(node: Any) -> tuple[dict, int] | None:
+    """The container whose children open with the page header, and where."""
+    if not isinstance(node, dict) or not isinstance(node.get("children"), list):
+        return None
+    kids = node["children"]
+    for i, k in enumerate(kids):
+        if not isinstance(k, dict):
+            return None
+        if k.get("type") == "Conditional":
+            # A detail page's whole body sits inside its "populated" gate;
+            # the error and empty gates hold only a state node.
+            inner = [c for c in (k.get("children") or []) if isinstance(c, dict)]
+            if any(c.get("type") not in _STATE_LEADS for c in inner):
+                found = _find_header_host(k)
+                if found:
+                    return found
+            continue
+        if k.get("type") in _STATE_LEADS:
+            continue
+        if k.get("type") == "Section" and (k.get("props") or {}).get("title"):
+            return node, i
+        if _header_leaves(k) is not None:
+            return node, i
+        if k.get("type") in _CONTAINERS and k.get("children"):
+            return _find_header_host(k)
+        return None
+    return None
+
+
+def normalise_page_header(root: Any) -> Any:
+    found = _find_header_host(root)
+    if not found:
+        return root
+    host, start = found
+    kids = host["children"]
+    first = kids[start]
+    if first.get("type") == "Section":
+        # Already the header. Its children are actions only if they are
+        # header-shaped; a form or a stack of content moves out after it.
+        props = first.setdefault("props", {})
+        props.setdefault("role", "headline")
+        content = [c for c in (first.get("children") or []) if _header_leaves(c) is None]
+        if content:
+            first["children"] = [c for c in (first.get("children") or []) if _header_leaves(c) is not None]
+            if not first["children"]:
+                first.pop("children", None)
+            host["children"] = kids[:start + 1] + content + kids[start + 1:]
+        return root
+    run: list[dict] = []
+    for k in kids[start:]:
+        if k.get("type") == "Section" or _header_leaves(k) is None:
+            break
+        run.append(k)
+        if len(run) >= 4:
+            break
+    leaves = [leaf for k in run for leaf in (_header_leaves(k) or [])]
+    heading = next((l for l in leaves if l.get("type") == "Heading" and _text_of(l)), None)
+    texts = [l for l in leaves if l.get("type") == "Text" and _text_of(l)]
+    title_node = heading or (texts.pop(0) if texts else None)
+    if title_node is None:
+        return root
+    subtitle = next((t for t in texts if len(_text_of(t).split()) > 2), texts[0] if texts else None)
+    crumbs = [l for l in leaves if l.get("type") == "Breadcrumb"]
+    actions = [l for l in leaves if l.get("type") in ("Button", "Link", "Badge")]
+    section: dict[str, Any] = {"type": "Section", "props": {"role": "headline", "title": _text_of(title_node)}}
+    if subtitle is not None:
+        section["props"]["subtitle"] = _text_of(subtitle)
+    if actions:
+        section["children"] = actions
+    if run[0].get("id"):
+        section["id"] = run[0]["id"]
+    host["children"] = kids[:start] + crumbs + [section] + kids[start + len(run):]
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1120,6 +1266,10 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
     out: list[dict] = []
 
     unresolved: list[str] = []
+    # `{{user.x}}` is the session user the page carries, not a list of User
+    # rows to fetch - resolving it as an entity had every case page pull the
+    # whole users table for every role.
+    used = {n for n in used if n not in _SESSION_BINDINGS}
     for name in sorted(used):
         # A binding that names an entity resolves to it; anything else falls
         # back to the page's own entity, which is what `rows`/`record` mean.
@@ -1348,6 +1498,7 @@ def plan_page(doc: dict, page: dict, template: dict,
                                     {p.get("route") for p in _live(doc.get("pages")) if p.get("route")},
                                     record=single)
         root = carry_the_record(root, doc, page, sources)
+        root = link_lists_to_records(root, doc, sources)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
@@ -1375,6 +1526,8 @@ def plan_page(doc: dict, page: dict, template: dict,
         **({"_figmaCanvas": template["canvas"]} if template.get("canvas") else {}),
     }
     errors = validate_props(schema, catalog)
+    if not errors and schema.get("root"):
+        schema["root"] = normalise_page_header(schema["root"])
     if errors:
         raise PlanError(f"{page.get('id')}: " + "; ".join(errors[:4]))
 

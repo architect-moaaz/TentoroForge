@@ -72,7 +72,9 @@ export const TimelineNode = z.object({
   id: z.string().optional(),
   type: z.literal("Timeline"),
   props: z.object({
-    entries: z.union([z.array(TimelineEntry), z.string().min(1)]).default([]),
+    // An entry, a data row (an activity log entry with `summary` and
+    // `occurredAt`, shaped by the component), or a binding.
+    entries: z.union([z.array(z.union([TimelineEntry, z.record(z.unknown())])), z.string().min(1)]).default([]),
     orientation: z.enum(["vertical", "horizontal"]).optional(),  // default vertical
     className: z.string().optional(),
     style: z.record(z.unknown()).optional(),
