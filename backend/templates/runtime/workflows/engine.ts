@@ -217,12 +217,20 @@ export async function executeWorkflow(
 /** `{{path}}` inside a config string, read from ctx.variables. */
 function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
   if (typeof value !== "string" || !value.includes("{{")) return value;
+  // `a.b[0].c`: dotted, with a bracketed index reaching into a query's rows.
+  const segments = (path: string): (string | number)[] =>
+    path.trim().split(".").flatMap((p) => {
+      const m = /^([A-Za-z_$][\w$]*)((?:\[\d+\])*)$/.exec(p);
+      if (!m) return [p];
+      const idx = Array.from(m[2].matchAll(/\[(\d+)\]/g), (x) => Number(x[1]));
+      return [m[1], ...idx];
+    });
   const read = (path: string) =>
-    path.trim().split(".").reduce<any>((cur, p) => {
+    segments(path).reduce<any>((cur, p) => {
       if (cur === null || cur === undefined) return undefined;
       // An id is its own id: `{{property.id}}` over a foreign-key value.
       if (p === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
-      return cur[p];
+      return cur[p as any];
     }, variables);
   const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
   if (whole) {
