@@ -52,7 +52,7 @@ def _screenshot(url: str) -> bytes | None:
     try:
         resp = httpx.post(f"{verify}/screenshot",
                           json={"url": url, "fullPage": True,
-                                "width": 1440, "height": 900, "waitMs": 600},
+                                "width": 1440, "height": 900, "waitMs": 1800},
                           timeout=45.0)
     except Exception as exc:  # noqa: BLE001
         logger.info("[review] screenshot request failed for %s: %s", url, exc)
