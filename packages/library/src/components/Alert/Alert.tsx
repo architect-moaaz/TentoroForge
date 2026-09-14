@@ -30,10 +30,11 @@ type Props = {
   message: string;
   variant?: Variant;
   title?: string;
+  ariaLive?: "off" | "polite" | "assertive";
   style?: StyleSlotT;
 };
 
-export function Alert({ message, variant = "neutral", title, style }: Props) {
+export function Alert({ message, variant = "neutral", title, ariaLive, style }: Props) {
   const styles = VARIANT_STYLES[variant];
   const radiusScale = useRadiusScale();
   const elevation = useElevation();
@@ -50,6 +51,7 @@ export function Alert({ message, variant = "neutral", title, style }: Props) {
   return (
     <div
       role="alert"
+      aria-live={ariaLive}
       data-alert=""
       data-variant={variant}
       style={{
