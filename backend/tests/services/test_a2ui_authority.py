@@ -1128,7 +1128,13 @@ def test_a_create_screen_asks_for_exactly_one_form(tmp_path):
     assert "exactly ONE form" in req
     # the two things the composer wrongly added on a create page
     assert "do NOT add a second 'Save Changes' or edit form" in req
-    assert "do NOT show a list or table of existing records" in req
+    assert "do NOT show a roster of already-submitted records" in req
+    # NAMES NO COMPONENTS: the A2UI capability checker reads "table"/"list"
+    # as a demand, so the create brief must not use them (it forbade a table
+    # and was then required to add one — the page could never converge).
+    import re as _re
+    assert not _re.search(r"\\btable\\b", req, _re.I)
+    assert not _re.search(r"\\blist\\b", req, _re.I)
     assert "EDIT screen" not in req
 
 

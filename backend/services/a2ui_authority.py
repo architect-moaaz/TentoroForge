@@ -532,12 +532,17 @@ def build_requirement(root: Path, kind: str = "dashboard",
     if _family_of(kind, route) == "form":
         _r = str(route or "").rstrip("/")
         if _r.endswith("/new"):
+            # NAMES NO COMPONENTS. The A2UI capability checker scans this text
+            # for words like "table" and "list" and makes any it finds
+            # mandatory — so "do NOT show a table" READS AS a demand for one,
+            # and the create page could never converge (it was told to add a
+            # table and forbidden to). Describe the shape, not the component.
             parts.append(
                 "\nThis is a CREATE screen: it collects ONE NEW record. Author "
                 "exactly ONE form, whose submit creates it. Nothing exists to "
                 "edit yet — do NOT add a second 'Save Changes' or edit form, and "
-                "do NOT show a list or table of existing records beside it. This "
-                "page IS the form."
+                "do NOT show a roster of already-submitted records beside it. "
+                "This page IS the form."
             )
         elif _r.endswith("/edit"):
             parts.append(
@@ -653,13 +658,17 @@ _DESIGN_DIRECTION = (
     "has no focus.\n"
     "  - DENSITY. Compose for a working screen, not a landing page. Group "
     "related controls together, keep summary tiles to a single tidy row of "
-    "equal peers, and let the main content (the table, the record, the form) "
-    "take the width and the weight. Do not spread a handful of elements down an "
-    "empty page — a screen that is mostly whitespace reads as unfinished.\n"
-    "  - NO DUPLICATE CONTROLS. One search per list, one primary action per "
-    "screen. If the table you place already searches its rows, do not also add "
-    "a separate search box above it; add filters that the table does not "
-    "provide, not a second copy of what it does.\n"
+    "equal peers, and let the main content (the collection, the record, the "
+    "form) take the width and the weight. Do not spread a handful of elements "
+    "down an empty page — a screen that is mostly whitespace reads as "
+    "unfinished.\n"
+    # NAMES NO COMPONENTS. The A2UI capability checker makes any component word
+    # in this text ("table") mandatory on every surface, so a create form —
+    # which has no collection — could never satisfy it. Say the shape.
+    "  - NO DUPLICATE CONTROLS. One search per collection, one primary action "
+    "per screen. If the collection you place already searches its rows, do not "
+    "also add a separate search box above it; add filters it does not provide, "
+    "not a second copy of what it does.\n"
     "  - RHYTHM. Consistent spacing between peer sections and consistent "
     "padding within cards. Uneven gaps and one oversized tile beside three "
     "small ones read as broken, not as emphasis.\n"
