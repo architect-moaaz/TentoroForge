@@ -916,6 +916,24 @@ def test_a_form_on_a_record_page_stays_on_the_record():
     assert root["props"]["onSuccess"] == {"toast": "Saved", "navigate": "/refund-cases/{{record.id}}"}
 
 
+# --- a list of records opens them -------------------------------------------
+
+
+def test_a_list_bound_to_an_entity_with_a_detail_page_opens_its_record():
+    doc = {"data": {"entities": [{"id": "ENTITY-003", "name": "RefundCase", "fields": []}]},
+           "pages": [{"id": "P1", "route": "/refund-cases", "data": {"primaryEntity": "ENTITY-003"}},
+                     {"id": "P2", "route": "/refund-cases/[id]", "data": {"primaryEntity": "ENTITY-003"}}]}
+    root = {"type": "Card", "children": [
+        {"type": "List", "props": {"items": "{{approvals}}"}},
+        {"type": "List", "props": {"items": "{{approvals}}", "itemHref": "/queues/{{id}}"}},
+        {"type": "List", "props": {"items": [{"title": "static"}]}},
+    ]}
+    pp.link_lists_to_records(root, doc, [{"name": "approvals", "entity": "RefundCase", "op": "list"}])
+    assert root["children"][0]["props"]["itemHref"] == "/refund-cases/{{id}}"
+    assert root["children"][1]["props"]["itemHref"] == "/queues/{{id}}"
+    assert "itemHref" not in root["children"][2]["props"]
+
+
 # --- §33: a create form asks about a record that does not exist yet ---------
 
 _ARTICLE = {"fields": [

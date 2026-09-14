@@ -989,6 +989,41 @@ def attach_related_collections(root: Any, doc: dict, entity: dict | None,
     return list(sources) + list(added.values())
 
 
+#: A LIST OF RECORDS OPENS THEM. The dashboard's "Approval queues" was a List
+#: of pending cases nothing could click; a Table gets `rowHref`, a List had no
+#: way to say where an item goes. When the bound source's entity has a detail
+#: page, each item opens its record — the same rule a Table follows.
+def link_lists_to_records(root: Any, doc: dict, sources: list[dict]) -> Any:
+    entities = _entities(doc)
+    detail_routes: dict[str, str] = {}
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        eid = (page.get("data") or {}).get("primaryEntity")
+        if route.endswith("/[id]") and eid and eid not in detail_routes:
+            detail_routes[eid] = route.replace("[id]", "{{id}}")
+    by_name = {e.get("name"): eid for eid, e in entities.items()}
+    source_entity = {str(s.get("name")): by_name.get(s.get("entity"), s.get("entity"))
+                     for s in sources if isinstance(s, dict) and s.get("op") == "list"}
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        props = n.get("props")
+        if n.get("type") == "List" and isinstance(props, dict) and not props.get("itemHref"):
+            m = re.fullmatch(r"\{\{\s*(\w+)\s*\}\}", str(props.get("items") or ""))
+            eid = source_entity.get(m.group(1)) if m else None
+            if eid in detail_routes:
+                props["itemHref"] = detail_routes[eid]
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -1348,6 +1383,7 @@ def plan_page(doc: dict, page: dict, template: dict,
                                     {p.get("route") for p in _live(doc.get("pages")) if p.get("route")},
                                     record=single)
         root = carry_the_record(root, doc, page, sources)
+        root = link_lists_to_records(root, doc, sources)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
