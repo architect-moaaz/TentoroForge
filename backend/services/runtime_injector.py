@@ -1622,7 +1622,7 @@ export async function GET(request: Request) {
       WHERE status = ${status}
         AND (
           assignee_id = ${userId}::text
-          OR ${userRole} = ANY(string_to_array(assignee_role, ','))
+          OR ${userRole}::text = ANY(string_to_array(assignee_role, ','))
           OR (assignee_id IS NULL AND assignee_role IS NULL)
         )
       ORDER BY created_at DESC

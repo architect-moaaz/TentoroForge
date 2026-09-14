@@ -41,7 +41,7 @@ export async function GET(
       WHERE id = ${id}::uuid
         AND (
           assignee_id = ${userId}::text
-          OR ${userRole} = ANY(string_to_array(assignee_role, ','))
+          OR ${userRole}::text = ANY(string_to_array(assignee_role, ','))
           OR (assignee_id IS NULL AND assignee_role IS NULL)
         )
       LIMIT 1
