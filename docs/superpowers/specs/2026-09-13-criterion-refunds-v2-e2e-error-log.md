@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-13 · **App:** `output/188b8l0s` on http://localhost:3000 (`npx next dev -p 3000`) against the Docker Postgres its `start.sh` boots (port 5434, db `app_188b8l0s`) · **Harness:** `backend/scripts/crawl.mjs` (Playwright from `docker/forge-verify`), signs in, visits every route, clicks every control, reports console errors, failed requests and 404s.
 
-Final state: crawl as Admin **0 findings**, crawl as Front Office Manager **0 findings**, 15 of 15 routes serving, 16 workflows, all eight chain roles able to sign in and see their property's cases.
+Final state (2026-09-14): headless drive of all 15 routes as all 8 accounts — **0 console or network errors**, role-restricted routes answer 403 to the roles they exclude, every queue populated for its role; guest refund request submitted from the browser with a decimal amount and landed in the Reception/FOM task inbox.
 
 | # | Symptom | Root cause | Layer | Fix |
 |---|---|---|---|---|
@@ -28,6 +28,9 @@ Final state: crawl as Admin **0 findings**, crawl as Front Office Manager **0 fi
 | 20 | The Complaints & Tickets pages carry design copy as content: "Showing cases for your home property: Zedwell Strand", "20 cases at this property", "Case SC-2044 · Zedwell Tower Hill" on every case | Literal text from the reference design landed in the page layout where a binding was meant | composition · page author | open — bind the badge, subtitle and caption to the session user's property and the record |
 | 21 | Refund case and sign-off tables show the property as a uuid or a dash | The column is `propertyName` (a field the row lacks) or the raw `propertyId`; nothing resolves the foreign key to its label | platform · table FK labels | open |
 | 22 | The side rail lists every route for every role; Reception's rail offers the Income Auditor queue and Users, which now answer 403 | `project_shell` writes the navigation tree without the pages' `users`, and the layout filters nothing by role | platform · shell projection | open — carry each page's roles into the rail and hide what the session's role cannot open |
+| 23 | A guest's refund request creates a task no inbox shows | The Blueprint's user task says `assignType: role, assignTarget: [Reception, Front Office Manager]`; the runtime reads `assigneeRole`/`assignee`, found neither, and filed the task under "admin", a user that does not exist | platform · workflow projection | `_name_the_assignee` translates the target into `assigneeRole` (roles comma-joined) or `assignee`; the inbox and completion routes match a role by membership |
+| 24 | The task inbox is empty even for a task assigned to the signed-in role | The inbox route read `tasks.rows`; postgres-js returns the rows themselves, node-postgres wraps them — so the route answered `[]` on every postgres-js app, and its catch hid the shape | platform · injected task routes | read `.rows ?? rows`; the bound role is cast to text so Postgres can type it beside `string_to_array` |
+| 25 | Both guest submissions were routed to the duplicate-review task although no duplicate existed (`check_duplicates.count == 0`) | The gateway tests `count(check_duplicates) > 0` on the db_query result object `{rows, count}`, which FEEL counts as a map, not the rows | workflow · expression | open — the condition should read `check_duplicates.count > 0`, or the runtime should expose a query result as its rows |
 
 ## Test accounts (password `Criterion1234`, home property St Giles for the property-scoped roles)
 
