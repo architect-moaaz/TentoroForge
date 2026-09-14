@@ -45,6 +45,75 @@ const DENSITY_ICON_PX: Record<"compact" | "comfortable" | "spacious", number> = 
   compact: 14, comfortable: 16, spacious: 18,
 };
 
+/**
+ * `validation` — the registry's "Validation rule expression." It had a live
+ * text control in the editor, was stripped by the zod schema, and was never
+ * read here: a user could type a rule, watch it save, and get no validation.
+ *
+ * It is the compact form of the `validators` object this component already
+ * honours, so it is parsed INTO that shape rather than given a second,
+ * divergent enforcement path. Grammar, deliberately small:
+ *
+ *   required                 the field must be filled
+ *   email                    must look like an address
+ *   min:N / minLength:N      minimum length
+ *   max:N / maxLength:N      maximum length
+ *   pattern:<regex>          raw HTML pattern
+ *
+ * Rules are separated by `|` or `,`. `pattern:` takes the whole remainder of
+ * the expression, so a regex may itself contain `|` — which means it has to be
+ * written last. Anything unrecognised is ignored rather than throwing: a typo
+ * in a text box must not blank out the page.
+ */
+const EMAIL_PATTERN = "[^@\\s]+@[^@\\s]+\\.[^@\\s]+";
+
+type InputValidators = NonNullable<InputPropsType["validators"]>;
+
+export function parseValidation(expr: unknown): InputValidators {
+  const out: InputValidators = {};
+  if (typeof expr !== "string" || !expr.trim()) return out;
+  let head = expr;
+  const patAt = expr.search(/\bpattern\s*:/i);
+  if (patAt >= 0) {
+    head = expr.slice(0, patAt);
+    const pat = expr.slice(patAt).replace(/^\s*pattern\s*:\s*/i, "").trim();
+    if (pat) out.pattern = pat;
+  }
+  for (const raw of head.split(/[|,]/)) {
+    const rule = raw.trim();
+    if (!rule) continue;
+    const colon = rule.indexOf(":");
+    const key = (colon >= 0 ? rule.slice(0, colon) : rule).trim().toLowerCase();
+    const arg = colon >= 0 ? rule.slice(colon + 1).trim() : "";
+    const n = Number(arg);
+    if (key === "required") out.required = true;
+    else if (key === "email") { if (out.pattern === undefined) out.pattern = EMAIL_PATTERN; }
+    else if ((key === "min" || key === "minlength") && arg !== "" && Number.isFinite(n)) out.minLength = n;
+    else if ((key === "max" || key === "maxlength") && arg !== "" && Number.isFinite(n)) out.maxLength = n;
+  }
+  return out;
+}
+
+/**
+ * The two vocabularies overlap on the same BOUND under different names: the
+ * expression writes `minLength`, an object may write `min`, and the component
+ * below prefers the HTML-standard spelling. A plain `{...parsed, ...explicit}`
+ * therefore let the expression's `minLength:3` beat an explicit `min:9` — the
+ * opposite of the intended precedence, and invisible in a spread.
+ *
+ * So a bound the object sets under EITHER spelling clears the expression's.
+ */
+function mergeValidation(
+  parsed: InputValidators,
+  explicit: InputValidators | undefined,
+): InputValidators {
+  if (!explicit) return parsed;
+  const out: InputValidators = { ...parsed };
+  if (explicit.min !== undefined || explicit.minLength !== undefined) delete out.minLength;
+  if (explicit.max !== undefined || explicit.maxLength !== undefined) delete out.maxLength;
+  return { ...out, ...explicit };
+}
+
 const FIELD_BASE = "flex flex-col gap-1.5";
 const LABEL_BASE = "text-caption font-medium leading-none text-foreground";
 const REQUIRED_MARK = "ms-0.5 text-destructive";
@@ -54,9 +123,17 @@ const INPUT_STATIC =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-export function Input({ name, label, type, placeholder, validators, bind: _bind,
+export function Input({ name, label, type, placeholder, validators: validatorsProp,
+                       validation, bind: _bind,
                        style, value, onChange, iconLeft, iconRight }: InputProps) {
   const id = useInputId(name);
+  // Both vocabularies may arrive together. The structured object is the
+  // higher-fidelity source, so it wins key by key; the expression fills only
+  // what it leaves unset.
+  const validators = React.useMemo(
+    () => mergeValidation(parseValidation(validation), validatorsProp),
+    [validation, validatorsProp],
+  );
   const required = validators?.required === true;
   // Both vocabularies apply as string length; the explicit HTML-standard
   // `minLength`/`maxLength` win over the historic `min`/`max`.

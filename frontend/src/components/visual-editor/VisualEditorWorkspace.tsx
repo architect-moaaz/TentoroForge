@@ -29,6 +29,30 @@ export interface VisualEditorWorkspaceProps {
   hidePageTabs?: boolean;
 }
 
+/**
+ * THE PANELS LOOKED TRANSPARENT. They were not — they were UNDERNEATH.
+ *
+ * Pages / Palette / Properties each wrap an <aside> that already paints
+ * `bg-background`, but on desktop these wrappers were given `className=""`:
+ * no z-index, no stacking context. `SelectionOverlay` draws the selection
+ * rectangle, its resize handles, the node-id chip and the copy/delete toolbar
+ * as `position: fixed` at `z-50` (SelectionOverlay.tsx:236-274) — deliberately
+ * a sibling of the canvas so its coordinates don't disturb canvas layout.
+ *
+ * A fixed z-50 element paints above any auto-z-index sibling whatever the DOM
+ * order, so selecting a node whose rectangle reached across a panel drew the
+ * blue box and its chrome straight over the component list. Read as "the
+ * palette is see-through"; it was paint order, not opacity.
+ *
+ * The chrome is above the canvas, so it says so. 60 > 50 rather than 50 = 50,
+ * because equal z-index falls back to DOM order, and Palette precedes the
+ * overlay — it would have kept losing. `relative` is what makes z-index apply
+ * at all on a statically-positioned box. An overlay for a node at the canvas
+ * edge is now clipped by the panel, which is correct: the node is not visible
+ * there either.
+ */
+const CHROME_LAYER = "relative z-[60]";
+
 export function VisualEditorWorkspace({
   projectId,
   hideToolbar = false,
@@ -246,7 +270,7 @@ export function VisualEditorWorkspace({
           <div
             className={
               isDesktop
-                ? ""
+                ? CHROME_LAYER
                 : "absolute z-30 top-0 left-0 bottom-0 bg-background shadow-xl"
             }
           >
@@ -264,7 +288,7 @@ export function VisualEditorWorkspace({
           <div
             className={
               isDesktop
-                ? ""
+                ? CHROME_LAYER
                 : "absolute z-30 top-0 left-0 bottom-0 bg-background shadow-xl"
             }
           >
@@ -284,7 +308,7 @@ export function VisualEditorWorkspace({
           <div
             className={
               isDesktop
-                ? ""
+                ? CHROME_LAYER
                 : "absolute z-30 top-0 right-0 bottom-0 bg-background shadow-xl"
             }
           >

@@ -1,0 +1,793 @@
+{
+ "rows": [
+  {
+   "component": "AddToCart",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "BarcodeScanner",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "BulkActionBar",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Button",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Calendar",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "CameraCapture",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Cascader",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Checkbox",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ColorPicker",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Combobox",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "DatePicker",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "DateRangePicker",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FileUpload",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FilterBar",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FilterBuilder",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Form",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "GlobalSearch",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "IconButton",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Input",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "InputOTP",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "KeyValueInput",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "KeyboardShortcuts",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "MaskedInput",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "MoneyInput",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "MultiSelect",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "NumberInput",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "RadioGroup",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Rating",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "RichTextEditor",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "SavedViewsPicker",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Scanner",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "SearchInput",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "SegmentedControl",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Select",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Slider",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Switch",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Textarea",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ThemeToggle",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "TimePicker",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Transfer",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Wizard",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ActivityFeed",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ApprovalStepper",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Avatar",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Badge",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Carousel",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "CodeBlock",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "DescriptionList",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Dialog",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FadeIn",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FeatureCard",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Gauge",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Heading",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Heatmap",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Kanban",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "KeyValueList",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Lightbox",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "List",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "MetricTile",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "MoneyDisplay",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "PersonCard",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "QRCode",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ResourceTimeline",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Schematic",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "SearchResults",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "SplitArc",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Stagger",
+   "status": "PARTIAL",
+   "applied": "Background,Padding,Radius,Shadow",
+   "missing": "Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Stat",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Stepper",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Tag",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Tree",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ValidationChecklist",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "CartPanel",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Chart",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Conditional",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "DataBoundary",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "DataGrid",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "EditableLineGrid",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Repeat",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "Slot",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "Sparkline",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Table",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "TableSortable",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Timeline",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Alert",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "AutoFocus",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Banner",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "EmptyState",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "EmptyStateRich",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FocusRing",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "FocusTrap",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "HoverCard",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "IllustratedEmpty",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "LoadingState",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "OptimisticProvider",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Popover",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "PresenceIndicator",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Progress",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Skeleton",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Spinner",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Tooltip",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "TourOverlay",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "UndoManager",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Breadcrumb",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "CartBadge",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "CommandPalette",
+   "status": "NONE-APPLIED",
+   "applied": "",
+   "missing": "Background,Padding,Radius,Shadow,Motion",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "ContextMenu",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "DropdownMenu",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Link",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Menubar",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "NavLink",
+   "status": "ALL-APPLIED",
+   "applied": "Background,Padding,Radius,Shadow,Motion",
+   "missing": "",
+   "blocked": "Width(no input for \"Width\"),Height(no input for \"Height\"),Min W(no input for \"Min W\"),Max W(no input for \"Max W\"),Min H(no input for \"Min H\"),Max H(no input for \"Max H\")"
+  },
+  {
+   "component": "Redirect",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "SkipLink",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop refused"
+  },
+  {
+   "component": "(design-system)",
+   "status": "INFO",
+   "Density": "BLOCKED no select under that label",
+   "Elevation": "BLOCKED no select under that label",
+   "Radius scale": "BLOCKED no select under that label"
+  }
+ ],
+ "harness": [
+  "SkipLink: canvas gone — reopening"
+ ]
+}

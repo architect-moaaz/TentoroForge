@@ -1,0 +1,247 @@
+{
+ "rows": [
+  {
+   "step": "canvas",
+   "nodes": 19
+  },
+  {
+   "node": "n",
+   "idx": 0,
+   "selected": true,
+   "Props": "16 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0",
+   "idx": 1,
+   "selected": true,
+   "Props": "16 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0-0",
+   "idx": 2,
+   "selected": true,
+   "Props": "16 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0-0-0",
+   "idx": 3,
+   "selected": true,
+   "Props": "16 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0-0-0-0",
+   "idx": 4,
+   "selected": true,
+   "Props": "18 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "NONE"
+  },
+  {
+   "node": "n-0-0-0-1",
+   "idx": 5,
+   "selected": true,
+   "Props": "24 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "container-jw5eew",
+   "idx": 6,
+   "selected": true,
+   "Props": "24 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0-0-1",
+   "idx": 7,
+   "selected": true,
+   "Props": "24 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "n-0-1",
+   "idx": 8,
+   "selected": false,
+   "note": "click did not select — skipping panel claims"
+  },
+  {
+   "node": "text-yaed1l",
+   "idx": 9,
+   "selected": true,
+   "Props": "12 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "card-wi42x9",
+   "idx": 10,
+   "selected": true,
+   "Props": "12 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "text-lm4n2q",
+   "idx": 11,
+   "selected": true,
+   "Props": "12 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "grid-iratmy",
+   "idx": 12,
+   "selected": true,
+   "Props": "16 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "gridcell-d3lhcj",
+   "idx": 13,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "gridcell-sw8ipz",
+   "idx": 14,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "gridcell-f20uax",
+   "idx": 15,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": "gridcell-054m8n",
+   "idx": 16,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": null,
+   "idx": 17,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "node": null,
+   "idx": 18,
+   "selected": true,
+   "Props": "10 ctrls",
+   "Style": "22 ctrls",
+   "Bindings": "5 ctrls",
+   "Tokens": "101 ctrls",
+   "breakpoints": "All,sm,md,lg,xl"
+  },
+  {
+   "step": "design-system-visible",
+   "density": true,
+   "elevation": true,
+   "radiusScale": true
+  }
+ ],
+ "errors": [
+  {
+   "kind": "http-404",
+   "where": "open-editor",
+   "detail": "GET http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/contracts/design-spec.json"
+  },
+  {
+   "kind": "console-error",
+   "where": "open-editor",
+   "detail": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+   "kind": "http-404",
+   "where": "open-editor",
+   "detail": "GET http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/schemas/shell.json"
+  },
+  {
+   "kind": "console-error",
+   "where": "open-editor",
+   "detail": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+   "kind": "http-404",
+   "where": "open-editor",
+   "detail": "GET http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/schemas/home.json"
+  },
+  {
+   "kind": "console-error",
+   "where": "open-editor",
+   "detail": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  },
+  {
+   "kind": "request-failed",
+   "where": "node:n-0",
+   "detail": "GET http://localhost:6501/org/ee46a24d-15e0-44db-a18c-9193ecd215ec/projects/ad503658-18d3-42ac-bf3e-329c077ec17f?_rsc=15f80"
+  },
+  {
+   "kind": "request-failed",
+   "where": "node:n-0-0",
+   "detail": "GET http://localhost:6501/org/ee46a24d-15e0-44db-a18c-9193ecd215ec/projects/ad503658-18d3-42ac-bf3e-329c077ec17f?_rsc=15f80"
+  },
+  {
+   "kind": "request-failed",
+   "where": "node:container-jw5eew",
+   "detail": "GET http://localhost:6501/org/ee46a24d-15e0-44db-a18c-9193ecd215ec/projects/ad503658-18d3-42ac-bf3e-329c077ec17f?_rsc=15f80"
+  }
+ ]
+}

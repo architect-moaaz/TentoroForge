@@ -1,0 +1,37 @@
+{
+ "rows": [
+  {
+   "cell": "inventory",
+   "legends": [
+    "Color",
+    "Spacing",
+    "Radius",
+    "Typography",
+    "Shadow",
+    "Motion"
+   ],
+   "colorInputs": 6,
+   "numberInputs": 9,
+   "textInputs": 5,
+   "removeButtons": 6
+  },
+  {
+   "cell": "color",
+   "row": "(unlabelled)",
+   "status": "APPLIED-BOTH-SPELLINGS",
+   "changed": "--color-primary-50, --token-color-primary-50, --muted, --sidebar-accent"
+  },
+  {
+   "cell": "number",
+   "row": "2",
+   "status": "APPLIED-BOTH-SPELLINGS",
+   "changed": "--spacing-2, --token-spacing-2"
+  },
+  {
+   "cell": "text",
+   "row": "base",
+   "status": "APPLIED-BOTH-SPELLINGS",
+   "changed": "--typography-fontFamily-base, --token-typography-fontFamily-base"
+  }
+ ]
+}

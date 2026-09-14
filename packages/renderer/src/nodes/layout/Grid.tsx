@@ -68,6 +68,32 @@ function gapClass(gap: unknown): string {
   return GAP_CLASS[gap] ?? "gap-4";
 }
 
+/**
+ * ROW/COLUMN GAP, PADDING AND ALIGN — declared by the registry, read by nothing.
+ *
+ * All four had live editor controls and were silently discarded. Unlike
+ * Container, this one is NOT invisible to existing work: 5 of the 12 Grid nodes
+ * in the projects on disk already carry these values, set by whoever expected
+ * them to work. Turning them on gives those five the gaps and alignment that
+ * were always intended — which is the fix, but it is a visible change to pages
+ * that already render, not a silent one.
+ *
+ * Axis gaps are derived from the SAME GAP_CLASS scale rather than a parallel
+ * table, so `gap`, `rowGap` and `columnGap` cannot disagree about what "md" means.
+ */
+function axisGapClass(v: unknown, axis: "x" | "y"): string {
+  if (typeof v !== "string" || !v) return "";
+  const base = GAP_CLASS[v];
+  return base ? base.replace(/^gap-/, `gap-${axis}-`) : "";
+}
+
+const PAD_CLASS: Record<string, string> = {
+  none: "p-0", xs: "p-1", sm: "p-2", md: "p-4", lg: "p-6", xl: "p-8",
+};
+const ALIGN_CLASS: Record<string, string> = {
+  start: "items-start", center: "items-center", end: "items-end", stretch: "items-stretch",
+};
+
 export function Grid({ node, children }: { node: any; children: ReactNode[] }) {
   const p = node.props ?? {};
   const slotProps = applyStyleSlot(node.style);
@@ -111,7 +137,16 @@ export function Grid({ node, children }: { node: any; children: ReactNode[] }) {
   return (
     <div
       data-node-id={node.id}
-      className={`grid${colsClass} ${gapClass(p.gap)}${callerClass}`}
+      // An axis gap is more specific than the combined `gap`, so it wins when
+      // set; with neither, the existing gapClass default is untouched.
+      className={[
+        "grid" + colsClass,
+        gapClass(p.gap),
+        axisGapClass(p.rowGap, "y"),
+        axisGapClass(p.columnGap, "x"),
+        p.padding !== undefined ? (PAD_CLASS[p.padding] ?? "p-4") : "",
+        p.align !== undefined ? (ALIGN_CLASS[p.align] ?? "items-stretch") : "",
+      ].filter(Boolean).join(" ") + callerClass}
       style={{
         ...resolveStyle(node.style),
         ...slotProps.style,

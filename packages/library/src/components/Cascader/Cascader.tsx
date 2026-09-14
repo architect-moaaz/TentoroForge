@@ -10,7 +10,17 @@ export interface CascaderProps extends CascaderPropsType {
   onChange?: (path: string[]) => void;
 }
 
-export function Cascader({ options = [], style, onChange }: CascaderProps) {
+/**
+ * `placeholder` is declared in the schema AND exposed by the registry as a live
+ * text control with the default "Select…", and was never destructured here — so
+ * a user could type placeholder copy, watch it save, and see nothing.
+ *
+ * A cascader has no text input to hang it on, so it goes where a placeholder
+ * means something for this shape of control: the prompt shown when there is
+ * nothing to cascade through. With options present the columns are the UI and
+ * the placeholder would only be noise.
+ */
+export function Cascader({ options = [], placeholder, style, onChange }: CascaderProps) {
   // path of selected values, one per revealed column
   const [path, setPath] = React.useState<string[]>([]);
 
@@ -31,6 +41,11 @@ export function Cascader({ options = [], style, onChange }: CascaderProps) {
 
   return (
     <div className="inline-flex rounded-md border border-border" data-cascader="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
+      {options.length === 0 && placeholder ? (
+        <span className="px-3 py-1.5 text-sm text-muted-foreground" data-cascader-placeholder="">
+          {placeholder}
+        </span>
+      ) : null}
       {columns.map((col, ci) => (
         <ul key={ci} className="min-w-[140px] border-e border-border last:border-e-0 p-1">
           {col.map((o) => {

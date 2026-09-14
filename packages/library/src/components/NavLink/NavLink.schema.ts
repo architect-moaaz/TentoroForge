@@ -11,6 +11,11 @@ export const NavLinkProps = z.object({
   label: z.string().optional(),
   children: z.string().optional(),
   currentPath: z.string().optional(),
+  // Both are registry-declared with live editor controls. A non-strict zod
+  // object still DROPS unknown keys on a successful parse, so omitting them
+  // here stripped them on the way to the component — silently, with no error.
+  target: z.string().optional(),
+  icon: z.string().optional(),
   className: z.string().optional(),
   style: StyleSlot.optional(),
 });

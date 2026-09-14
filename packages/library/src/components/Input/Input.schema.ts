@@ -18,6 +18,10 @@ export const InputProps = z.object({
   type:        z.enum(["text", "email", "password", "number", "url", "tel", "search"]).default("text"),
   placeholder: z.string().optional(),
   bind:        z.string().optional(),
+  /** Registry-declared "Validation rule expression." — a compact pipe-separated
+   *  form of the `validators` object below, e.g. "required|min:3|pattern:^A".
+   *  Must be declared here or zod strips it before Input can read it. */
+  validation:  z.string().optional(),
   validators:  z.object({
     required: z.boolean().optional(),
     // `min`/`max` are the historic names; the renderer applies both as string

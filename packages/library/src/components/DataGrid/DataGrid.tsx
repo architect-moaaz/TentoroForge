@@ -18,8 +18,14 @@ const DENSITY_ROW_HEIGHT: Record<string, number> = {
  * (auto-enabled at >100 rows), sortable columns, bulk-select checkbox column,
  * and a row-actions slot (3-dot trigger per row).
  *
- * Future waves: column-resize, group-by, filter-bar slot, expandable rows,
- * persisted saved-views.
+ * Future waves: column-resize, group-by, filter-bar slot, persisted saved-views.
+ *
+ * `expandable` — "Allow rows to expand for detail content." The registry has
+ * advertised it with a live toggle all along while this file listed it as a
+ * future wave, so the control saved a value that changed nothing. The detail
+ * panel shows the row fields the columns do NOT already display (and every
+ * field when the columns cover them all), which is the only detail content
+ * available without a per-row slot in the schema.
  */
 export function DataGrid({
   columns = [],
@@ -27,6 +33,7 @@ export function DataGrid({
   rowKey = "id",
   virtualise,
   selectable,
+  expandable,
   rowActions,
 }: DataGridProps) {
   // `rows` may be a binding string ("{{invoices}}") before the Engine resolves it,
@@ -52,6 +59,10 @@ export function DataGrid({
     dir: "asc" | "desc";
   } | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const hasRowActions = Boolean(rowActions && rowActions.length > 0);
+  const detailSpan =
+    columns.length + (selectable ? 1 : 0) + (expandable ? 1 : 0) + (hasRowActions ? 1 : 0);
 
   const sortedRows = React.useMemo(() => {
     if (!sortBy) return rows;
@@ -72,6 +83,15 @@ export function DataGrid({
     );
   };
 
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -83,12 +103,30 @@ export function DataGrid({
 
   const renderRow = (row: Record<string, unknown>, index: number) => {
     const rowId = String(row[rowKey] ?? index);
+    const isExpanded = expanded.has(rowId);
+    const shown = new Set(columns.map((c) => c.key));
+    const detailEntries = Object.entries(row).filter(([k]) => !shown.has(k));
+    const details = detailEntries.length > 0 ? detailEntries : Object.entries(row);
     return (
+      <React.Fragment key={rowId}>
       <tr
-        key={rowId}
         className="border-b border-border hover:bg-muted/30 transition-colors"
         style={{ height: rowHeight }}
       >
+        {expandable && (
+          <td className="w-8 px-1 align-middle">
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? `Collapse row ${rowId}` : `Expand row ${rowId}`}
+              onClick={() => toggleExpand(rowId)}
+              data-row-expand={rowId}
+              className="text-muted-foreground hover:text-foreground text-xs leading-none"
+            >
+              <span aria-hidden="true">{isExpanded ? "▾" : "▸"}</span>
+            </button>
+          </td>
+        )}
         {selectable && (
           <td className="w-10 px-2 align-middle">
             <input
@@ -133,6 +171,21 @@ export function DataGrid({
           </td>
         )}
       </tr>
+      {expandable && isExpanded && (
+        <tr className="border-b border-border bg-muted/20" data-row-detail={rowId}>
+          <td colSpan={detailSpan} className="px-6 py-3 text-sm">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+              {details.map(([k, v]) => (
+                <React.Fragment key={k}>
+                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">{k}</dt>
+                  <dd className="text-sm">{v != null ? String(v) : "—"}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </td>
+        </tr>
+      )}
+      </React.Fragment>
     );
   };
 
@@ -145,6 +198,7 @@ export function DataGrid({
       <table className="w-full text-sm">
         <thead className="sticky top-0 z-10 bg-muted/40 backdrop-blur">
           <tr>
+            {expandable && <th className="w-8" />}
             {selectable && <th className="w-10" />}
             {columns.map((col) => {
               const frozenClass = col.frozen
@@ -175,7 +229,7 @@ export function DataGrid({
                 </th>
               );
             })}
-            {rowActions && rowActions.length > 0 && <th className="w-10" />}
+            {hasRowActions && <th className="w-10" />}
           </tr>
         </thead>
         <tbody>

@@ -317,8 +317,25 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const prev = node.props[action.propName];
       node.props[action.propName] = { $binding: action.binding };
 
-      // Inverse: if previous value was a literal, unbind back to it
-      if (prev !== undefined && (typeof prev !== "object" || !(prev as any).$binding)) {
+      // `prev` IS LEGITIMATELY null FOR 87 REGISTRY PROPS — Button.onClick,
+      // Chart.data, Table.columns, Form.fields, and the `binding` prop of every
+      // form input (Input/Select/Checkbox/Switch/Slider/Combobox/FileUpload…).
+      //
+      // The old guard read `typeof prev !== "object" || !prev.$binding`. Because
+      // `typeof null === "object"`, a null `prev` failed the first clause, fell
+      // through to the second, and dereferenced null — throwing a TypeError out
+      // of applyAction. editor-store.dispatch catches that, sets `lastError` and
+      // returns WITHOUT committing, so the Props-tab bind toggle silently did
+      // nothing on exactly the props people most want to bind. Measured: all 87
+      // threw; props with a string default bound fine.
+      //
+      // The sibling unbindProp case below already guards with `prev &&`; this
+      // one simply never did.
+      const prevIsBinding =
+        typeof prev === "object" && prev !== null && "$binding" in (prev as object);
+
+      // Inverse: if previous value was a literal (null counts as one), unbind back to it
+      if (prev !== undefined && !prevIsBinding) {
         return {
           next,
           inverse: {

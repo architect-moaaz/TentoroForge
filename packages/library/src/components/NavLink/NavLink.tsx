@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { resolveIcon } from "../../icons";
 
 // Prop-based approach: the library does not depend on Next.js at all.
 // The foundation app (or any wrapper) passes currentPath from usePathname().
@@ -14,7 +15,16 @@ import { useMotion } from "../../style/useMotion";
 type Props = {
   href?: string;
   navigate?: string;
+  /**
+   * Third spelling of the destination. The registry declares `target`
+   * ("Target page ID or external URL") and the editor renders a control for it,
+   * but it was never in the fallback chain — so a user could type a destination,
+   * watch it save, and get a link to "#". Same class as `icon` below.
+   */
+  target?: string;
   label?: string;
+  /** Leading icon name, resolved through the shared icon map (as Button does). */
+  icon?: string;
   children?: ReactNode;
   /** Current pathname — passed by the foundation wrapper (e.g. from Next.js usePathname). */
   currentPath?: string;
@@ -22,8 +32,9 @@ type Props = {
   style?: StyleSlotT;
 };
 
-export function NavLink({ href, navigate, label, children, currentPath = "", className, style }: Props) {
-  const dest = href ?? navigate ?? "#";
+export function NavLink({ href, navigate, target, label, icon, children, currentPath = "", className, style }: Props) {
+  const dest = href ?? navigate ?? target ?? "#";
+  const IconComp = icon ? resolveIcon(icon) : null;
   const content = children ?? label;
   const active = currentPath !== "" && currentPath === dest;
   // When a className is supplied (Figma styling), don't also emit inline
@@ -46,6 +57,13 @@ export function NavLink({ href, navigate, label, children, currentPath = "", cla
       style={inlineStyle}
       {...useMotion(style?.motion)}
     >
+      {IconComp ? (
+        <IconComp
+          size={16}
+          aria-hidden="true"
+          style={{ display: "inline-block", verticalAlign: "-0.15em", marginInlineEnd: content ? "0.375rem" : 0 }}
+        />
+      ) : null}
       {content}
     </a>
   );

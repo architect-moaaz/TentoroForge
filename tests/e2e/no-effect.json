@@ -1,0 +1,1042 @@
+[
+ {
+  "component": "AddToCart",
+  "prop": "entity",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Entity name (e.g. \"Plant\")."
+ },
+ {
+  "component": "AddToCart",
+  "prop": "itemId",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Row id of the item being added."
+ },
+ {
+  "component": "AddToCart",
+  "prop": "quantity",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Quantity to add. Increments existing lines."
+ },
+ {
+  "component": "AddToCart",
+  "prop": "price",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Price to snapshot on the cart line."
+ },
+ {
+  "component": "AddToCart",
+  "prop": "label",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Display label to snapshot on the cart line."
+ },
+ {
+  "component": "BarcodeScanner",
+  "prop": "name",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Form field name that receives the decoded value."
+ },
+ {
+  "component": "Button",
+  "prop": "onClick",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": ""
+ },
+ {
+  "component": "Button",
+  "prop": "clearsFilters",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": ""
+ },
+ {
+  "component": "CameraCapture",
+  "prop": "captureLabel",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Capture button text."
+ },
+ {
+  "component": "Cascader",
+  "prop": "placeholder",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Placeholder text."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "name",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Form field name / URL param key."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "startDate",
+  "type": "string",
+  "control": "text",
+  "group": "state",
+  "description": "Initial start date in ISO format (YYYY-MM-DD)."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "endDate",
+  "type": "string",
+  "control": "text",
+  "group": "state",
+  "description": "Initial end date in ISO format (YYYY-MM-DD)."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "presets",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of preset labels to show (today, last-7-days, last-30-days, etc.)."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "minDate",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Earliest selectable date (ISO)."
+ },
+ {
+  "component": "DateRangePicker",
+  "prop": "maxDate",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Latest selectable date (ISO)."
+ },
+ {
+  "component": "FilterBar",
+  "prop": "chips",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { key, label, options: [{value,label}][] } filter chips."
+ },
+ {
+  "component": "FilterBar",
+  "prop": "savedViews",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { label, filters } saved view presets."
+ },
+ {
+  "component": "FilterBuilder",
+  "prop": "fields",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Array of {name, type, operators?, options?} field defs (JSON)."
+ },
+ {
+  "component": "FilterBuilder",
+  "prop": "paramKey",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "URL query param the serialised expression is stored under."
+ },
+ {
+  "component": "FilterBuilder",
+  "prop": "combinator",
+  "type": "enum",
+  "control": "select",
+  "group": "behavior",
+  "description": "Top-level combinator."
+ },
+ {
+  "component": "FilterBuilder",
+  "prop": "onApplyWorkflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow dispatched with the compiled expression on Apply."
+ },
+ {
+  "component": "Form",
+  "prop": "workflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow action id called on submit."
+ },
+ {
+  "component": "Form",
+  "prop": "fields",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Declarative field definitions (discriminated union)."
+ },
+ {
+  "component": "Form",
+  "prop": "defaultValues",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Record of initial field values keyed by field name."
+ },
+ {
+  "component": "GlobalSearch",
+  "prop": "workflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow name to fire with { query } on submit."
+ },
+ {
+  "component": "GlobalSearch",
+  "prop": "debounceMs",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Keystroke debounce in ms (0..2000)."
+ },
+ {
+  "component": "IconButton",
+  "prop": "workflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow action id triggered on click."
+ },
+ {
+  "component": "Input",
+  "prop": "validation",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Validation rule expression."
+ },
+ {
+  "component": "KeyValueInput",
+  "prop": "valueType",
+  "type": "enum",
+  "control": "select",
+  "group": "behavior",
+  "description": "How each value is coerced."
+ },
+ {
+  "component": "MaskedInput",
+  "prop": "mask",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Mask pattern (# = a digit)."
+ },
+ {
+  "component": "MoneyInput",
+  "prop": "currency",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "3-letter ISO currency code (locked unless currencyEditable)."
+ },
+ {
+  "component": "MultiSelect",
+  "prop": "name",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "URL key / form field name."
+ },
+ {
+  "component": "MultiSelect",
+  "prop": "options",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { value, label } option objects."
+ },
+ {
+  "component": "MultiSelect",
+  "prop": "selected",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "state",
+  "description": "Array of selected value strings (initial state)."
+ },
+ {
+  "component": "MultiSelect",
+  "prop": "showSearch",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Show search field inside the dropdown."
+ },
+ {
+  "component": "SavedViewsPicker",
+  "prop": "views",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Array of {id, label, isDefault?} view entries."
+ },
+ {
+  "component": "SavedViewsPicker",
+  "prop": "activeViewId",
+  "type": "string",
+  "control": "text",
+  "group": "state",
+  "description": "Currently selected view id (falls back to default or first)."
+ },
+ {
+  "component": "SavedViewsPicker",
+  "prop": "onSelectWorkflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow name to fire when a view is picked."
+ },
+ {
+  "component": "SearchInput",
+  "prop": "endpoint",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "URL that resolves op:\"search\" and returns SearchHit[]."
+ },
+ {
+  "component": "SearchInput",
+  "prop": "debounceMs",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Keystroke debounce in ms (0..2000)."
+ },
+ {
+  "component": "SearchInput",
+  "prop": "minChars",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Minimum query length before firing (0..20)."
+ },
+ {
+  "component": "Select",
+  "prop": "options",
+  "type": "string",
+  "control": "textarea",
+  "group": "content",
+  "description": "Comma-separated option values or binding expression."
+ },
+ {
+  "component": "Select",
+  "prop": "multiple",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Allow multiple selections."
+ },
+ {
+  "component": "Switch",
+  "prop": "checked",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "state",
+  "description": "On/off state."
+ },
+ {
+  "component": "Textarea",
+  "prop": "rows",
+  "type": "number",
+  "control": "number",
+  "group": "style",
+  "description": "Visible row height."
+ },
+ {
+  "component": "ThemeToggle",
+  "prop": "lightLabel",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "aria-label when currently dark."
+ },
+ {
+  "component": "ThemeToggle",
+  "prop": "storageKey",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "localStorage key for persisted preference."
+ },
+ {
+  "component": "Wizard",
+  "prop": "steps",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Array of {id, title, fields[], nextIf?} step defs (JSON)."
+ },
+ {
+  "component": "Wizard",
+  "prop": "onComplete",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow name dispatched on final submit."
+ },
+ {
+  "component": "Wizard",
+  "prop": "successRoute",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Route to navigate on success (template substituted)."
+ },
+ {
+  "component": "Wizard",
+  "prop": "submitLabel",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Label for the final submit button."
+ },
+ {
+  "component": "ActivityFeed",
+  "prop": "entries",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of { timestamp, actor, action, target, detail?, category? } entries or Mustache binding."
+ },
+ {
+  "component": "ActivityFeed",
+  "prop": "showFilter",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Show category filter chips above the feed."
+ },
+ {
+  "component": "ApprovalStepper",
+  "prop": "steps",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of { label, status, actor?, timestamp? } step objects."
+ },
+ {
+  "component": "ApprovalStepper",
+  "prop": "onStepClick",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Workflow ID triggered when a step is clicked (optional)."
+ },
+ {
+  "component": "Avatar",
+  "prop": "src",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Alternate image src (legacy; prefer photoUrl)."
+ },
+ {
+  "component": "FeatureCard",
+  "prop": "cta",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Optional CTA link { label, href }."
+ },
+ {
+  "component": "Gauge",
+  "prop": "max",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Range maximum."
+ },
+ {
+  "component": "Heatmap",
+  "prop": "color",
+  "type": "string",
+  "control": "text",
+  "group": "style",
+  "description": "Base cell colour."
+ },
+ {
+  "component": "Heatmap",
+  "prop": "showValues",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "content",
+  "description": "Show numeric value in each cell."
+ },
+ {
+  "component": "KeyValueList",
+  "prop": "items",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { label, value, copyable? } item objects."
+ },
+ {
+  "component": "MetricTile",
+  "prop": "format",
+  "type": "enum",
+  "control": "select",
+  "group": "style",
+  "description": "Display format applied to the value."
+ },
+ {
+  "component": "MetricTile",
+  "prop": "icon",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Icon name displayed alongside the metric."
+ },
+ {
+  "component": "MetricTile",
+  "prop": "delta",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Delta object { value, direction: up|down|flat }."
+ },
+ {
+  "component": "MetricTile",
+  "prop": "trend",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of numbers for the sparkline trend."
+ },
+ {
+  "component": "MoneyDisplay",
+  "prop": "currency",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "3-letter ISO currency code."
+ },
+ {
+  "component": "MoneyDisplay",
+  "prop": "locale",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "BCP-47 locale (drives grouping + decimals)."
+ },
+ {
+  "component": "MoneyDisplay",
+  "prop": "compact",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Compact notation ($1.2M)."
+ },
+ {
+  "component": "MoneyDisplay",
+  "prop": "showSymbol",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Show the currency symbol vs the 3-letter code."
+ },
+ {
+  "component": "MoneyDisplay",
+  "prop": "align",
+  "type": "string",
+  "control": "select",
+  "group": "style",
+  "description": "Horizontal alignment."
+ },
+ {
+  "component": "PersonCard",
+  "prop": "department",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Department or team name."
+ },
+ {
+  "component": "PersonCard",
+  "prop": "avatarInitials",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Initials fallback when no avatarUrl is provided."
+ },
+ {
+  "component": "PersonCard",
+  "prop": "email",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Contact email address."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "itemResourceField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Item field holding the resource id."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "startField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Item start-date field."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "endField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Item end-date field."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "titleField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Item bar label field."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "statusField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Item status field → bar colour + legend."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "resourceGroupField",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Resource field to group rows under (room type, floor)."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "days",
+  "type": "number",
+  "control": "number",
+  "group": "content",
+  "description": "Number of day columns."
+ },
+ {
+  "component": "ResourceTimeline",
+  "prop": "itemHref",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Per-item deep link, e.g. /reservations/{id}."
+ },
+ {
+  "component": "Schematic",
+  "prop": "showLabels",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "content",
+  "description": "Show marker/region labels."
+ },
+ {
+  "component": "SearchResults",
+  "prop": "hrefPattern",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Route template — ${entity}/${id} substituted. Empty = non-navigating rows."
+ },
+ {
+  "component": "SearchResults",
+  "prop": "skeletonRows",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Skeleton row count while loading (1..20)."
+ },
+ {
+  "component": "SearchResults",
+  "prop": "emptyText",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Copy shown when a query returns no matches."
+ },
+ {
+  "component": "SplitArc",
+  "prop": "total",
+  "type": "number",
+  "control": "number",
+  "group": "behavior",
+  "description": "Optional normalisation total. 0/omitted → sum of segment values."
+ },
+ {
+  "component": "Stepper",
+  "prop": "activeStep",
+  "type": "number",
+  "control": "number",
+  "group": "state",
+  "description": "Active step index (derives status)."
+ },
+ {
+  "component": "CartPanel",
+  "prop": "currency",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "ISO currency code used for formatting."
+ },
+ {
+  "component": "CartPanel",
+  "prop": "checkoutLabel",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Primary CTA label."
+ },
+ {
+  "component": "CartPanel",
+  "prop": "onCheckoutNavigate",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Route to visit after a successful checkout."
+ },
+ {
+  "component": "Chart",
+  "prop": "data",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of row objects or Mustache binding string ({{stats.series}})."
+ },
+ {
+  "component": "Chart",
+  "prop": "xKey",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Data key used for the X axis."
+ },
+ {
+  "component": "Chart",
+  "prop": "series",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of { name, dataKey, color? } series definitions."
+ },
+ {
+  "component": "Chart",
+  "prop": "showGrid",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "style",
+  "description": "Show background grid lines."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "columns",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { key, label, width?, sortable?, frozen?, align? } column defs."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "rows",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of row objects — keys must match column.key values."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "rowKey",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Property name that uniquely identifies each row."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "virtualise",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Enable row virtualisation (auto-enabled when rows > 100)."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "selectable",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Allow row selection via checkbox."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "expandable",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Allow rows to expand for detail content."
+ },
+ {
+  "component": "DataGrid",
+  "prop": "rowActions",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Array of { label, action } row-level actions shown in an overflow menu."
+ },
+ {
+  "component": "EditableLineGrid",
+  "prop": "columns",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { key, label, type?, options?, align?, width? } column defs. type: text|number|currency|select|readonly."
+ },
+ {
+  "component": "EditableLineGrid",
+  "prop": "rows",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of row objects keyed by column.key."
+ },
+ {
+  "component": "EditableLineGrid",
+  "prop": "rowKey",
+  "type": "string",
+  "control": "text",
+  "group": "data",
+  "description": "Property name that uniquely identifies each row."
+ },
+ {
+  "component": "EditableLineGrid",
+  "prop": "totals",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Object { auto, subtotal?, tax?, taxRate?, taxLabel?, total?, currency? } for the footer rollup. Set auto=true to derive from rows."
+ },
+ {
+  "component": "Table",
+  "prop": "columns",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { key, label, width? } column definitions."
+ },
+ {
+  "component": "TableSortable",
+  "prop": "columns",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { key, label, width? } column definitions."
+ },
+ {
+  "component": "TableSortable",
+  "prop": "onSort",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Callback { key, dir: asc|desc } triggered when a column header is clicked."
+ },
+ {
+  "component": "Timeline",
+  "prop": "entries",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "data",
+  "description": "Array of { timestamp, title, actor?, status?, detail? } entries."
+ },
+ {
+  "component": "Timeline",
+  "prop": "orientation",
+  "type": "enum",
+  "control": "select",
+  "group": "style",
+  "description": "Layout direction of the timeline."
+ },
+ {
+  "component": "EmptyState",
+  "prop": "action",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Optional CTA button { label, workflow }."
+ },
+ {
+  "component": "EmptyStateRich",
+  "prop": "illustration",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Illustration slot: URL string or { slug, alt?, tone? } object."
+ },
+ {
+  "component": "EmptyStateRich",
+  "prop": "primaryCta",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Primary CTA { label, action: navigate|workflow }."
+ },
+ {
+  "component": "EmptyStateRich",
+  "prop": "sampleDataLink",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "behavior",
+  "description": "Secondary link for loading sample data."
+ },
+ {
+  "component": "FocusTrap",
+  "prop": "autoFocus",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Focus the first focusable descendant on mount."
+ },
+ {
+  "component": "FocusTrap",
+  "prop": "restoreFocus",
+  "type": "boolean",
+  "control": "toggle",
+  "group": "behavior",
+  "description": "Return focus to the prior element on unmount."
+ },
+ {
+  "component": "HoverCard",
+  "prop": "title",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Card title."
+ },
+ {
+  "component": "HoverCard",
+  "prop": "content",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Card body."
+ },
+ {
+  "component": "IllustratedEmpty",
+  "prop": "action",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Optional {label, workflow} CTA below the illustration."
+ },
+ {
+  "component": "Popover",
+  "prop": "title",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Panel title."
+ },
+ {
+  "component": "Popover",
+  "prop": "content",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Panel body text."
+ },
+ {
+  "component": "Tooltip",
+  "prop": "content",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Tooltip hint."
+ },
+ {
+  "component": "Breadcrumb",
+  "prop": "items",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { label, href? } breadcrumb items."
+ },
+ {
+  "component": "Breadcrumb",
+  "prop": "separator",
+  "type": "string",
+  "control": "text",
+  "group": "style",
+  "description": "Separator character between items."
+ },
+ {
+  "component": "CommandPalette",
+  "prop": "items",
+  "type": "action",
+  "control": "actionPicker",
+  "group": "content",
+  "description": "Array of { label, group?, shortcut?, action } command items."
+ },
+ {
+  "component": "CommandPalette",
+  "prop": "placeholder",
+  "type": "string",
+  "control": "text",
+  "group": "content",
+  "description": "Input placeholder text."
+ },
+ {
+  "component": "Link",
+  "prop": "workflow",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Optional workflow ID triggered on click (alongside or instead of navigate)."
+ },
+ {
+  "component": "NavLink",
+  "prop": "target",
+  "type": "string",
+  "control": "text",
+  "group": "behavior",
+  "description": "Target page ID or external URL."
+ },
+ {
+  "component": "NavLink",
+  "prop": "icon",
+  "type": "string",
+  "control": "iconPicker",
+  "group": "content",
+  "description": "Optional leading icon name."
+ }
+]

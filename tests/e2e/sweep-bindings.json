@@ -1,0 +1,762 @@
+{
+ "rows": [
+  {
+   "component": "AddToCart",
+   "prop": "(9 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "BarcodeScanner",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "BulkActionBar",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Button",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Calendar",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "CameraCapture",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Cascader",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Checkbox",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ColorPicker",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Combobox",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DatePicker",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DateRangePicker",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FileUpload",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FilterBar",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FilterBuilder",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Form",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "GlobalSearch",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "IconButton",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Input",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "InputOTP",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "KeyValueInput",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "KeyboardShortcuts",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MaskedInput",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MoneyInput",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MultiSelect",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MultiSelect",
+   "prop": "options",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "NumberInput",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "RadioGroup",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Rating",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "RichTextEditor",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SavedViewsPicker",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Scanner",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SearchInput",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SegmentedControl",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Select",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Select",
+   "prop": "options",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Slider",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Switch",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Textarea",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Textarea",
+   "prop": "rows",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "ThemeToggle",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "TimePicker",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Transfer",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Wizard",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ActivityFeed",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ActivityFeed",
+   "prop": "entries",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "ApprovalStepper",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Avatar",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Badge",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Carousel",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "CodeBlock",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DescriptionList",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Dialog",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FadeIn",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FeatureCard",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Gauge",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Heading",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Heatmap",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Kanban",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "KeyValueList",
+   "prop": "items",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Lightbox",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "List",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MetricTile",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "MoneyDisplay",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "PersonCard",
+   "prop": "(8 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "QRCode",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ResourceTimeline",
+   "prop": "(9 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ResourceTimeline",
+   "prop": "items",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Schematic",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SearchResults",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SplitArc",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Stagger",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Stat",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Stepper",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Tag",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Tree",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "ValidationChecklist",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "CartPanel",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Chart",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Chart",
+   "prop": "data",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Conditional",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DataBoundary",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DataGrid",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DataGrid",
+   "prop": "rows",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "EditableLineGrid",
+   "prop": "(7 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "EditableLineGrid",
+   "prop": "rows",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Repeat",
+   "prop": "(5 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Slot",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Sparkline",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Sparkline",
+   "prop": "data",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Table",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "TableSortable",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Timeline",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Timeline",
+   "prop": "entries",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "Alert",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "AutoFocus",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Banner",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "EmptyState",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "EmptyStateRich",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FocusRing",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "FocusTrap",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "HoverCard",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "IllustratedEmpty",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "LoadingState",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "OptimisticProvider",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Popover",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "PresenceIndicator",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Progress",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Skeleton",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Spinner",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Tooltip",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "TourOverlay",
+   "prop": "(6 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "UndoManager",
+   "prop": "(4 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Breadcrumb",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Breadcrumb",
+   "prop": "items",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "CartBadge",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "CommandPalette",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "CommandPalette",
+   "prop": "items",
+   "expr": "items",
+   "via": "select",
+   "status": "RESOLVED"
+  },
+  {
+   "component": "ContextMenu",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "DropdownMenu",
+   "prop": "(1 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Link",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "NavLink",
+   "prop": "(3 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "Redirect",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  },
+  {
+   "component": "SkipLink",
+   "prop": "(2 props)",
+   "status": "NOT-APPLICABLE",
+   "detail": "bind toggle emits {$binding}, which the renderer never resolves — one architectural defect, counted once"
+  }
+ ],
+ "harness": []
+}

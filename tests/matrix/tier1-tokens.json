@@ -1,0 +1,276 @@
+[
+ {
+  "cell": "token",
+  "path": "color.primary.50",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "color.primary.500",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "color.primary.900",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "color.surface.0",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "color.surface.1",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "color.secondary.500",
+  "group": "color",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "spacing.2",
+  "group": "spacing",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "spacing.4",
+  "group": "spacing",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "spacing.8",
+  "group": "spacing",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "radius.sm",
+  "group": "radius",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "radius.md",
+  "group": "radius",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "radius.lg",
+  "group": "radius",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "radius.scale",
+  "group": "radius",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "typography.fontFamily.base",
+  "group": "typography",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "typography.fontFamily.heading",
+  "group": "typography",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "typography.scale.body",
+  "group": "typography",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "typography.scale.h1",
+  "group": "typography",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "shadow.sm",
+  "group": "shadow",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "shadow.md",
+  "group": "shadow",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "motion.fast",
+  "group": "motion",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "token",
+  "path": "motion.slow",
+  "group": "motion",
+  "status": "WRITE-OK",
+  "rejected": null,
+  "varsFound": true,
+  "bareMoved": true,
+  "prefixedMoved": true,
+  "lockstep": true
+ },
+ {
+  "cell": "removeToken",
+  "path": "color.primary.500",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "removeToken",
+  "path": "spacing.4",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "removeToken",
+  "path": "radius.md",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "removeToken",
+  "path": "shadow.sm",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "removeToken",
+  "path": "motion.fast",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "removeToken",
+  "path": "typography.scale.h1",
+  "status": "REMOVED-OK",
+  "rejected": null
+ },
+ {
+  "cell": "known-candidate",
+  "path": "radius.scale",
+  "status": "NaN-CONFIRMED",
+  "detail": "TokenEditor coerces every radius.* row with Number(); radius.scale holds a string",
+  "value": "NaN"
+ }
+]

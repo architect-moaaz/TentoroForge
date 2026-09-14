@@ -201,11 +201,38 @@ export function StylePanel() {
   };
 
   // Design-system tokens cascade from the tokens artifact, not per-node.
-  // For v1 we just show the current values and update via updateToken when the
-  // tokens artifact has a "system" group.
-  const designSystem = (artifacts?.tokens as any)?.system ?? {};
+  //
+  // THESE THREE CONTROLS WROTE TO A GROUP NOTHING READS. They wrote
+  // `tokens.system.{density,elevation,radiusScale}`, but every consumer reads
+  // the canonical TokenSnapshot shape instead — `useTokens().density`,
+  // `.elevation` and `.radius.scale` (library/src/theme/tokens-context.tsx
+  // :55,:60,:73). A repo-wide search for `tokens.system` finds no reader at
+  // all: the group was invented here and only ever written.
+  //
+  // The failure was silent and convincing, which is why it survived: the
+  // control READ BACK ITS OWN WRITE, so the dropdown moved, the artifact went
+  // dirty, autosave persisted it — and not one pixel changed on the canvas.
+  // Radius was reported; density and elevation were broken identically.
+  //
+  // Note `radiusScale` is doubly wrong: the key is also nested, `radius.scale`,
+  // not a top-level `radiusScale`. Hence a path per control rather than one
+  // rule — the shapes genuinely differ and a single convention cannot express
+  // them.
+  const SYSTEM_TOKEN_PATH: Record<string, string[]> = {
+    density: ["density"],
+    elevation: ["elevation"],
+    radiusScale: ["radius", "scale"],
+  };
+  const tokens = (artifacts?.tokens as any) ?? {};
+  const designSystem = {
+    density: tokens.density,
+    elevation: tokens.elevation,
+    radiusScale: tokens.radius?.scale,
+  };
   const writeSystemToken = (key: string, value: string) => {
-    dispatch({ type: "updateToken", path: ["system", key], value });
+    const path = SYSTEM_TOKEN_PATH[key];
+    if (!path) return;
+    dispatch({ type: "updateToken", path, value });
   };
 
   return (

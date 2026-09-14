@@ -46,6 +46,17 @@ const SELECT_STATIC =
 
 export function Select(props: SelectProps) {
   const { name, label, options: allOptions, validators, style, value, onChange } = props;
+  /**
+   * `multiple` is declared in the registry with a live toggle and was never
+   * read — the control flipped, saved, and the select stayed single-choice.
+   *
+   * A native multi-select needs an ARRAY value, while this component's
+   * onChange contract is `(value: string) => void`. Rather than change that
+   * contract (and every caller with it), the selection is joined on "," on the
+   * way out and split on "," on the way in — the same comma convention
+   * `Select.options` already documents for its own value list.
+   */
+  const multiple = (props as { multiple?: boolean }).multiple === true;
   // DEPENDENT OPTIONS. The renderer expanded `optionsFrom` and, when it
   // declared `dependsOn`, kept each option's key on the parent column. The
   // sibling's live value narrows the list; nothing chosen yet, nothing offered.
@@ -111,8 +122,24 @@ export function Select(props: SelectProps) {
         className={selectCls}
         name={name}
         required={required}
-        value={value}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        multiple={multiple || undefined}
+        // A multi-select must be handed an ARRAY, and React warns loudly if it
+        // is handed a string; a single select must NOT be handed an array.
+        value={
+          multiple
+            ? (value ? String(value).split(",").filter(Boolean) : [])
+            : value
+        }
+        onChange={
+          onChange
+            ? (e) =>
+                onChange(
+                  multiple
+                    ? Array.from(e.target.selectedOptions, (o) => o.value).join(",")
+                    : e.target.value,
+                )
+            : undefined
+        }
       >
         {(options ?? []).map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>

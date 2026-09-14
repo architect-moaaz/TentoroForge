@@ -1,3 +1,4 @@
+"use client";
 import * as React from "react";
 import { formatValue } from "../../utils/formatValue";
 import { z } from "zod";
@@ -49,7 +50,17 @@ function formatRelativeSafe(iso: unknown): string {
 }
 
 
-export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fields }: Props) {
+/**
+ * `showFilter` — "Show category filter chips above the feed." Declared by the
+ * registry with a live toggle, present in the node schema, and read by nothing:
+ * the toggle flipped, saved, persisted, and the feed never changed.
+ *
+ * The chips are derived from the categories actually present in the entries
+ * rather than from the CATEGORY_TONE table, so a feed never offers a filter
+ * that would empty it. With the toggle off the component renders exactly as it
+ * did before — no header row, no state observable in the DOM.
+ */
+export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fields, showFilter }: Props) {
   const radiusScale = useRadiusScale();
   // Schema accepts entries as either an inline array OR a Mustache binding
   // string (e.g. "{{stats.recentActivity}}"). When the binding hasn't been
@@ -57,12 +68,52 @@ export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fi
   // unresolved-binding placeholder rather than crashing on entries.length.
   // `limit` is written by the dashboard composer when this feed shares a
   // grid row — see style/rowCap. Unbounded, it decides the row height.
-  const list = applyRowCap(Array.isArray(entries) ? entries : [], limit);
+  // Normalising BEFORE the cap is what makes filtering honest: the categories
+  // offered are the ones in the whole feed, and the cap applies to what is left
+  // after filtering rather than silently hiding the matches past row `limit`.
+  const normalized = React.useMemo(
+    () => (Array.isArray(entries) ? entries : []).map((raw, i) => normalizeEntry(raw, i, fields as never)),
+    [entries, fields],
+  );
+  const categories = React.useMemo(
+    () => Array.from(new Set(normalized.map((e) => e.category).filter(Boolean))) as string[],
+    [normalized],
+  );
+  const [activeCategory, setActiveCategory] = React.useState<string | null>(null);
+  // A category can disappear when the data changes; fall back to "All" rather
+  // than leaving the feed stuck showing nothing with no chip selected.
+  const active = activeCategory && categories.includes(activeCategory) ? activeCategory : null;
+  const filtered = active ? normalized.filter((e) => e.category === active) : normalized;
+  const list = applyRowCap(filtered, limit);
   const isUnresolvedBinding = typeof entries === "string";
+  const filterChips = showFilter === true && categories.length > 0;
   return (
     <section data-activity-feed="" className={`${RADIUS_SURFACE_CLASS[radiusScale]} border border-border bg-card ${SCROLL_X}`}>
       <header className="border-b border-border px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+        {filterChips && (
+          <div className="mt-2 flex flex-wrap gap-1" data-activity-filter="">
+            {[null, ...categories].map((cat) => {
+              const selected = active === cat;
+              return (
+                <button
+                  key={cat ?? "__all"}
+                  type="button"
+                  onClick={() => setActiveCategory(cat)}
+                  aria-pressed={selected}
+                  data-activity-filter-chip={cat ?? "all"}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                    selected
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {cat ?? "All"}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </header>
       <ol
         className="overflow-y-auto"
@@ -76,8 +127,7 @@ export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fi
           </li>
         ) : list.length === 0 ? (
           <li className="px-3 py-8 text-center text-xs text-muted-foreground">No activity yet.</li>
-        ) : list.map((raw, i) => {
-          const e = normalizeEntry(raw, i, fields as never);
+        ) : list.map((e) => {
           const rel = formatRelativeSafe(e.timestamp);
           return (
           <li key={e.id} className="flex gap-3 border-b border-border last:border-b-0 px-3 py-2.5 hover:bg-muted/30">

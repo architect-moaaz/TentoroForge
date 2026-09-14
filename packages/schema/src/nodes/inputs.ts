@@ -73,6 +73,12 @@ export const SelectNode = z.object({
     // Select node was refused ("'options' is a required property") while the
     // declarative Form field allowed exactly that shape.
     options: z.array(SelectOption).min(1).optional(),
+    // Registry-declared with a live toggle ("Allow multiple selections.").
+    // This props object is .strict(), so without the field here validateProps
+    // stripped it on the way to the component and the toggle did nothing.
+    // Declared on the canonical node rather than only on the library schema so
+    // a page carrying `multiple` still validates everywhere else it is parsed.
+    multiple: z.boolean().optional(),
     optionsFrom: OptionsFrom.optional(),
     // Inline-add for FK dropdowns — when optionsFrom returns zero rows and
     // the referenced entity has a create route, render "+ Add new <X>"

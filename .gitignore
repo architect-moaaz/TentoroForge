@@ -92,3 +92,7 @@ backend/data/build-usage.jsonl
 
 # built on demand from backend/scripts/feel/entry.ts
 backend/scripts/feel/validate.cjs
+tests/e2e/.auth/
+tests/e2e/findings.json
+tests/e2e/e2e-report.json
+tests/e2e/test-results/

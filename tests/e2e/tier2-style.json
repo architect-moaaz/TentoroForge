@@ -1,0 +1,711 @@
+{
+ "rows": [
+  {
+   "component": "Container",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Grid",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Card",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Divider",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Spacer",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Hero",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Stack",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Row",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Input",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Textarea",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Select",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Checkbox",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Switch",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "NumberInput",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "MoneyInput",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "MoneyDisplay",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "RadioGroup",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Slider",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "FileUpload",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Combobox",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Button",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Heading",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "MetricTile",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Avatar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "NavLink",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Breadcrumb",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Section",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Tabs",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "TabPanel",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Table",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Badge",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Alert",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "EmptyState",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Form",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "IconButton",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Sidebar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Cluster",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Split",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "AppShell",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "InspectorPanel",
+   "status": "HARNESS-BLOCKED",
+   "detail": "expected 1 selection overlay, saw 0"
+  },
+  {
+   "component": "TabPanelWithDeepLink",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Chart",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Sparkline",
+   "status": "HARNESS-BLOCKED",
+   "detail": "expected 1 selection overlay, saw 0"
+  },
+  {
+   "component": "DataGrid",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "EditableLineGrid",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Timeline",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "TableSortable",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "ApprovalStepper",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "PersonCard",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "FilterBar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "CommandPalette",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "ActivityFeed",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "EmptyStateRich",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "DateRangePicker",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "MultiSelect",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "FeatureCard",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Skeleton",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "LoadingState",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "KeyValueList",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Link",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "DatePicker",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "TimePicker",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "ColorPicker",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "InputOTP",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Rating",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "MaskedInput",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "KeyValueInput",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Gauge",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "SplitArc",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Heatmap",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Schematic",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Stepper",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Tag",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Stat",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "DescriptionList",
+   "status": "HARNESS-BLOCKED",
+   "detail": "expected 1 selection overlay, saw 0"
+  },
+  {
+   "component": "List",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "SegmentedControl",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Tree",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Transfer",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Cascader",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Calendar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Kanban",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "ResourceTimeline",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "RichTextEditor",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Carousel",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Lightbox",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "CodeBlock",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "QRCode",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "CameraCapture",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "BarcodeScanner",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Scanner",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "ValidationChecklist",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "FadeIn",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Stagger",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Repeat",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (111->111)",
+   "banner": ""
+  },
+  {
+   "component": "Conditional",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (111->111)",
+   "banner": ""
+  },
+  {
+   "component": "DataBoundary",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (111->111)",
+   "banner": ""
+  },
+  {
+   "component": "Slot",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (111->111)",
+   "banner": ""
+  },
+  {
+   "component": "Progress",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Spinner",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Banner",
+   "status": "HARNESS-BLOCKED",
+   "detail": "Padding control: no select under a \"Padding\" label"
+  },
+  {
+   "component": "Redirect",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (114->0)",
+   "banner": ""
+  },
+  {
+   "component": "Dialog",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "DropdownMenu",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "Popover",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "Tooltip",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "Drawer",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "ContextMenu",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "HoverCard",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "Menubar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "AddToCart",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "CartBadge",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "CartPanel",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "CartPage",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "BulkActionBar",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "SavedViewsPicker",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "GlobalSearch",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "SearchInput",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "SearchResults",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "KeyboardShortcuts",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "ThemeToggle",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "IllustratedEmpty",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "FocusTrap",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "SkipLink",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "FocusRing",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "AutoFocus",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "UndoManager",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "PresenceIndicator",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "OptimisticProvider",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "Wizard",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "SplitView",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "FilterBuilder",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  },
+  {
+   "component": "TourOverlay",
+   "status": "HARNESS-BLOCKED",
+   "detail": "drop did not commit (0->0)",
+   "banner": ""
+  }
+ ],
+ "errors": [
+  "REQFAIL http://localhost:3000/",
+  "REQFAIL http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/contracts/nav-flow.json",
+  "REQFAIL http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/schemas/PAGE-001.json",
+  "REQFAIL http://localhost:6500/api/_debug/project-file/gh0mlpbp/src/theme/tokens.custom.json"
+ ]
+}

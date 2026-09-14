@@ -1,0 +1,263 @@
+{
+ "totals": {
+  "classified": 130,
+  "visibleExpected": 28,
+  "confirmedBugs": 2,
+  "refuted": 26,
+  "config": 48,
+  "stateDependent": 52,
+  "unclear": 2
+ },
+ "confirmedBugs": [
+  {
+   "key": "Cascader.placeholder",
+   "why": "Placeholder text shows in the empty default state of the input, so changing it must change the rendered output."
+  },
+  {
+   "key": "NavLink.icon",
+   "why": "A leading icon name picked via an iconPicker in the content group renders a glyph next to the link label; setting it on a default NavLink should visibly add or swap that icon."
+  }
+ ],
+ "refutedKeys": [
+  "DateRangePicker.endDate",
+  "FilterBar.chips",
+  "Form.fields",
+  "CameraCapture.captureLabel",
+  "Switch.checked",
+  "DateRangePicker.startDate",
+  "Textarea.rows",
+  "Heatmap.color",
+  "SavedViewsPicker.views",
+  "Wizard.steps",
+  "MoneyInput.currency",
+  "Select.options",
+  "MetricTile.icon",
+  "PersonCard.department",
+  "MoneyDisplay.align",
+  "MetricTile.format",
+  "PersonCard.email",
+  "MoneyDisplay.currency",
+  "MoneyDisplay.locale",
+  "ResourceTimeline.days",
+  "MoneyDisplay.showSymbol",
+  "CartPanel.checkoutLabel",
+  "Stepper.activeStep",
+  "Timeline.orientation",
+  "EmptyStateRich.illustration",
+  "Chart.showGrid"
+ ],
+ "stateDependent": [
+  {
+   "key": "Select.multiple",
+   "requiredState": "Dropdown/list open, or at least one option selected — a closed single-vs-multi select with no selections can render identically."
+  },
+  {
+   "key": "ThemeToggle.lightLabel",
+   "requiredState": "Component must currently be in dark theme — the description scopes this label to 'when currently dark'; a default render is presumably light and uses the other label."
+  },
+  {
+   "key": "FilterBuilder.combinator",
+   "requiredState": "Builder holding at least two rules/conditions (or at least one group) so the AND/OR joiner between them is rendered; an empty default builder has nothing to join."
+  },
+  {
+   "key": "Form.defaultValues",
+   "requiredState": "Form must have fields defined whose names match the record keys; the values land as live input values (DOM properties), which a default fieldless render and an attribute-level diff would both miss."
+  },
+  {
+   "key": "Input.validation",
+   "requiredState": "Field must be in an invalid/touched state — a value entered (or submit attempted) that violates the rule — so the validation message or error styling renders."
+  },
+  {
+   "key": "MaskedInput.mask",
+   "requiredState": "Input must hold a value (user-typed or seeded text); with an empty default field the pattern has nothing to format."
+  },
+  {
+   "key": "MultiSelect.options",
+   "requiredState": "Dropdown must be open; option labels live inside the popup list, and a closed default trigger shows only placeholder/selection text."
+  },
+  {
+   "key": "MultiSelect.selected",
+   "requiredState": "Matching `options` must be supplied so the selected values resolve to labels (and/or the dropdown opened to show checked rows); with the default empty option list the values have nothing to render as."
+  },
+  {
+   "key": "MultiSelect.showSearch",
+   "requiredState": "Dropdown must be open — the description says the search field sits inside the dropdown."
+  },
+  {
+   "key": "SavedViewsPicker.activeViewId",
+   "requiredState": "`views` must be populated with entries whose ids match — with the default (likely empty) view list there is no label or highlight for an id to select."
+  },
+  {
+   "key": "DateRangePicker.presets",
+   "requiredState": "Picker popover/dropdown open — preset shortcut labels live in the calendar panel, not on the closed trigger."
+  },
+  {
+   "key": "DateRangePicker.minDate",
+   "requiredState": "Calendar popover open, showing day cells that can be marked disabled/out-of-range."
+  },
+  {
+   "key": "DateRangePicker.maxDate",
+   "requiredState": "Calendar popover open, showing day cells that can be marked disabled/out-of-range."
+  },
+  {
+   "key": "FilterBar.savedViews",
+   "requiredState": "Saved-views menu/dropdown opened — the preset labels are listed inside that menu rather than inline on the bar."
+  },
+  {
+   "key": "FilterBuilder.fields",
+   "requiredState": "At least one condition/rule row present (or the field selector opened) — an empty builder shows only an 'Add condition' affordance."
+  },
+  {
+   "key": "PersonCard.avatarInitials",
+   "requiredState": "avatarUrl empty/unset so the avatar falls back to initials; with a default avatarUrl present the initials are never rendered"
+  },
+  {
+   "key": "Wizard.submitLabel",
+   "requiredState": "Wizard advanced to its final step, where the submit button replaces the Next button"
+  },
+  {
+   "key": "ActivityFeed.showFilter",
+   "requiredState": "Feed holding entries that carry categories, so filter chips have something to render"
+  },
+  {
+   "key": "Avatar.src",
+   "requiredState": "photoUrl unset/empty so the legacy src fallback path is taken (and the image actually resolves)"
+  },
+  {
+   "key": "FeatureCard.cta",
+   "requiredState": "cta set to a complete {label, href} object; the card renders no CTA element at all when it is absent or malformed"
+  },
+  {
+   "key": "Gauge.max",
+   "requiredState": "A non-zero value bound to the gauge (and/or a scale with min/max tick labels enabled)"
+  },
+  {
+   "key": "Schematic.showLabels",
+   "requiredState": "Component must be holding marker/region data; with no markers or regions defined there are no labels for the toggle to show or hide."
+  },
+  {
+   "key": "SearchResults.skeletonRows",
+   "requiredState": "Component must be in the loading state (query in flight, results not yet resolved) for skeleton rows to render at all."
+  },
+  {
+   "key": "SearchResults.emptyText",
+   "requiredState": "Component must be in the empty state — a query that has run and returned zero matches."
+  },
+  {
+   "key": "SplitArc.total",
+   "requiredState": "Component must hold segment values whose sum differs from the supplied total; with no segments, or with total left at the 0/omitted default that falls back to the segment sum, the geometry is unchanged."
+  },
+  {
+   "key": "CartPanel.currency",
+   "requiredState": "Panel must be holding at least one priced line item or a rendered total; an empty cart has no monetary value to format."
+  },
+  {
+   "key": "Heatmap.showValues",
+   "requiredState": "Heatmap must be holding a non-empty data matrix so cells actually render; with no cells there is no numeric label to show or hide."
+  },
+  {
+   "key": "KeyValueList.items",
+   "requiredState": "The items binding must resolve to a non-empty array of { label, value } objects at render time; an actionPicker-set reference with no backing data yields an empty list."
+  },
+  {
+   "key": "MetricTile.delta",
+   "requiredState": "A resolvable delta object { value, direction } must actually be supplied/bound; the tile renders no delta affordance when the bound data is absent."
+  },
+  {
+   "key": "MetricTile.trend",
+   "requiredState": "A resolvable array of numbers must be supplied/bound so the sparkline has a series to draw; with no numeric data no sparkline is rendered."
+  },
+  {
+   "key": "MoneyDisplay.compact",
+   "requiredState": "The displayed amount must be large enough for compact notation to differ (roughly >= 1000); for a small or zero default amount '$42' is identical compact or not."
+  },
+  {
+   "key": "Chart.data",
+   "requiredState": "The chart must have series (and xKey) configured that match the row keys, and the actionPicker binding must resolve to an actual array; with nothing to plot, any data value renders the same empty chart."
+  },
+  {
+   "key": "Chart.series",
+   "requiredState": "The chart must be holding resolved data rows whose keys match each series dataKey; with no data the series definitions produce no marks or legend entries."
+  },
+  {
+   "key": "DataGrid.columns",
+   "requiredState": "The actionPicker binding must resolve to a real array of column defs (and typically rows to populate them); an unresolved binding leaves the grid in its empty state for every value."
+  },
+  {
+   "key": "DataGrid.rows",
+   "requiredState": "Columns must be defined with keys matching the row objects, and the bound data source must resolve; without columns or a resolving binding the grid shows its empty state regardless of rows."
+  },
+  {
+   "key": "DataGrid.virtualise",
+   "requiredState": "The grid must hold enough rows to exceed the viewport (the description implies 100+) for windowed rendering to change which row nodes exist; with few or no rows both settings render identically."
+  },
+  {
+   "key": "DataGrid.selectable",
+   "requiredState": "The grid must have resolved columns/rows so a checkbox column and header checkbox have somewhere to render; an empty default grid shows no rows to select."
+  },
+  {
+   "key": "DataGrid.expandable",
+   "requiredState": "Grid must be holding at least one row; the expander affordance is per-row, and the detail content itself only appears after a row is actually expanded."
+  },
+  {
+   "key": "EditableLineGrid.columns",
+   "requiredState": "The picker must be bound to a real array of column definition objects; with an unbound or non-conforming binding the grid falls back to its default/empty column set."
+  },
+  {
+   "key": "EditableLineGrid.rows",
+   "requiredState": "The grid must be bound to real row data keyed by column.key; with no resolvable data it renders its empty/default body regardless of which picker value is selected."
+  },
+  {
+   "key": "EditableLineGrid.totals",
+   "requiredState": "A footer rollup object must actually resolve (and the grid must be showing its totals footer); an unresolved actionPicker binding leaves the footer absent or unchanged."
+  },
+  {
+   "key": "Table.columns",
+   "requiredState": "Bound to a valid array of { key, label, width? } objects; otherwise the table keeps its default header set."
+  },
+  {
+   "key": "TableSortable.columns",
+   "requiredState": "Bound to a valid array of { key, label, width? } objects; otherwise the sortable table keeps its default header set."
+  },
+  {
+   "key": "Timeline.entries",
+   "requiredState": "Timeline must be holding real entry data ({ timestamp, title, ... }); without a resolving binding it shows its default or empty timeline."
+  },
+  {
+   "key": "HoverCard.title",
+   "requiredState": "Card open — trigger hovered or focused so the hover panel is rendered."
+  },
+  {
+   "key": "HoverCard.content",
+   "requiredState": "Card open — trigger hovered or focused so the hover panel is rendered."
+  },
+  {
+   "key": "Popover.title",
+   "requiredState": "Popover open — the panel (and its title) is only rendered/visible once the popover is triggered."
+  },
+  {
+   "key": "Popover.content",
+   "requiredState": "Popover open — the panel body is only rendered/visible once the popover is triggered."
+  },
+  {
+   "key": "Tooltip.content",
+   "requiredState": "Tooltip shown — trigger hovered or focused so the hint bubble renders."
+  },
+  {
+   "key": "Breadcrumb.separator",
+   "requiredState": "At least two breadcrumb items present, so a separator is rendered between them."
+  },
+  {
+   "key": "CommandPalette.items",
+   "requiredState": "Command palette open, so the command list is rendered."
+  },
+  {
+   "key": "CommandPalette.placeholder",
+   "requiredState": "Command palette open, so the search input (and its placeholder) is rendered."
+  }
+ ],
+ "unclear": [
+  "IllustratedEmpty.action",
+  "Breadcrumb.items"
+ ]
+}
