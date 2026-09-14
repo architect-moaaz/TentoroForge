@@ -1111,3 +1111,37 @@ def test_a_list_screen_is_told_where_it_leads_not_what_to_run(tmp_path):
                             contract=_NOTES["pages"][0], registry=reg, page_id="PAGE-001")
     assert "`/notes/[id]`" in req and "`/notes/new`" in req
     assert "ALSO CREATES" not in req
+
+
+# ── create and edit are one form, not two ───────────────────────────────────
+#
+# The `form` job reads "collects or edits ONE record" for both, so on a `/new`
+# page the composer hedged and authored a create form AND a "Save Changes" edit
+# form (plus a table of existing records). The render review flagged the
+# duplicate control and could not get it removed in two rounds. The route says
+# which it is; the brief now says so unambiguously.
+
+def test_a_create_screen_asks_for_exactly_one_form(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/support-requests/new")
+    assert "CREATE screen" in req
+    assert "exactly ONE form" in req
+    # the two things the composer wrongly added on a create page
+    assert "do NOT add a second 'Save Changes' or edit form" in req
+    assert "do NOT show a list or table of existing records" in req
+    assert "EDIT screen" not in req
+
+
+def test_an_edit_screen_asks_for_one_prefilled_form(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/rentals/[id]/edit")
+    assert "EDIT screen" in req
+    assert "exactly ONE" in req
+    assert "no second create form" in req
+    assert "CREATE screen" not in req
+
+
+def test_a_non_form_screen_gets_no_create_or_edit_clause(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="collection", route="/members")
+    assert "CREATE screen" not in req and "EDIT screen" not in req

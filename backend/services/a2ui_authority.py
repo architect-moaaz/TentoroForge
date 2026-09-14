@@ -523,6 +523,30 @@ def build_requirement(root: Path, kind: str = "dashboard",
 
     parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind, route)]]
 
+    # CREATE AND EDIT ARE ONE FORM, NOT TWO. The `form` job reads "collects or
+    # edits ONE record" for both, so on a `/new` page the composer hedged and
+    # authored BOTH a create form and a "Save Changes" edit form (plus a table
+    # of existing records), which the render review then flagged as a duplicate
+    # control and off-brief and could not get removed in two rounds. The route
+    # says which it is; say so, unambiguously, so one form is authored.
+    if _family_of(kind, route) == "form":
+        _r = str(route or "").rstrip("/")
+        if _r.endswith("/new"):
+            parts.append(
+                "\nThis is a CREATE screen: it collects ONE NEW record. Author "
+                "exactly ONE form, whose submit creates it. Nothing exists to "
+                "edit yet — do NOT add a second 'Save Changes' or edit form, and "
+                "do NOT show a list or table of existing records beside it. This "
+                "page IS the form."
+            )
+        elif _r.endswith("/edit"):
+            parts.append(
+                "\nThis is an EDIT screen: it changes ONE EXISTING record, its "
+                "form pre-filled with the current values. Author exactly ONE "
+                "form, whose submit saves the changes — no second create form "
+                "beside it."
+            )
+
     if presentation in ("drawer", "modal"):
         # A page that opens OVER its caller is not a screen. Composed as one it
         # arrives with a page container, a heading and a back link — chrome for
