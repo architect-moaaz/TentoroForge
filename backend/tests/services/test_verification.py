@@ -388,6 +388,47 @@ def test_a_record_action_on_an_entity_no_workflow_touches_is_caught():
     assert hits[0].responsible_agent == "workflow"
 
 
+def _record_delete_doc(*, delete_step: bool):
+    """A Record detail page declaring `delete`, with Create + Update workflows
+    on Record. `delete_step` seeds whether a workflow also DELETES it."""
+    steps = [{"key": "u", "type": "action", "entity": "ENTITY-001",
+              "config": {"actionType": "db_delete" if delete_step else "db_update",
+                         "table": "records"}}]
+    return doc(
+        pages=[{"id": "PAGE-001", "name": "Rec", "route": "/records/[id]",
+                "purpose": "x", "actions": ["view", "edit", "delete"],
+                "data": {"primaryEntity": "ENTITY-001"}}],
+        data={"entities": [{"id": "ENTITY-001", "name": "Record", "table": "records"}]},
+        workflows=[
+            {"id": "FLOW-001", "name": "Create Record", "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-001"],
+             "inputs": [{"kind": "record", "entity": "ENTITY-001"}],
+             "steps": [{"key": "c", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_insert", "table": "records"}}]},
+            {"id": "FLOW-002", "name": "Update Record", "trigger": {"kind": "manual"},
+             "launchedFrom": ["PAGE-001"],
+             "inputs": [{"kind": "record", "entity": "ENTITY-001"}], "steps": steps},
+        ],
+    )
+
+
+def test_a_delete_action_needs_a_workflow_that_deletes():
+    """The entity-level check passes because Create/Update touch Record — but a
+    `delete` action can be served by neither, and no workflow performs db_delete.
+    Caught per-op so the workflow author adds the Delete workflow, rather than the
+    composer wiring the Delete button to Update. Routed to the workflow agent."""
+    d = _record_delete_doc(delete_step=False)
+    hits = [f for f in verify(d, edges=("Page↔Workflow",)).findings
+            if "no workflow deletes" in f.detail]
+    assert len(hits) == 1 and hits[0].section == "workflows"
+
+
+def test_a_delete_action_with_a_deleting_workflow_is_accepted():
+    d = _record_delete_doc(delete_step=True)
+    assert not [f for f in verify(d, edges=("Page↔Workflow",)).findings
+                if "no workflow deletes" in f.detail]
+
+
 def test_a_create_action_is_not_a_missing_entity_workflow():
     """A create/submit makes a NEW record — its workflow outputs the entity
     rather than reading it — so a create page with no entity-reading workflow is

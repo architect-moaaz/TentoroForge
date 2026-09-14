@@ -263,3 +263,69 @@ def test_without_a_doc_the_functional_check_is_skipped():
     result = _proposal({"type": "Stack", "props": {}, "children": [
         {"type": "Button", "props": {"label": "Cancel"}, "children": []}]})
     check_pattern_templates(result)   # structure only — must not raise
+
+
+# ---------------------------------------------------------------------------
+# A DESTRUCTIVE CONTROL DELETES. A "Delete" button wired to an Update workflow
+# changes the record instead of removing it — nothing a person can see happens,
+# which reads as a broken button. `workflow-not-defined` never sees it: the
+# Update workflow exists, so the reference resolves.
+# ---------------------------------------------------------------------------
+
+def _delete_binding_doc(*, delete_wf: bool):
+    """A Record detail page whose Delete button is wired to the UPDATE workflow.
+    `delete_wf` seeds whether a real Delete workflow (db_delete) also exists."""
+    workflows = [
+        {"id": "FLOW-UPD", "name": "Update Record",
+         "steps": [{"key": "u", "type": "action", "entity": "E-REC",
+                    "config": {"actionType": "db_update", "table": "records"}}],
+         "inputs": [{"name": "record", "kind": "record", "entity": "E-REC", "required": True}]},
+    ]
+    if delete_wf:
+        workflows.append(
+            {"id": "FLOW-DEL", "name": "Delete Record",
+             "steps": [{"key": "d", "type": "action", "entity": "E-REC",
+                        "config": {"actionType": "db_delete", "table": "records"}}],
+             "inputs": [{"name": "record", "kind": "record", "entity": "E-REC", "required": True}]})
+    layout = {
+        "page": "PAGE-DET",
+        "dataSources": [{"name": "rec", "entity": "E-REC", "op": "get"}],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "Button", "props": {
+                "label": "Delete Record", "variant": "danger", "workflow": "FLOW-UPD",
+                "args": {"id": "{{rec.id}}"}}, "children": []},
+        ]},
+    }
+    return {
+        "pages": [{"id": "PAGE-DET", "route": "/records/[id]",
+                   "data": {"primaryEntity": "E-REC"}}],
+        "data": {"entities": [{"id": "E-REC", "name": "Record", "table": "records"}]},
+        "workflows": workflows,
+        "pageLayouts": [layout],
+    }
+
+
+def test_a_delete_button_wired_to_update_is_refused_when_a_delete_workflow_exists():
+    doc = _delete_binding_doc(delete_wf=True)
+    rules = {f["rule"] for f in functional_findings(doc)}
+    assert "workflow-verb-mismatch" in rules
+    detail = next(f["detail"] for f in functional_findings(doc)
+                  if f["rule"] == "workflow-verb-mismatch")
+    # Names the correct target so the composer can rebind.
+    assert "Delete Record" in detail
+
+
+def test_a_delete_button_is_not_double_flagged_when_no_delete_workflow_exists():
+    # With no Delete workflow to name, the mismatch is the workflow author's to
+    # fix (Page↔Workflow), not the composer's — demanding a rebind here would
+    # point at a target that does not exist. So page-side stays silent.
+    doc = _delete_binding_doc(delete_wf=False)
+    rules = {f["rule"] for f in functional_findings(doc)}
+    assert "workflow-verb-mismatch" not in rules
+
+
+def test_a_delete_button_wired_to_the_delete_workflow_is_accepted():
+    doc = _delete_binding_doc(delete_wf=True)
+    doc["pageLayouts"][0]["root"]["children"][0]["props"]["workflow"] = "FLOW-DEL"
+    rules = {f["rule"] for f in functional_findings(doc)}
+    assert "workflow-verb-mismatch" not in rules

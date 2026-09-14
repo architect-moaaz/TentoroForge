@@ -127,6 +127,114 @@ def _workflow_refs(props: Any) -> Iterator[str]:
             yield from _workflow_refs(value)
 
 
+# ---------------------------------------------------------------------------
+# A DESTRUCTIVE CONTROL DELETES. `delete` is the one mutating verb the
+# entity-level workflow check cannot satisfy by proxy: an Update workflow can
+# stand in for neither Create nor Delete, so a page that declares `delete` on an
+# entity whose only workflows create and update it has NO workflow to delete
+# with — and the composer, given nothing correct to wire the Delete button to,
+# reaches for the nearest write workflow (Update). The button then updates the
+# record instead of removing it and looks broken. Decided on the DB operation
+# (`db_delete`) rather than a label, and on the terse verb the page contract and
+# the control label already use — the same vocabulary `detail_action_guard` and
+# `verification._acts_on_existing_record` speak.
+# ---------------------------------------------------------------------------
+
+#: Action/label verbs that REMOVE a record. Their intent can only be served by a
+#: workflow whose action is `db_delete`; no other write op deletes.
+_DESTRUCTIVE_VERBS = frozenset({"delete", "remove", "archive", "destroy", "discard"})
+
+
+def _verb_of(text: Any) -> str:
+    """The leading word of an action string or a control label, lowercased —
+    `"Delete Record"` → `"delete"`, `"delete"` → `"delete"`. The page contract
+    names actions by intent (`delete`, `filter_by_status`) and controls by label
+    (`Delete Record`); both reduce to their first word for the verb."""
+    for part in re.split(r"[^a-z0-9]+", str(text or "").lower()):
+        if part:
+            return part
+    return ""
+
+
+def is_destructive_action(action: Any) -> bool:
+    """Whether a page-contract action removes a record (delete / remove /
+    archive …). Accepts the bare string the contract uses or a dict form."""
+    label = action if isinstance(action, str) else (
+        (action or {}).get("name") or (action or {}).get("label") or (action or {}).get("id")
+        if isinstance(action, dict) else action)
+    return _verb_of(label) in _DESTRUCTIVE_VERBS
+
+
+def _workflow_db_ops(wf: dict) -> set[str]:
+    """The `db_*` action types a workflow performs, read from its steps —
+    `{"db_insert"}`, `{"db_update"}`, `{"db_delete"}`, or a union."""
+    ops: set[str] = set()
+    for step in (wf or {}).get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        at = (step.get("config") or {}).get("actionType")
+        if isinstance(at, str) and at.startswith("db_"):
+            ops.add(at)
+    return ops
+
+
+def _workflow_targets_entity(doc: dict, wf: dict, entity: str) -> bool:
+    """Whether a workflow's DB steps act on `entity` — matched on the step's
+    own `entity` id or, failing that, the entity's table name. `entity` may be
+    given as an id or a name."""
+    by_name = _entity_id_by_name(doc)
+    ent_id = entity if entity in set(by_name.values()) else by_name.get(entity, entity)
+    tables = {
+        str(e.get("table") or "").lower()
+        for e in _live((doc.get("data") or {}).get("entities"))
+        if e.get("id") == ent_id and e.get("table")
+    }
+    for step in (wf or {}).get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        cfg = step.get("config") or {}
+        if not str(cfg.get("actionType") or "").startswith("db_"):
+            continue
+        if str(step.get("entity") or "") == ent_id:
+            return True
+        if str(cfg.get("table") or "").lower() in tables:
+            return True
+    return False
+
+
+def entities_with_delete_workflow(doc: dict) -> set[str]:
+    """Entity ids some workflow DELETES — a step whose action is `db_delete`
+    on that entity's id or table. The set a destructive page action can be
+    correctly wired against."""
+    out: set[str] = set()
+    id_by_name = _entity_id_by_name(doc)
+    ids = set(id_by_name.values())
+    for e in _live((doc.get("data") or {}).get("entities")):
+        eid = str(e.get("id") or "")
+        if eid and any(
+            "db_delete" in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, eid)
+            for w in _live(doc.get("workflows"))
+        ):
+            out.add(eid)
+    return out
+
+
+def _delete_workflow_for(doc: dict, page: dict) -> str | None:
+    """The name of a workflow that deletes THIS page's primary entity, or None.
+    Used to name the correct target when a Delete control is mis-bound."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    for w in _live(doc.get("workflows")):
+        if "db_delete" in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, entity):
+            return str(w.get("name") or w.get("id") or "") or None
+    return None
+
+
+def _workflow_by_id(doc: dict, wid: str) -> dict | None:
+    return next((w for w in _live(doc.get("workflows")) if str(w.get("id")) == str(wid)), None)
+
+
 def _bindings(node: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(node, list):
@@ -213,6 +321,28 @@ def page_findings(doc: dict) -> list[dict]:
                                           f"which this application does not "
                                           f"define"})
                     continue
+                # A DESTRUCTIVE CONTROL MUST RUN A WORKFLOW THAT DELETES. A
+                # "Delete" button wired to an Update workflow changes the record
+                # instead of removing it — nothing visibly happens, which reads
+                # as a broken button. `workflow-not-defined` never catches it:
+                # the Update workflow exists, so the ref resolves. Flagged only
+                # when a delete workflow for this record EXISTS to name — when
+                # none does, the missing workflow is the workflow author's to
+                # add (Page↔Workflow), and demanding a rebind here would ask the
+                # composer for a target that is not there yet.
+                if _verb_of(props.get("label") or props.get("submitLabel")
+                            or props.get("aria-label")) in _DESTRUCTIVE_VERBS:
+                    target = _workflow_by_id(doc, ref)
+                    if target is not None and "db_delete" not in _workflow_db_ops(target):
+                        correct = _delete_workflow_for(doc, page)
+                        if correct:
+                            out.append({"rule": "workflow-verb-mismatch", "page": pid,
+                                        "detail": f"{route}: {kind} "
+                                                  f"{props.get('label') or props.get('submitLabel') or kind!r} "
+                                                  f"deletes, but runs {target.get('name') or ref} ({ref}), "
+                                                  f"which does not delete — it changes the record rather than "
+                                                  f"removing it, so the control does nothing a person can see. "
+                                                  f"Bind it to {correct!r}, the workflow that deletes this record."})
                 for missing in unsatisfied_inputs(doc, page, layout, node, ref):
                     out.append({"rule": "workflow-inputs-unsatisfied", "page": pid,
                                 "detail": f"{route}: {missing}"})

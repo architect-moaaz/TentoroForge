@@ -638,6 +638,38 @@ def check_page_workflow(doc: dict) -> list[Finding]:
                     f"{en} — those actions name workflows that do not exist. "
                     f"Declare the workflow(s) they run, each acting on {en}."),
         ))
+
+    # A DESTRUCTIVE ACTION NEEDS A WORKFLOW THAT DELETES. The entity-level check
+    # above passes as soon as ANY workflow touches the entity, so a page that
+    # declares `delete` on an entity whose only workflows CREATE and UPDATE it
+    # slips through — `delete` is the one mutating verb no other write op can
+    # serve. With no delete workflow to wire the Delete button to, the composer
+    # reaches for the nearest write workflow (Update), and the button silently
+    # updates instead of removing. Checked per-op, on the DB operation
+    # (`db_delete`) rather than a label, so the workflow author is asked for the
+    # missing Delete workflow before the compose→refuse cycle, not after.
+    from services.blueprint.functional_completeness import (
+        entities_with_delete_workflow, is_destructive_action,
+    )
+    deletable = entities_with_delete_workflow(doc)
+    for page in _live(doc.get("pages")):
+        entity = str((page.get("data") or {}).get("primaryEntity") or "")
+        if not entity or entity in deletable:
+            continue
+        dels = [_action_label(a) for a in (page.get("actions") or [])
+                if is_destructive_action(a)]
+        if not dels:
+            continue
+        en = ent_name.get(entity, entity)
+        out.append(Finding(
+            "Page↔Workflow", section="workflows", artifact_id=page.get("id"),
+            detail=(f"{page.get('route') or page.get('id')} declares [{', '.join(dels)}] "
+                    f"on {en}, but no workflow deletes {en} (a step whose action is "
+                    f"'db_delete'). Another workflow on {en} cannot serve a delete — an "
+                    f"Update leaves the record in place — so a Delete control has nothing "
+                    f"correct to run and gets wired to a write workflow that does not "
+                    f"delete. Declare a workflow that deletes the {en} record by id."),
+        ))
     return out
 
 
