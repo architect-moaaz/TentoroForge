@@ -1063,8 +1063,46 @@ def _name_the_assignee(config: dict[str, Any], wf_id: str, step: dict) -> None:
                        "resolves — task will be unassigned", wf_id, step.get("key"), kind)
 
 
+#: WHAT A HUMAN STEP ASKS THE PERSON. The Blueprint states what later steps
+#: read from a task — `{{triage_with_override.overrideReason}}` — and never
+#: a form; the generic task page collected a decision and a comment, the
+#: placeholder stayed text, and the insert failed on a uuid column. The
+#: names the workflow reads off a task that the runtime does not provide
+#: are the fields the task must ask for.
+_TASK_RUNTIME_OUTPUTS = frozenset({"userId", "completedBy", "decision", "comment", "output", "value"})
+_STEP_REF = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def task_form_fields(step_key: str, steps: list[dict]) -> list[dict[str, Any]]:
+    """Fields a human step must collect: `{{<key>.<field>}}` read by any step."""
+    names: list[str] = []
+    for other in steps:
+        if not isinstance(other, dict) or other.get("key") == step_key:
+            continue
+        for src, field in _STEP_REF.findall(json.dumps(other.get("config") or {})):
+            if src == step_key and field not in _TASK_RUNTIME_OUTPUTS and field not in names:
+                names.append(field)
+    fields = []
+    for name in names:
+        label = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).replace("_", " ").strip().capitalize()
+        kind = "textarea" if re.search(r"reason|note|comment|description|justification", name, re.I) else "text"
+        fields.append({"name": name, "label": label, "kind": kind, "required": True})
+    return fields
+
+
+#: A SET-VARIABLE THAT COMPUTES. The runtime evaluates `expression` and stores
+#: `value` as it is; an author who writes the rule into `value` —
+#: `refundType in ["Gesture (SR)", …]` — stored the rule's text as the flag.
+_EXPRESSION_MARKS = re.compile(r"\b(and|or|not|in)\b|[=<>()+*/]|\bcount\(|\bdate\(|\bnow\(")
+
+
+def _reads_as_expression(value: Any) -> bool:
+    return (isinstance(value, str) and "{{" not in value
+            and bool(_EXPRESSION_MARKS.search(value)))
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
-                 wf_id: str = "") -> dict[str, Any]:
+                 wf_id: str = "", steps: list[dict] | None = None) -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
     variant, then what the step declares.
 
@@ -1091,6 +1129,23 @@ def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
         config["table"] = entity["table"]
     if ntype in _HUMAN_STEPS:
         _name_the_assignee(config, wf_id, step)
+        if not config.get("formBinding") and steps:
+            fields = task_form_fields(str(step.get("key")), steps)
+            if fields:
+                config["formBinding"] = {"fields": fields}
+    if ntype == "action" and config.get("actionType") == "set_variable":
+        if "expression" not in config and _reads_as_expression(config.get("value")):
+            config["expression"] = config.pop("value")
+    if ntype == "condition" and steps and isinstance(config.get("expression"), str):
+        # A db_query answers `{rows, count}`; `count(<step>)` counted the
+        # object's keys, so "Duplicate case found?" was always yes.
+        queries = {str(o.get("key")) for o in steps
+                   if isinstance(o, dict) and o.get("type") == "action"
+                   and str((o.get("config") or {}).get("actionType") or "") == "db_query"}
+        config["expression"] = re.sub(
+            r"\bcount\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+            lambda m: f"{m.group(1)}.count" if m.group(1) in queries else m.group(0),
+            config["expression"])
 
     if (ntype == "action" and config.get("actionType") in ("db_insert", "db_update")
             and entity.get("table")):
@@ -1219,7 +1274,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
                 s["key"], s.get("type"), len(chain),
-                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug)),
+                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])

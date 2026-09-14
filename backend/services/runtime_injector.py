@@ -1332,6 +1332,15 @@ export async function POST(
         // outputMappings without an entity re-query.
         markers[`__step_${resumeTaskRow.node_id}_output`] = { decision: (input as any).__decision };
       }
+      if ((input as any).comment !== undefined) {
+        markers[`__step_${resumeTaskRow.node_id}_comment`] = (input as any).comment;
+      }
+      // The task's own form (its formBinding fields), entered by the person
+      // completing it. The engine publishes it as the task's output.
+      const submittedForm = (input as any).__form;
+      if (submittedForm && typeof submittedForm === "object") {
+        markers[`__step_${resumeTaskRow.node_id}_form`] = submittedForm;
+      }
       Object.assign(input, { ...pv, ...input, ...markers });
     }
 

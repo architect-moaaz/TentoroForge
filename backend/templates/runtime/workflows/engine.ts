@@ -678,12 +678,23 @@ async function executeNode(
           logEntry.completedAt = new Date().toISOString();
           const decision = ctx.variables[`__step_${node.id}_decision`];
           const comment = ctx.variables[`__step_${node.id}_comment`];
+          const completedBy = ctx.variables[`__step_${node.id}_completedBy`];
+          // What the person entered on the task (its formBinding fields) rides
+          // as the task's output beside who completed it, so a later step
+          // reads `{{<task>.overrideReason}}` and `{{<task>.userId}}` — the
+          // names the Blueprint writes — instead of the placeholder text.
+          const submitted = ctx.variables[`__step_${node.id}_form`];
           logEntry.output = {
             ...logEntry.output,
+            ...(submitted && typeof submitted === "object" ? submitted : {}),
             waitingForHumanAction: false,
-            completedBy: ctx.variables[`__step_${node.id}_completedBy`],
+            completedBy,
+            userId: completedBy,
             decision,
+            comment,
           };
+          ctx.variables[node.id] = logEntry.output;
+          ctx.variables[`__${node.id}_output`] = logEntry.output;
           // Write the decision into the approval node's declared outputParams so
           // downstream nodes (e.g. a db_update setting the entity's status) see
           // approved/rejected instead of the pending default. A status/decision-

@@ -39,6 +39,9 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<TaskRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState("");
+  // The task's own form: the fields the workflow reads off this task
+  // (`form_binding.fields`, derived from what later steps reference).
+  const [form, setForm] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +75,7 @@ export default function TaskDetailPage() {
             input: {
               __decision: decision,
               comment,
+              __form: form,
               entityId: task.entity_id,
               entityType: task.entity_type,
             },
@@ -105,7 +109,13 @@ export default function TaskDetailPage() {
   }
 
   const vars = task.process_variables ?? {};
-  const varEntries = Object.entries(vars);
+  // The person's context, not the engine's: scalar values the workflow
+  // carries, without the `__step_…` bookkeeping and nested step outputs.
+  const varEntries = Object.entries(vars).filter(
+    ([k, v]) => !k.startsWith("__") && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"),
+  );
+  const formFields = ((task.form_binding as { fields?: Array<{ name: string; label?: string; kind?: string; required?: boolean }> } | null)?.fields ?? []);
+  const formComplete = formFields.every((f) => !f.required || (form[f.name] ?? "").trim() !== "");
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -136,6 +146,33 @@ export default function TaskDetailPage() {
         </dl>
       ) : null}
 
+      {formFields.map((f) => (
+        <div className="mt-6" key={f.name}>
+          <label className="block text-sm font-medium mb-1" htmlFor={`task-${f.name}`}>
+            {f.label ?? f.name}{f.required ? "" : " (optional)"}
+          </label>
+          {f.kind === "textarea" ? (
+            <textarea
+              id={`task-${f.name}`}
+              rows={3}
+              value={form[f.name] ?? ""}
+              onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+              disabled={submitting}
+              className="w-full rounded-md border border-border px-3 py-2 text-sm bg-background"
+            />
+          ) : (
+            <input
+              id={`task-${f.name}`}
+              type="text"
+              value={form[f.name] ?? ""}
+              onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+              disabled={submitting}
+              className="w-full rounded-md border border-border px-3 py-2 text-sm bg-background"
+            />
+          )}
+        </div>
+      ))}
+
       <div className="mt-6">
         <label className="block text-sm font-medium mb-1" htmlFor="comment">
           Comment (optional)
@@ -159,7 +196,7 @@ export default function TaskDetailPage() {
       <div className="mt-6 flex gap-3">
         <button
           type="button"
-          disabled={submitting}
+          disabled={submitting || !formComplete}
           onClick={() => submit("approve")}
           className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
