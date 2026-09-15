@@ -467,10 +467,9 @@ def assemble(doc: dict, app_root: str | Path, *,
 
     out = Path(app_root)
     scaffold = copy_scaffold(out, project_short_id=project_short_id)
-    edge = interpolate_edge_pages(out, doc)
-    # Before the runtime layer substitutes its own auth-page tokens: this only
-    # rewrites the ACCOUNT_TYPES default and leaves those tokens untouched.
-    signup_types = interpolate_signup_account_types(out, doc)
+    filled = interpolate_scaffold(out, doc)
+    edge = [f for f in filled if f.startswith("src/") and "signup" not in f]
+    signup_types = [f for f in filled if "signup" in f]
     runtime = inject_runtime_layer(out, doc)
     vendored = vendor_engines(out)
     loose = copy_loose_libs(out)
@@ -721,16 +720,54 @@ def _fallback_routes(schemas: Path) -> set[str]:
     return out
 
 
-def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge") -> list[str]:
+def interpolate_scaffold(app_root: str | Path, doc: dict) -> list[str]:
+    """Every placeholder the scaffold ships, filled from the Blueprint — the
+    edge pages' `{{app_name}}`/`{{home_route}}`, the chrome's `__APP_NAME__`,
+    the sign-in panel's copy and image. Idempotent: a file with nothing left
+    to fill is left alone.
+
+    Called wherever the scaffold is laid down, because a scaffold file with a
+    placeholder in it is not a scaffold file — `{{app_name}}` inside JSX is a
+    ReferenceError on every request, and `__APP_NAME__` is the app's name on
+    its own sign-in page. The install node copied the scaffold raw at second
+    zero and only the preview node's assemble filled it; a run that failed
+    between the two (a refused page) left the app that way.
+    """
+    from services.runtime_injector import (
+        _substitute_app_name, _substitute_auth_copy, _substitute_auth_image,
+    )
+    out = Path(app_root)
+    application = doc.get("application") or {}
+    touched = interpolate_edge_pages(out, doc)
+    # Before the auth-page tokens are substituted: this only rewrites the
+    # ACCOUNT_TYPES default and leaves those tokens untouched.
+    touched += interpolate_signup_account_types(out, doc)
+    name, domain = application.get("name"), application.get("domain")
+    if _substitute_app_name(out, name, domain):
+        touched.append("__APP_NAME__")
+    if _substitute_auth_image(out, domain):
+        touched.append("__AUTH_IMAGE_URL__")
+    if _substitute_auth_copy(out, name, domain):
+        touched.append("__AUTH_COPY__")
+    return touched
+
+
+def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge",
+                     doc: dict | None = None) -> list[str]:
     """Everything `npm install` needs and nothing the Blueprint decides.
 
     The scaffold's package.json and the vendored engine packages are the same
     for every application, so they can be laid down — and the dependencies
     installed against them — before a single agent has replied. `assemble`
     lays the same files again later, idempotently, around the projected app.
+
+    ``doc`` fills the scaffold's placeholders in the same step, so no run —
+    however it ends — leaves the app introducing itself as `__APP_NAME__`.
     """
     out = Path(app_root)
     written = copy_scaffold(out, project_short_id=project_short_id)
+    if doc is not None:
+        written += interpolate_scaffold(out, doc)
     written += vendor_engines(out)
     return written
 

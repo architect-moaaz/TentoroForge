@@ -2368,9 +2368,10 @@ def _project_install(svc: BlueprintService, app_root: str) -> Any:
     from services.blueprint.assembly import install_dependencies, prepare_app_root
 
     short_id = (svc.doc.get("application") or {}).get("id", "forge")
+    doc = copy.deepcopy(svc.doc)   # read once, under the lock; the thread never touches svc
 
     def work() -> int:
-        prepare_app_root(app_root, project_short_id=short_id)
+        prepare_app_root(app_root, project_short_id=short_id, doc=doc)
         return install_dependencies(app_root)
 
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-install")

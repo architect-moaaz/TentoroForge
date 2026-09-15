@@ -304,3 +304,38 @@ def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
     seen.clear()
     assembly.verify_build(tmp_path, install=False)
     assert [c[:3] for c in seen] == [["npm", "run", "build"]]
+
+
+def test_the_scaffold_is_filled_the_moment_it_is_laid_down(tmp_path):
+    """The install node copies the scaffold at second zero; only the preview
+    node's assemble used to fill its placeholders. A run that failed between
+    the two (a refused page) left the app introducing itself as __APP_NAME__
+    on its sign-in page and throwing `app_name is not defined` from its 404
+    page. Laying the scaffold down now fills it in the same step."""
+    app = tmp_path / "app"
+    assembly.copy_scaffold(app, project_short_id="t1")
+    doc = {"application": {"id": "t1", "name": "Recruitment Tracker", "domain": "hr"},
+           "pages": [{"route": "/login"}, {"route": "/overview"}]}
+    touched = assembly.interpolate_scaffold(app, doc)
+    assert "__APP_NAME__" in touched and "src/app/not-found.tsx" in touched
+
+    left = {}
+    for f in (app / "src").rglob("*.tsx"):
+        text = f.read_text("utf-8")
+        hits = [t for t in ("__APP_NAME__", "{{app_name}}", "{{home_route}}",
+                            "__AUTH_HEADLINE__", "__AUTH_SUBHEAD__") if t in text]
+        if hits:
+            left[str(f.relative_to(app))] = hits
+    assert left == {}, left
+    assert 'Return to Recruitment Tracker' in (app / "src/app/not-found.tsx").read_text()
+    assert assembly.interpolate_scaffold(app, doc) == []      # idempotent
+
+
+def test_prepare_app_root_fills_the_scaffold_when_given_the_blueprint(tmp_path, monkeypatch):
+    monkeypatch.setattr(assembly, "vendor_engines", lambda out: [])
+    app = tmp_path / "app"
+    doc = {"application": {"id": "t2", "name": "Ledger", "domain": "finance"},
+           "pages": [{"route": "/login"}, {"route": "/accounts"}]}
+    assembly.prepare_app_root(app, project_short_id="t2", doc=doc)
+    assert "__APP_NAME__" not in (app / "src/app/login/page.tsx").read_text()
+    assert "{{app_name}}" not in (app / "src/app/not-found.tsx").read_text()
