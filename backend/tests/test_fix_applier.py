@@ -487,3 +487,19 @@ def test_remove_workflow_unknown_is_a_clean_noop(tmp_path):
     res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
         "seam": "remove_workflow", "patch": {"workflow_id": "Ghost"}}}, git=False)
     assert res["applied"] is False and "not found" in res["reason"]
+
+
+def test_edit_entity_rename_applies(tmp_path):
+    (tmp_path / "contracts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "src" / "db" / "schema").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps({"entities": [
+        {"name": "Draft", "slug": "draft", "table": "drafts",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}]}))
+    (tmp_path / "src" / "db" / "schema" / "draft.ts").write_text(
+        'import { pgTable, uuid } from "drizzle-orm/pg-core";\n\n'
+        'export const draft = pgTable("drafts", {\n  id: uuid("id").primaryKey(),\n});\n')
+    (tmp_path / "src" / "db" / "schema" / "index.ts").write_text('export { draft } from "./draft";\n')
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_entity", "patch": {"entity": "Draft", "new_name": "Post"}}}, git=False)
+    assert res["applied"] and res["seam"] == "edit_entity"
+    assert (tmp_path / "src" / "db" / "schema" / "post.ts").exists()

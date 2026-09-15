@@ -73,6 +73,8 @@ def apply_fix(output_dir: str, diagnosis: dict, *, git: bool = True) -> dict:
         return _apply_add_entity(output_dir, diagnosis, git=git)
     if seam == "remove_entity":
         return _apply_remove_entity(output_dir, diagnosis, git=git)
+    if seam == "edit_entity":
+        return _apply_edit_entity(output_dir, diagnosis, git=git)
     if seam == "remove_workflow":
         return _apply_remove_workflow(output_dir, diagnosis, git=git)
     if seam == "add_field":
@@ -1018,6 +1020,31 @@ def _apply_remove_entity(output_dir: str, diagnosis: dict, *, git: bool) -> dict
         return _noop(str(exc), seam="remove_entity")
     return _apply_field_bundle(output_dir, ops, seam="remove_entity", entity=entity,
                                label=entity, git=git)
+
+
+def _apply_edit_entity(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_entity`` proposal — rename an entity and/or its table.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "edit_entity", patch: {
+          entity: "Draft", new_name: "Post",   # optional
+          new_table: "posts"                    # optional
+        }}
+    """
+    from services.edit_entity_seam import build_edit_entity_bundle, EditEntityError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    try:
+        ops = build_edit_entity_bundle(
+            output_dir, entity=entity,
+            new_name=params.get("new_name"), new_table=params.get("new_table"))
+    except EditEntityError as exc:
+        return _noop(str(exc), seam="edit_entity")
+    return _apply_field_bundle(output_dir, ops, seam="edit_entity", entity=entity,
+                               label=f"{entity}→{params.get('new_name') or params.get('new_table')}",
+                               git=git)
 
 
 def _apply_remove_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:

@@ -767,6 +767,17 @@ TOOL_CATALOG: list[dict] = [
              "Every Button/Form that dispatched it stops resolving, which "
              "the workflow-not-defined check then surfaces so the control is "
              "rebound or dropped. Reference-breaking, so it confirms first."},
+    {"name": "edit_entity",
+     "signature": "edit_entity(entity, new_name?, new_table?) -> {applied, "
+                  "changes, verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "RENAME an entity and/or its table — 'rename the Draft entity "
+             "to Post'. Moves the registry entry, the Drizzle module (file, "
+             "exported const, pgTable name) and the barrel export together. "
+             "new_table alone renames just the table. The highest-cascade "
+             "change: every workflow, page, relationship and foreign key that "
+             "named the old entity must move, so it confirms first with that "
+             "cascade and the completeness checks surface each reference. "
+             "Refuses the auth/users entity and any rename into that namespace."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -1236,6 +1247,7 @@ READONLY_HANDLERS = {
     "create_business_rule":     lambda output_dir, args: _smith_create_business_rule(output_dir, args),
     "add_entity":               lambda output_dir, args: _smith_add_entity(output_dir, args),
     "remove_entity":            lambda output_dir, args: _smith_remove_entity(output_dir, args),
+    "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
@@ -1821,6 +1833,38 @@ def _smith_remove_entity(output_dir: str, args: dict) -> dict:
         "proposedFix": {"seam": "remove_entity", "patch": {"entity": entity}},
     }
     result = _apply_remove_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_edit_entity(output_dir: str, args: dict) -> dict:
+    """Rename an entity and/or its table. Highest-cascade edit, so it confirms
+    first with the dependent pages/workflows/relationships."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_edit_entity
+    entity = args.get("entity") or args.get("name") or ""
+    new_name = args.get("new_name")
+    new_table = args.get("new_table")
+    if not args.get("_confirmed"):
+        deps: list[str] = []
+        try:
+            from services.remove_entity_seam import dependents
+            from services.registry import load_registry
+            deps = dependents(load_registry(output_dir) or {}, entity)
+        except Exception:  # noqa: BLE001 — confirmation must not fail on a read
+            deps = []
+        target = new_name or new_table or entity
+        return needs_confirmation_result(
+            "entity", f"{entity} → {target}",
+            dependents=deps or [f"everything that names {entity!r} must move to {target!r}"],
+            cascade=True, removes=deps)
+    diagnosis = {
+        "artifact": {"kind": "entity", "path": entity},
+        "explanation": "",
+        "proposedFix": {"seam": "edit_entity", "patch": {
+            "entity": entity, "new_name": new_name, "new_table": new_table}},
+    }
+    result = _apply_edit_entity(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
 
