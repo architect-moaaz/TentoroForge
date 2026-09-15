@@ -560,8 +560,17 @@ def check_pattern_templates(result: AgentResult,
         pages = {p.get("id"): p for p in (doc.get("pages") or [])}
         for proposal in proposals:
             page_id = proposal.body.get("page")
+            # EVERY PAGE IS CONTEXT, ONE PAGE IS JUDGED. The rules read the
+            # other pages to decide what THIS one owes — is there a form page
+            # an Edit can go to, a record page a View can open, an id route
+            # that puts a record in scope. Handing them this page alone made
+            # the contract weaker than the observer's full-document check:
+            # a list page without Edit was accepted here and flagged there.
+            # So the page list is complete, and the findings are the page's.
+            all_pages = [pages.get(page_id) or {"id": page_id, "route": page_id}] + [
+                p for pid, p in pages.items() if pid != page_id]
             findings = page_findings({
-                "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
+                "pages": all_pages,
                 "workflows": doc.get("workflows") or [],
                 "data": doc.get("data") or {},
                 # `security` carries the ownershipRules that mark inputs the
@@ -577,7 +586,8 @@ def check_pattern_templates(result: AgentResult,
             # composer cannot fix an upstream/degradable cause, so blocking on
             # them only loops (see ADVISORY_PAGE_RULES).
             problems.extend(f["detail"] for f in findings
-                            if f.get("rule") not in ADVISORY_PAGE_RULES)
+                            if f.get("rule") not in ADVISORY_PAGE_RULES
+                            and str(f.get("page")) == str(page_id))
 
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))

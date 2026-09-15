@@ -212,3 +212,21 @@ def test_the_observer_judges_a_page_and_records_it_but_never_re_composes_it(svc)
     assert "page_layouts:PAGE-001" in report.unrepaired    # the verdict is kept as the note
     page = next(p for p in svc.doc["pages"] if p["id"] == "PAGE-001")
     assert page.get("status") == "OUT_OF_SYNC" and "#" in str(page.get("syncNote"))
+
+
+def test_the_contract_judges_a_page_with_the_other_pages_in_view():
+    """A list page composed WITHOUT its Edit row action, when a form page for
+    the entity exists: refused. Handed the page alone, the contract could not
+    see the form page, accepted the tree, and the observer — reading the
+    whole document — flagged the very thing the contract had waved through."""
+    doc = _doc()
+    page = doc["pages"][0]
+    body = template_layout(doc, page)
+    table = next(n for n in _walk(body["root"]) if n["type"] == "Table")
+    table["props"]["rowActions"] = [a for a in table["props"]["rowActions"] if a["label"] != "Edit"]
+    res = AgentResult(task_id="t", agent="a2ui_pages", confidence=0.5,
+                      proposals=[ArtifactProposal(section="pageLayouts", natural_key="PAGE-001", body=body)])
+    with pytest.raises(InvalidPatternTemplate) as e:
+        check_pattern_templates(res, doc)
+    assert "declares `edit`" in str(e.value)
+    assert "PAGE-002" not in str(e.value) and "/add-data" not in str(e.value).split("declares")[0]   # only this page's findings
