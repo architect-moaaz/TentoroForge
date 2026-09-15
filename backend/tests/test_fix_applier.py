@@ -403,3 +403,48 @@ def test_edit_workflow_refusal_leaves_the_file_untouched(tmp_path):
         "patch": {"workflow_id": "UpdateRecord", "changes": {"rename": {"to": "X"}}}}}, git=False)
     assert res["applied"] is False
     assert (tmp_path / "workflows" / "UpdateRecord.json").read_text() == before
+
+
+# --------------------------------------------------------------------------- #
+# remove_field / edit_field seams — drop, rename, retype a column.
+# --------------------------------------------------------------------------- #
+
+def _field_app(root: Path) -> None:
+    (root / "contracts").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "db" / "schema").mkdir(parents=True, exist_ok=True)
+    (root / "contracts" / "resource-registry.json").write_text(json.dumps({"entities": [
+        {"name": "Record", "slug": "records", "table": "records", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "fullName", "type": "varchar", "length": 255},
+            {"name": "gender", "type": "varchar", "length": 50}]}]}))
+    (root / "src" / "db" / "schema" / "records.ts").write_text(
+        'import { pgTable, uuid, varchar } from "drizzle-orm/pg-core";\n\n'
+        'export const records = pgTable("records", {\n'
+        '  id: uuid("id").primaryKey().defaultRandom(),\n'
+        '  fullName: varchar("full_name", { length: 255 }).notNull(),\n'
+        '  gender: varchar("gender", { length: 50 }),\n'
+        '});\n')
+
+
+def test_remove_field_applies_and_verifies(tmp_path):
+    _field_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "remove_field", "patch": {"entity": "Record", "field": "gender"}}}, git=False)
+    assert res["applied"] and res["verify"]["resolved"] and res["seam"] == "remove_field"
+    assert "gender" not in (tmp_path / "src" / "db" / "schema" / "records.ts").read_text()
+
+
+def test_remove_field_managed_column_is_a_clean_noop(tmp_path):
+    _field_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "remove_field", "patch": {"entity": "Record", "field": "id"}}}, git=False)
+    assert res["applied"] is False and "managed" in res["reason"]
+
+
+def test_edit_field_rename_applies(tmp_path):
+    _field_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_field",
+        "patch": {"entity": "Record", "field": "fullName", "new_name": "displayName"}}}, git=False)
+    assert res["applied"] and res["seam"] == "edit_field"
+    assert "displayName" in (tmp_path / "src" / "db" / "schema" / "records.ts").read_text()

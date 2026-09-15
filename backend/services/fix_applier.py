@@ -73,6 +73,10 @@ def apply_fix(output_dir: str, diagnosis: dict, *, git: bool = True) -> dict:
         return _apply_add_entity(output_dir, diagnosis, git=git)
     if seam == "add_field":
         return _apply_add_field(output_dir, diagnosis, git=git)
+    if seam == "remove_field":
+        return _apply_remove_field(output_dir, diagnosis, git=git)
+    if seam == "edit_field":
+        return _apply_edit_field(output_dir, diagnosis, git=git)
     if seam == "code_edit":
         return {
             "applied": False,
@@ -901,6 +905,89 @@ def _apply_add_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
         "commit_hash": result.commit_hash,
         "reason": result.reason,
     }
+
+
+# --------------------------------------------------------------------------- #
+# remove_field / edit_field seams — the destructive/renaming siblings of
+# add_field. A column drop or rename is data-affecting and reference-breaking;
+# the field-ripple checks (workflow-column-unknown, form-field-unknown) surface
+# whatever still names the old column for follow-up repair.
+# --------------------------------------------------------------------------- #
+
+def _apply_field_bundle(output_dir: str, ops, *, seam: str, entity: str,
+                        label: str, git: bool) -> dict:
+    """Apply a registry+drizzle bundle for a field change and report in the
+    fix_applier contract, sharing the add_field verify (the registry re-reads)."""
+    from services.atomic_apply import apply_bundle
+
+    def _verify(root: Path) -> dict:
+        try:
+            json.loads((root / "contracts/resource-registry.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return {"ok": False, "reason": f"registry re-read failed: {e}"}
+        return {"ok": True}
+
+    result = apply_bundle(output_dir, ops, verify=_verify,
+                          commit_message=f"smith: {seam} — {label}", git=git)
+    return {
+        "applied": bool(result.applied),
+        "seam": seam,
+        "changes": [{"path": p, "kind": "edit"} for p in (result.ops_written or [])],
+        "verify": {
+            "resolved": bool(result.applied),
+            "remaining": [] if result.applied else [
+                {"reason": result.reason or f"{seam} rolled back"}],
+        },
+        "committed": bool(result.commit_hash),
+        "commit_hash": result.commit_hash,
+        "reason": result.reason,
+    }
+
+
+def _apply_remove_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply a ``remove_field`` proposal — drop one column from an entity.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "remove_field", patch: {entity: "Record", field: "gender"}}
+    """
+    from services.edit_field_seam import build_remove_field_bundle, EditFieldError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    field = str(params.get("field") or params.get("field_name") or "").strip()
+    try:
+        ops = build_remove_field_bundle(output_dir, entity=entity, field_name=field)
+    except EditFieldError as exc:
+        return _noop(str(exc), seam="remove_field")
+    return _apply_field_bundle(output_dir, ops, seam="remove_field", entity=entity,
+                               label=f"{entity}.{field}", git=git)
+
+
+def _apply_edit_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_field`` proposal — rename and/or retype one column.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "edit_field", patch: {
+          entity: "Record", field: "fullName",
+          new_name: "displayName",   # optional
+          new_type: "text"           # optional
+        }}
+    """
+    from services.edit_field_seam import build_edit_field_bundle, EditFieldError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    field = str(params.get("field") or params.get("field_name") or "").strip()
+    try:
+        ops = build_edit_field_bundle(
+            output_dir, entity=entity, field_name=field,
+            new_name=params.get("new_name"), new_type=params.get("new_type"))
+    except EditFieldError as exc:
+        return _noop(str(exc), seam="edit_field")
+    return _apply_field_bundle(output_dir, ops, seam="edit_field", entity=entity,
+                               label=f"{entity}.{field}", git=git)
 
 
 # --------------------------------------------------------------------------- #

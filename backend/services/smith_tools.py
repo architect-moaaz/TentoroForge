@@ -767,6 +767,30 @@ TOOL_CATALOG: list[dict] = [
              "with edit_page(<that page>, 'show the new discount field'). "
              "Rolled back atomically on failure; refuses a duplicate field "
              "or an unknown entity."},
+    {"name": "remove_field",
+     "signature": "remove_field(entity, field) -> {applied, changes, "
+                  "verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DROP one column from an existing entity — 'remove the "
+             "middle-name field from customers'. Writes the registry + that "
+             "entity's Drizzle module, so it lands as a drizzle-kit push. "
+             "DATA-AFFECTING and reference-breaking: the column's data is "
+             "lost and anything that named it (a workflow step, a form "
+             "field, a binding) now points at nothing — so it returns "
+             "needs_confirmation first, and the field-ripple checks surface "
+             "the references to repair. Refuses the primary key, the managed "
+             "timestamps, and a foreign-key column."},
+    {"name": "edit_field",
+     "signature": "edit_field(entity, field, new_name?, new_type?) -> "
+                  "{applied, changes, verify, edited_paths} | "
+                  "{status:'needs_confirmation'}",
+     "desc": "RENAME and/or RETYPE one column on an existing entity — "
+             "'rename customers.fullName to displayName', 'make the age "
+             "field text'. Updates the registry + the Drizzle column (var, "
+             "column name, builder). A rename is reference-breaking (every "
+             "workflow/form/binding that named the old field must move), so "
+             "it returns needs_confirmation first and the ripple checks flag "
+             "what still names it. Pass at least one of new_name / new_type; "
+             "refuses managed columns."},
     {"name": "plan_and_apply",
      "signature": "plan_and_apply(ask) -> {status, plan, steps, edited_paths}",
      "desc": "One call for ADD-A-FEATURE asks that span multiple seams "
@@ -1194,6 +1218,8 @@ READONLY_HANDLERS = {
     "create_business_rule":     lambda output_dir, args: _smith_create_business_rule(output_dir, args),
     "add_entity":               lambda output_dir, args: _smith_add_entity(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
+    "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
+    "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
     "think":                    lambda output_dir, args: _smith_think(args),
     "understand_ask":           lambda output_dir, args: _smith_understand_ask(args),
@@ -1773,6 +1799,59 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
         }},
     }
     result = _apply_add_field(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_remove_field(output_dir: str, args: dict) -> dict:
+    """Drop one column from an existing entity. Data-affecting and
+    reference-breaking, so it confirms first (unless ``_confirmed``)."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_field
+    entity = args.get("entity") or ""
+    field = args.get("field") or args.get("field_name") or ""
+    if not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "field", f"{entity}.{field}",
+            dependents=[
+                f"the column and its data are dropped",
+                f"every workflow step, form field and binding that names "
+                f"{field!r} stops resolving until it is repaired",
+            ])
+    diagnosis = {
+        "artifact": {"kind": "field", "path": f"{entity}.{field}"},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_field", "patch": {"entity": entity, "field": field}},
+    }
+    result = _apply_remove_field(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_edit_field(output_dir: str, args: dict) -> dict:
+    """Rename and/or retype one column. A rename is reference-breaking, so a
+    rename confirms first; a pure retype applies directly."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_edit_field
+    entity = args.get("entity") or ""
+    field = args.get("field") or args.get("field_name") or ""
+    new_name = args.get("new_name")
+    new_type = args.get("new_type")
+    if new_name and not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "field", f"{entity}.{field} → {new_name}",
+            dependents=[
+                f"every workflow step, form field and binding that names "
+                f"{field!r} must move to {new_name!r} or it stops resolving",
+            ])
+    diagnosis = {
+        "artifact": {"kind": "field", "path": f"{entity}.{field}"},
+        "explanation": "",
+        "proposedFix": {"seam": "edit_field", "patch": {
+            "entity": entity, "field": field,
+            "new_name": new_name, "new_type": new_type}},
+    }
+    result = _apply_edit_field(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
 
