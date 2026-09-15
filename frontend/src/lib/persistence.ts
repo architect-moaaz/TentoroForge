@@ -50,13 +50,28 @@ export function buildPersister(projectId: string, debounceMs = 500): Persister {
     // Build a lookup from page id → schemaFile so saves land at the same
     // path nav-flow declared (and where the read path fetched from).
     // Pages without a navFlow entry fall back to `src/schemas/<id>.json`.
-    const navPages = (artifacts.navFlow as { pages?: Array<{ id?: string; schemaFile?: string }> } | undefined)?.pages ?? [];
+    // TWO ID VOCABULARIES. `artifacts.pageSchemas` is keyed by the schema's own
+    // id (the Blueprint page id, `PAGE-002`), but nav-flow keys its pages by
+    // route slug (`add-data`). Looking the file up by pageSchemas key alone
+    // missed every Blueprint-built page, fell back to `src/schemas/PAGE-002.json`
+    // — a file nothing reads — and the edit came back on refresh. A page and its
+    // nav entry both carry `route`, so match on that when the id misses.
+    const navPages = (artifacts.navFlow as {
+      pages?: Array<{ id?: string; route?: string; schemaFile?: string }>;
+    } | undefined)?.pages ?? [];
     const schemaFileById = new Map<string, string>();
+    const schemaFileByRoute = new Map<string, string>();
     for (const p of navPages) {
-      if (p?.id && p?.schemaFile) schemaFileById.set(p.id, p.schemaFile);
+      if (!p?.schemaFile) continue;
+      if (p.id) schemaFileById.set(p.id, p.schemaFile);
+      if (p.route) schemaFileByRoute.set(p.route, p.schemaFile);
     }
     for (const [pageId, page] of Object.entries(artifacts.pageSchemas)) {
-      const path = schemaFileById.get(pageId) ?? `src/schemas/${pageId}.json`;
+      const route = (page as { route?: string } | undefined)?.route;
+      const path =
+        schemaFileById.get(pageId) ??
+        (route ? schemaFileByRoute.get(route) : undefined) ??
+        `src/schemas/${pageId}.json`;
       await saveFile(projectId, path, JSON.stringify(page, null, 2));
     }
     await saveFile(
