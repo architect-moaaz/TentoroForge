@@ -1874,6 +1874,27 @@ def project_sensitive_columns(doc: dict, app_root: str | Path) -> dict[str, Any]
             "columns": sum(len(v) for v in manifest.values())}
 
 
+#: The string family a free-text search can query. The check that consumes this
+#: used to accept only "text"/"string"/"str", so an entity whose columns were
+#: typed `varchar` (what the registry and Drizzle actually emit — `fullName`,
+#: `email`, `phoneNumber`) read as having NO text column, and its page's search
+#: box was refused every round with a defect the page composer cannot fix (the
+#: columns exist; only the type vocabulary was too narrow). `varchar(255)` and
+#: friends carry a length, so the type is compared with the length stripped.
+_TEXT_TYPES = {
+    "text", "string", "str", "varchar", "char", "nvarchar", "nchar", "citext",
+    "longtext", "mediumtext", "tinytext", "clob",
+    "email", "tel", "phone", "url", "slug", "name",
+}  # deliberately NOT uuid/enum/number/date — those are not free-text search targets
+
+
+def _is_text_type(t: Any) -> bool:
+    """Whether a column type is free-text a search can match against — the whole
+    string family, not just the word "text"; a `varchar(255)` length is ignored."""
+    base = str(t or "").lower().split("(")[0].strip()
+    return base in _TEXT_TYPES
+
+
 def searchable_columns(doc: dict) -> dict[str, list[str]]:
     """Columns a search op may query, per entity.
 
@@ -1890,7 +1911,7 @@ def searchable_columns(doc: dict) -> dict[str, list[str]]:
         hidden = set(masked.get(name, {}))
         cols = [
             f.get("name") for f in entity.get("fields") or []
-            if str(f.get("type") or "").lower() in ("text", "string", "str")
+            if _is_text_type(f.get("type"))
             and not f.get("primaryKey")
             and f.get("name") not in hidden
         ]

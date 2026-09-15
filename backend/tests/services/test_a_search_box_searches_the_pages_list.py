@@ -119,3 +119,40 @@ def test_the_composer_demotes_only_when_no_source_can_be_given():
     src = inspect.getsource(figma_layout.compose)
     assert "_demote_search_boxes(" in src and src.index("_search_source_for(") < src.index("_demote_search_boxes(")
 
+
+
+# ---------------------------------------------------------------------------
+# The searchable-columns manifest recognises the whole string family, not just
+# the literal word "text". The registry and Drizzle emit `varchar`, so a Member
+# with fullName/email/phoneNumber (all varchar) read as having NO text column —
+# and /members' search box was refused every round with a defect the composer
+# cannot fix (the columns exist). NKit looped on exactly this.
+# ---------------------------------------------------------------------------
+
+def test_varchar_columns_are_searchable():
+    from services.blueprint.projection import searchable_columns
+    doc = {"data": {"entities": [{
+        "name": "Member", "table": "members", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "fullName", "type": "varchar"},
+            {"name": "bio", "type": "varchar(255)"},   # length suffix ignored
+            {"name": "role", "type": "enum"},
+        ]}]}}
+    cols = searchable_columns(doc)
+    got = cols.get("Member") or []
+    assert "fullName" in got            # varchar is text
+    assert "bio" in got                 # varchar(255) — the length is stripped
+    assert "role" not in got            # enum is not free-text
+    assert "id" not in got              # uuid pk is not free-text
+
+
+def test_a_members_search_box_is_not_refused_when_it_has_varchar_columns():
+    from services.blueprint.functional_completeness import search_findings
+    doc = {"data": {"entities": [{"name": "Member", "table": "members", "fields": [
+        {"name": "id", "type": "uuid", "primaryKey": True},
+        {"name": "fullName", "type": "varchar"}]}]}}
+    page = {"id": "PAGE-M", "route": "/members"}
+    layout = {"dataSources": [{"name": "members", "entity": "Member", "op": "list"}],
+              "root": {"type": "Stack", "children": [
+                  {"type": "Input", "props": {"type": "search"}}]}}
+    assert search_findings(doc, page, layout) == []
