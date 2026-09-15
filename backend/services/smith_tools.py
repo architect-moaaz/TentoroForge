@@ -753,31 +753,38 @@ TOOL_CATALOG: list[dict] = [
      "signature": "remove_entity(entity) -> {applied, changes, verify, "
                   "edited_paths} | {status:'needs_confirmation'}",
      "desc": "DROP an entire entity — its table, Drizzle module and barrel "
-             "export — 'remove the drafts table'. The highest-blast-radius "
-             "change: the data is gone and every page whose primary entity "
-             "it is, every workflow that operates on it, and every "
-             "relationship that names it is orphaned. Returns "
-             "needs_confirmation with that full cascade first; after it, the "
-             "completeness checks surface each orphan to repair. Refuses the "
+             "export — 'remove / delete / drop / get rid of the drafts table', "
+             "'we don't need the Draft entity anymore'. Target is a whole "
+             "ENTITY/TABLE, not a page (that is remove_page) or one column (that "
+             "is remove_field). The highest-blast-radius change: the data is gone "
+             "and every page whose primary entity it is, every workflow that "
+             "operates on it, and every relationship that names it is orphaned. "
+             "Returns needs_confirmation with that full cascade first; after it, "
+             "the completeness checks surface each orphan to repair. Refuses the "
              "auth/users entity."},
     {"name": "remove_workflow",
      "signature": "remove_workflow(workflow_id) -> {applied, changes, "
                   "verify, edited_paths} | {status:'needs_confirmation'}",
-     "desc": "DELETE a workflow file — 'remove the DeleteRecord workflow'. "
-             "Every Button/Form that dispatched it stops resolving, which "
-             "the workflow-not-defined check then surfaces so the control is "
-             "rebound or dropped. Reference-breaking, so it confirms first."},
+     "desc": "DELETE a workflow file — 'remove / delete / drop / kill / scrap the "
+             "DeleteRecord workflow / flow / automation'. Target is a WORKFLOW, "
+             "not a page or entity. Every Button/Form that dispatched it stops "
+             "resolving, which the workflow-not-defined check then surfaces so the "
+             "control is rebound or dropped. To CHANGE a flow's steps instead of "
+             "deleting it, use edit_workflow. Reference-breaking, so it confirms "
+             "first."},
     {"name": "edit_entity",
      "signature": "edit_entity(entity, new_name?, new_table?) -> {applied, "
                   "changes, verify, edited_paths} | {status:'needs_confirmation'}",
-     "desc": "RENAME an entity and/or its table — 'rename the Draft entity "
-             "to Post'. Moves the registry entry, the Drizzle module (file, "
-             "exported const, pgTable name) and the barrel export together. "
-             "new_table alone renames just the table. The highest-cascade "
-             "change: every workflow, page, relationship and foreign key that "
-             "named the old entity must move, so it confirms first with that "
-             "cascade and the completeness checks surface each reference. "
-             "Refuses the auth/users entity and any rename into that namespace."},
+     "desc": "RENAME an entity and/or its table — 'rename the Draft entity to "
+             "Post', 'call the Draft entity Post instead', 'the customers table "
+             "should be clients'. Moves the registry entry, the Drizzle module "
+             "(file, exported const, pgTable name) and the barrel export together. "
+             "new_table alone renames just the table. NOT a field rename (that is "
+             "edit_field) and NOT a page title change (that is edit_page/rename). "
+             "The highest-cascade change: every workflow, page, relationship and "
+             "foreign key that named the old entity must move, so it confirms "
+             "first and the completeness checks surface each reference. Refuses "
+             "the auth/users entity and any rename into that namespace."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -799,27 +806,32 @@ TOOL_CATALOG: list[dict] = [
     {"name": "remove_field",
      "signature": "remove_field(entity, field) -> {applied, changes, "
                   "verify, edited_paths} | {status:'needs_confirmation'}",
-     "desc": "DROP one column from an existing entity — 'remove the "
-             "middle-name field from customers'. Writes the registry + that "
-             "entity's Drizzle module, so it lands as a drizzle-kit push. "
-             "DATA-AFFECTING and reference-breaking: the column's data is "
-             "lost and anything that named it (a workflow step, a form "
-             "field, a binding) now points at nothing — so it returns "
-             "needs_confirmation first, and the field-ripple checks surface "
-             "the references to repair. Refuses the primary key, the managed "
-             "timestamps, and a foreign-key column."},
+     "desc": "DROP one column from an entity's DATA MODEL — 'remove / delete / "
+             "drop / get rid of / scrap the middle-name field from customers'. "
+             "SCOPE MATTERS: this deletes the column AND ITS DATA. If the ask is "
+             "only to stop SHOWING a field on a screen ('take phone off the "
+             "signup form', 'hide the notes field') — the column stays — that is "
+             "edit_page, NOT this. Writes the registry + that entity's Drizzle "
+             "module (a drizzle-kit push). Reference-breaking: a workflow step, "
+             "form field or binding that named it now points at nothing, so it "
+             "returns needs_confirmation first and the field-ripple checks "
+             "surface the references to repair. Refuses the primary key, the "
+             "managed timestamps, and a foreign-key column."},
     {"name": "edit_field",
      "signature": "edit_field(entity, field, new_name?, new_type?) -> "
                   "{applied, changes, verify, edited_paths} | "
                   "{status:'needs_confirmation'}",
-     "desc": "RENAME and/or RETYPE one column on an existing entity — "
-             "'rename customers.fullName to displayName', 'make the age "
-             "field text'. Updates the registry + the Drizzle column (var, "
-             "column name, builder). A rename is reference-breaking (every "
-             "workflow/form/binding that named the old field must move), so "
-             "it returns needs_confirmation first and the ripple checks flag "
-             "what still names it. Pass at least one of new_name / new_type; "
-             "refuses managed columns."},
+     "desc": "RENAME and/or RETYPE one column's DATA MODEL — 'rename "
+             "customers.fullName to displayName', 'call the age field yearsOld', "
+             "'make age a number/text', 'change price to a decimal'. Updates the "
+             "registry + the Drizzle column (var, column name, builder). NOT for "
+             "changing HOW a field is entered — 'make gender a dropdown', 'use a "
+             "date picker for dob', 'show price as currency' is set_field_interaction "
+             "(a UI change, same column type). A rename is reference-breaking "
+             "(every workflow/form/binding that named the old field must move), so "
+             "it returns needs_confirmation first and the ripple checks flag what "
+             "still names it. Pass at least one of new_name / new_type; refuses "
+             "managed columns."},
     {"name": "plan_and_apply",
      "signature": "plan_and_apply(ask) -> {status, plan, steps, edited_paths}",
      "desc": "One call for ADD-A-FEATURE asks that span multiple seams "
