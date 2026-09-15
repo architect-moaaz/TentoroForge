@@ -42,9 +42,13 @@ describe("bindProp with a null previous value", () => {
     expect(() => applyAction(artifacts(null), bind)).not.toThrow();
   });
 
-  it("writes the binding", () => {
+  it("writes the binding as the {{expr}} string the renderer resolves", () => {
+    // The format changed with binding.ts: the object form was resolved by
+    // nothing. What matters for THIS test is unchanged — a null previous value
+    // must not throw — so the assertion follows the format rather than pinning
+    // the dead one.
     const { next } = applyAction(artifacts(null), bind);
-    expect(nodeOf(next).props.columns).toEqual({ $binding: "rows" });
+    expect(nodeOf(next).props.columns).toBe("{{rows}}");
   });
 
   it("offers an inverse that restores the null literal", () => {
@@ -58,9 +62,13 @@ describe("bindProp with a null previous value", () => {
     expect(nodeOf(back).props.columns).toBeNull();
   });
 
-  it("still treats a real binding as a binding (no regression)", () => {
-    const { inverse } = applyAction(artifacts({ $binding: "old" }), bind);
-    expect((inverse as any).type).toBe("updateProp");
+  it("still treats a real binding as a binding, in EITHER format", () => {
+    // Pages already on disk carry the legacy object, so re-binding one must
+    // still take the updateProp branch rather than offering to "unbind" to it.
+    expect((applyAction(artifacts({ $binding: "old" }), bind).inverse as any).type)
+      .toBe("updateProp");
+    expect((applyAction(artifacts("{{old}}"), bind).inverse as any).type)
+      .toBe("updateProp");
   });
 
   it("still unbinds a plain literal back to its value (no regression)", () => {

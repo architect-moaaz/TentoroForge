@@ -8,6 +8,7 @@ import { CONTROL_BY_TYPE, TextControl } from "./PropControls";
 import { BindingControl } from "./PropControls/BindingControl";
 import { DataKeyControl } from "./PropControls/DataKeyControl";
 import { BindToggle } from "./BindToggle";
+import { isBinding, bindingExpression } from "@forge/patches";
 import { BreakpointSwitcher, type EditorBreakpoint } from "./BreakpointSwitcher";
 
 const BP_KEYS = new Set(["default", "sm", "md", "lg", "xl"]);
@@ -112,29 +113,18 @@ function findNodeInArtifacts(artifacts: any, nodeId: string):
   return null;
 }
 
-const MUSTACHE_RE = /\{\{[\s\S]+?\}\}/;
-
-/** A prop is "bound" if it's the editor's {$binding} object OR a generated
- *  {{expr}} interpolation string (which is what the pipeline emits). */
-function isBindingValue(v: unknown): boolean {
-  if (v && typeof v === "object" && "$binding" in (v as any)) return true;
-  return typeof v === "string" && MUSTACHE_RE.test(v);
-}
-
-/** True when the bound value is the {{expr}} string form (vs the {$binding} object). */
-function isMustacheBinding(v: unknown): boolean {
-  return typeof v === "string" && MUSTACHE_RE.test(v);
-}
-
-/** Extract the inner expression from either binding form for the BindingControl. */
-function bindingExpr(v: unknown): string {
-  if (v && typeof v === "object" && "$binding" in (v as any)) return String((v as any).$binding ?? "");
-  if (typeof v === "string") {
-    const m = v.match(/\{\{\s*([\s\S]*?)\s*\}\}/);
-    return m ? m[1] : v;
-  }
-  return "";
-}
+/**
+ * Binding predicates come from @forge/patches, which is also what the reducer
+ * and the commit guard use. They were duplicated here, which is how the editor
+ * ended up able to WRITE a format it could also READ but nothing could RENDER.
+ * One owner for the format now.
+ *
+ * `isBindingValue` still recognises the legacy {$binding} object as bound, so a
+ * page that has not yet been through the load-time migration displays correctly
+ * rather than showing the user a raw object in a text field.
+ */
+const isBindingValue = isBinding;
+const bindingExpr = bindingExpression;
 
 /** Props that hold row/record DATA and are almost always bound to a data source
  *  (Chart.data, Table.rows, list options/items, ActivityFeed.entries). For these
@@ -155,6 +145,19 @@ export function PropertiesPanelInner() {
   const selectedIds = useEditorStore(s => s.selectedNodeIds);
   const dispatch = useEditorStore(s => s.dispatch);
   const [activeBp, setActiveBp] = useState<EditorBreakpoint>("default");
+  /**
+   * WHICH PROPS THE USER HAS PUT INTO BIND MODE BUT NOT YET FILLED IN.
+   *
+   * An empty bind writes "" (never the template "{{}}", which would resolve to
+   * nothing while still reading as bound). "" is indistinguishable from an
+   * empty literal, so the toggle would spring back the instant it was clicked
+   * unless the panel remembers the intent itself.
+   *
+   * Bind-mode is an editor affordance, not document data, so it lives here and
+   * never reaches the schema. Keyed by `nodeId::propName` so selecting a
+   * different node does not inherit the previous one's pending binds.
+   */
+  const [pendingBinds, setPendingBinds] = useState<ReadonlySet<string>>(new Set());
 
   if (selectedIds.length === 0) {
     return (
@@ -183,6 +186,13 @@ export function PropertiesPanelInner() {
 
   // Single selection — use first id
   const selectedNodeId = selectedIds[0];
+  const bindKey = (propName: string) => `${selectedNodeId}::${propName}`;
+  const markBinding = (propName: string, on: boolean) =>
+    setPendingBinds((prev) => {
+      const nextSet = new Set(prev);
+      if (on) nextSet.add(bindKey(propName)); else nextSet.delete(bindKey(propName));
+      return nextSet;
+    });
 
   if (!artifacts) {
     return <div className="p-4 text-sm">Loading…</div>;
@@ -227,7 +237,7 @@ export function PropertiesPanelInner() {
                 const rawValue = (node.props ?? {})[propName];
                 const currentValue = readPropAtBp(node, propName, activeBp, descriptor.default);
                 // For bind checks, inspect the raw value (not the bp-resolved one)
-                const isBound = isBindingValue(rawValue);
+                const isBound = isBindingValue(rawValue) || pendingBinds.has(bindKey(propName));
                 // Data-source props always surface the binding dropdown (bound or not),
                 // so a just-dropped Chart/Table shows its picker without hunting a toggle.
                 const isDataSourceProp = DATA_SOURCE_PROPS.has(propName);
@@ -241,6 +251,7 @@ export function PropertiesPanelInner() {
                           isBound={isBound}
                           onToggle={() => {
                             if (isBound) {
+                              markBinding(propName, false);
                               dispatch({
                                 type: "unbindProp",
                                 pageId,
@@ -249,6 +260,11 @@ export function PropertiesPanelInner() {
                                 literalValue: descriptor.default ?? "",
                               });
                             } else {
+                              // Remember the INTENT. The dispatch writes "" (an
+                              // empty bind must not become the template that
+                              // wraps nothing), which is indistinguishable from
+                              // an empty literal, so the panel holds the mode.
+                              markBinding(propName, true);
                               dispatch({
                                 type: "bindProp",
                                 pageId,
@@ -267,19 +283,16 @@ export function PropertiesPanelInner() {
                         pageId={pageId}
                         value={isBound ? bindingExpr(rawValue) : (typeof rawValue === "string" ? rawValue : "")}
                         onChange={(v) => {
-                          // Data-source props + generated {{expr}} strings write a
-                          // {{…}} string; the editor's {$binding} object stays an object.
-                          if (isDataSourceProp || isMustacheBinding(rawValue)) {
-                            dispatch({
-                              type: "updateProp", pageId, nodeId: selectedNodeId,
-                              propName, value: v ? `{{${v}}}` : "",
-                            });
-                          } else {
-                            dispatch({
-                              type: "bindProp", pageId, nodeId: selectedNodeId,
-                              propName, binding: v,
-                            });
-                          }
+                          // ONE FORMAT. This used to fork: data-source props
+                          // and already-mustache values wrote the interpolation
+                          // string, while everything else went through bindProp
+                          // and got the object form that no renderer understands.
+                          // Both paths produce the same string now, so bindProp
+                          // is the single entry point and the fork is gone.
+                          dispatch({
+                            type: "bindProp", pageId, nodeId: selectedNodeId,
+                            propName, binding: v,
+                          });
                           // Binding a Chart's `data` to a series source is useless
                           // without an axis + series mapping. A series resolves to
                           // [{label,value}], so auto-set xKey/series/chartType (only

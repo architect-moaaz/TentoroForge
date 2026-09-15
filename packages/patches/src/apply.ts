@@ -1,5 +1,6 @@
 // packages/patches/src/apply.ts
 import type { Artifacts, EditorAction, ApplyResult, SchemaNode, PageId } from "./types";
+import { isBinding, bindingExpression, toBindingValue } from "./binding";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -315,27 +316,23 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const node = loc.node;
       if (!node.props) node.props = {};
       const prev = node.props[action.propName];
-      node.props[action.propName] = { $binding: action.binding };
+      // THE MUSTACHE STRING, NOT `{ $binding: … }` — see binding.ts for the full
+      // account. The object form was resolved by nothing: it survived
+      // interpolateDeep (which only rewrites strings) and validateProps (which
+      // cannot coerce it) and landed in React child position, so binding a prop
+      // broke the node on the spot and autosave then shipped the break to disk.
+      node.props[action.propName] = toBindingValue(action.binding);
 
       // `prev` IS LEGITIMATELY null FOR 87 REGISTRY PROPS — Button.onClick,
       // Chart.data, Table.columns, Form.fields, and the `binding` prop of every
       // form input (Input/Select/Checkbox/Switch/Slider/Combobox/FileUpload…).
-      //
-      // The old guard read `typeof prev !== "object" || !prev.$binding`. Because
-      // `typeof null === "object"`, a null `prev` failed the first clause, fell
-      // through to the second, and dereferenced null — throwing a TypeError out
-      // of applyAction. editor-store.dispatch catches that, sets `lastError` and
-      // returns WITHOUT committing, so the Props-tab bind toggle silently did
-      // nothing on exactly the props people most want to bind. Measured: all 87
-      // threw; props with a string default bound fine.
-      //
-      // The sibling unbindProp case below already guards with `prev &&`; this
-      // one simply never did.
-      const prevIsBinding =
-        typeof prev === "object" && prev !== null && "$binding" in (prev as object);
+      // An earlier guard dereferenced that null and threw out of applyAction, so
+      // the bind toggle silently did nothing on exactly those props. `isBinding`
+      // null-checks before it reaches for a key, and covers BOTH formats, so
+      // undo still works on a page that already has legacy objects on disk.
 
       // Inverse: if previous value was a literal (null counts as one), unbind back to it
-      if (prev !== undefined && !prevIsBinding) {
+      if (prev !== undefined && !isBinding(prev)) {
         return {
           next,
           inverse: {
@@ -371,8 +368,12 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const prev = node.props[action.propName];
       node.props[action.propName] = action.literalValue;
 
-      // Inverse: re-bind if previous was a $binding
-      if (prev && typeof prev === "object" && (prev as any).$binding) {
+      // Inverse: re-bind if the previous value was a binding, in EITHER form.
+      //
+      // This used to test the TRUTHINESS of `prev.$binding`, so a freshly
+      // toggled-but-never-filled bind took the updateProp branch instead and
+      // undo was silently asymmetric. `isBinding` tests presence, not content.
+      if (isBinding(prev)) {
         return {
           next,
           inverse: {
@@ -380,7 +381,7 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
             pageId: action.pageId,
             nodeId: action.nodeId,
             propName: action.propName,
-            binding: (prev as any).$binding as string,
+            binding: bindingExpression(prev),
           },
         };
       }

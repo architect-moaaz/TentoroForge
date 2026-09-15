@@ -10,7 +10,7 @@ import { NodeErrorBoundary } from "../nodes/library/NodeErrorBoundary";
 import { evalExpression } from "./bindings";
 import { interpolateDeep } from "./interpolate";
 import { applyStyleSlot } from "./style-slot";
-import { syntheticNodeId } from "@forge/patches";
+import { syntheticNodeId, migrateBindingsDeep } from "@forge/patches";
 
 /** Minimal structural interface for a registry — matches Library.Registry without the import. */
 type RegistryLike = {
@@ -98,6 +98,20 @@ function expandOptionsFrom(node: any, data: Record<string, unknown>): any {
   return { ...node, props: { ...rest, options , ...(dep ? { dependsOn: { field: dep.field, keys } } : {}) } };
 }
 
+/**
+ * The scope every expression on a node is resolved against.
+ *
+ * `{ ...ctx.data, user: ctx.user }` looks equivalent and is not: when no one is
+ * signed in, `ctx.user` is undefined and the spread writes `user: undefined`
+ * OVER a page data source that happens to be called `user` — so on a profile
+ * page `{{user.name}}` bound to that source resolved to nothing, with no error
+ * to notice. The session user still wins when there IS one; it just no longer
+ * erases the page's own data by being absent.
+ */
+function scopeFor(ctx: DispatchContext): Record<string, unknown> {
+  return ctx.user ? { ...ctx.data, user: ctx.user } : { ...ctx.data };
+}
+
 export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // Ensure every node has a stable id so the editor overlay can locate it
   // via [data-node-id]. Schemas from the legacy pipeline may omit the id field.
@@ -107,7 +121,7 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
 
   // Evaluate visibleIf before rendering anything; treat expression errors as false.
   if (node.visibleIf) {
-    const v = evalExpression(node.visibleIf, { ...ctx.data, user: ctx.user });
+    const v = evalExpression(node.visibleIf, scopeFor(ctx));
     if (!v) return null;
   }
 
@@ -118,6 +132,16 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
   // using the formal `bind` field. Children stay un-walked here; each child's
   // own renderNode call will run its own interpolation pass.
   if (node.props && typeof node.props === "object") {
+    // HEAL THE LEGACY BINDING OBJECT HERE TOO, not only in the editor.
+    //
+    // The editor's load-time migration fixes a page the moment it is opened,
+    // but the GENERATED APP renders page JSON straight off disk and never goes
+    // through it. A page saved during the `{$binding}` era therefore still
+    // reached React in child position and rendered "[object Object]" to the
+    // end user. `migrateBindingsDeep` returns the same object when there is
+    // nothing to change, so a clean page pays one walk and no allocation.
+    const healed = migrateBindingsDeep(node.props as Record<string, unknown>);
+    if (healed !== node.props) node = { ...node, props: healed };
     // A ROW TEMPLATE IS NOT A PAGE BINDING. `rowHref: "/cases/{{id}}"` is
     // filled by the Table from each row; interpolated here against the page
     // data, where there is no `id`, the placeholder was dropped and every
@@ -128,7 +152,7 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
     for (const [k, v] of Object.entries((node.props ?? {}) as Record<string, unknown>)) {
       (ROW_TEMPLATE_PROPS.has(k) ? rowTemplated : pageBound)[k] = v;
     }
-    const interp = { ...(interpolateDeep(pageBound, { ...ctx.data, user: ctx.user }) as Record<string, unknown>), ...rowTemplated };
+    const interp = { ...(interpolateDeep(pageBound, scopeFor(ctx)) as Record<string, unknown>), ...rowTemplated };
     node = { ...node, props: interp };
   }
 

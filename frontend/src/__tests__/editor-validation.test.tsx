@@ -293,9 +293,12 @@ describe("inspector tabs — each writes the right action and undo restores", ()
     expect(currentHome().root.children[0].style).toBeUndefined();
   });
 
-  it("BINDINGS tab: bindProp wraps the prop in {$binding} and undo restores the literal", () => {
+  it("BINDINGS tab: bindProp writes the interpolation string and undo restores the literal", () => {
+    // The prop used to become an object the renderer had no resolver for, so
+    // binding a prop broke the node on the spot. It is now the same string form
+    // the generation pipeline emits and interpolate.ts already resolves.
     useEditorStore.getState().dispatch({ type: "bindProp", pageId: "home", nodeId: "btn", propName: "label", binding: "user.name" });
-    expect(currentHome().root.children[0].props.label).toEqual({ $binding: "user.name" });
+    expect(currentHome().root.children[0].props.label).toBe("{{user.name}}");
     useEditorStore.getState().undo();
     expect(currentHome().root.children[0].props.label).toBe("Old");
   });

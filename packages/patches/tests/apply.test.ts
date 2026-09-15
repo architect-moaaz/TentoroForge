@@ -120,16 +120,57 @@ describe("applyAction — duplicateNode", () => {
 });
 
 describe("applyAction — bind/unbind", () => {
-  it("bindProp wraps literal in $binding", () => {
+  const textProp = (a: any) => (a.pageSchemas.home.root.children![0].props as any).text;
+
+  it("bindProp writes a {{expr}} STRING, never the {$binding} object", () => {
+    // The object form was implemented by nothing outside the editor: it survived
+    // interpolateDeep (which only transforms strings) and validateProps (which
+    // cannot coerce it) and reached React in child position, so binding a prop
+    // rendered "⚠ render error" and then autosaved the breakage into the
+    // generated app. The string is what interpolate.ts actually resolves.
     const { next } = applyAction(fixture(), {
       type: "bindProp", pageId: "home", nodeId: "n2",
       propName: "text", binding: "form.name",
     });
-    expect((next.pageSchemas.home.root.children![0].props as any).text)
-      .toEqual({ $binding: "form.name" });
+    expect(textProp(next)).toBe("{{form.name}}");
+    expect(typeof textProp(next)).toBe("string");
   });
 
-  it("unbindProp replaces $binding with literal", () => {
+  it("an EMPTY bind writes \"\", not \"{{}}\"", () => {
+    // The bind toggle binds before the user has typed anything. "{{}}" would be
+    // a template that resolves to nothing while still reading as bound — the
+    // same bug in a quieter costume. "" is honestly "no value yet", renders as
+    // nothing, and still satisfies a required string field.
+    const { next } = applyAction(fixture(), {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "",
+    });
+    expect(textProp(next)).toBe("");
+  });
+
+  it("undo of an EMPTY bind restores the literal (the inverse used to be asymmetric)", () => {
+    // unbindProp tested the TRUTHINESS of prev.$binding, so a bind that was
+    // toggled but never filled took the updateProp branch and undo behaved
+    // differently from a filled one. Shape, not truthiness, decides now.
+    const before = fixture();
+    const { next, inverse } = applyAction(before, {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "",
+    });
+    const restored = applyAction(next, inverse).next;
+    expect(textProp(restored)).toBe(textProp(before));
+  });
+
+  it("re-binding an already-bound prop round-trips through its inverse", () => {
+    const start = applyAction(fixture(), {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "a.one",
+    }).next;
+    const { next, inverse } = applyAction(start, {
+      type: "bindProp", pageId: "home", nodeId: "n2", propName: "text", binding: "b.two",
+    });
+    expect(textProp(next)).toBe("{{b.two}}");
+    expect(textProp(applyAction(next, inverse).next)).toBe("{{a.one}}");
+  });
+
+  it("unbindProp replaces the binding with the literal", () => {
     const start = applyAction(fixture(), {
       type: "bindProp", pageId: "home", nodeId: "n2",
       propName: "text", binding: "form.name",

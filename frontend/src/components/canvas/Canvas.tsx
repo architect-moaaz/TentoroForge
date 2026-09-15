@@ -14,7 +14,7 @@ import { SelectionOverlay } from "./SelectionOverlay";
 import { DropIndicator } from "./DropIndicator";
 import { ReorderIndicator } from "./ReorderIndicator";
 import { useEditorStore } from "@/lib/editor-store";
-import { syntheticNodeId } from "@forge/patches";
+import { syntheticNodeId, migrateBindingsDeep } from "@forge/patches";
 
 /**
  * Recursively inject stable ids into every node that doesn't already have one.
@@ -27,7 +27,7 @@ import { syntheticNodeId } from "@forge/patches";
  * always produces the same walk order, so the same nodes get the same
  * disambiguated ids each render.
  */
-function normaliseSchema(raw: any): any {
+export function normaliseSchema(raw: any): any {
   const seen = new Set<string>();
   function uniq(base: string, path: string): string {
     if (!seen.has(base)) { seen.add(base); return base; }
@@ -46,6 +46,21 @@ function normaliseSchema(raw: any): any {
     return {
       ...node,
       id,
+      // HEAL LEGACY BINDINGS ON THE WAY IN.
+      //
+      // The Bindings tab used to write `{ $binding: "expr" }`, a shape nothing
+      // outside the editor implements — it reached React in child position and
+      // rendered the node's "render error" placeholder, then autosaved itself into the page schema
+      // and the generated app. The editor now writes "{{expr}}" instead, but
+      // pages saved before that still carry the object on disk.
+      //
+      // This is the one production path every page load goes through, so
+      // converting here means an affected page heals the moment it is opened,
+      // with no migration script to run and nothing for the user to notice.
+      // `migrateBindingsDeep` returns the same object when there is nothing to
+      // change, so the common case costs a walk and no allocation. It must run
+      // BEFORE `validateNoLegacyBindings` can reject the artifacts at commit.
+      props: node.props ? migrateBindingsDeep(node.props) : node.props,
       children: Array.isArray(node.children)
         ? node.children.map((c: any, i: number) =>
             injectIds(c, path ? `${path}.${i}` : `${i}`)

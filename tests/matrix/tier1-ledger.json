@@ -9,7 +9,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -23,7 +23,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -37,7 +37,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -51,7 +51,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -65,7 +65,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -79,7 +79,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -197,7 +197,7 @@
   "cell": "binding",
   "prop": "direction",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"vertical\""
  },
  {
@@ -224,7 +224,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -238,7 +238,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -252,7 +252,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -266,7 +266,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -384,7 +384,7 @@
   "cell": "binding",
   "prop": "columns",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "2"
  },
  {
@@ -543,7 +543,7 @@
   "cell": "binding",
   "prop": "title",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -570,7 +570,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -674,7 +674,7 @@
   "cell": "binding",
   "prop": "orientation",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"horizontal\""
  },
  {
@@ -791,7 +791,7 @@
   "cell": "binding",
   "prop": "size",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"md\""
  },
  {
@@ -1006,7 +1006,7 @@
   "cell": "binding",
   "prop": "headline",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Welcome\""
  },
  {
@@ -1179,7 +1179,7 @@
   "cell": "binding",
   "prop": "direction",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"vertical\""
  },
  {
@@ -1338,7 +1338,7 @@
   "cell": "binding",
   "prop": "gap",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"md\""
  },
  {
@@ -1511,7 +1511,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Label\""
  },
  {
@@ -1670,7 +1670,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Label\""
  },
  {
@@ -1725,7 +1725,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -1829,7 +1829,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Label\""
  },
  {
@@ -1960,7 +1960,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Check me\""
  },
  {
@@ -1987,7 +1987,7 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
+  "domChanged": true,
   "visible": false,
   "noopClean": true
  },
@@ -2105,7 +2105,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Enabled\""
  },
  {
@@ -2278,7 +2278,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Quantity\""
  },
  {
@@ -2479,7 +2479,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Amount\""
  },
  {
@@ -2666,7 +2666,7 @@
   "cell": "binding",
   "prop": "currency",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"USD\""
  },
  {
@@ -2797,7 +2797,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Choose one\""
  },
  {
@@ -2970,7 +2970,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Value\""
  },
  {
@@ -3129,7 +3129,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Upload file\""
  },
  {
@@ -3274,7 +3274,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Select\""
  },
  {
@@ -3475,7 +3475,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Button\""
  },
  {
@@ -3620,7 +3620,7 @@
   "cell": "binding",
   "prop": "content",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Heading\""
  },
  {
@@ -3821,7 +3821,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Metric\""
  },
  {
@@ -3994,7 +3994,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"User\""
  },
  {
@@ -4021,8 +4021,8 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
-  "visible": false,
+  "domChanged": true,
+  "visible": true,
   "noopClean": true
  },
  {
@@ -4139,7 +4139,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Link\""
  },
  {
@@ -4270,7 +4270,7 @@
   "cell": "binding",
   "prop": "items",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -4443,7 +4443,7 @@
   "cell": "binding",
   "prop": "variant",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"plain\""
  },
  {
@@ -4574,7 +4574,7 @@
   "cell": "binding",
   "prop": "tabs",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -4705,7 +4705,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Tab\""
  },
  {
@@ -4836,7 +4836,7 @@
   "cell": "binding",
   "prop": "columns",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -4967,7 +4967,7 @@
   "cell": "binding",
   "prop": "content",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Badge\""
  },
  {
@@ -5112,7 +5112,7 @@
   "cell": "binding",
   "prop": "message",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Alert message\""
  },
  {
@@ -5257,7 +5257,7 @@
   "cell": "binding",
   "prop": "message",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Nothing here yet.\""
  },
  {
@@ -5416,7 +5416,7 @@
   "cell": "binding",
   "prop": "workflow",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -5603,7 +5603,7 @@
   "cell": "binding",
   "prop": "icon",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Plus\""
  },
  {
@@ -5720,7 +5720,7 @@
   "cell": "binding",
   "prop": "width",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"240px\""
  },
  {
@@ -5893,7 +5893,7 @@
   "cell": "binding",
   "prop": "gap",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"md\""
  },
  {
@@ -6024,7 +6024,7 @@
   "cell": "binding",
   "prop": "ratio",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"1:1\""
  },
  {
@@ -6183,7 +6183,7 @@
   "cell": "binding",
   "prop": "sidebar",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -6328,7 +6328,7 @@
   "cell": "binding",
   "prop": "paramKey",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"inspector\""
  },
  {
@@ -6473,7 +6473,7 @@
   "cell": "binding",
   "prop": "paramKey",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"tab\""
  },
  {
@@ -6688,7 +6688,7 @@
   "cell": "binding",
   "prop": "chartType",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"line\""
  },
  {
@@ -6861,7 +6861,7 @@
   "cell": "binding",
   "prop": "data",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7062,7 +7062,7 @@
   "cell": "binding",
   "prop": "columns",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7277,7 +7277,7 @@
   "cell": "binding",
   "prop": "columns",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7408,7 +7408,7 @@
   "cell": "binding",
   "prop": "entries",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7553,7 +7553,7 @@
   "cell": "binding",
   "prop": "columns",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7698,7 +7698,7 @@
   "cell": "binding",
   "prop": "steps",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -7913,7 +7913,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Jane Doe\""
  },
  {
@@ -8058,7 +8058,7 @@
   "cell": "binding",
   "prop": "chips",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -8203,7 +8203,7 @@
   "cell": "binding",
   "prop": "items",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -8362,7 +8362,7 @@
   "cell": "binding",
   "prop": "entries",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -8549,7 +8549,7 @@
   "cell": "binding",
   "prop": "heading",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Nothing here yet\""
  },
  {
@@ -8750,7 +8750,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"dateRange\""
  },
  {
@@ -8937,7 +8937,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"multiSelect\""
  },
  {
@@ -9110,7 +9110,7 @@
   "cell": "binding",
   "prop": "title",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Feature\""
  },
  {
@@ -9241,7 +9241,7 @@
   "cell": "binding",
   "prop": "variant",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"rect\""
  },
  {
@@ -9358,7 +9358,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Loading…\""
  },
  {
@@ -9475,7 +9475,7 @@
   "cell": "binding",
   "prop": "items",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -9620,7 +9620,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Learn more\""
  },
  {
@@ -9793,7 +9793,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"date\""
  },
  {
@@ -9924,7 +9924,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Time\""
  },
  {
@@ -10055,7 +10055,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Color\""
  },
  {
@@ -10200,7 +10200,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Code\""
  },
  {
@@ -10345,7 +10345,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Rating\""
  },
  {
@@ -10490,7 +10490,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Field\""
  },
  {
@@ -10649,7 +10649,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Configuration\""
  },
  {
@@ -10836,7 +10836,7 @@
   "cell": "binding",
   "prop": "value",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "72"
  },
  {
@@ -11037,7 +11037,7 @@
   "cell": "binding",
   "prop": "segments",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -11182,7 +11182,7 @@
   "cell": "binding",
   "prop": "color",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"var(--color-primary-500)\""
  },
  {
@@ -11341,7 +11341,7 @@
   "cell": "binding",
   "prop": "width",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "100"
  },
  {
@@ -11486,7 +11486,7 @@
   "cell": "binding",
   "prop": "orientation",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"horizontal\""
  },
  {
@@ -11631,7 +11631,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Tag\""
  },
  {
@@ -11804,7 +11804,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Metric\""
  },
  {
@@ -11935,7 +11935,7 @@
   "cell": "binding",
   "prop": "orientation",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"vertical\""
  },
  {
@@ -12066,7 +12066,7 @@
   "cell": "binding",
   "prop": "divided",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "true"
  },
  {
@@ -12197,7 +12197,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -12314,7 +12314,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -12431,7 +12431,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -12444,8 +12444,8 @@
   "status": "WRITE-OK",
   "rejected": null,
   "landed": true,
-  "domChanged": false,
-  "visible": false,
+  "domChanged": true,
+  "visible": true,
   "noopClean": true
  },
  {
@@ -12562,7 +12562,7 @@
   "cell": "binding",
   "prop": "placeholder",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Select…\""
  },
  {
@@ -12679,7 +12679,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -12796,7 +12796,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13039,7 +13039,7 @@
   "cell": "binding",
   "prop": "resources",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13170,7 +13170,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13287,7 +13287,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13404,7 +13404,7 @@
   "cell": "binding",
   "prop": "binding",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13549,7 +13549,7 @@
   "cell": "binding",
   "prop": "code",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13694,7 +13694,7 @@
   "cell": "binding",
   "prop": "value",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -13839,7 +13839,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Capture Photo\""
  },
  {
@@ -13998,7 +13998,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"barcode\""
  },
  {
@@ -14157,7 +14157,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Scanner\""
  },
  {
@@ -14288,7 +14288,7 @@
   "cell": "binding",
   "prop": "orientation",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"vertical\""
  },
  {
@@ -14419,7 +14419,7 @@
   "cell": "binding",
   "prop": "delay",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "0"
  },
  {
@@ -14550,7 +14550,7 @@
   "cell": "binding",
   "prop": "delay",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "0"
  },
  {
@@ -14723,7 +14723,7 @@
   "cell": "binding",
   "prop": "source",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -14840,7 +14840,7 @@
   "cell": "binding",
   "prop": "when",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -14957,7 +14957,7 @@
   "cell": "binding",
   "prop": "fallback",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -15074,7 +15074,7 @@
   "cell": "binding",
   "prop": "name",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"default\""
  },
  {
@@ -15219,7 +15219,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Progress\""
  },
  {
@@ -15350,7 +15350,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Loading\""
  },
  {
@@ -15495,7 +15495,7 @@
   "cell": "binding",
   "prop": "variant",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"info\""
  },
  {
@@ -15626,7 +15626,7 @@
   "cell": "binding",
   "prop": "to",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"/\""
  },
  {
@@ -15785,7 +15785,7 @@
   "cell": "binding",
   "prop": "id",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"dialog\""
  },
  {
@@ -15902,7 +15902,7 @@
   "cell": "binding",
   "prop": "trigger",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Actions\""
  },
  {
@@ -16047,7 +16047,7 @@
   "cell": "binding",
   "prop": "trigger",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Open\""
  },
  {
@@ -16178,7 +16178,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Hover me\""
  },
  {
@@ -16337,7 +16337,7 @@
   "cell": "binding",
   "prop": "trigger",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Open\""
  },
  {
@@ -16454,7 +16454,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Right-click here\""
  },
  {
@@ -16599,7 +16599,7 @@
   "cell": "binding",
   "prop": "label",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Hover me\""
  },
  {
@@ -16929,7 +16929,7 @@
   "cell": "binding",
   "prop": "entity",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -17074,7 +17074,7 @@
   "cell": "binding",
   "prop": "href",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"/cart\""
  },
  {
@@ -17247,7 +17247,7 @@
   "cell": "binding",
   "prop": "title",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Your cart\""
  },
  {
@@ -17406,7 +17406,7 @@
   "cell": "binding",
   "prop": "title",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Your cart\""
  },
  {
@@ -17551,7 +17551,7 @@
   "cell": "binding",
   "prop": "selectedCount",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "0"
  },
  {
@@ -17696,7 +17696,7 @@
   "cell": "binding",
   "prop": "views",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -17841,7 +17841,7 @@
   "cell": "binding",
   "prop": "placeholder",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Search…\""
  },
  {
@@ -18000,7 +18000,7 @@
   "cell": "binding",
   "prop": "placeholder",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Search…\""
  },
  {
@@ -18159,7 +18159,7 @@
   "cell": "binding",
   "prop": "hrefPattern",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"/${entity}/${id}\""
  },
  {
@@ -18290,7 +18290,7 @@
   "cell": "binding",
   "prop": "shortcuts",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -18435,7 +18435,7 @@
   "cell": "binding",
   "prop": "lightLabel",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"Switch to light mode\""
  },
  {
@@ -18594,7 +18594,7 @@
   "cell": "binding",
   "prop": "kind",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"list\""
  },
  {
@@ -18739,7 +18739,7 @@
   "cell": "binding",
   "prop": "active",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "true"
  },
  {
@@ -18870,7 +18870,7 @@
   "cell": "binding",
   "prop": "target",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"main\""
  },
  {
@@ -19015,7 +19015,7 @@
   "cell": "binding",
   "prop": "color",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -19160,7 +19160,7 @@
   "cell": "binding",
   "prop": "enabled",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "true"
  },
  {
@@ -19319,7 +19319,7 @@
   "cell": "binding",
   "prop": "position",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"bottom-center\""
  },
  {
@@ -19478,7 +19478,7 @@
   "cell": "binding",
   "prop": "route",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -19623,7 +19623,7 @@
   "cell": "binding",
   "prop": "resource",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -19810,7 +19810,7 @@
   "cell": "binding",
   "prop": "steps",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -19969,7 +19969,7 @@
   "cell": "binding",
   "prop": "syncKey",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"selected\""
  },
  {
@@ -20142,7 +20142,7 @@
   "cell": "binding",
   "prop": "fields",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  },
  {
@@ -20329,7 +20329,7 @@
   "cell": "binding",
   "prop": "steps",
   "status": "ROUNDTRIP-OK",
-  "bound": "{\"$binding\":\"user.name\"}",
+  "bound": "\"{{user.name}}\"",
   "unbound": "\"\""
  }
 ]
