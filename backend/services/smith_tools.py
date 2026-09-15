@@ -749,6 +749,24 @@ TOOL_CATALOG: list[dict] = [
              "notNull?, ...}. Rolled back atomically on failure. "
              "Follow up with add_page(archetype='create', entity=<new>, "
              "…) to give it a UI."},
+    {"name": "remove_entity",
+     "signature": "remove_entity(entity) -> {applied, changes, verify, "
+                  "edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DROP an entire entity — its table, Drizzle module and barrel "
+             "export — 'remove the drafts table'. The highest-blast-radius "
+             "change: the data is gone and every page whose primary entity "
+             "it is, every workflow that operates on it, and every "
+             "relationship that names it is orphaned. Returns "
+             "needs_confirmation with that full cascade first; after it, the "
+             "completeness checks surface each orphan to repair. Refuses the "
+             "auth/users entity."},
+    {"name": "remove_workflow",
+     "signature": "remove_workflow(workflow_id) -> {applied, changes, "
+                  "verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DELETE a workflow file — 'remove the DeleteRecord workflow'. "
+             "Every Button/Form that dispatched it stops resolving, which "
+             "the workflow-not-defined check then surfaces so the control is "
+             "rebound or dropped. Reference-breaking, so it confirms first."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -1217,6 +1235,8 @@ READONLY_HANDLERS = {
     "set_field_interaction":    lambda output_dir, args: _smith_set_field_interaction(output_dir, args),
     "create_business_rule":     lambda output_dir, args: _smith_create_business_rule(output_dir, args),
     "add_entity":               lambda output_dir, args: _smith_add_entity(output_dir, args),
+    "remove_entity":            lambda output_dir, args: _smith_remove_entity(output_dir, args),
+    "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
@@ -1773,6 +1793,54 @@ def _smith_add_entity(output_dir: str, args: dict) -> dict:
         }},
     }
     result = _apply_add_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_remove_entity(output_dir: str, args: dict) -> dict:
+    """Drop an entire entity. Highest blast radius, so it confirms first with
+    the true cascade (dependent pages/workflows/relationships)."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_entity
+    entity = args.get("entity") or args.get("name") or ""
+    if not args.get("_confirmed"):
+        deps: list[str] = []
+        try:
+            from services.remove_entity_seam import dependents
+            from services.registry import load_registry
+            doc = load_registry(output_dir) or {}
+            deps = dependents(doc, entity)
+        except Exception:  # noqa: BLE001 — confirmation must not fail on a read
+            deps = []
+        return needs_confirmation_result(
+            "entity", entity, dependents=deps or [f"the {entity} table and its data"],
+            cascade=True, removes=deps)
+    diagnosis = {
+        "artifact": {"kind": "entity", "path": entity},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_entity", "patch": {"entity": entity}},
+    }
+    result = _apply_remove_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
+    """Delete a workflow file. Reference-breaking, so it confirms first."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_workflow
+    wid = args.get("workflow_id") or args.get("workflow") or args.get("id") or ""
+    if not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "workflow", wid,
+            dependents=[f"every Button or Form that dispatched {wid!r} stops "
+                        f"resolving until it is rebound or removed"])
+    diagnosis = {
+        "artifact": {"kind": "workflow", "path": wid},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_workflow", "patch": {"workflow_id": wid}},
+    }
+    result = _apply_remove_workflow(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
 

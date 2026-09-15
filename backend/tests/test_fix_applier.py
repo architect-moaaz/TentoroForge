@@ -448,3 +448,42 @@ def test_edit_field_rename_applies(tmp_path):
         "patch": {"entity": "Record", "field": "fullName", "new_name": "displayName"}}}, git=False)
     assert res["applied"] and res["seam"] == "edit_field"
     assert "displayName" in (tmp_path / "src" / "db" / "schema" / "records.ts").read_text()
+
+
+# --------------------------------------------------------------------------- #
+# remove_entity / remove_workflow seams — drop a table / delete a workflow.
+# --------------------------------------------------------------------------- #
+
+def _entity_app(root: Path) -> None:
+    (root / "contracts").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "db" / "schema").mkdir(parents=True, exist_ok=True)
+    (root / "workflows").mkdir(parents=True, exist_ok=True)
+    (root / "contracts" / "resource-registry.json").write_text(json.dumps({"entities": [
+        {"name": "Draft", "slug": "drafts", "table": "drafts",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}]}))
+    (root / "src" / "db" / "schema" / "drafts.ts").write_text("export const drafts = 1;\n")
+    (root / "src" / "db" / "schema" / "index.ts").write_text('export { draft } from "./drafts";\n')
+    (root / "workflows" / "DeleteDraft.json").write_text(json.dumps({"id": "DeleteDraft"}))
+
+
+def test_remove_entity_applies(tmp_path):
+    _entity_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "remove_entity", "patch": {"entity": "Draft"}}}, git=False)
+    assert res["applied"] and res["seam"] == "remove_entity"
+    assert not (tmp_path / "src" / "db" / "schema" / "drafts.ts").exists()
+
+
+def test_remove_workflow_applies(tmp_path):
+    _entity_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "remove_workflow", "patch": {"workflow_id": "DeleteDraft"}}}, git=False)
+    assert res["applied"] and res["verify"]["resolved"] and res["seam"] == "remove_workflow"
+    assert not (tmp_path / "workflows" / "DeleteDraft.json").exists()
+
+
+def test_remove_workflow_unknown_is_a_clean_noop(tmp_path):
+    _entity_app(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "remove_workflow", "patch": {"workflow_id": "Ghost"}}}, git=False)
+    assert res["applied"] is False and "not found" in res["reason"]
