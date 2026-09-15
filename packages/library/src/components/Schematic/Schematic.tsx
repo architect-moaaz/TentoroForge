@@ -10,13 +10,13 @@ export interface SchematicProps extends SchematicPropsType {
 }
 
 const DEFAULT_STATUS_COLORS: Record<string, string> = {
-  ok: "var(--color-success-500, #22c55e)",
-  active: "var(--color-primary-500)",
-  busy: "var(--color-warning-500, #f59e0b)",
-  warning: "var(--color-warning-500, #f59e0b)",
-  error: "var(--color-danger-500, #ef4444)",
-  blocked: "var(--color-danger-500, #ef4444)",
-  idle: "var(--color-border-strong, #94a3b8)",
+  ok: "hsl(var(--success))",
+  active: "hsl(var(--primary))",
+  busy: "hsl(var(--warning))",
+  warning: "hsl(var(--warning))",
+  error: "hsl(var(--destructive))",
+  blocked: "hsl(var(--destructive))",
+  idle: "hsl(var(--border))",
 };
 
 /**
@@ -32,7 +32,7 @@ export function Schematic({
   const pts = Array.isArray(markers) ? markers : [];
   const colors = { ...DEFAULT_STATUS_COLORS, ...(statusColors ?? {}) };
   const markerColor = (m: any): string =>
-    m.color ?? (m.status && colors[m.status]) ?? "var(--color-primary-500)";
+    m.color ?? (m.status && colors[m.status]) ?? "hsl(var(--primary))";
   const r = Math.max(0.8, Math.min(width, height) * 0.018);
   const usedStatuses = Array.from(new Set(pts.map((m: any) => m.status).filter(Boolean)));
 
@@ -40,10 +40,10 @@ export function Schematic({
     <div className="w-full" data-schematic="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={heightPx}
         preserveAspectRatio="xMidYMid meet"
-        style={{ background: "var(--color-surface-sunken, #f8fafc)", borderRadius: 8, border: "1px solid var(--color-border-default, #e2e8f0)" }}>
+        style={{ background: "hsl(var(--muted))", borderRadius: 8, border: "1px solid hsl(var(--border))" }}>
         {/* grid */}
         {grid && (
-          <g stroke="var(--color-border-default, #e2e8f0)" strokeWidth={0.15}>
+          <g stroke="hsl(var(--border))" strokeWidth={0.15}>
             {Array.from({ length: grid.cols + 1 }, (_, i) => {
               const x = (width / grid.cols) * i;
               return <line key={`c${i}`} x1={x} y1={0} x2={x} y2={height} />;
@@ -56,7 +56,7 @@ export function Schematic({
         )}
         {/* regions */}
         {(regions ?? []).map((rg, i) => {
-          const fill = rg.color ?? "var(--color-primary-500)";
+          const fill = rg.color ?? "hsl(var(--primary))";
           const cx = rg.points
             ? rg.points.reduce((s, p) => s + p[0], 0) / rg.points.length
             : (rg.x ?? 0) + (rg.w ?? 0) / 2;
@@ -71,7 +71,7 @@ export function Schematic({
                 <rect x={rg.x ?? 0} y={rg.y ?? 0} width={rg.w ?? 0} height={rg.h ?? 0} rx={0.8} fill={fill} fillOpacity={0.14} stroke={fill} strokeWidth={0.3} />
               )}
               {showLabels && rg.label && (
-                <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(1.6, height * 0.035)} fill="var(--color-text-secondary, #475569)">{rg.label}</text>
+                <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(1.6, height * 0.035)} fill="hsl(var(--muted-foreground))">{rg.label}</text>
               )}
             </g>
           );
@@ -90,7 +90,7 @@ export function Schematic({
                 <circle cx={m.x} cy={m.y} r={r} fill={c} />
               )}
               {showLabels && m.label && (
-                <text x={m.x} y={m.y - r * 1.4} textAnchor="middle" fontSize={Math.max(1.4, height * 0.03)} fill="var(--color-text-primary, #0f172a)">{m.label}</text>
+                <text x={m.x} y={m.y - r * 1.4} textAnchor="middle" fontSize={Math.max(1.4, height * 0.03)} fill="hsl(var(--foreground))">{m.label}</text>
               )}
             </g>
           );
@@ -101,7 +101,7 @@ export function Schematic({
         <div className="mt-2 flex flex-wrap gap-3">
           {usedStatuses.map((st) => (
             <span key={st} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[st] ?? "var(--color-primary-500)" }} />
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[st] ?? "hsl(var(--primary))" }} />
               {st}
             </span>
           ))}

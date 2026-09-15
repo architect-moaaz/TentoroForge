@@ -62,3 +62,29 @@ def test_tailwind_config_exposes_the_contract_status_aliases():
         assert f"var(--{role}," in src, f"tailwind alias for {role} not on contract"
         assert f"var(--{role}-subtle," in src, f"no subtle alias for {role}"
     assert "var(--destructive-subtle," in src
+
+
+_GLOBALS = _ROOT / "backend" / "templates" / "app-foundation" / "src" / "app" / "globals.css"
+
+
+def test_data_viz_components_carry_no_off_contract_color_dialect():
+    # Chart/* and Schematic read the contract tokens (hsl(var(--primary)) …), not
+    # the unfed `--color-*` numbered/named dialect that rendered chart chrome
+    # unstyled and left Schematic's `active` colourless (--color-primary-500 had
+    # no fallback).
+    for path in list((_LIB / "components" / "Chart").glob("*.tsx")) + [
+        _LIB / "components" / "Schematic" / "Schematic.tsx"
+    ]:
+        src = path.read_text("utf-8")
+        assert "var(--color-" not in src, f"{path.name} still uses the --color-* dialect"
+
+
+def test_globals_defines_status_token_defaults_for_raw_consumers():
+    # A raw `hsl(var(--success))` in a chart has no Tailwind-alias fallback, so
+    # the contract's status tokens must have a default in both themes.
+    css = _GLOBALS.read_text("utf-8")
+    root, dark = css.split(".dark", 1)
+    for token in ("--success", "--warning", "--info",
+                  "--destructive-subtle", "--success-subtle"):
+        assert f"{token}:" in root, f":root missing {token}"
+        assert f"{token}:" in dark, f".dark missing {token}"

@@ -29,7 +29,7 @@ export function FunnelChartImpl(props: ChartPropsType) {
         <ReFunnelChart>
           {props.showTooltip !== false && <Tooltip />}
           <Funnel dataKey={valueKey} nameKey={nameKey} data={data} isAnimationActive>
-            <LabelList position="right" fill="var(--color-text-secondary)" stroke="none" dataKey={nameKey} fontSize={11} />
+            <LabelList position="right" fill="hsl(var(--muted-foreground))" stroke="none" dataKey={nameKey} fontSize={11} />
             {data.map((_, i) => (
               <Cell key={i} fill={props.series?.[i]?.color ?? DEFAULT_PALETTE[i % DEFAULT_PALETTE.length]} />
             ))}

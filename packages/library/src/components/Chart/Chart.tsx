@@ -31,7 +31,7 @@ export function Chart(props: ChartProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "var(--color-text-tertiary, #94a3b8)",
+          color: "hsl(var(--muted-foreground))",
           fontSize: 12,
           fontStyle: "italic",
         }}
