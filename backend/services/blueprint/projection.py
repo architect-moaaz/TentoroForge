@@ -873,6 +873,129 @@ def _kebab(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
 
 
+import functools
+
+
+@functools.lru_cache(maxsize=1)
+def _token_contract() -> dict:
+    """The library's design-token contract — THE single source for which
+    ``var(--…)`` names exist, which Blueprint role feeds each, and the default
+    each falls back to. Read from the library package the backend runs beside
+    (the staged tree and the repo both carry ``packages/library``); an absent
+    file leaves the projector on its legacy alias path rather than crashing."""
+    here = Path(__file__).resolve()
+    for base in here.parents:
+        cand = base / "packages" / "library" / "src" / "theme" / "token-contract.json"
+        if cand.is_file():
+            try:
+                return json.loads(cand.read_text("utf-8"))
+            except (OSError, ValueError):
+                return {}
+    return {}
+
+
+_TRIPLET = re.compile(r"^-?\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%$")
+
+
+def _as_triplet(value: str) -> str | None:
+    """A Blueprint colour as the HSL triplet the contract stores — `#B91C1C` ->
+    `0 74% 42%`, and a value already in triplet form passes through. Anything
+    else (a named colour, an rgb()) has no triplet and is skipped, so the
+    contract's default stands rather than a poisoned `hsl(<garbage>)`."""
+    v = str(value).strip()
+    if _TRIPLET.match(v):
+        return v
+    return _hsl_triplet(v)
+
+
+def _readable_on(triplet: str) -> str:
+    """A near-black or near-white foreground for a background triplet, chosen by
+    its lightness. Used to fill a `contrastOf` token whose Blueprint role does
+    not state a text colour, so a tinted or dark surface never renders unreadable
+    default text."""
+    try:
+        lightness = float(triplet.split()[2].rstrip("%"))
+    except (IndexError, ValueError):
+        return "0 0% 100%"
+    return "222 84% 5%" if lightness >= 60 else "0 0% 100%"
+
+
+def _resolve_role(colors: dict, roles: list[str]) -> str | None:
+    """The first Blueprint colour that matches one of `roles`, by exact key or
+    kebab-insensitive match (`textPrimary` == `text-primary`)."""
+    by_kebab = {_kebab(k): v for k, v in colors.items()
+                if isinstance(v, str) and v}
+    for role in roles:
+        v = colors.get(role)
+        if isinstance(v, str) and v:
+            return v
+        v = by_kebab.get(_kebab(role))
+        if isinstance(v, str) and v:
+            return v
+    return None
+
+
+def _project_contract_colors(colors: dict) -> list[str]:
+    """Emit every contract token the Blueprint feeds, in the contract's order.
+
+    Role tokens are filled from the Blueprint colour that matches; `contrastOf`
+    tokens are computed from the resolved value of the token they contrast. A
+    token the Blueprint does not drive is left unset here so the library's
+    `theme.css` default stands — the projector overrides exactly what the design
+    states, nothing more. Returns [] when the contract is unavailable, and the
+    caller falls back to the legacy alias emission.
+    """
+    color_tokens = (_token_contract().get("colorTokens") or [])
+    if not color_tokens:
+        return []
+    emitted: dict[str, str] = {}
+    consumed: set[str] = set()          # blueprint roles a contract token claims
+    for spec in color_tokens:
+        roles = spec.get("role")
+        if not roles:
+            continue
+        consumed.update(_kebab(r) for r in roles)
+        raw = _resolve_role(colors, roles)
+        if raw is None:
+            continue
+        trip = _as_triplet(raw)
+        if trip is not None:
+            emitted[str(spec["token"])] = trip
+    for spec in color_tokens:
+        base = spec.get("contrastOf")
+        if base and base in emitted:
+            emitted[str(spec["token"])] = _readable_on(emitted[base])
+    lines = [f"  --{spec['token']}: {emitted[spec['token']]};"
+             for spec in color_tokens if spec["token"] in emitted]
+
+    # PASS THROUGH THE ROLES THE CONTRACT DOES NOT CLAIM. The Blueprint may name
+    # app-specific colours the shadcn contract has no slot for — `sidebarBackground`
+    # that the rail reads, a `primaryHover` a scaffold uses. Emit each under its
+    # own name so nothing an app depends on is dropped, but skip any role a
+    # contract token already consumed, so a `danger` that became `--destructive`
+    # does not also reappear as a dead `--danger` twin. Wrapped-set names keep the
+    # hsl() triplet; the rest keep their value (a custom colour is read raw).
+    contract_names = {str(spec["token"]) for spec in color_tokens}
+    for role, value in sorted(colors.items()):
+        if not (isinstance(value, str) and value):
+            continue
+        name = _kebab(role)
+        if name in consumed or name in contract_names:
+            continue
+        out_value = (_hsl_triplet(value) or value) if role in _WRAPPED_ROLES else value
+        lines.append(f"  --{name}: {out_value};")
+    return lines
+
+
+#: shadcn names the scaffold wraps in `hsl()`, so a passthrough role among them
+#: must be a triplet. The contract covers these already; this only matters for a
+#: legacy tree whose Blueprint names one directly.
+_WRAPPED_ROLES = {"background", "foreground", "primary", "primaryForeground",
+                  "secondary", "secondaryForeground", "accent", "accentForeground",
+                  "muted", "mutedForeground", "destructive", "destructiveForeground",
+                  "border", "input", "ring", "card", "cardForeground"}
+
+
 #: A CSS length unit, or none for a bare `0`. `fr`/`%` included: spacing and
 #: radius scales legitimately use them.
 _CSS_UNIT = (r"(?:px|rem|em|%|fr|vh|vw|vmin|vmax|vi|vb|svh|lvh|dvh|svw|lvw|dvw|"
@@ -952,29 +1075,38 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     colors = design.get("colors") or {}
     lines: list[str] = []
 
-    # THE NAMES THE SCAFFOLD WRAPS IN hsl(). This said "these four… the rest
-    # keep their hex" — and the scaffold's sign-in page paints its brand panel
-    # with `hsl(var(--accent))`, so a hex accent became `hsl(#c9a84c)`: invalid,
-    # silently dropped, and the design's gold never reached the one page every
-    # user sees first. The wrapped set is shadcn's, which is what the scaffold
-    # is — the same names `_COLOR_TOKENS` below already lists.
-    WRAPPED = {"background", "foreground", "primary", "primaryForeground",
-               "secondary", "secondaryForeground", "accent", "accentForeground",
-               "muted", "mutedForeground", "destructive", "destructiveForeground",
-               "border", "input", "ring", "card", "cardForeground"}
-    for role, value in sorted(colors.items()):
-        if isinstance(value, str) and value:
-            out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
-            lines.append(f"  --{_kebab(role)}: {out_value};")
-    for token, candidates in _TOKEN_ALIASES:
-        if any(line.startswith(f"  {token}:") for line in lines):
-            continue
-        for role in candidates:
-            raw = colors.get(role)
-            if isinstance(raw, str) and raw:
-                triplet = _hsl_triplet(raw)
-                lines.append(f"  {token}: {triplet or raw};")
-                break
+    # ONE CONTRACT, emitted from the library's token-contract.json: every
+    # `var(--…)` a component reads has a home, filled from the Blueprint role
+    # that feeds it, in the HSL-triplet form the scaffold wraps in `hsl()`.
+    # This replaced a hand-kept `WRAPPED` set + alias table + a pile of
+    # role-named hex twins nothing read: status colours reached the app under
+    # one name in one place (`--success`, not both a dead `--success` hex twin
+    # AND Badge's unfed `--color-success-100`), and `surface` finally reached
+    # `--card`/`--popover`. When the contract file is not beside the backend the
+    # projector falls back to the legacy alias emission below rather than
+    # emitting nothing.
+    lines.extend(_project_contract_colors(colors))
+    if not lines:
+        # THE NAMES THE SCAFFOLD WRAPS IN hsl(). Legacy path — kept for a tree
+        # that carries no token-contract.json. The wrapped set is shadcn's,
+        # which is what the scaffold is.
+        WRAPPED = {"background", "foreground", "primary", "primaryForeground",
+                   "secondary", "secondaryForeground", "accent", "accentForeground",
+                   "muted", "mutedForeground", "destructive", "destructiveForeground",
+                   "border", "input", "ring", "card", "cardForeground"}
+        for role, value in sorted(colors.items()):
+            if isinstance(value, str) and value:
+                out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
+                lines.append(f"  --{_kebab(role)}: {out_value};")
+        for token, candidates in _TOKEN_ALIASES:
+            if any(line.startswith(f"  {token}:") for line in lines):
+                continue
+            for role in candidates:
+                raw = colors.get(role)
+                if isinstance(raw, str) and raw:
+                    triplet = _hsl_triplet(raw)
+                    lines.append(f"  {token}: {triplet or raw};")
+                    break
 
     radius = design.get("radius")
     if isinstance(radius, str) and radius:

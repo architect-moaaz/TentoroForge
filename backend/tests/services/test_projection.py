@@ -617,8 +617,11 @@ def test_names_the_scaffold_wraps_are_emitted_as_hsl_triplets(tmp_path):
     css = (tmp_path / "src" / "app" / "tokens.css").read_text()
     assert "--primary: 202 77% 31%;" in css
     assert "--primary: #125E8A;" not in css
-    # Roles the scaffold does not wrap keep their hex.
-    assert "--focus-ring: #0B72C4;" in css
+    # A role the CONTRACT does not claim passes through under its own name and
+    # keeps its hex (the scaffold reads it raw). `focusRing` is no longer such a
+    # role — the contract consumes it into `--ring` (see the sibling test) — so
+    # this uses a genuinely app-specific colour.
+    assert "--status-paid: #1B6B3A;" in css
 
 
 def test_a_shadcn_name_the_blueprint_omits_falls_back_to_a_declared_role(tmp_path):
