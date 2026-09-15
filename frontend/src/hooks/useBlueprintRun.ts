@@ -307,6 +307,29 @@ export function useBlueprintRun(projectId: string | null) {
     };
   }, [projectId, pollOnce]);
 
+  // CATCH UP WHEN THE TAB WAKES. `smith/chat` streams the build over one
+  // connection; Chrome suspends a backgrounded/asleep tab's network I/O
+  // (net::ERR_NETWORK_IO_SUSPENDED), dropping the stream — and a suspended tab
+  // also throttles/pauses the 4s poll timer, so after a wake the run can sit
+  // stale for seconds (or look stuck) before the poll catches it up. On the tab
+  // becoming visible or the browser reporting `online`, poll once immediately.
+  // Safe: `pollOnce` no-ops while a live stream is still owned (its own guard),
+  // and only advances state once polling has taken over from a dropped stream.
+  useEffect(() => {
+    if (!projectId) return;
+    const onWake = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      void pollOnce();
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("online", onWake);
+    return () => {
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("online", onWake);
+    };
+  }, [projectId, pollOnce]);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
