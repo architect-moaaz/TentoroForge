@@ -140,6 +140,70 @@ async def delete_page(
     await db.commit()
 
 
+@router.post("/api/projects/{project_id}/editor/remove-page")
+async def editor_remove_page(
+    project_id: uuid.UUID,
+    body: dict,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a page from the generated app by route (visual editor, ED-14).
+
+    Unlike ``DELETE /pages/{id}`` (which drops a DB PageDefinition), this removes
+    the page from the app on disk through the ``remove_page`` seam: it strips the
+    page's schema and its nav-flow entries and regenerates ``registry.ts`` +
+    the shell menu, so the app dispatcher stops trying to import the deleted
+    page. ``cascade`` removes the whole feature area (list/new/[id]/edit).
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    route = str((body or {}).get("route") or "").strip()
+    if not route:
+        raise HTTPException(status_code=400, detail="route is required")
+    cascade = bool((body or {}).get("cascade"))
+
+    # The app's schemas live at <output_dir>/app/src/schemas for a projected
+    # build; older/foundation trees keep them at <output_dir>/src/schemas.
+    import os
+    app_root = project.output_dir
+    if os.path.isdir(os.path.join(project.output_dir, "app", "src", "schemas")):
+        app_root = os.path.join(project.output_dir, "app")
+
+    # Apply the file removal at the APP root (where src/schemas lives), but with
+    # git=False: the git repo is the PROJECT root, not the app subdir, so letting
+    # the seam commit there would mis-stage and roll the deletion back. Commit at
+    # the project root afterwards.
+    from services.fix_applier import _apply_remove_page
+    result = _apply_remove_page(
+        app_root,
+        {"proposedFix": {"seam": "remove_page",
+                         "patch": {"route": route, "cascade": cascade}}},
+        git=False,
+    )
+    if not result.get("applied"):
+        raise HTTPException(
+            status_code=400,
+            detail=result.get("reason") or f"could not remove page {route!r}",
+        )
+    committed = False
+    try:
+        from services.git_service import git_commit, git_init
+        await git_init(project.output_dir)
+        commit_hash = await git_commit(
+            project.output_dir, f"editor: remove page — {route}", actor="editor")
+        committed = bool(commit_hash)
+    except Exception:  # noqa: BLE001 — the removal already landed; a failed commit must not 500
+        logging.getLogger(__name__).warning(
+            "remove-page commit failed for %s", project_id, exc_info=True)
+    return {
+        "removed": route,
+        "cascade": cascade,
+        "changes": result.get("changes") or [],
+        "committed": committed,
+    }
+
+
 @router.post("/api/projects/{project_id}/pages/{page_id}/apply")
 async def apply_page(
     project_id: uuid.UUID,
