@@ -251,11 +251,12 @@ def test_what_cannot_be_brought_round_is_flagged_not_patched(svc):
     assert "Page↔Permission" in report.unrepaired["page_contracts"]
     assert svc.doc["pages"][0]["status"] == "OUT_OF_SYNC"
     assert "ROLE-999" in svc.doc["pages"][0]["syncNote"]
-    # Original + exactly `rounds` repairs, no more.
-    assert len(author.calls) == 3
-    # The second brief carries what the first repair still missed — it is a
-    # fresh judgement of the re-authored page, not the first brief replayed.
-    assert "ROLE-999" in author.calls[2].feedback
+    # EARLY STOP: the re-author came back IDENTICAL (Ghost never fixes), so a
+    # second identical brief cannot help — the observer flags it after ONE
+    # repair rather than burning the full `rounds`. Original + one repair.
+    assert len(author.calls) == 2
+    # The one repair carried the finding, so the author was genuinely told why.
+    assert "ROLE-999" in author.calls[1].feedback
 
 
 def test_a_refused_repair_goes_round_told_why(svc):
@@ -634,3 +635,24 @@ def test_the_critic_is_not_shown_provenance(svc):
     ctx = observation_context(svc.doc, agent="page_design")
     assert "syncNote" not in ctx["output"]["pages"][0]
     assert "missing" not in json.dumps(ctx)
+
+
+def test_a_changing_but_unfixed_subject_keeps_its_full_rounds(svc):
+    """The early stop fires only when a re-author comes back IDENTICAL. A subject
+    whose findings CHANGE each round (real movement, just not fixed yet) must get
+    its full `rounds` — otherwise the stop would cut genuine convergence short."""
+    calls: list[TaskSpec] = []
+
+    def author(spec: TaskSpec) -> AgentResult:
+        calls.append(spec)
+        n = sum(1 for c in calls if "observer" in c.task_id)
+        # a different missing role each round → a different finding each round
+        role = ["ROLE-999", "ROLE-888", "ROLE-777"][min(n, 2)]
+        return page(spec, users=[role])
+
+    report = run(svc, author, plan=["page_contracts"],
+                 observer_agent=Observer(rounds=2))
+    # original + 2 repairs (findings differed each round → no early stop), then
+    # flagged after the rounds are genuinely spent.
+    assert len(calls) == 3
+    assert "page_contracts" in report.unrepaired

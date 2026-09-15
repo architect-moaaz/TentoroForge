@@ -1422,6 +1422,19 @@ def _execute(
         for subject in obs.subjects:
             label = f"{key}:{subject}" if subject else key
             if obs.findings.get(subject):
+                # Did the round that just ran change anything at all? If a repair
+                # already ran and came back with the IDENTICAL findings, the
+                # re-author moved nothing — a second identical brief will not help
+                # (a deterministic defect the agent cannot fix, e.g. a data-model
+                # gap). Mark it stuck so `advance` flags it now instead of burning
+                # the last round. Compared on identity, not count, so a real
+                # re-author whose output merely shifted keeps its full rounds.
+                prev = w.last.get(subject)
+                if prev is not None:
+                    def _sig(fs):
+                        return frozenset((f.edge, f.artifact_id, f.detail) for f in fs)
+                    if _sig(obs.findings[subject]) == _sig(prev.findings.get(subject, [])):
+                        w.stuck.add(subject)
                 w.open[subject] = RepairTask(
                     node=key, agent=DAG[key].agent, subject=subject,
                     feedback=obs.brief(subject),
@@ -1429,25 +1442,36 @@ def _execute(
                 w.last[subject] = obs
             elif subject in w.open:
                 w.open.pop(subject)
+                w.stuck.discard(subject)
                 report.repaired.append(label)
         advance(pool, key)
 
+    def _flag(key: str, subject: str, task: Any) -> None:
+        """Leave a subject as its author last wrote it, flagged OUT_OF_SYNC."""
+        obs = watches[key].last[subject]
+        with svc.lock:
+            flag_unrepaired(svc, obs, subject)
+        why = "; ".join(
+            f"{f.edge}: {f.detail}" for f in obs.findings.get(subject, [])
+        )[:600]
+        report.unrepaired[task.label] = why
+        _note(ledger, "unrepaired", key, subject, why)
+
     def advance(pool: ThreadPoolExecutor, key: str) -> None:
-        """Repair what is open, or flag it once the rounds are spent."""
+        """Repair what is open, or flag it — once the rounds are spent, or as soon
+        as a round leaves a subject no better (see `_Watch.stuck`)."""
         w = watches[key]
+        # EARLY STOP: subjects a repair round did not improve. Flag them now
+        # rather than re-authoring against an identical brief that already failed.
+        for subject in [s for s in list(w.open) if s in w.stuck]:
+            _flag(key, subject, w.open.pop(subject))
+            w.stuck.discard(subject)
         if not w.open:
             complete(key)
             return
         if w.round >= rounds:
-            for subject, task in w.open.items():
-                obs = w.last[subject]
-                with svc.lock:
-                    flag_unrepaired(svc, obs, subject)
-                why = "; ".join(
-                    f"{f.edge}: {f.detail}" for f in obs.findings.get(subject, [])
-                )[:600]
-                report.unrepaired[task.label] = why
-                _note(ledger, "unrepaired", key, subject, why)
+            for subject, task in list(w.open.items()):
+                _flag(key, subject, task)
             complete(key)
             return
         w.round += 1
@@ -1590,6 +1614,11 @@ class _Watch:
     landed: list[str] = field(default_factory=list)
     #: Subject -> identities the node's current answer for it consists of.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
+    #: Subjects a repair round left NO better (finding count did not drop). A
+    #: second identical brief will not help, so they are flagged now instead of
+    #: burning the remaining round — the observer's biggest source of wasted
+    #: re-authoring on hard apps (measured: NKit page_layouts).
+    stuck: set[str] = field(default_factory=set)
 
 
 def _applied(state: _NodeRun) -> list[str]:
