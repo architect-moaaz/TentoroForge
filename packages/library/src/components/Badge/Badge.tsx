@@ -41,11 +41,15 @@ const VARIANT_CLASS: Record<Variant, string> = {
   // always present (synthesized via a +150° hue rotation from primary
   // when the palette omits an accent), so no fallback branch is needed.
   accent: "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] border-[hsl(var(--accent))]",
-  // Status colors: semantic meaning must not shift with brand. Use fixed
-  // success/warning/error palette vars (falling back to Tailwind defaults).
-  success: "bg-[var(--color-success-100,theme(colors.emerald.100))] text-[var(--color-success-800,theme(colors.emerald.800))] border-[var(--color-success-200,theme(colors.emerald.200))]",
-  danger:  "bg-[var(--color-error-100,theme(colors.red.100))] text-[var(--color-error-800,theme(colors.red.800))] border-[var(--color-error-200,theme(colors.red.200))]",
-  warning: "bg-[var(--color-warning-100,theme(colors.amber.100))] text-[var(--color-warning-800,theme(colors.amber.800))] border-[var(--color-warning-200,theme(colors.amber.200))]",
+  // Status colors read the ONE token contract: `<status>-subtle` is the tint
+  // and `<status>-subtle-foreground` the text on it — filled from the
+  // Blueprint's success/warning/danger by the projector, so a status chip
+  // wears the design's palette instead of a fixed Tailwind emerald/red/amber.
+  // (Badge's `danger` maps to the contract's `destructive`.) The Tailwind
+  // aliases carry their own default fallback, so a chip never renders unstyled.
+  success: "bg-success-subtle text-success-subtle-foreground border-success-subtle-foreground/20",
+  danger:  "bg-destructive-subtle text-destructive-subtle-foreground border-destructive-subtle-foreground/20",
+  warning: "bg-warning-subtle text-warning-subtle-foreground border-warning-subtle-foreground/20",
 };
 
 // radius.scale → corner radius class.

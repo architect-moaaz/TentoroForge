@@ -40,25 +40,42 @@ const config: Config = {
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
         accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
-        destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+          subtle: "hsl(var(--destructive-subtle, 0 86% 97%))",
+          "subtle-foreground": "hsl(var(--destructive-subtle-foreground, 0 74% 32%))",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
-        // Status palette — emitted by design_agent into globals.css :root
-        // (see _PALETTE_TO_CSS_VAR in backend/agents/design_agent.py).
-        // Without these the LLM's `bg-success` / `text-warning` etc. silently
-        // drop, making every generated app monochrome.
+        // Status palette. The single source is the token contract
+        // (packages/library/src/theme/token-contract.json): the blueprint
+        // projector fills `--success` / `--success-subtle` / … from
+        // designSystem, so `bg-success` / `bg-success-subtle` reach the app's
+        // real palette. The legacy `generate.py` path fills `--color-success`
+        // instead (design_agent), so it is kept as a fallback; the bare hsl
+        // triplet is the last resort so a status class never silently drops.
+        // Each status carries the locked 4-token shape (solid + foreground +
+        // subtle + subtle-foreground) so a Badge tint and a solid fill both
+        // resolve to the design's colour.
         success: {
-          DEFAULT: "var(--color-success, hsl(142 71% 45%))",
-          foreground: "var(--color-success-foreground, hsl(0 0% 100%))",
+          DEFAULT: "hsl(var(--success, var(--color-success, 142 71% 45%)))",
+          foreground: "hsl(var(--success-foreground, var(--color-success-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--success-subtle, 141 79% 93%))",
+          "subtle-foreground": "hsl(var(--success-subtle-foreground, 142 71% 22%))",
         },
         warning: {
-          DEFAULT: "var(--color-warning, hsl(38 92% 50%))",
-          foreground: "var(--color-warning-foreground, hsl(0 0% 100%))",
+          DEFAULT: "hsl(var(--warning, var(--color-warning, 38 92% 50%)))",
+          foreground: "hsl(var(--warning-foreground, var(--color-warning-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--warning-subtle, 48 96% 89%))",
+          "subtle-foreground": "hsl(var(--warning-subtle-foreground, 31 92% 30%))",
         },
         info: {
-          DEFAULT: "var(--color-info, hsl(217 91% 60%))",
-          foreground: "var(--color-info-foreground, hsl(0 0% 100%))",
+          DEFAULT: "hsl(var(--info, var(--color-info, 217 91% 60%)))",
+          foreground: "hsl(var(--info-foreground, var(--color-info-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--info-subtle, 204 94% 94%))",
+          "subtle-foreground": "hsl(var(--info-subtle-foreground, 201 96% 26%))",
         },
       },
       spacing: tailwindTokens.spacing,
