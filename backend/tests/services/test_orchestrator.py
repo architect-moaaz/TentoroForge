@@ -1715,3 +1715,36 @@ def test_a_page_change_recomposes_the_app(ats):
     plan = incremental_plan(ats, [ats["pages"][0]["id"]])
     assert "composition" in plan
     assert plan.index("composition") < plan.index("page_layouts")
+
+
+def test_every_refusal_so_far_reaches_the_next_attempt(svc):
+    """Fed only its latest refusal, the composer cycled on /master-data: each
+    attempt fixed the fault it was shown and undid one it was no longer shown.
+    Attempt three must still be holding attempt one's refusal."""
+    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.orchestrator import DAG, RunReport, _run_agent_subject
+
+    seen: list[str] = []
+    reasons = iter(["a Table cannot run Create Record", "declares `edit` but nothing updates",
+                    "a Table cannot run Update Record"])
+
+    def executor(spec):
+        seen.append(spec.feedback)
+        raise InvalidPatternTemplate(next(reasons))
+
+    report = RunReport()
+    _run_agent_subject(svc, executor, "page_layouts", DAG["page_layouts"], "",
+                       max_attempts=3, commit=False, user_request="", report=report)
+    assert seen[0] == ""
+    assert "attempt 1: a Table cannot run Create Record" in seen[1]
+    assert ("attempt 1: a Table cannot run Create Record" in seen[2]
+            and "attempt 2: declares `edit`" in seen[2])            # both, in order
+    assert seen[2].index("attempt 1") < seen[2].index("attempt 2")
+    assert "satisfy ALL of them together" in seen[2]
+
+
+def test_the_fan_out_path_accumulates_too(svc):
+    from services.blueprint.orchestrator import accumulate_refusals
+    fb = accumulate_refusals("", 1, "first")
+    fb = accumulate_refusals(fb, 2, "second")
+    assert fb.splitlines()[1:] == ["- attempt 1: first", "- attempt 2: second"]

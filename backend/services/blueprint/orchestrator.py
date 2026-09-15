@@ -1954,6 +1954,22 @@ FALLBACK_BY_NODE: dict[str, Any] = {
 }
 
 
+def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
+    """The feedback for the next attempt: EVERY refusal so far, not the last.
+
+    Fed only its latest refusal, the composer cycled: told a Table cannot run
+    Create it rebound the row to Update; told a Table cannot run Update it
+    dropped Delete; told Delete was missing it wired Delete to Create — four
+    attempts on /master-data, each fixing the fault it was shown and undoing
+    one it was no longer shown. Held to all of them at once, attempt two has
+    everything attempt four learned."""
+    line = f"- attempt {attempt}: {reason.strip()}"
+    if not previous.strip():
+        return ("Every refusal so far — the next reply must satisfy ALL of them "
+                f"together, not trade one for another:\n{line}")
+    return f"{previous.rstrip()}\n{line}"
+
+
 def _fallback_compose(svc: "BlueprintService", key: str, subject: str, *,
                       attempt: int, reason: str, commit: bool, user_request: str,
                       report: "RunReport", ledger: Any = None,
@@ -2095,7 +2111,8 @@ def _apply_subject(
         """The proposal was refused. Either it goes round again (§103), or
         this was the last attempt: the node's fallback composes the subject,
         or the subject is lost."""
-        state.feedback[subject] = reason
+        state.feedback[subject] = accumulate_refusals(
+            state.feedback.get(subject, ""), attempt, reason)
         if attempt >= max_attempts:
             if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
                                  commit=commit, user_request=user_request, report=report,
@@ -2242,8 +2259,9 @@ def _run_agent_subject(
         except Exception as exc:  # §102 — one classified outcome, not a crash
             # Carried into the next attempt for the same reason an apply
             # rejection is: a retry that is not told what went wrong is just
-            # the same request again.
-            feedback = str(exc)
+            # the same request again — and one told only its latest refusal
+            # trades faults (see `accumulate_refusals`).
+            feedback = accumulate_refusals(feedback, attempt, str(exc))
             if attempt == max_attempts:
                 if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
                                      commit=commit, user_request=user_request, report=report):
@@ -2259,7 +2277,7 @@ def _run_agent_subject(
             )
         except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
                 InvalidWorkflowStep, InvalidBusinessRule) as exc:
-            feedback = str(exc)
+            feedback = accumulate_refusals(feedback, attempt, str(exc))
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed
             # contract validation took the other seventeen with it, and the
