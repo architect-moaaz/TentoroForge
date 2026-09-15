@@ -318,6 +318,12 @@ def make_critique(
             # a review that could not judge, not a clean page.
             if not shots:
                 return None
+        # The ledger never sees the critique, so what sent a page round again
+        # was unrecoverable afterwards. One line per finding, in the log.
+        for f in findings:
+            logger.info("[review] %s finding %s/%s %s: %s", Path(output_dir).name,
+                        f.get("route"), f.get("kind"), f.get("severity"),
+                        str(f.get("note") or "")[:300])
         if emit is not None:
             emit("review", {"phase": "analysis", "findings": findings})
         return {"pages_reviewed": [s["route"] for s in shots],

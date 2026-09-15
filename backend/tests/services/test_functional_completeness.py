@@ -473,3 +473,131 @@ def test_search_without_columns_is_advisory_not_a_composition_blocker():
     assert "search-without-columns" in {f["rule"] for f in findings}   # still surfaced
     blocking = [f for f in findings if f["rule"] not in ADVISORY_PAGE_RULES]
     assert not any(f["rule"] == "search-without-columns" for f in blocking)  # not a blocker
+
+
+# ---------------------------------------------------------------------------
+# A page that declares an action must compose a control for it. The inverse of
+# control-without-action: a re-compose of /master-data that DROPPED the Delete
+# and Edit row actions passed every per-control check (no controls, nothing to
+# check) and was accepted — "Delete does nothing" became "Delete is gone".
+# ---------------------------------------------------------------------------
+
+def _list_page_doc(row_actions=None, *, table_props=None, actions=("view", "edit", "delete", "create")):
+    workflows = [
+        {"id": "FLOW-001", "name": "Create Record",
+         "steps": [{"key": "i", "type": "action", "entity": "E-REC",
+                    "config": {"actionType": "db_insert", "table": "records"}}],
+         "inputs": [{"name": "fullName", "kind": "field", "required": True}]},
+        {"id": "FLOW-002", "name": "Update Record",
+         "steps": [{"key": "u", "type": "action", "entity": "E-REC",
+                    "config": {"actionType": "db_update", "table": "records"}}],
+         "inputs": [{"name": "record", "kind": "record", "entity": "E-REC", "required": True}]},
+        {"id": "FLOW-003", "name": "Delete Record",
+         "steps": [{"key": "d", "type": "action", "entity": "E-REC",
+                    "config": {"actionType": "db_delete", "table": "records"}}],
+         "inputs": [{"name": "record", "kind": "record", "entity": "E-REC", "required": True}]},
+    ]
+    props = {"data": "{{records}}", "columns": [{"key": "fullName", "label": "Name"}]}
+    if row_actions is not None:
+        props["rowActions"] = row_actions
+    props.update(table_props or {})
+    return {
+        "pages": [
+            {"id": "PAGE-LIST", "route": "/master-data", "actions": list(actions),
+             "data": {"primaryEntity": "E-REC"}},
+            {"id": "PAGE-DET", "route": "/master-data/[id]", "actions": ["view"],
+             "data": {"primaryEntity": "E-REC"}},
+            {"id": "PAGE-ADD", "route": "/add-data", "actions": ["create"],
+             "data": {"primaryEntity": "E-REC"}},
+        ],
+        "data": {"entities": [{"id": "E-REC", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName", "type": "string"}]}]},
+        "workflows": workflows,
+        "pageLayouts": [
+            {"page": "PAGE-LIST",
+             "dataSources": [{"name": "records", "entity": "E-REC", "op": "list"}],
+             "root": {"type": "Stack", "props": {}, "children": [
+                 {"type": "Button", "props": {"label": "Add Record", "navigate": "/add-data"}, "children": []},
+                 {"type": "Table", "props": props, "children": []},
+             ]}},
+            {"page": "PAGE-DET",
+             "dataSources": [{"name": "rec", "entity": "E-REC", "op": "get"}],
+             "root": {"type": "Text", "props": {"content": "{{rec.fullName}}"}, "children": []}},
+            {"page": "PAGE-ADD",
+             "dataSources": [],
+             "root": {"type": "Form", "props": {"submitLabel": "Create Record", "workflow": "FLOW-001",
+                                                "fields": [{"name": "fullName"}]}, "children": []}},
+        ],
+    }
+
+
+_FULL_ROW_ACTIONS = [
+    {"label": "View", "navigate": "/master-data/{{id}}"},
+    {"label": "Edit", "navigate": "/add-data?id={{id}}"},
+    {"label": "Delete", "workflow": "FLOW-003", "variant": "danger"},
+]
+
+
+def _declared(doc, page="PAGE-LIST"):
+    return [f["detail"] for f in functional_findings(doc)
+            if f["rule"] == "declared-action-without-control" and f["page"] == page]
+
+
+def test_a_list_page_with_every_declared_control_is_accepted():
+    doc = _list_page_doc(_FULL_ROW_ACTIONS)
+    assert [f for f in functional_findings(doc) if f["page"] == "PAGE-LIST"] == []
+
+
+def test_dropping_the_delete_and_edit_row_actions_is_refused():
+    """Attempt 18 on DC5: the composer answered a column complaint by
+    re-composing the table without its row actions. Accepted then; refused now,
+    with the control and its workflow named."""
+    doc = _list_page_doc([])                  # table kept, actions gone
+    details = _declared(doc)
+    assert len(details) == 3                  # view, edit, delete — in the page's own order
+    assert "declares `view`" in details[0] and "/master-data/[id]" in details[0]
+    assert "declares `edit`" in details[1] and "Update Record (FLOW-002)" in details[1]
+    assert "declares `delete`" in details[2] and "Delete Record (FLOW-003)" in details[2]
+    assert "rowActions" in details[2]
+
+
+def test_view_is_satisfied_by_a_row_click_or_a_link_to_the_record_page():
+    only_delete = [{"label": "Delete", "workflow": "FLOW-003"}, {"label": "Edit", "navigate": "/add-data?id={{id}}"}]
+    doc = _list_page_doc(only_delete)
+    assert [d for d in _declared(doc) if "`view`" in d]
+    doc = _list_page_doc(only_delete, table_props={"onRowClick": {"navigate": "/master-data/{{id}}"}})
+    assert _declared(doc) == []
+    doc = _list_page_doc(only_delete + [{"label": "Open", "navigate": "/master-data/{id}"}])
+    assert _declared(doc) == []
+
+
+def test_a_form_page_satisfies_create_with_its_own_form():
+    doc = _list_page_doc(_FULL_ROW_ACTIONS)
+    assert _declared(doc, "PAGE-ADD") == []
+    doc["pageLayouts"][2]["root"] = {"type": "Text", "props": {"content": "nothing here"}, "children": []}
+    (d,) = _declared(doc, "PAGE-ADD")
+    assert "declares `create`" in d and "Create Record (FLOW-001)" in d
+
+
+def test_the_record_page_itself_is_not_asked_for_a_view_control():
+    doc = _list_page_doc(_FULL_ROW_ACTIONS)
+    assert _declared(doc, "PAGE-DET") == []
+
+
+def test_nothing_to_bind_is_not_the_composers_finding():
+    # No delete workflow at all: the gap is Page↔Workflow's (the review declares
+    # it); asking the composer for a control it cannot bind would only burn rounds.
+    doc = _list_page_doc([{"label": "Edit", "navigate": "/add-data?id={{id}}"},
+                          {"label": "View", "navigate": "/master-data/{{id}}"}])
+    doc["workflows"] = [w for w in doc["workflows"] if w["id"] != "FLOW-003"]
+    assert _declared(doc) == []
+
+
+def test_a_bound_flow_id_action_and_unknown_verbs_are_left_alone():
+    doc = _list_page_doc(_FULL_ROW_ACTIONS, actions=("FLOW-003", "export", "filter_by_gender"))
+    assert _declared(doc) == []
+
+
+def test_the_missing_control_is_a_refusal_not_advice():
+    from services.blueprint.functional_completeness import ADVISORY_PAGE_RULES
+    assert "declared-action-without-control" not in ADVISORY_PAGE_RULES

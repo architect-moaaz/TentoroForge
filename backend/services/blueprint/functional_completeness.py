@@ -339,6 +339,127 @@ def _bindings(node: Any) -> set[str]:
     return found
 
 
+#: Verbs that OPEN a record rather than change it — satisfied by a navigation
+#: to the record's own page, or a row click.
+_VIEW_VERBS = frozenset({"view", "open", "show", "details", "detail"})
+
+
+def _intents(props: Any, actions: set[str]) -> Iterator[dict]:
+    """Every dict inside a node's props that carries an action — the node's own
+    props, and the nested ones (`Table.rowActions[]`, `emptyAction`,
+    `headerActions[]`) — so a row action counts as the control it is."""
+    if isinstance(props, list):
+        for item in props:
+            yield from _intents(item, actions)
+        return
+    if not isinstance(props, dict):
+        return
+    if set(props) & actions:
+        yield props
+    for v in props.values():
+        if isinstance(v, (dict, list)):
+            yield from _intents(v, actions)
+
+
+def _route_shape(route: str) -> str:
+    """`/master-data/[id]`, `/master-data/{{id}}`, `/master-data/{id}` and
+    `/master-data/{{row.id}}` all name the same page."""
+    return re.sub(r"(\[[^\]/]+\]|\{\{[^}]*\}\}|\{[^}/]*\})", "*",
+                  str(route or "").split("?")[0].rstrip("/")) or "/"
+
+
+def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
+    """A page declares what a person can DO there (`actions: [view, edit,
+    delete]`); the composed tree must give each of those a control. The
+    inverse of `control-without-action`: there every control must do
+    something, here everything declared must have a control. Without it a
+    re-compose that DROPPED the Delete row action was accepted — the page
+    passed every per-control check because it had no controls to check —
+    and the user's "Delete does nothing" became "Delete is gone".
+
+    Checked only where a control could be satisfied: a CRUD verb whose
+    workflow exists on the page's entity, a view verb whose record page
+    exists. What is not there to bind is the workflow author's (Page↔Workflow),
+    not the composer's."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity or not layout:
+        return []
+    route = str(page.get("route") or page.get("id") or "")
+    by_name = _entity_id_by_name(doc)
+    ent_name = next((str(e.get("name")) for e in _live((doc.get("data") or {}).get("entities"))
+                     if str(e.get("id")) == entity), entity)
+    actions = _action_props()
+    intents = [i for n in _walk(layout.get("root")) for i in _intents(n.get("props") or {}, actions)]
+    tables = [n for n in _walk(layout.get("root")) if n.get("type") == "Table"]
+
+    def label_of(i: dict) -> str:
+        return str(i.get("label") or i.get("submitLabel") or i.get("aria-label") or "")
+
+    def runs_op(op: str) -> bool:
+        for i in intents:
+            for ref in _workflow_refs(i):
+                wf = _workflow_by_id(doc, ref)
+                if wf is not None and op in _workflow_db_ops(wf) \
+                        and _workflow_targets_entity(doc, wf, entity):
+                    return True
+            if _VERB_DB_OP.get(_verb_of(label_of(i))) == op and (set(i) & actions):
+                return True                   # "Add Record" → the form page; "Edit" → the form
+        return False
+
+    detail_routes = {str(p.get("route")) for p in _live(doc.get("pages"))
+                     if "[" in str(p.get("route") or "")
+                     and str((p.get("data") or {}).get("primaryEntity") or "") in {entity, by_name.get(entity, "")}}
+
+    def opens_record() -> bool:
+        shapes = {_route_shape(r) for r in detail_routes}
+        for t in tables:
+            if (t.get("props") or {}).get("onRowClick") or (t.get("props") or {}).get("rowHref"):
+                return True
+        for i in intents:
+            nav = i.get("navigate") or i.get("href") or i.get("to")
+            if isinstance(nav, str) and _route_shape(nav) in shapes:
+                return True
+            if _verb_of(label_of(i)) in _VIEW_VERBS and (set(i) & actions):
+                return True
+        return False
+
+    _does = {"db_insert": "creates", "db_update": "updates", "db_delete": "deletes"}
+    out: list[str] = []
+    seen: set[str] = set()
+    for action in page.get("actions") or []:
+        label = action if isinstance(action, str) else str(
+            (action or {}).get("name") or (action or {}).get("label") or "")
+        if not label or label.upper().startswith("FLOW-"):
+            continue
+        verb = _verb_of(label)
+        op = _VERB_DB_OP.get(verb)
+        if op:
+            if op in seen or runs_op(op):
+                continue
+            wf_name = _workflow_for_op(doc, page, op)
+            if not wf_name:
+                continue                      # nothing to bind yet — Page↔Workflow's
+            seen.add(op)
+            wf_id = next((str(w.get("id")) for w in _live(doc.get("workflows"))
+                          if str(w.get("name") or w.get("id")) == wf_name), wf_name)
+            how = (f"a `rowActions` entry on the Table, or a Button on the {ent_name}'s own page, "
+                   f"labelled '{verb.capitalize()} …' bound to {wf_name} ({wf_id})"
+                   if op != "db_insert" else
+                   f"a Button labelled '{verb.capitalize()} …' that runs {wf_name} ({wf_id}) "
+                   f"or navigates to the page whose Form does")
+            out.append(f"{route} declares `{label}` on {ent_name}, but nothing composed "
+                       f"{_does[op]} a {ent_name} — a control the contract promises is "
+                       f"missing, and a page that quietly drops it is not fixed. Add {how}.")
+        elif verb in _VIEW_VERBS and "[" not in route and detail_routes:
+            if "view" in seen or opens_record():
+                continue
+            seen.add("view")
+            out.append(f"{route} declares `{label}` on {ent_name}, but nothing composed opens "
+                       f"a {ent_name} — add a `rowActions` entry (or a Link) that navigates to "
+                       f"{sorted(detail_routes)[0]}, or an `onRowClick` on the Table.")
+    return out
+
+
 def page_findings(doc: dict) -> list[dict]:
     """What a page's controls would do — the composer's refusals."""
     """`[{rule, page, detail}]` — everything that would not work.
@@ -456,6 +577,8 @@ def page_findings(doc: dict) -> list[dict]:
             out.append({"rule": "dependent-options-unsatisfied", "page": pid, "detail": f"{route}: {detail}"})
         for detail in form_field_findings(doc, page, layout):
             out.append({"rule": "form-field-unknown", "page": pid, "detail": f"{route}: {detail}"})
+        for detail in declared_action_findings(doc, page, layout):
+            out.append({"rule": "declared-action-without-control", "page": pid, "detail": detail})
         unresolved = set(_dangling(
             {"dataSources": layout.get("dataSources") or [],
              "root": layout.get("root")})) - _planner_placeholders()
