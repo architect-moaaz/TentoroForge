@@ -458,7 +458,7 @@ function _canonTable(s: string): string {
   return s.toLowerCase().replace(/[_-]/g, "");
 }
 
-function _resolveTable(name?: unknown): any {
+export function _resolveTable(name?: unknown): any {
   if (typeof name !== "string") return undefined;
   const tables = Object.values(schema as Record<string, unknown>).filter(
     (v) => is(v as any, Table),
@@ -484,6 +484,26 @@ function _resolveTable(name?: unknown): any {
 // Returns undefined on any missing / null segment (never throws). Whitespace
 // inside indices is not permitted (a real binding never has it) so we don't
 // tolerate it — the regex catches malformed refs by falling out.
+/**
+ * A workflow declares a RECORD input — `record` — and reads `{{record.id}}`;
+ * the controls that run it hand over the record AS ITS ID. A Table row action
+ * dispatches `{ id }` (the row's id under `id`), and a Button's `args` pass
+ * `{ record: "<uuid>" }` (the id under the input's own name). Neither is an
+ * object with an `.id`, so the walk found nothing, the WHERE was empty, and
+ * every Delete/Update refused with "trigger form is missing an input" — on a
+ * workflow that was bound correctly. `<name>.id` therefore resolves to the
+ * bare id supplied under `<name>`, else to the `id` the row dispatch sends.
+ * Only `.id`: a record's other fields were never supplied and stay unresolved.
+ */
+function _recordIdFallback(path: string, vars: Record<string, unknown>): unknown {
+  const m = path.match(/^([A-Za-z_]\w*)\.id$/);
+  if (!m) return undefined;
+  const own = vars[m[1]];
+  if (typeof own === "string" || typeof own === "number") return own;
+  if (own == null && (typeof vars.id === "string" || typeof vars.id === "number")) return vars.id;
+  return undefined;
+}
+
 function _walkPath(root: unknown, path: string): unknown {
   if (root == null) return undefined;
   // Split "a.b[0].c" into ["a", "b", 0, "c"]. `\d+` inside `[]` becomes a
@@ -508,6 +528,11 @@ function _walkPath(root: unknown, path: string): unknown {
   let cur: any = root;
   for (const seg of parts) {
     if (cur == null) return undefined;
+    // AN ID IS ITS OWN ID. A form's foreign-key field carries the related
+    // row's id as a string (`property: "7d85…"`), and the Blueprint reads it
+    // as the row (`{{property.id}}`). Walking `.id` into a string gave
+    // undefined, and the case's property_id was inserted as null.
+    if (seg === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
     cur = cur[seg as any];
   }
   return cur;
@@ -546,7 +571,8 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       const v: unknown = ctx.variables[key];
       if (v !== undefined) return v;
       if (!key.includes(".") && !key.includes("[")) return "";
-      return _walkPath(ctx.variables, key);
+      const walked = _walkPath(ctx.variables, key);
+      return walked === undefined ? _recordIdFallback(key, ctx.variables) : walked;
     }
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
@@ -560,7 +586,8 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       let v: unknown = ctx.variables[key];
       if (v !== undefined) return v == null ? "" : String(v);
       if (!key.includes(".") && !key.includes("[")) return "";
-      const walked = _walkPath(ctx.variables, key);
+      let walked = _walkPath(ctx.variables, key);
+      if (walked === undefined) walked = _recordIdFallback(key, ctx.variables);
       return walked == null ? "" : String(walked);
     });
   }
@@ -717,7 +744,7 @@ function _isUnresolvedRef(ref: string, ctx: WorkflowExecutionContext): boolean {
   return false;
 }
 
-function _resolveValueMap(
+export function _resolveValueMap(
   map: unknown,
   ctx: WorkflowExecutionContext,
   table?: any,
@@ -831,7 +858,7 @@ export function _finalizeInsert(
   return out;
 }
 
-function _buildWhere(
+export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
 ): any {

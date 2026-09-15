@@ -32,6 +32,26 @@ function tokenVar(ref: string): string {
   return `var(--token-${ref.replace(/^tokens\./, "").replace(/\./g, "-")})`;
 }
 
+// A NAMED GAP IS A SIZE, NOT A VARIABLE. Every composed page writes its gaps
+// as `sm` / `md` / `lg`; this component turned them into `var(--token-sm)`,
+// which no stylesheet defines, so every Cluster rendered with no gap at all
+// and its buttons touched. Stack and Grid already map the same names to a
+// real size; Cluster maps them the same way, and only a `tokens.…` reference
+// still becomes a variable.
+const NAMED_GAP_REM: Record<string, string> = {
+  none: "0", xs: "0.25rem", sm: "0.5rem", md: "1rem", lg: "1.5rem", xl: "2rem", "2xl": "2.5rem",
+};
+
+function gapCss(gap: string | undefined, density: "compact" | "comfortable" | "spacious"): string {
+  if (!gap) return DENSITY_GAP_REM[density];
+  if (gap in NAMED_GAP_REM) return NAMED_GAP_REM[gap];
+  const step = /^tokens\.spacing\.(\d+)$/.exec(gap);
+  if (step) return `${Number(step[1]) * 0.25}rem`;
+  if (/^\d+(\.\d+)?(px|rem|em)$/.test(gap)) return gap;
+  if (gap.startsWith("tokens.")) return tokenVar(gap);
+  return DENSITY_GAP_REM[density];
+}
+
 // Wave 2: density-aware default gap (CSS rem values for inline style).
 // When props.gap is absent, this fallback kicks in.
 // comfortable = 1rem which is the neutral default (Cluster previously had no default gap).
@@ -79,7 +99,7 @@ export function Cluster({
     const gridCss: React.CSSProperties = {
       display: "grid",
       gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
-      gap: gap ? tokenVar(gap) : DENSITY_GAP_REM[density],
+      gap: gapCss(gap, density),
       alignItems: align === "stretch" ? "stretch"
         : align === "start"   ? "start"
         : align === "end"     ? "end"
@@ -111,7 +131,7 @@ export function Cluster({
     callerClass,
   );
   const css: React.CSSProperties = {
-    gap: gap ? tokenVar(gap) : DENSITY_GAP_REM[density],
+    gap: gapCss(gap, density),
     ...resolveStyle(style),
   };
   return (

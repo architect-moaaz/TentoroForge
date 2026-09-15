@@ -21,7 +21,7 @@ type Source = {
 };
 
 /** The caller, in the shape the data engine's ownership rules read. */
-export type ActorCtx = { user?: { id?: string; role?: string; email?: string; workspaceId?: string } };
+export type ActorCtx = { user?: { id?: string; role?: string; email?: string; workspaceId?: string; [column: string]: unknown } };
 
 /** Narrow a session user to the engine's context.
  *
@@ -30,10 +30,19 @@ export type ActorCtx = { user?: { id?: string; role?: string; email?: string; wo
  * or field ACLs fail closed and every ruled field comes back null. A row-scoped
  * entity fails closed on the missing id separately, inside the engine.
  */
-export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown; workspaceId?: unknown }) {
+export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown; workspaceId?: unknown; [column: string]: unknown }) {
   if (!user || !(user.id || user.role)) return undefined;
+  // THE WHOLE ROW TRAVELS. An ownership rule's `actorColumn` names any users
+  // column (homePropertyId, organisationId); narrowing to four fields here
+  // left the engine nothing to compare a workspace scope against.
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(user)) {
+    if (["id", "role", "email", "workspaceId"].includes(k)) continue;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v)) rest[k] = v;
+  }
   return {
     user: {
+      ...rest,
       id: user.id ? String(user.id) : undefined,
       role: user.role as string | undefined,
       email: user.email as string | undefined,
@@ -76,6 +85,14 @@ export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Ar
 // way in so both shapes work.
 const SCALAR_OPS = new Set(["max", "avg", "sum", "count", "min"]);
 
+// AN UNRESOLVED ROUTE PARAM IS NOT A RECORD ID. A detail/action route reached
+// at its literal template (`/rentals/[id]/return`, id="[id]") — no real record
+// selected — passed "[id]" straight to a get-by-id, and Postgres rejected it as
+// an invalid uuid, failing the whole page load with a 500 instead of showing a
+// "not found" state. Any id still carrying the `[…]` placeholder brackets is
+// unresolved; treat it as no record rather than a query.
+const isUnresolvedRouteParam = (v: string): boolean => /[[\]]/.test(v);
+
 export const dataEngine: DataEngine = {
   async run(source: unknown, ctx?: { request?: Request; user?: { id?: string; role?: string; email?: string; workspaceId?: string } }) {
     const src = (source ?? {}) as Source & { op?: string; field?: string; metrics?: Record<string, unknown> };
@@ -113,6 +130,7 @@ export const dataEngine: DataEngine = {
 
       // Detail load — { type: "detail", entity, id } or { id } in query
       if (src.id !== undefined) {
+        if (isUnresolvedRouteParam(String(src.id))) return [];
         const item = await engine.findById(entity, String(src.id), userCtx);
         return item ? [item] : [];
       }
@@ -130,6 +148,7 @@ export const dataEngine: DataEngine = {
         try { id = new URL(ctx.request.url).searchParams.get("id") ?? undefined; } catch { /* non-URL request */ }
       }
       if (id !== undefined && typeof id !== "object" && id !== null && id !== "") {
+        if (isUnresolvedRouteParam(String(id))) return [];
         const item = await engine.findById(entity, String(id), userCtx);
         return item ? [item] : [];
       }
@@ -162,6 +181,27 @@ export const dataEngine: DataEngine = {
           }
         } catch { /* non-URL request */ }
       }
+      // "{{user.<column>}}" — a list source scoped to the signed-in user's own
+      // row: `{propertyId: "{{user.homePropertyId}}"}` is an approver's
+      // sign-offs queue at their home property. The renderer interpolates page
+      // props against `user`, but a source resolves HERE, before anything
+      // renders, so nothing filled the placeholder and the query compared
+      // propertyId to the literal text: an empty queue for every approver.
+      // The session user fills it. A user without the column is not narrowed
+      // by it — "scoped to their home property where they have one" — and the
+      // ownership rules, not a page filter, remain the boundary: a scoped role
+      // with no home property still reads nothing, a chain-wide role reads the
+      // chain. Left in place, the literal text reached Postgres as a uuid and
+      // the whole source failed.
+      const sessionUser = (ctx?.user ?? {}) as Record<string, unknown>;
+      for (const k of Object.keys(filters)) {
+        const m = /^\{\{\s*user\.([A-Za-z0-9_]+)\s*\}\}$/.exec(filters[k]);
+        if (!m) continue;
+        const v = sessionUser[m[1]];
+        if (v !== undefined && v !== null && v !== "") filters[k] = String(v);
+        else delete filters[k];
+      }
+
       // Sort — accept either `sort: "field"` (asc default) or
       // `sort: {field, order}` on the source.
       const rawSort = (src as { sort?: unknown }).sort;

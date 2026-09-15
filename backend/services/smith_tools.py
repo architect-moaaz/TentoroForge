@@ -560,6 +560,12 @@ TOOL_CATALOG: list[dict] = [
              "design as evidence. `token_env` is the NAME of the environment "
              "variable holding the token (e.g. FIGMA_TOKEN); never the token "
              "itself, which must not reach the conversation log.\n"
+             "  connect_uxpilot {uxpilot_ref, key_env} — attach a UX Pilot "
+             "page as evidence. `key_env` is the NAME of the environment "
+             "variable holding the UX Pilot API key; never the key itself.\n"
+             "  disconnect_design {} — remove the connected design and "
+             "compose every screen from the component library instead: "
+             "'disconnect the Figma design', 'drop the design'.\n"
              "  rebuild       {} — regenerate the whole application from "
              "its definition.\n"
              "Omitting `verb` means rename. If you can't confidently fill "
@@ -743,6 +749,42 @@ TOOL_CATALOG: list[dict] = [
              "notNull?, ...}. Rolled back atomically on failure. "
              "Follow up with add_page(archetype='create', entity=<new>, "
              "…) to give it a UI."},
+    {"name": "remove_entity",
+     "signature": "remove_entity(entity) -> {applied, changes, verify, "
+                  "edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DROP an entire entity — its table, Drizzle module and barrel "
+             "export — 'remove / delete / drop / get rid of the drafts table', "
+             "'we don't need the Draft entity anymore'. Target is a whole "
+             "ENTITY/TABLE, not a page (that is remove_page) or one column (that "
+             "is remove_field). The highest-blast-radius change: the data is gone "
+             "and every page whose primary entity it is, every workflow that "
+             "operates on it, and every relationship that names it is orphaned. "
+             "Returns needs_confirmation with that full cascade first; after it, "
+             "the completeness checks surface each orphan to repair. Refuses the "
+             "auth/users entity."},
+    {"name": "remove_workflow",
+     "signature": "remove_workflow(workflow_id) -> {applied, changes, "
+                  "verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DELETE a workflow file — 'remove / delete / drop / kill / scrap the "
+             "DeleteRecord workflow / flow / automation'. Target is a WORKFLOW, "
+             "not a page or entity. Every Button/Form that dispatched it stops "
+             "resolving, which the workflow-not-defined check then surfaces so the "
+             "control is rebound or dropped. To CHANGE a flow's steps instead of "
+             "deleting it, use edit_workflow. Reference-breaking, so it confirms "
+             "first."},
+    {"name": "edit_entity",
+     "signature": "edit_entity(entity, new_name?, new_table?) -> {applied, "
+                  "changes, verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "RENAME an entity and/or its table — 'rename the Draft entity to "
+             "Post', 'call the Draft entity Post instead', 'the customers table "
+             "should be clients'. Moves the registry entry, the Drizzle module "
+             "(file, exported const, pgTable name) and the barrel export together. "
+             "new_table alone renames just the table. NOT a field rename (that is "
+             "edit_field) and NOT a page title change (that is edit_page/rename). "
+             "The highest-cascade change: every workflow, page, relationship and "
+             "foreign key that named the old entity must move, so it confirms "
+             "first and the completeness checks surface each reference. Refuses "
+             "the auth/users entity and any rename into that namespace."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -761,6 +803,35 @@ TOOL_CATALOG: list[dict] = [
              "with edit_page(<that page>, 'show the new discount field'). "
              "Rolled back atomically on failure; refuses a duplicate field "
              "or an unknown entity."},
+    {"name": "remove_field",
+     "signature": "remove_field(entity, field) -> {applied, changes, "
+                  "verify, edited_paths} | {status:'needs_confirmation'}",
+     "desc": "DROP one column from an entity's DATA MODEL — 'remove / delete / "
+             "drop / get rid of / scrap the middle-name field from customers'. "
+             "SCOPE MATTERS: this deletes the column AND ITS DATA. If the ask is "
+             "only to stop SHOWING a field on a screen ('take phone off the "
+             "signup form', 'hide the notes field') — the column stays — that is "
+             "edit_page, NOT this. Writes the registry + that entity's Drizzle "
+             "module (a drizzle-kit push). Reference-breaking: a workflow step, "
+             "form field or binding that named it now points at nothing, so it "
+             "returns needs_confirmation first and the field-ripple checks "
+             "surface the references to repair. Refuses the primary key, the "
+             "managed timestamps, and a foreign-key column."},
+    {"name": "edit_field",
+     "signature": "edit_field(entity, field, new_name?, new_type?) -> "
+                  "{applied, changes, verify, edited_paths} | "
+                  "{status:'needs_confirmation'}",
+     "desc": "RENAME and/or RETYPE one column's DATA MODEL — 'rename "
+             "customers.fullName to displayName', 'call the age field yearsOld', "
+             "'make age a number/text', 'change price to a decimal'. Updates the "
+             "registry + the Drizzle column (var, column name, builder). NOT for "
+             "changing HOW a field is entered — 'make gender a dropdown', 'use a "
+             "date picker for dob', 'show price as currency' is set_field_interaction "
+             "(a UI change, same column type). A rename is reference-breaking "
+             "(every workflow/form/binding that named the old field must move), so "
+             "it returns needs_confirmation first and the ripple checks flag what "
+             "still names it. Pass at least one of new_name / new_type; refuses "
+             "managed columns."},
     {"name": "plan_and_apply",
      "signature": "plan_and_apply(ask) -> {status, plan, steps, edited_paths}",
      "desc": "One call for ADD-A-FEATURE asks that span multiple seams "
@@ -1187,7 +1258,12 @@ READONLY_HANDLERS = {
     "set_field_interaction":    lambda output_dir, args: _smith_set_field_interaction(output_dir, args),
     "create_business_rule":     lambda output_dir, args: _smith_create_business_rule(output_dir, args),
     "add_entity":               lambda output_dir, args: _smith_add_entity(output_dir, args),
+    "remove_entity":            lambda output_dir, args: _smith_remove_entity(output_dir, args),
+    "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
+    "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
+    "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
+    "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
     "think":                    lambda output_dir, args: _smith_think(args),
     "understand_ask":           lambda output_dir, args: _smith_understand_ask(args),
@@ -1223,6 +1299,10 @@ READONLY_HANDLERS = {
     # JV-8 — read the most recent VerifyRun row's structured report so
     # Smith can answer follow-ups after a verify+fix without re-running.
     "read_last_verify_run":     lambda output_dir, args: _smith_read_last_verify_run(output_dir, args),
+    # SV-9 — in the catalogue since the initial commit, dispatchable since
+    # 2026-09-10. Without this the model was coached to call a tool that
+    # fell through to "unknown tool" every time.
+    "verify_app":               lambda output_dir, args: _smith_verify_app(output_dir, args),
     "add_role":                 lambda output_dir, args: _smith_add_role(output_dir, args),
     "remove_role":              lambda output_dir, args: _smith_remove_role(output_dir, args),
     "restrict_page_to_role":    lambda output_dir, args: _smith_restrict_page_to_role(output_dir, args),
@@ -1741,6 +1821,85 @@ def _smith_add_entity(output_dir: str, args: dict) -> dict:
     return result
 
 
+def _smith_remove_entity(output_dir: str, args: dict) -> dict:
+    """Drop an entire entity. Highest blast radius, so it confirms first with
+    the true cascade (dependent pages/workflows/relationships)."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_entity
+    entity = args.get("entity") or args.get("name") or ""
+    if not args.get("_confirmed"):
+        deps: list[str] = []
+        try:
+            from services.remove_entity_seam import dependents
+            from services.registry import load_registry
+            doc = load_registry(output_dir) or {}
+            deps = dependents(doc, entity)
+        except Exception:  # noqa: BLE001 — confirmation must not fail on a read
+            deps = []
+        return needs_confirmation_result(
+            "entity", entity, dependents=deps or [f"the {entity} table and its data"],
+            cascade=True, removes=deps)
+    diagnosis = {
+        "artifact": {"kind": "entity", "path": entity},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_entity", "patch": {"entity": entity}},
+    }
+    result = _apply_remove_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_edit_entity(output_dir: str, args: dict) -> dict:
+    """Rename an entity and/or its table. Highest-cascade edit, so it confirms
+    first with the dependent pages/workflows/relationships."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_edit_entity
+    entity = args.get("entity") or args.get("name") or ""
+    new_name = args.get("new_name")
+    new_table = args.get("new_table")
+    if not args.get("_confirmed"):
+        deps: list[str] = []
+        try:
+            from services.remove_entity_seam import dependents
+            from services.registry import load_registry
+            deps = dependents(load_registry(output_dir) or {}, entity)
+        except Exception:  # noqa: BLE001 — confirmation must not fail on a read
+            deps = []
+        target = new_name or new_table or entity
+        return needs_confirmation_result(
+            "entity", f"{entity} → {target}", action="rename",
+            dependents=deps or [f"everything that names {entity!r} must move to {target!r}"])
+    diagnosis = {
+        "artifact": {"kind": "entity", "path": entity},
+        "explanation": "",
+        "proposedFix": {"seam": "edit_entity", "patch": {
+            "entity": entity, "new_name": new_name, "new_table": new_table}},
+    }
+    result = _apply_edit_entity(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
+    """Delete a workflow file. Reference-breaking, so it confirms first."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_workflow
+    wid = args.get("workflow_id") or args.get("workflow") or args.get("id") or ""
+    if not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "workflow", wid,
+            dependents=[f"every Button or Form that dispatched {wid!r} stops "
+                        f"resolving until it is rebound or removed"])
+    diagnosis = {
+        "artifact": {"kind": "workflow", "path": wid},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_workflow", "patch": {"workflow_id": wid}},
+    }
+    result = _apply_remove_workflow(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
 def _smith_add_field(output_dir: str, args: dict) -> dict:
     """Add one column to an EXISTING entity — the incremental data-model change
     a field-add is supposed to be, instead of a whole-app rebuild (F-01).
@@ -1763,6 +1922,59 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
         }},
     }
     result = _apply_add_field(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_remove_field(output_dir: str, args: dict) -> dict:
+    """Drop one column from an existing entity. Data-affecting and
+    reference-breaking, so it confirms first (unless ``_confirmed``)."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_remove_field
+    entity = args.get("entity") or ""
+    field = args.get("field") or args.get("field_name") or ""
+    if not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "field", f"{entity}.{field}",
+            dependents=[
+                f"the column and its data are dropped",
+                f"every workflow step, form field and binding that names "
+                f"{field!r} stops resolving until it is repaired",
+            ])
+    diagnosis = {
+        "artifact": {"kind": "field", "path": f"{entity}.{field}"},
+        "explanation": "",
+        "proposedFix": {"seam": "remove_field", "patch": {"entity": entity, "field": field}},
+    }
+    result = _apply_remove_field(output_dir, diagnosis, git=False)
+    result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
+    return result
+
+
+def _smith_edit_field(output_dir: str, args: dict) -> dict:
+    """Rename and/or retype one column. A rename is reference-breaking, so a
+    rename confirms first; a pure retype applies directly."""
+    from services.confirmation_gate import needs_confirmation_result
+    from services.fix_applier import _apply_edit_field
+    entity = args.get("entity") or ""
+    field = args.get("field") or args.get("field_name") or ""
+    new_name = args.get("new_name")
+    new_type = args.get("new_type")
+    if new_name and not args.get("_confirmed"):
+        return needs_confirmation_result(
+            "field", f"{entity}.{field} → {new_name}", action="rename",
+            dependents=[
+                f"every workflow step, form field and binding that names "
+                f"{field!r} must move to {new_name!r} or it stops resolving",
+            ])
+    diagnosis = {
+        "artifact": {"kind": "field", "path": f"{entity}.{field}"},
+        "explanation": "",
+        "proposedFix": {"seam": "edit_field", "patch": {
+            "entity": entity, "field": field,
+            "new_name": new_name, "new_type": new_type}},
+    }
+    result = _apply_edit_field(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
 
@@ -2358,6 +2570,72 @@ def _smith_generate_mobile_app(output_dir: str, args: dict) -> dict:
             f"surface the exact gap there."
         ),
     }
+
+
+async def _project_id_for_output_dir(db, output_dir: str):
+    """The Project row that owns ``output_dir``, or None.
+
+    Exact resolved path first; then by directory name, because some projects
+    store relative paths and the mismatch must not read as "no project".
+    """
+    from pathlib import Path
+
+    from sqlalchemy import select as _select
+
+    from models.project import Project as _Project
+
+    resolved = str(Path(output_dir).resolve())
+    project = (await db.execute(
+        _select(_Project).where(_Project.output_dir == resolved),
+    )).scalar_one_or_none()
+    if project is None:
+        projects = (await db.execute(_select(_Project))).scalars().all()
+        project = next(
+            (p for p in projects if p.output_dir
+             and Path(p.output_dir).name == Path(resolved).name),
+            None,
+        )
+    return project.id if project is not None else None
+
+
+def _smith_verify_app(output_dir: str, args: dict) -> dict:
+    """Run the Self-Verify Pass (SV-9) on the app in ``output_dir``.
+
+    The same pass the plain-language route fires from ``routers.generate``
+    when a message reads as a verify intent; this is the in-loop path, for
+    when Smith decides to verify. ``fix`` defaults to true as the catalogue
+    promises. Sync wrapper, same shape as :func:`_smith_read_last_verify_run`:
+    the SDK dispatches tools synchronously from a threadpool, so a loop is
+    created here and driven to completion.
+    """
+    import asyncio
+
+    from database import async_session
+
+    scope = str(args.get("scope") or "*")
+    target = "deploy" if str(args.get("target") or "preview") == "deploy" else "preview"
+    fix = args.get("fix", True)
+    fix = fix if isinstance(fix, bool) else str(fix).strip().lower() not in ("false", "0", "no")
+
+    async def _run() -> dict:
+        from services.self_verify_pass import run_self_verify
+
+        async with async_session() as db:
+            project_id = await _project_id_for_output_dir(db, output_dir)
+        if project_id is None:
+            return {"error": "project_not_found_for_output_dir"}
+        return await run_self_verify(
+            project_id, target=target, scope=scope, fix=fix,
+            invoked_by="user_chat",
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            raise RuntimeError("nested loop")
+    except RuntimeError:
+        pass
+    return asyncio.run(_run())
 
 
 def _smith_read_last_verify_run(output_dir: str, args: dict) -> dict:

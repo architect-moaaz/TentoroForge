@@ -77,6 +77,8 @@ VALID_STATUSES = (
 SINGLETON_SECTIONS: frozenset[str] = frozenset({
     "product", "navigation", "designSystem", "security",
     "runtime", "database", "deployment", "completeness",
+    # §34 — the whole app sketched once. One object per app, like designSystem.
+    "composition",
 })
 
 #: Lists whose members carry no id of their own, identified instead by a

@@ -86,60 +86,68 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "string"
-                    },
-                    "actor": {
+                  "anyOf": [
+                    {
                       "type": "object",
                       "properties": {
-                        "name": {
+                        "id": {
                           "type": "string"
                         },
-                        "avatarInitials": {
+                        "timestamp": {
                           "type": "string"
                         },
-                        "avatarUrl": {
+                        "actor": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "avatarInitials": {
+                              "type": "string"
+                            },
+                            "avatarUrl": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "action": {
                           "type": "string"
+                        },
+                        "target": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "create",
+                            "update",
+                            "approve",
+                            "reject",
+                            "comment",
+                            "system"
+                          ]
                         }
                       },
                       "required": [
-                        "name"
+                        "timestamp",
+                        "actor",
+                        "action",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
-                    "action": {
-                      "type": "string"
-                    },
-                    "target": {
-                      "type": "string"
-                    },
-                    "detail": {
-                      "type": "string"
-                    },
-                    "category": {
-                      "type": "string",
-                      "enum": [
-                        "create",
-                        "update",
-                        "approve",
-                        "reject",
-                        "comment",
-                        "system"
-                      ]
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
-                  },
-                  "required": [
-                    "timestamp",
-                    "actor",
-                    "action",
-                    "target"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               {
@@ -275,6 +283,14 @@
           },
           "title": {
             "type": "string"
+          },
+          "ariaLive": {
+            "type": "string",
+            "enum": [
+              "off",
+              "polite",
+              "assertive"
+            ]
           },
           "style": {
             "type": "object",
@@ -9273,24 +9289,32 @@
           "items": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "label": {
-                  "type": "string",
-                  "minLength": 1
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "copyable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "value"
+                  ],
+                  "additionalProperties": false
                 },
-                "value": {
-                  "type": "string"
-                },
-                "copyable": {
-                  "type": "boolean"
+                {
+                  "type": "object",
+                  "additionalProperties": {}
                 }
-              },
-              "required": [
-                "label",
-                "value"
-              ],
-              "additionalProperties": false
+              ]
             },
             "minItems": 1
           }
@@ -9582,29 +9606,47 @@
         "type": "object",
         "properties": {
           "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "title": {
-                  "type": "string"
-                },
-                "subtitle": {
-                  "type": "string"
-                },
-                "icon": {
-                  "type": "string"
-                }
+            "anyOf": [
+              {
+                "type": "string"
               },
-              "required": [
-                "title"
-              ],
-              "additionalProperties": false
-            },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "subtitle": {
+                          "type": "string"
+                        },
+                        "icon": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "title"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  ]
+                }
+              }
+            ],
             "default": []
           },
           "divided": {
             "type": "boolean"
+          },
+          "itemHref": {
+            "type": "string"
           },
           "limit": {
             "type": "integer",
@@ -10414,8 +10456,7 @@
           }
         },
         "required": [
-          "name",
-          "options"
+          "name"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
@@ -13187,8 +13228,7 @@
         },
         "required": [
           "name",
-          "label",
-          "options"
+          "label"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
@@ -15749,47 +15789,55 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "timestamp": {
-                      "type": "string"
-                    },
-                    "actor": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "pending",
-                            "approved",
-                            "rejected",
-                            "info",
-                            "completed"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        },
+                        "actor": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "approved",
+                                "rejected",
+                                "info",
+                                "completed"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            }
                           ]
                         },
-                        {
-                          "type": "string",
-                          "minLength": 1
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
                         }
-                      ]
+                      },
+                      "required": [
+                        "timestamp",
+                        "title"
+                      ],
+                      "additionalProperties": false
                     },
-                    "title": {
-                      "type": "string"
-                    },
-                    "detail": {
-                      "type": "string"
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
-                  },
-                  "required": [
-                    "timestamp",
-                    "title"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               },
               {

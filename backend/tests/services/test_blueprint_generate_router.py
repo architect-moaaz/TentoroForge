@@ -294,3 +294,81 @@ def test_the_forecast_is_compared_to_the_outcome(tmp_path):
 
     assert compare(planned, {"pages": [{"id": f"P{i}"} for i in range(18)]}) == {}
 
+
+
+# --- the verify-&-fix offer reaches the user -------------------------------
+#
+# The offer used to be emitted by the caller AFTER `_run_dag` returned. A build
+# that outran its turn released the panel, finished in the background, announced
+# completion, and the offer — emitted later with the stream gone and nothing
+# persisting it — never arrived. Measured on a real build (roazgziv): the
+# "your application is built" line was in the transcript, the offer was not.
+# It now rides the completion announcement: one helper, one emit, both persisted.
+
+def test_the_verify_offer_rides_the_completion_announcement(monkeypatch):
+    from routers import blueprint_generate as bg
+    monkeypatch.setattr(bg, "_build_complete_message",
+                        lambda doc: "Your application is built — 2 pages ready.")
+    events: list[tuple[str, dict]] = []
+    bg._announce_build_complete({"pages": []},
+                                lambda ev, data: events.append((ev, data)),
+                                offer_verify=True, where="t")
+    msgs = [d for e, d in events if e == "message"]
+    assert msgs[0]["text"].startswith("Your application is built")
+    offer = [m for m in msgs if m.get("options")]
+    assert offer and offer[0]["options"] == list(bg._VERIFY_OFFER_OPTIONS)
+    assert offer[0]["status"] == "asked"
+
+
+def test_the_standalone_build_makes_no_verify_offer(monkeypatch):
+    # `/generate/blueprint` (offer_verify=False) announces completion but does
+    # not offer to verify — the offer belongs to the Smith chat turn.
+    from routers import blueprint_generate as bg
+    monkeypatch.setattr(bg, "_build_complete_message",
+                        lambda doc: "Your application is built — 2 pages ready.")
+    events: list[tuple[str, dict]] = []
+    bg._announce_build_complete({"pages": []},
+                                lambda ev, data: events.append((ev, data)),
+                                offer_verify=False, where="t")
+    msgs = [d for e, d in events if e == "message"]
+    assert len(msgs) == 1 and not msgs[0].get("options")
+
+
+def test_nothing_built_announces_nothing_and_offers_nothing(monkeypatch):
+    from routers import blueprint_generate as bg
+    monkeypatch.setattr(bg, "_build_complete_message", lambda doc: None)
+    events: list[tuple[str, dict]] = []
+    bg._announce_build_complete({}, lambda ev, data: events.append((ev, data)),
+                                offer_verify=True, where="t")
+    assert events == []
+
+
+def test_the_offered_option_is_the_consent_the_next_turn_accepts():
+    # The loop closes: the exact option Smith offers is what `_is_verify_consent`
+    # recognises when the user clicks it (the frontend sends the label back).
+    from routers import blueprint_generate as bg
+    assert bg._is_verify_consent(bg._VERIFY_OFFER_OPTIONS[0]) is True
+    assert bg._is_verify_consent(bg._VERIFY_OFFER_OPTIONS[1]) is False
+
+
+# --- the Verify & Fix chip's own sentences are consent; questions are not -----
+
+def test_the_chips_sentences_are_taken_as_consent():
+    import routers.blueprint_generate as bg
+    for m in ("Verify the app and fix anything that's broken.",
+              "Verify only the current page: /master-data",
+              "Verify only the critical journeys.",
+              "verify and fix", "Verify & fix"):
+        assert bg._is_verify_consent(m) is True, m
+    for m in ("did you verify it?", "have you verified the login page",
+              "can you verify my email format is right", "no, not now",
+              "I want to add a verify step to the workflow", ""):
+        assert bg._is_verify_consent(m) is False, m
+
+
+def test_the_current_page_scope_is_a_route_list():
+    import routers.blueprint_generate as bg
+    assert bg._verify_scope("Verify only the current page: /master-data") == ["/master-data"]
+    assert bg._verify_scope("verify only the current page /admin/foo.") == ["/admin/foo"]
+    assert bg._verify_scope("Verify the app and fix anything that's broken.") is None
+    assert bg._verify_scope("Verify only the critical journeys.") is None

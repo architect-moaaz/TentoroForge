@@ -51,7 +51,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "completeness"}
+       "pageLayouts", "composition", "completeness"}
 )
 
 
@@ -162,6 +162,13 @@ _READS: dict[str, set[str]] = {
     # Tests are written against everything that claims to do something.
     "testing": {"requirements", "data", "pages", "apis", "workflows",
                 "businessRules"},
+
+    # §34 — the whole app at once, and nothing below the page contract. No
+    # entity fields, no endpoints: the sketch carries no props to bind them to,
+    # and seeing them would only invite it to author what the per-page call
+    # authors against the full catalog.
+    "a2ui_composition": {"requirements", "product", "pages", "modules",
+                         "navigation", "widgets", "roles", "designSystem"},
 }
 
 
@@ -212,7 +219,17 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         {"pageLayouts"},
         reads={"requirements", "pages", "data", "widgets", "roles",
                "permissions", "designSystem", "navigation",
-               "modules", "workflows", "apis"},
+               "modules", "workflows", "apis", "composition"},
+        tools={"blueprint:read", "page_contract:read", "design_system:read",
+               "component_catalog:read", "mcp:a2ui"},
+    ),
+    # §34 — the whole app composed once, before any page is. It writes a
+    # skeleton (per page: layout and ordered sections, no props) and the
+    # conventions every page inherits. Its own agent, not a mode of a2ui_pages,
+    # so the boundary reads: this one sketches, it never renders.
+    "a2ui_composition": _cap(
+        "a2ui_composition",
+        {"composition"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
     ),
@@ -233,6 +250,12 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "build": _cap("build", {"runtime"}),
     # Verification reports divergence; it never edits an artifact's content.
     "verification": _cap("verification", set(), may_set_status=True),
+    # The observer (§73's loop, closed at the node). Judges every agent
+    # node's outcome as it lands and commands the repair — which the owning
+    # agent authors. Like verification it may flag and write nothing: an
+    # observer that patched a page directly would be a second author with no
+    # §30 boundary.
+    "observer": _cap("observer", set(), may_set_status=True),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -254,9 +277,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     #                    api_derivation; anything authored here is overwritten
     #                    on the next derivation, so writing it is a lie.
     #   pageLayouts      validated against the real component catalog, which is
-    #                    injected into the a2ui_pages prompt and not into
-    #                    Smith's. Authoring blind would fail
-    #                    check_page_layout anyway.
+    #   composition      injected into the a2ui prompts and not into Smith's.
+    #                    Authoring blind would fail check_page_layout or
+    #                    check_composition anyway.
     #   codeMap          projection output. A model asked for file paths
     #                    produces plausible ones, and Blueprint↔Implementation
     #                    then goes green against files nobody wrote.
@@ -530,13 +553,24 @@ def check_pattern_templates(result: AgentResult,
     # caller that cannot say which workflows exist would otherwise reject every
     # real binding as invented.
     if doc is not None:
-        from services.blueprint.functional_completeness import page_findings
+        from services.blueprint.functional_completeness import (
+            page_findings, ADVISORY_PAGE_RULES,
+        )
 
         pages = {p.get("id"): p for p in (doc.get("pages") or [])}
         for proposal in proposals:
             page_id = proposal.body.get("page")
+            # EVERY PAGE IS CONTEXT, ONE PAGE IS JUDGED. The rules read the
+            # other pages to decide what THIS one owes — is there a form page
+            # an Edit can go to, a record page a View can open, an id route
+            # that puts a record in scope. Handing them this page alone made
+            # the contract weaker than the observer's full-document check:
+            # a list page without Edit was accepted here and flagged there.
+            # So the page list is complete, and the findings are the page's.
+            all_pages = [pages.get(page_id) or {"id": page_id, "route": page_id}] + [
+                p for pid, p in pages.items() if pid != page_id]
             findings = page_findings({
-                "pages": [pages.get(page_id) or {"id": page_id, "route": page_id}],
+                "pages": all_pages,
                 "workflows": doc.get("workflows") or [],
                 "data": doc.get("data") or {},
                 # `security` carries the ownershipRules that mark inputs the
@@ -548,10 +582,89 @@ def check_pattern_templates(result: AgentResult,
                 "businessRules": [],
                 "pageLayouts": [proposal.body],
             })
-            problems.extend(f["detail"] for f in findings)
+            # Advisory findings are surfaced but never REFUSE a composition — the
+            # composer cannot fix an upstream/degradable cause, so blocking on
+            # them only loops (see ADVISORY_PAGE_RULES).
+            problems.extend(f["detail"] for f in findings
+                            if f.get("rule") not in ADVISORY_PAGE_RULES
+                            and str(f.get("page")) == str(page_id))
 
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))
+
+
+def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
+                   model_key: str, page_routes: Mapping[str, str]) -> str:
+    """The registry's key for this proposal.
+
+    ``natural_key_for`` derives it from the body (route, name, prose). Where
+    no scheme applies the model's key stands. Where the model's exact key is
+    already bound and the canonical one is not — a document written before
+    keys were canonicalised, resumed — the existing binding is kept, so an
+    id never moves under a running application.
+    """
+    from services.blueprint.ids import natural_key_for
+
+    canon = natural_key_for(section, body, page_routes=page_routes)
+    if not canon or canon == model_key:
+        return model_key
+    if alloc.lookup(model_key) and not alloc.lookup(canon):
+        return model_key
+    return canon
+
+
+class InvalidComposition(ValueError):
+    """A2UI sketched the app against pages or components that do not exist."""
+
+
+def check_composition(result: AgentResult, doc: dict) -> None:
+    """Reject a whole-app sketch that does not fit the app it is for.
+
+    Three things are checked, all structural: every sketch names a page that
+    exists, every page is sketched exactly once, and every component a section
+    names is in the catalog. That is the contract the per-page author relies
+    on — a sketch for a page that does not exist is noise, a page without one
+    is authored blind, and a component that does not exist would be carried
+    into the page prompt as an instruction to use it.
+
+    Nothing about the *quality* of the sketch is gated here. Whether the
+    sections make sense for the page is a judgement, and the observer makes
+    it; a heuristic gate on that would be the kind of validator the old
+    pipeline drowned in.
+    """
+    proposals = [p for p in result.proposals if p.section == "composition"]
+    if not proposals:
+        return
+
+    from services.blueprint.page_planner import load_catalog
+
+    catalog = load_catalog()
+    live = {
+        p["id"] for p in (doc.get("pages") or [])
+        if p.get("id") and p.get("status") != "DEPRECATED"
+    }
+    problems: list[str] = []
+    for proposal in proposals:
+        seen: dict[str, int] = {}
+        for sketch in proposal.body.get("pages") or []:
+            pid = sketch.get("page") or "?"
+            seen[pid] = seen.get(pid, 0) + 1
+            if pid not in live:
+                problems.append(f"{pid}: not a page in this Blueprint")
+            for section in sketch.get("sections") or []:
+                for name in section.get("components") or []:
+                    if name not in catalog:
+                        problems.append(
+                            f"{pid} / {section.get('name', '?')}: {name!r} is "
+                            "not a registered component"
+                        )
+        for pid in sorted(live - set(seen)):
+            problems.append(f"{pid}: no sketch — every page must be sketched once")
+        for pid, count in seen.items():
+            if count > 1:
+                problems.append(f"{pid}: sketched {count} times")
+    if problems:
+        raise InvalidComposition("; ".join(problems[:6]))
 
 
 def apply_agent_result(
@@ -577,7 +690,11 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
+    from services.blueprint.layout_vocabulary import translate_layout_vocabulary
+    translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
+    check_composition(result, svc.doc)
     check_workflow_steps(result, svc.doc)
     check_business_rules(result, svc.doc)
 
@@ -666,6 +783,11 @@ def apply_agent_result(
         for alias in (existing.get("name"), existing.get("table")):
             if isinstance(alias, str) and alias:
                 allocated.setdefault(alias, str(existing["id"]))
+    page_routes = {
+        page["id"]: page.get("route") or ""
+        for page in (svc.doc.get("pages") or [])
+        if isinstance(page, dict) and page.get("id")
+    }
     with IdAllocator.session(output_dir=svc.output_dir) as alloc:
         for p in result.proposals:
             prefix = (
@@ -674,6 +796,17 @@ def apply_agent_result(
             )
             if not prefix:
                 continue
+            # IDENTITY IS READ OFF THE ARTIFACT, NOT TAKEN FROM THE MODEL.
+            # Smith's change path has restated keys through `natural_key_for`
+            # since §12 was wired; the agent path took the model's string as
+            # given. Measured on a live build: "A member can see all of their
+            # notes in one list." existed as six requirements under six
+            # model-spelled keys, two of them still live — and a repair that
+            # rephrased a key was an insert, not an update. The same route,
+            # name or prose is the same artifact whatever the model called it.
+            model_key = p.natural_key
+            p.natural_key = _canonical_key(
+                alloc, p.section, p.body, p.natural_key, page_routes)
             # A body id is honoured ONLY when it belongs to this section — a
             # resumed proposal carrying its own TEST-007 keeps it, and the batch
             # stays idempotent. But identity is assigned, not authored
@@ -689,6 +822,14 @@ def apply_agent_result(
                 keep = False
             artifact_id = str(body_id) if keep else alloc.allocate(prefix, p.natural_key)
             allocated[p.natural_key] = artifact_id
+            # THE KEY THE MODEL CHOSE STAYS CITABLE. A role in the same batch
+            # cites its permissions by the keys the agent gave them
+            # ("PERM-create-note"); restating the key above and then mapping
+            # only the restated one left every such citation unresolved, and
+            # `security` failed the contract twice on a live build — a
+            # regression the canonicalisation introduced the same morning.
+            if model_key and model_key != p.natural_key:
+                allocated.setdefault(model_key, artifact_id)
             if not keep and body_id:
                 # ACTUALLY drop it — do not just allocate beside it. The
                 # comment above promised a wrong-prefix id is dropped, but the

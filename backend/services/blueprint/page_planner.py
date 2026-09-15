@@ -29,6 +29,8 @@ What falls out of it:
 """
 from __future__ import annotations
 
+from collections import Counter
+
 import json
 import re
 from pathlib import Path
@@ -60,6 +62,7 @@ INTERNAL_FIELDS = frozenset({"id", "createdAt", "updatedAt", "deletedAt"})
 #: The dataSource name a template binds the primary collection / record to.
 ROWS = "rows"
 RECORD = "record"
+_SESSION_BINDINGS = frozenset({"user", "currentUser", "sessionUser", "me"})
 
 
 class PlanError(RuntimeError):
@@ -758,6 +761,380 @@ def bind_workflows(node: dict, workflow: str | None) -> dict:
     return node
 
 
+#: THE AUTHOR WRITES JAVASCRIPT; THE RENDERER SPEAKS FEEL. `visibleIf` and a
+#: Conditional's `when` are evaluated by FEEL-lite, whose comparison is `=`
+#: and whose connectives are `and`/`or`. An author raised on JavaScript
+#: writes `record.status === 'Pending approval'`, `!==`, `&&` and `||`; the
+#: renderer folds `==` to `=` and nothing else, so `===` became `==` and
+#: failed to parse, `!==` and `&&` never parsed at all, and every failure is
+#: false: the Approve button and every action form on /refund-cases/[id]
+#: were hidden for the case they were for. Spelling is the planner's to
+#: translate — outside string literals, where `&&` is content.
+#:
+#: `==` is the spelling kept, not `=`: the renderer folds it for FEEL-lite,
+#: the planner's own gates are written with it (`src == null`), and the
+#: Conditional node decides whether a `when` string is an expression at all
+#: by looking for `==`/`!=`/`and`/`or` — a bare `properties = null` read as
+#: a resolved value and showed the error alert on a page that had loaded.
+_JS_SPELLING = (
+    (re.compile(r"!=="), "!="),
+    (re.compile(r"==="), "=="),
+    (re.compile(r"\s*&&\s*"), " and "),
+    (re.compile(r"\s*\|\|\s*"), " or "),
+)
+_STRING_LITERAL = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+
+
+def feel_expression(expr: str) -> str:
+    """`expr` in FEEL-lite's spelling, JavaScript operators translated."""
+    if not isinstance(expr, str) or not expr.strip():
+        return expr
+    out: list[str] = []
+    for i, part in enumerate(_STRING_LITERAL.split(expr)):
+        if i % 2 == 0:
+            for pat, rep in _JS_SPELLING:
+                part = pat.sub(rep, part)
+        out.append(part)
+    return "".join(out)
+
+
+#: Where a layout carries an expression: a node's `visibleIf`, a Conditional's
+#: `when`, and a form field's interaction predicates.
+_INTERACTION_PREDICATES = ("visibleIf", "enabledIf", "disabledIf", "requiredIf", "readOnlyIf")
+
+
+def speak_feel(node: Any) -> Any:
+    """Translate every expression in a tree in place; returns the tree."""
+    if isinstance(node, list):
+        for child in node:
+            speak_feel(child)
+        return node
+    if not isinstance(node, dict):
+        return node
+    if isinstance(node.get("visibleIf"), str):
+        node["visibleIf"] = feel_expression(node["visibleIf"])
+    props = node.get("props")
+    if isinstance(props, dict):
+        if isinstance(props.get("when"), str):
+            props["when"] = feel_expression(props["when"])
+        for field in (props.get("fields") or []) if isinstance(props.get("fields"), list) else []:
+            inter = field.get("interaction") if isinstance(field, dict) else None
+            if isinstance(inter, dict):
+                for key in _INTERACTION_PREDICATES:
+                    if isinstance(inter.get(key), str):
+                        inter[key] = feel_expression(inter[key])
+    for child in node.get("children") or []:
+        speak_feel(child)
+    return node
+
+
+#: WHERE A FORM GOES WHEN IT SAVES. The Form's default success outcome is
+#: "toast Saved, navigate to the parent path": /refund-cases/new returns to
+#: /refund-cases, which exists. The public /guest/refund-request returned to
+#: /guest, which is no page — a guest who had just submitted a refund request
+#: landed on a 404. A form on a page whose parent is not a route stays where
+#: it is and says so; a page may still author its own `onSuccess`.
+def settle_form_outcomes(root: Any, route: str, routes: set[str],
+                         record: str | None = None) -> Any:
+    """Give every Form without an `onSuccess` one that lands on a real page.
+
+    On a record page — `/refund-cases/[id]` with a `get` source — a form adds
+    to the record (a note, an attachment, a decision), and the default
+    "return to the parent" sent the person to the list they had just left.
+    The form stays on the record, reloaded, so what it added is shown.
+    """
+    parts = [seg for seg in (route or "/").split("?")[0].split("/") if seg]
+    parent = "/" + "/".join(parts[:-1]) if len(parts) > 1 else "/"
+    stay = None
+    if record and parts and parts[-1].startswith("["):
+        stay = "/" + "/".join(parts[:-1] + [f"{{{{{record}.id}}}}"])
+    elif parent in routes:
+        return root
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        if n.get("type") == "Form":
+            props = n.setdefault("props", {})
+            if not props.get("onSuccess"):
+                props["onSuccess"] = ({"toast": "Saved", "navigate": stay} if stay
+                                      else {"toast": "Submitted — thank you", "navigate": route})
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
+#: A LAUNCHER ON A RECORD PAGE CARRIES THE RECORD. A workflow declares its
+#: inputs — `{kind: "record", entity: ENTITY-003, name: "refundCase"}` — and
+#: reads `{{refundCase.id}}` in every step. The Approve button on the case
+#: page was authored with `args: {stage: …}` and no case, so the approval
+#: row was inserted with a null refund_case_id and the button did nothing
+#: visible (Criterion Refunds v2, 2026-09-14). The page has one record; the
+#: workflow says what it calls it; the planner passes it.
+def carry_the_record(root: Any, doc: dict, page: dict, sources: list[dict]) -> Any:
+    record = next((s.get("name") for s in sources
+                   if isinstance(s, dict) and s.get("op") in ("get", "detail", "find", "one")), None)
+    entity_id = (page.get("data") or {}).get("primaryEntity")
+    if not record or not entity_id:
+        return root
+    workflows = {w.get("id"): w for w in _live(doc.get("workflows")) if w.get("id")}
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        props = n.get("props")
+        wf = workflows.get((props or {}).get("workflow")) if isinstance(props, dict) else None
+        if wf:
+            args = props.get("args") if isinstance(props.get("args"), dict) else {}
+            for inp in wf.get("inputs") or []:
+                if (isinstance(inp, dict) and inp.get("kind") == "record"
+                        and inp.get("entity") == entity_id and inp.get("name")
+                        and inp["name"] not in args):
+                    args[inp["name"]] = f"{{{{{record}.id}}}}"
+            if args:
+                props["args"] = args
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
+#: A RECORD'S CHILD COLLECTIONS ARE FETCHES OF THEIR OWN. A record page binds
+#: `{{record.notes}}`, `{{record.attachments}}`, `{{record.activity}}`: the
+#: composer reads them as relations of the record, but a `get` returns one
+#: row and no relation, so every such list rendered empty — a note was added,
+#: written, logged, and never shown (Criterion Refunds v2, 2026-09-14). The
+#: Blueprint's relationships say which entities point at this one and by
+#: which column; each becomes a list source filtered to the route's record.
+_RECORD_CHILD = re.compile(r"\{\{\s*(\w+)\.(\w+)((?:\.\w+)*)\s*\}\}")
+
+
+def _slugify_word(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+def attach_related_collections(root: Any, doc: dict, entity: dict | None,
+                               sources: list[dict]) -> list[dict]:
+    record = next((s for s in sources if isinstance(s, dict)
+                   and s.get("op") in ("get", "detail", "find", "one")), None)
+    if not entity or not record:
+        return sources
+    rec = str(record.get("name"))
+    fields = {f.get("name") for f in (entity.get("fields") or []) if f.get("name")}
+    entities = _entities(doc)
+    children: dict[str, tuple[dict, str]] = {}
+    for rel in _live((doc.get("data") or {}).get("relationships")):
+        if rel.get("to") == entity.get("id") and rel.get("from") in entities and rel.get("toField"):
+            children[rel["from"]] = (entities[rel["from"]], str(rel["toField"]))
+    fk_by_name = f"{_lower_first(str(entity.get('name') or ''))}Id"
+    for eid, child in entities.items():
+        if eid == entity.get("id") or eid in children:
+            continue
+        if any(f.get("name") == fk_by_name for f in (child.get("fields") or [])):
+            children[eid] = (child, fk_by_name)
+
+    def child_for(key: str) -> tuple[dict, str] | None:
+        want = _slugify_word(key)
+        for child, fk in children.values():
+            cname = _slugify_word(str(child.get("name") or ""))
+            if cname in (want, want.rstrip("s")) or cname.startswith(want.rstrip("s")):
+                return child, fk
+        return None
+
+    added: dict[str, dict] = {}
+
+    def rebind(value: Any) -> Any:
+        if isinstance(value, str):
+            def sub(m: "re.Match[str]") -> str:
+                base, key, rest = m.group(1), m.group(2), m.group(3) or ""
+                if base != rec or key in fields:
+                    return m.group(0)
+                found = child_for(key)
+                if not found:
+                    return m.group(0)
+                child, fk = found
+                if key not in added and not any(s.get("name") == key for s in sources):
+                    added[key] = {"name": key, "entity": child.get("name"), "op": "list",
+                                  "filter": {fk: "$routeId"}}
+                return "{{" + key + rest + "}}"
+            return _RECORD_CHILD.sub(sub, value)
+        if isinstance(value, list):
+            return [rebind(v) for v in value]
+        if isinstance(value, dict):
+            return {k: rebind(v) for k, v in value.items()}
+        return value
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        if isinstance(n.get("props"), dict):
+            n["props"] = rebind(n["props"])
+        if isinstance(n.get("visibleIf"), str):
+            n["visibleIf"] = rebind(n["visibleIf"])
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return list(sources) + list(added.values())
+
+
+#: A LIST OF RECORDS OPENS THEM. The dashboard's "Approval queues" was a List
+#: of pending cases nothing could click; a Table gets `rowHref`, a List had no
+#: way to say where an item goes. When the bound source's entity has a detail
+#: page, each item opens its record — the same rule a Table follows.
+def link_lists_to_records(root: Any, doc: dict, sources: list[dict]) -> Any:
+    entities = _entities(doc)
+    detail_routes: dict[str, str] = {}
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        eid = (page.get("data") or {}).get("primaryEntity")
+        if route.endswith("/[id]") and eid and eid not in detail_routes:
+            detail_routes[eid] = route.replace("[id]", "{{id}}")
+    by_name = {e.get("name"): eid for eid, e in entities.items()}
+    source_entity = {str(s.get("name")): by_name.get(s.get("entity"), s.get("entity"))
+                     for s in sources if isinstance(s, dict) and s.get("op") == "list"}
+
+    def walk(n: Any) -> None:
+        if isinstance(n, list):
+            for c in n:
+                walk(c)
+            return
+        if not isinstance(n, dict):
+            return
+        props = n.get("props")
+        if n.get("type") == "List" and isinstance(props, dict) and not props.get("itemHref"):
+            m = re.fullmatch(r"\{\{\s*(\w+)\s*\}\}", str(props.get("items") or ""))
+            eid = source_entity.get(m.group(1)) if m else None
+            if eid in detail_routes:
+                props["itemHref"] = detail_routes[eid]
+        for c in n.get("children") or []:
+            walk(c)
+    walk(root)
+    return root
+
+
+#: EVERY PAGE OPENS THE SAME WAY. Composed pages opened five ways — a headline
+#: Section, a Heading and a Text, a Row of two Texts and a Button, a Breadcrumb
+#: over a Row holding a Heading and a Badge, a Grid whose first row held them —
+#: five spellings of "title, subtitle, actions" (Criterion Refunds v2,
+#: 2026-09-14). One page header: a Section with role "headline", the title,
+#: the subtitle, and the actions as its children; a Breadcrumb stays above it.
+_CONTAINERS = frozenset({"Container", "Stack", "Box", "Column", "Page", "Main", "Grid", "Split", "Row", "Cluster"})
+_HEADER_LEAVES = frozenset({"Heading", "Text", "Badge", "Button", "Link", "Breadcrumb"})
+_HEADER_GROUPS = frozenset({"Row", "Cluster", "Inline", "Stack", "Box"})
+_STATE_LEADS = frozenset({"Alert", "Conditional", "EmptyState", "LoadingState", "Skeleton"})
+
+
+def _header_leaves(node: Any) -> list[dict] | None:
+    """The leaves of a header-shaped node, or None if it holds content."""
+    if not isinstance(node, dict):
+        return None
+    t = node.get("type")
+    if t in _HEADER_LEAVES:
+        return [node]
+    if t in _HEADER_GROUPS:
+        out: list[dict] = []
+        for c in node.get("children") or []:
+            leaves = _header_leaves(c)
+            if leaves is None:
+                return None
+            out.extend(leaves)
+        return out
+    return None
+
+
+def _text_of(n: dict) -> str:
+    p = n.get("props") or {}
+    return str(p.get("content") or p.get("text") or p.get("title") or "").strip()
+
+
+def _find_header_host(node: Any) -> tuple[dict, int] | None:
+    """The container whose children open with the page header, and where."""
+    if not isinstance(node, dict) or not isinstance(node.get("children"), list):
+        return None
+    kids = node["children"]
+    for i, k in enumerate(kids):
+        if not isinstance(k, dict):
+            return None
+        if k.get("type") == "Conditional":
+            # A detail page's whole body sits inside its "populated" gate;
+            # the error and empty gates hold only a state node.
+            inner = [c for c in (k.get("children") or []) if isinstance(c, dict)]
+            if any(c.get("type") not in _STATE_LEADS for c in inner):
+                found = _find_header_host(k)
+                if found:
+                    return found
+            continue
+        if k.get("type") in _STATE_LEADS:
+            continue
+        if k.get("type") == "Section" and (k.get("props") or {}).get("title"):
+            return node, i
+        if _header_leaves(k) is not None:
+            return node, i
+        if k.get("type") in _CONTAINERS and k.get("children"):
+            return _find_header_host(k)
+        return None
+    return None
+
+
+def normalise_page_header(root: Any) -> Any:
+    found = _find_header_host(root)
+    if not found:
+        return root
+    host, start = found
+    kids = host["children"]
+    first = kids[start]
+    if first.get("type") == "Section":
+        # Already the header. Its children are actions only if they are
+        # header-shaped; a form or a stack of content moves out after it.
+        props = first.setdefault("props", {})
+        props.setdefault("role", "headline")
+        content = [c for c in (first.get("children") or []) if _header_leaves(c) is None]
+        if content:
+            first["children"] = [c for c in (first.get("children") or []) if _header_leaves(c) is not None]
+            if not first["children"]:
+                first.pop("children", None)
+            host["children"] = kids[:start + 1] + content + kids[start + 1:]
+        return root
+    run: list[dict] = []
+    for k in kids[start:]:
+        if k.get("type") == "Section" or _header_leaves(k) is None:
+            break
+        run.append(k)
+        if len(run) >= 4:
+            break
+    leaves = [leaf for k in run for leaf in (_header_leaves(k) or [])]
+    heading = next((l for l in leaves if l.get("type") == "Heading" and _text_of(l)), None)
+    texts = [l for l in leaves if l.get("type") == "Text" and _text_of(l)]
+    title_node = heading or (texts.pop(0) if texts else None)
+    if title_node is None:
+        return root
+    subtitle = next((t for t in texts if len(_text_of(t).split()) > 2), texts[0] if texts else None)
+    crumbs = [l for l in leaves if l.get("type") == "Breadcrumb"]
+    actions = [l for l in leaves if l.get("type") in ("Button", "Link", "Badge")]
+    section: dict[str, Any] = {"type": "Section", "props": {"role": "headline", "title": _text_of(title_node)}}
+    if subtitle is not None:
+        section["props"]["subtitle"] = _text_of(subtitle)
+    if actions:
+        section["children"] = actions
+    if run[0].get("id"):
+        section["id"] = run[0]["id"]
+    host["children"] = kids[:start] + crumbs + [section] + kids[start + len(run):]
+    return root
+
+
 #: What each authored state node is for. A2UI writes all four as siblings in
 #: a Stack, so they render at once and permanently: a spinner beside an empty
 #: state beside an error alert, on a page that fetched successfully.
@@ -766,8 +1143,38 @@ STATE_NODES = {
     "EmptyState": "empty", "IllustratedEmpty": "empty", "Alert": "error",
 }
 
+#: THE PAGE-STATE VOCABULARY, AS AN AUTHOR GATES ON IT. The page contract
+#: declares `states` (loading, empty, populated, error, permission_denied)
+#: and the author is told they are gated for them — so the author writes the
+#: state onto the node: `visibleIf: "populated"`, or in JavaScript spelling,
+#: `visibleIf: "state === 'empty'"`. The renderer evaluates visibleIf as a
+#: FEEL expression over the page's DATA, where no `state` exists: the bare
+#: word was null and the comparison a parse error, both false, so the form on
+#: /refund-cases/new, the whole of /refund-cases/[id] and the sign-offs table
+#: rendered nothing (Criterion Refunds v2, 2026-09-14). A state gate is the
+#: planner's to translate, exactly as a state NODE is.
+_STATE_GATE = re.compile(
+    r"^\s*(?:state\s*={2,3}\s*)?['\"]?"
+    r"(loading|error|empty|populated|permission_denied|forbidden|denied)"
+    r"['\"]?\s*$")
 
-def gate_states(node: dict, source: str | None) -> dict:
+#: States a rendered page can never be in. Sources resolve server-side before
+#: the page renders, so nothing is in flight; and permission is decided by the
+#: route guard before the page renders, so a denied reader never reaches it —
+#: the app's forbidden page answers them.
+_UNREACHABLE_STATES = frozenset({"loading", "permission_denied", "forbidden", "denied"})
+
+
+def state_gate(node: dict) -> str | None:
+    """The page state a node's `visibleIf` names, or None for a data expression."""
+    cond = node.get("visibleIf") if isinstance(node, dict) else None
+    if not isinstance(cond, str):
+        return None
+    m = _STATE_GATE.match(cond)
+    return m.group(1) if m else None
+
+
+def gate_states(node: dict, source: str | None, *, single: bool = False) -> dict:
     """Gate the authored state nodes on the data source, and drop the unreachable.
 
     `ctx.data` distinguishes three cases, not four: a resolved source is present
@@ -779,23 +1186,50 @@ def gate_states(node: dict, source: str | None) -> dict:
     LoadingState on a server-rendered page is a node for a state that cannot
     occur, which is why "Loading customers" sat permanently under a table that
     had already loaded. Dropped rather than gated: no expression selects it.
+
+    A node is a state node by its TYPE (`STATE_NODES`) or by the state its
+    `visibleIf` names (`state_gate`); either way the state word leaves the
+    node and the source decides. `single` says the source is one record (a
+    `get`), which schema-page.tsx unwraps, so "populated" is `!= null` rather
+    than a count. With no source at all, content gated on "populated" simply
+    shows — nothing was fetched, so there is nothing for it to wait on — and
+    the empty/error nodes, which describe a fetch, are dropped.
     """
-    if not source or not isinstance(node, dict):
+    if not isinstance(node, dict):
         return node
     kept: list[dict] = []
     for child in node.get("children") or []:
-        state = STATE_NODES.get(child.get("type")) if isinstance(child, dict) else None
-        if state == "loading":
+        if not isinstance(child, dict):
+            kept.append(child)
+            continue
+        # The author's own word wins over the node's type: an Alert gated on
+        # permission_denied is not the error alert.
+        authored = state_gate(child)
+        state = authored or STATE_NODES.get(child.get("type"))
+        if not source and not authored:
+            # Nothing fetched and nothing said: the node is content, as before.
+            kept.append(gate_states(child, source, single=single))
+            continue
+        if state in _UNREACHABLE_STATES:
             continue
         if state:
-            kept.append({
-                "type": "Conditional",
-                "props": {"when": (f"{source} == null" if state == "error"
-                                   else f"{source} != null and count({source}) == 0")},
-                "children": [child],
-            })
+            child = {k: v for k, v in child.items() if k != "visibleIf"}
+            if not source:
+                if state == "populated":
+                    kept.append(gate_states(child, source, single=single))
+                continue
+            if state == "error":
+                when = f"{source} == null"
+            elif state == "empty":
+                when = (f"{source} == null" if single
+                        else f"{source} != null and count({source}) == 0")
+            else:  # populated
+                when = (f"{source} != null" if single
+                        else f"{source} != null and count({source}) > 0")
+            kept.append({"type": "Conditional", "props": {"when": when},
+                         "children": [gate_states(child, source, single=single)]})
             continue
-        kept.append(gate_states(child, source))
+        kept.append(gate_states(child, source, single=single))
     if node.get("children") is not None:
         node["children"] = kept
     return node
@@ -832,6 +1266,10 @@ def data_sources(doc: dict, page: dict, entity: dict | None, root: dict) -> list
     out: list[dict] = []
 
     unresolved: list[str] = []
+    # `{{user.x}}` is the session user the page carries, not a list of User
+    # rows to fetch - resolving it as an entity had every case page pull the
+    # whole users table for every role.
+    used = {n for n in used if n not in _SESSION_BINDINGS}
     for name in sorted(used):
         # A binding that names an entity resolves to it; anything else falls
         # back to the page's own entity, which is what `rows`/`record` mean.
@@ -1045,8 +1483,22 @@ def plan_page(doc: dict, page: dict, template: dict,
         x["entity"] = by_id.get(x.get("entity"), x.get("entity"))
         carried.append(x)
     sources = carried or (data_sources(doc, page, entity, root) if root else [])
+    if root:
+        sources = attach_related_collections(root, doc, entity, sources)
     primary = next((s["name"] for s in sources if s.get("op") == "list"), None)
-    root = gate_states(root, primary) if root else root
+    # A detail page is about its one record: that is what "populated" means,
+    # whatever child collections it also lists.
+    single = next((s["name"] for s in sources
+                   if s.get("op") in ("get", "detail", "find", "one")), None)
+    if root:
+        root = (gate_states(root, single, single=True) if single
+                else gate_states(root, primary))
+        root = speak_feel(root)
+        root = settle_form_outcomes(root, page.get("route") or "/",
+                                    {p.get("route") for p in _live(doc.get("pages")) if p.get("route")},
+                                    record=single)
+        root = carry_the_record(root, doc, page, sources)
+        root = link_lists_to_records(root, doc, sources)
     if root is not None:
         root = assign_node_ids(root)
     if root is None:
@@ -1074,6 +1526,8 @@ def plan_page(doc: dict, page: dict, template: dict,
         **({"_figmaCanvas": template["canvas"]} if template.get("canvas") else {}),
     }
     errors = validate_props(schema, catalog)
+    if not errors and schema.get("root"):
+        schema["root"] = normalise_page_header(schema["root"])
     if errors:
         raise PlanError(f"{page.get('id')}: " + "; ".join(errors[:4]))
 
@@ -1281,6 +1735,99 @@ def catalog_digest(catalog: dict[str, dict], *, categories: tuple[str, ...] = ()
     return "\n".join(lines)
 
 
+def catalog_index(catalog: dict[str, dict]) -> str:
+    """Names only — the catalog as the whole-app composer sees it.
+
+    The composition pass sketches every page in one call, so it cannot afford
+    the prop signatures ``catalog_digest`` carries; it names the components a
+    section will use and leaves their props to the per-page author, who is
+    shown the full digest. Roughly a tenth of the digest.
+    """
+    by_cat: dict[str, list[dict]] = {}
+    for entry in catalog.values():
+        by_cat.setdefault(entry["category"], []).append(entry)
+    lines: list[str] = []
+    for cat in sorted(by_cat):
+        lines.append(f"\n## {cat}")
+        for entry in sorted(by_cat[cat], key=lambda e: e["name"]):
+            head = entry["name"] + (" (children)" if entry.get("acceptsChildren") else "")
+            doc = (entry.get("doc") or "").strip().split("\n")[0]
+            if doc and not doc.startswith("Renderer primitive"):
+                head += f" — {doc[:100]}"
+            lines.append(f"- {head}")
+    return "\n".join(lines)
+
+
+def app_brief(doc: dict) -> dict:
+    """The whole application at a glance — what the composition pass is shown.
+
+    Every page, compressed to what a composer needs to place it next to its
+    neighbours: the job, the pattern, the entity, the actions, who uses it.
+    No entity fields, no endpoints, no component props; those belong to the
+    per-page call. Around 150 tokens a page, so an app of twenty pages costs
+    less than one page's full brief.
+    """
+    entities = _entities(doc)
+    modules = {m.get("id"): m.get("name") for m in _live(doc.get("modules"))}
+    roles = {r.get("id"): r.get("name") for r in _live(doc.get("roles"))}
+    design = doc.get("designSystem") or {}
+    pages: list[dict] = []
+    for page in _live(doc.get("pages")):
+        eid = (page.get("data") or {}).get("primaryEntity")
+        entity = entities.get(eid)
+        pages.append({
+            "id": page.get("id"),
+            "name": page.get("name"),
+            "route": page.get("route"),
+            "purpose": page.get("purpose"),
+            "pattern": page.get("pattern"),
+            "module": modules.get(page.get("module"), page.get("module")),
+            "users": [roles.get(r, r) for r in (page.get("users") or [])],
+            "primaryTasks": page.get("primaryTasks") or [],
+            "actions": page.get("actions") or [],
+            "entity": entity.get("name") if entity else None,
+            "widgets": [w.get("label") for w in page_widgets(doc, page.get("id"))],
+            "states": page.get("states") or [],
+        })
+    return {
+        "product": doc.get("product") or {},
+        "requirements": [
+            {"id": r.get("id"), "description": r.get("description")}
+            for r in _live(doc.get("requirements"))
+        ],
+        "roles": [{"id": k, "name": v} for k, v in roles.items()],
+        "navigation": doc.get("navigation") or {},
+        "designSystem": {
+            k: design.get(k) for k in (
+                "visualPersonality", "navigationApproach", "informationDensity",
+                "interactionConventions",
+            ) if design.get(k)
+        },
+        "pages": pages,
+    }
+
+
+def composition_for_page(doc: dict, page_id: str) -> dict:
+    """This page's slice of the app-level composition, plus its neighbours.
+
+    The sketch is the instruction a page author is given; the siblings are one
+    line each — layout and section names — so the author can see what the
+    page next to this one looks like without being handed its tree.
+    """
+    comp = doc.get("composition") or {}
+    sketches = comp.get("pages") or []
+    return {
+        "vision": comp.get("vision") or "",
+        "conventions": comp.get("conventions") or [],
+        "sketch": next((s for s in sketches if s.get("page") == page_id), None),
+        "siblings": [
+            {"page": s.get("page"), "layout": s.get("layout"),
+             "sections": [x.get("name") for x in (s.get("sections") or [])]}
+            for s in sketches if s.get("page") != page_id
+        ],
+    }
+
+
 def pattern_page_facts(doc: dict) -> str:
     """Which pages each pattern must serve, and what each one actually has.
 
@@ -1360,6 +1907,9 @@ def page_brief(doc: dict, page_id: str) -> dict:
         "widgets": [w for w in _live(doc.get("widgets"))
                     if w.get("page") == page_id],
         "designSystem": doc.get("designSystem") or {},
+        # The whole-app sketch for this page and a one-line view of the pages
+        # next to it — the part no per-page author ever had.
+        "composition": composition_for_page(doc, page_id),
         # THE WORKFLOWS A CONTROL MAY DISPATCH, BY ID. The author is asked to
         # write `{label, workflow}` and was never told which workflows exist,
         # so it wrote names it inferred from the page — `exportCaseActivity`,
@@ -1432,9 +1982,43 @@ def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
         is_spec = str(source.get("treatAs") or "evidence") == "specification"
         if is_spec is not specification:
             continue
-        for frame in source.get("frames") or []:
-            if frame.get("looksLikeScreen", True) and frame.get("nodeId"):
-                out.append({"source": source.get("id"), **frame})
+        frames = [f for f in source.get("frames") or []
+                  if f.get("looksLikeScreen", True) and f.get("nodeId")]
+        if not specification:
+            frames = identified_frames(frames)
+        for frame in frames:
+            out.append({"source": source.get("id"), **frame})
+    return out
+
+
+def identified_frames(frames: list[dict]) -> list[dict]:
+    """The frames that can be told apart: each says what it shows, or its
+    layer name is its alone.
+
+    A reference frame is a slot the planner MUST answer with the page built
+    from it, so a frame with no identity is a question with no content — and
+    given fifteen frames all named "Refund & Case Management Platform" and
+    nothing else, the planner answered them in file order: the Properties
+    page was built from the Write-off Approval drawing, the posting queue from
+    the Front Desk search, fifteen of fifteen wrong. Such a frame is not a
+    slot. The pages it might have been are composed from components, which is
+    the honest outcome for a drawing nobody can name (§48, §49); `shows` is
+    how a frame earns its way back in.
+    """
+    names = Counter(str(f.get("name") or "").strip().lower() for f in frames)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for frame in frames:
+        shows = str(frame.get("shows") or "").strip()
+        name = str(frame.get("name") or "").strip().lower()
+        identity = shows.lower() or (name if names[name] == 1 else "")
+        # TWO FRAMES SHOWING ONE HEADING ARE ONE SCREEN, drawn in two states —
+        # a list and its detail, a queue and its empty case. One slot; the
+        # second drawing is not a second page and must not become one.
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        out.append(frame)
     return out
 
 

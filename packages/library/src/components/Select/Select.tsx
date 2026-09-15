@@ -114,7 +114,7 @@ export function Select(props: SelectProps) {
         value={value}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       >
-        {options.map((o) => (
+        {(options ?? []).map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>

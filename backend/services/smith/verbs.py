@@ -49,6 +49,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # The same contract for the second design tool: the page, and the NAME of
     # the variable holding the API key — never the key.
     "connect_uxpilot": {"uxpilot_ref", "key_env"},
+    # Undoes what the two above did to the page set: the design record goes,
+    # every page stops naming a frame, and the screens are composed from the
+    # component library. Needs nothing — there is only ever one design set.
+    "disconnect_design": set(),
     "rebuild": set(),
 }
 
@@ -87,6 +91,13 @@ VERB_HELP: dict[str, str] = {
         "UX Pilot page <id or url>\". Needs the page and the NAME of the "
         "environment variable holding the UX Pilot API key — never the key. "
         "Smith then asks whether the design is the specification or a reference."
+    ),
+    "disconnect_design": (
+        "Stop building screens from the connected Figma or UX Pilot design: "
+        "\"disconnect the Figma design\", \"drop the design\", \"compose the "
+        "pages from components instead\". The design record is removed, no "
+        "page names a frame any more, and every screen is composed from the "
+        "component library. The requirements, entities and rules are untouched."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

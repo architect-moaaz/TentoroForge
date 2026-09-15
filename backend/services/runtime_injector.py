@@ -1251,6 +1251,7 @@ export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 import { triggerWorkflow } from "@/lib/workflows";
+import { LAUNCH_ROLES } from "@/lib/workflows/launch-roles";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
@@ -1270,8 +1271,21 @@ export async function POST(
     // workflow runtime defaults owner FKs (ownerId/landlordId/userId/…) from
     // ctx.user.id; without this an authed create hits a NOT NULL FK error.
     const session = await auth();
-    const su = session?.user as { id?: string; role?: string; email?: string | null } | undefined;
-    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : body.user;
+    const su = session?.user as { id?: string; role?: string; email?: string | null; [k: string]: unknown } | undefined;
+    // Every scalar column of the session user rides into the workflow — a
+    // gate compares the case's property to the actor's home property.
+    const user = su?.id
+      ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
+          id: String(su.id), role: su.role, email: su.email ?? undefined }
+      : body.user;
+    // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
+    // the pages a workflow launches from and the roles those pages serve;
+    // Reception could post a refund through the API because nothing here
+    // compared the two. "*" admits an anonymous caller (a public page).
+    const allowed = LAUNCH_ROLES[id] ?? null;
+    if (allowed && !allowed.includes(String(user?.role ?? "")) && !(allowed.includes("*") && !su?.id)) {
+      return NextResponse.json({ error: "This action is not available to your role" }, { status: 403 });
+    }
     let taskId = body.taskId;
 
     // ─── RESUME PATH ──────────────────────────────────────────────────────
@@ -1332,6 +1346,15 @@ export async function POST(
         // outputMappings without an entity re-query.
         markers[`__step_${resumeTaskRow.node_id}_output`] = { decision: (input as any).__decision };
       }
+      if ((input as any).comment !== undefined) {
+        markers[`__step_${resumeTaskRow.node_id}_comment`] = (input as any).comment;
+      }
+      // The task's own form (its formBinding fields), entered by the person
+      // completing it. The engine publishes it as the task's output.
+      const submittedForm = (input as any).__form;
+      if (submittedForm && typeof submittedForm === "object") {
+        markers[`__step_${resumeTaskRow.node_id}_form`] = submittedForm;
+      }
       Object.assign(input, { ...pv, ...input, ...markers });
     }
 
@@ -1367,7 +1390,7 @@ export async function POST(
               completed_by = ${user?.id || null},
               completed_at = NOW(),
               decision = ${input.__decision || null},
-              response_data = ${JSON.stringify(input)}
+              form_data = ${JSON.stringify(input)}::jsonb
           WHERE id = ${taskId}::uuid
         `);
       } catch (dbErr) {
@@ -1393,6 +1416,13 @@ export async function POST(
 }
 '''
     (api_dir / "route.ts").write_text(route_content, encoding="utf-8")
+    roles_file = output_path / "src" / "lib" / "workflows" / "launch-roles.ts"
+    if not roles_file.exists():
+        roles_file.parent.mkdir(parents=True, exist_ok=True)
+        roles_file.write_text(
+            "// Written by the Blueprint projection (project_workflows). Empty: no launch is" + chr(10)
+            + "// restricted until the projection names the roles each workflow's pages serve." + chr(10)
+            + "export const LAUNCH_ROLES: Record<string, string[] | null> = {};" + chr(10), encoding="utf-8")
 
     # Also create the event-based trigger route
     event_dir = output_path / "src" / "app" / "api" / "workflows" / "event" / "[event]"
@@ -1622,14 +1652,16 @@ export async function GET(request: Request) {
       WHERE status = ${status}
         AND (
           assignee_id = ${userId}::text
-          OR assignee_role = ${userRole}
+          OR ${userRole}::text = ANY(string_to_array(assignee_role, ','))
           OR (assignee_id IS NULL AND assignee_role IS NULL)
         )
       ORDER BY created_at DESC
       LIMIT 50
     `);
 
-    return NextResponse.json(tasks.rows || []);
+    // postgres-js returns the rows themselves; node-postgres wraps them in `.rows`.
+    // Read `.rows` alone and this inbox was empty on every postgres-js app.
+    return NextResponse.json(((tasks as any).rows ?? tasks) || []);
   } catch (error) {
     // Table may not exist — return empty
     return NextResponse.json([]);
@@ -1684,25 +1716,34 @@ def _inject_task_inbox_pages(output_path: Path) -> list[str]:
     # the inbox relocates to /inbox; internal links are rewritten to match.
     slug = "inbox" if _plan_has_task_entity(output_path) else "tasks"
 
-    inbox_src = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "app" / "tasks" / "page.tsx"
-    inbox_dst = output_path / "src" / "app" / slug / "page.tsx"
+    # THE INBOX IS A PAGE OF THE APP, NOT BESIDE IT. Under `src/app/tasks` it
+    # rendered outside the (dashboard) route group whose layout draws the
+    # rail, so the inbox and every task opened with no chrome. The templates
+    # live under (dashboard) and are written there; a copy left at the old
+    # path by an earlier run is removed, or Next would see the route twice.
+    for legacy in (output_path / "src" / "app" / slug / "page.tsx",
+                   output_path / "src" / "app" / slug / "[id]" / "page.tsx"):
+        if legacy.exists():
+            legacy.unlink()
+    inbox_src = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
+    inbox_dst = output_path / "src" / "app" / "(dashboard)" / slug / "page.tsx"
     if inbox_src.exists() and not inbox_dst.exists():
         inbox_dst.parent.mkdir(parents=True, exist_ok=True)
         inbox_dst.write_text(
             inbox_src.read_text(encoding="utf-8").replace("/tasks/", f"/{slug}/"),
             encoding="utf-8",
         )
-        written.append(f"src/app/{slug}/page.tsx")
+        written.append(f"src/app/(dashboard)/{slug}/page.tsx")
 
-    detail_src = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "app" / "tasks" / "[id]" / "page.tsx"
-    detail_dst = output_path / "src" / "app" / slug / "[id]" / "page.tsx"
+    detail_src = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks" / "[id]" / "page.tsx"
+    detail_dst = output_path / "src" / "app" / "(dashboard)" / slug / "[id]" / "page.tsx"
     if detail_src.exists() and not detail_dst.exists():
         detail_dst.parent.mkdir(parents=True, exist_ok=True)
         detail_dst.write_text(
             detail_src.read_text(encoding="utf-8").replace("/tasks/", f"/{slug}/"),
             encoding="utf-8",
         )
-        written.append(f"src/app/{slug}/[id]/page.tsx")
+        written.append(f"src/app/(dashboard)/{slug}/[id]/page.tsx")
 
     api_src = _TEMPLATE_DIR.parent / "api-tasks" / "id-route.ts"
     api_dst = output_path / "src" / "app" / "api" / "tasks" / "[id]" / "route.ts"

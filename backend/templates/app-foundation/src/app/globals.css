@@ -25,6 +25,23 @@
     --accent-foreground: var(--foreground);
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
+    /* Status tokens — the token-contract defaults, so a raw hsl(var(--success))
+       (charts, Schematic) resolves even before the projector fills it. The
+       projector overrides these from designSystem; see token-contract.json. */
+    --destructive-subtle: 0 86% 97%;
+    --destructive-subtle-foreground: 0 74% 32%;
+    --success: 142 71% 29%;
+    --success-foreground: 0 0% 100%;
+    --success-subtle: 141 79% 93%;
+    --success-subtle-foreground: 142 71% 22%;
+    --warning: 31 92% 37%;
+    --warning-foreground: 0 0% 100%;
+    --warning-subtle: 48 96% 89%;
+    --warning-subtle-foreground: 31 92% 30%;
+    --info: 201 96% 32%;
+    --info-foreground: 0 0% 100%;
+    --info-subtle: 204 94% 94%;
+    --info-subtle-foreground: 201 96% 26%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
     --ring: var(--primary);
@@ -47,6 +64,20 @@
     --accent-foreground: 210 20% 98%;
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
+    --destructive-subtle: 0 63% 16%;
+    --destructive-subtle-foreground: 0 86% 90%;
+    --success: 142 60% 45%;
+    --success-foreground: 0 0% 100%;
+    --success-subtle: 142 60% 14%;
+    --success-subtle-foreground: 141 79% 88%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 222 84% 5%;
+    --warning-subtle: 31 80% 15%;
+    --warning-subtle-foreground: 48 96% 85%;
+    --info: 201 90% 55%;
+    --info-foreground: 0 0% 100%;
+    --info-subtle: 201 90% 15%;
+    --info-subtle-foreground: 204 94% 88%;
     --border: 215 25% 20%;
     --input: 215 25% 20%;
     --ring: var(--primary);

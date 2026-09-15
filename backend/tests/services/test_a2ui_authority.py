@@ -1038,3 +1038,185 @@ def test_the_ceiling_leaves_room_for_three_attempts():
         f"{DEFAULT_TIMEOUT}s x 3 attempts is longer than anyone will wait")
 
 
+
+
+# --- the brief says how each workflow's inputs are met, and where the screen leads
+
+_NOTES = {
+    "data": {"entities": [
+        {"id": "ENTITY-001", "name": "Member", "fields": [{"name": "id", "type": "uuid"}]},
+        {"id": "ENTITY-002", "name": "Note", "fields": [
+            {"name": "id", "type": "uuid"}, {"name": "title", "type": "string"},
+            {"name": "body", "type": "text"}]}]},
+    "pages": [
+        {"id": "PAGE-001", "route": "/notes", "name": "Notes", "purpose": "list",
+         "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-002"},
+         "navigatesTo": ["PAGE-002"]},
+        {"id": "PAGE-002", "route": "/notes/[id]", "name": "Note", "purpose": "one",
+         "pattern": "record_workspace", "data": {"primaryEntity": "ENTITY-002"},
+         "navigatesTo": ["PAGE-001"]}],
+    "workflows": [
+        {"id": "FLOW-001", "name": "Create Note", "trigger": {"kind": "manual"},
+         "launchedFrom": ["PAGE-002"], "inputs": [
+             {"name": "member", "kind": "record", "entity": "ENTITY-001", "required": True},
+             {"name": "title", "kind": "field", "required": True}]},
+        {"id": "FLOW-002", "name": "Edit Note", "trigger": {"kind": "manual"},
+         "launchedFrom": ["PAGE-002"], "inputs": [
+             {"name": "note", "kind": "record", "entity": "ENTITY-002", "required": True},
+             {"name": "title", "kind": "field", "required": True}]},
+        {"id": "FLOW-009", "name": "Nightly Purge", "trigger": {"kind": "schedule"},
+         "launchedFrom": ["PAGE-002"], "inputs": []}],
+}
+
+
+def test_the_brief_narrows_to_the_workflows_a_screen_launches():
+    from services.a2ui_authority import launchable, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    assert [w["id"] for w in launchable(reg, "PAGE-002")] == ["FLOW-001", "FLOW-002"]
+    assert launchable(reg, "PAGE-001") == []
+
+
+def test_the_brief_says_how_each_input_is_met(tmp_path):
+    from services.a2ui_authority import build_domain_context, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    ctx = build_domain_context(tmp_path, reg, "PAGE-002")
+    assert "FLOW-001" in ctx and "FLOW-009" not in ctx
+    assert '"member": "$user.id"' in ctx
+    assert "`note` — the Note this screen shows; supplied automatically" in ctx
+    assert "a field a Form around the control collects, named exactly `title`" in ctx
+
+
+def test_a_screen_that_creates_its_record_is_told_to_compose_both_states(tmp_path):
+    from services.a2ui_authority import (
+        build_requirement, creates_here, registry_from_blueprint,
+    )
+
+    reg = registry_from_blueprint(_NOTES)
+    assert creates_here(reg, "PAGE-002")["id"] == "FLOW-001"
+    assert creates_here(reg, "PAGE-001") is None
+    req = build_requirement(_app(tmp_path), "record_workspace", "/notes/[id]",
+                            contract=_NOTES["pages"][1], registry=reg, page_id="PAGE-002")
+    assert "ALSO CREATES ITS RECORD" in req
+    assert "FLOW-001" in req and "FLOW-002" in req
+    assert '"visibleIf": "!<record pointer>/id"' in req
+
+
+def test_a_list_screen_is_told_where_it_leads_not_what_to_run(tmp_path):
+    from services.a2ui_authority import build_requirement, registry_from_blueprint
+
+    reg = registry_from_blueprint(_NOTES)
+    req = build_requirement(_app(tmp_path), "entity_list", "/notes",
+                            contract=_NOTES["pages"][0], registry=reg, page_id="PAGE-001")
+    assert "`/notes/[id]`" in req and "`/notes/new`" in req
+    assert "ALSO CREATES" not in req
+
+
+# ── create and edit are one form, not two ───────────────────────────────────
+#
+# The `form` job reads "collects or edits ONE record" for both, so on a `/new`
+# page the composer hedged and authored a create form AND a "Save Changes" edit
+# form (plus a table of existing records). The render review flagged the
+# duplicate control and could not get it removed in two rounds. The route says
+# which it is; the brief now says so unambiguously.
+
+def test_a_create_screen_asks_for_exactly_one_form(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/support-requests/new")
+    assert "CREATE screen" in req
+    assert "exactly ONE form" in req
+    # the two things the composer wrongly added on a create page
+    assert "do NOT add a second 'Save Changes' or edit form" in req
+    assert "do NOT show a roster of already-submitted records" in req
+    # NAMES NO COMPONENTS: the A2UI capability checker reads "table"/"list"
+    # as a demand, so the create brief must not use them (it forbade a table
+    # and was then required to add one — the page could never converge).
+    import re as _re
+    assert not _re.search(r"\\btable\\b", req, _re.I)
+    assert not _re.search(r"\\blist\\b", req, _re.I)
+    assert "EDIT screen" not in req
+
+
+def test_an_edit_screen_asks_for_one_prefilled_form(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/rentals/[id]/edit")
+    assert "EDIT screen" in req
+    assert "exactly ONE" in req
+    assert "no second create form" in req
+    assert "CREATE screen" not in req
+
+
+def test_a_non_form_screen_gets_no_create_or_edit_clause(tmp_path):
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="collection", route="/members")
+    assert "CREATE screen" not in req and "EDIT screen" not in req
+
+
+def test_a_custom_create_route_still_gets_the_one_form_brief(tmp_path):
+    # A create page whose route is not spelled `/new` (e.g. `/add-data`) still
+    # has no `[id]`, so it must get the CREATE (one-form) brief — matching only
+    # `/new` let the duplicate create+edit form back in on these routes.
+    root = _app(tmp_path)
+    req = build_requirement(root, kind="form", route="/add-data")
+    assert "CREATE screen" in req and "EDIT screen" not in req
+    assert "exactly ONE form" in req
+
+
+# --- the action model, resolved per screen ----------------------------------
+
+def test_the_brief_names_what_each_declared_action_must_become():
+    """Four refused attempts on /master-data each fixed the verb named and
+    mis-bound another — Delete to Update, Edit dropped, a Table running
+    Create. The brief now resolves every declared action up front: the route
+    an Edit navigates to, the id of the workflow a Delete runs, and what it
+    must NOT be bound to."""
+    from services.a2ui_authority import _contract_guidance, registry_from_blueprint
+    doc = {
+        "data": {"entities": [{"id": "ENTITY-001", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName", "type": "string"}]}]},
+        "pages": [
+            {"id": "PAGE-001", "route": "/master-data", "pattern": "entity_list",
+             "actions": ["view", "edit", "delete", "create"], "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-002", "route": "/add-data", "pattern": "form", "actions": ["create", "update"],
+             "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-003", "route": "/master-data/[id]", "pattern": "record_workspace",
+             "actions": ["edit", "delete"], "data": {"primaryEntity": "ENTITY-001"}},
+        ],
+        "workflows": [
+            {"id": "FLOW-001", "name": "Create Record", "inputs": [], "launchedFrom": ["PAGE-002"],
+             "steps": [{"key": "i", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_insert", "table": "records"}}]},
+            {"id": "FLOW-002", "name": "Update Record", "inputs": [], "launchedFrom": ["PAGE-002"],
+             "steps": [{"key": "u", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_update", "table": "records"}}]},
+            {"id": "FLOW-003", "name": "Delete Record", "inputs": [], "launchedFrom": ["PAGE-001"],
+             "steps": [{"key": "d", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_delete", "table": "records"}}]},
+        ],
+    }
+    reg = registry_from_blueprint(doc)
+    assert [(w["id"], w["op"], w["entity"]) for w in reg["workflows"]] == [
+        ("FLOW-001", "db_insert", "Record"), ("FLOW-002", "db_update", "Record"), ("FLOW-003", "db_delete", "Record")]
+    assert reg["pageFamily"] == {"PAGE-001": "collection", "PAGE-002": "form", "PAGE-003": "record"}
+
+    lst = "\n".join(_contract_guidance(doc["pages"][0], reg, "PAGE-001"))
+    assert "THE ACTION MODEL" in lst and "THE CONTROLS THIS SCREEN OWES" in lst
+    assert "`view`: a row action (or link) that navigates to `/master-data/{{id}}`" in lst
+    assert "`edit`: a row action that navigates to `/add-data?id=`{{id}} — it does NOT run FLOW-002" in lst
+    assert '`delete`: a row action with `workflow: "FLOW-003"` (Delete Record)' in lst and "Not FLOW-002, not FLOW-001" in lst
+    assert "`create`: a Button that navigates to `/add-data` — it does NOT run a workflow" in lst
+
+    rec = "\n".join(_contract_guidance(doc["pages"][2], reg, "PAGE-003"))
+    assert '`delete`: a Button with `workflow: "FLOW-003"`' in rec
+    assert "bound from this screen's record source" in rec
+
+    # The form screen's own Form is described by the creates-here guidance,
+    # not repeated (and not contradicted) here.
+    frm = "\n".join(_contract_guidance(doc["pages"][1], reg, "PAGE-002"))
+    assert "THE CONTROLS THIS SCREEN OWES" not in frm
+
+    # No delete workflow: say so rather than point at Update.
+    doc["workflows"].pop()
+    lst = "\n".join(_contract_guidance(doc["pages"][0], reg_no := registry_from_blueprint(doc), "PAGE-001"))
+    assert "no workflow deletes a Record yet — leave it out" in lst

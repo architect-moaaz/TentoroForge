@@ -81,6 +81,8 @@ SECTION_OWNER: dict[str, str] = {
     # finding's `section` through the Page↔Layout edge and had no owner, so
     # every one of those repair tasks was addressed to "unassigned".
     "pageLayouts": "a2ui_pages",
+    # §34 — the whole-app sketch has the same authority behind it.
+    "composition": "a2ui_composition",
     "components": "frontend",
     "widgets": "page_design",
     "designSystem": "accessibility",
@@ -99,6 +101,40 @@ SECTION_OWNER: dict[str, str] = {
     "runtime": "build",
     "deployment": "deployment",
     "codeMap": "backend",
+}
+
+#: The Blueprint sections each edge reads — what it *relates*. A relationship
+#: can only be judged once both of its sides exist, which is the fact the
+#: observer needs: while a node that produces one side is still pending, the
+#: edge has nothing to say yet and a finding on it would be routed to an agent
+#: that cannot act on it. `check_requirement_code` reads codeMap, and an
+#: observed `requirements` node held to that edge before any projection has
+#: run would be told every requirement is unimplemented.
+#:
+#: Test-checked against :data:`CHECKS`: an edge without an entry, or an entry
+#: naming a section no agent can write, fails the suite rather than silently
+#: making the edge always-ready or never-ready.
+EDGE_SECTIONS: dict[str, tuple[str, ...]] = {
+    "Page↔API": ("pages", "apis"),
+    "API↔Database": ("apis", "data.entities"),
+    "Page↔Permission": ("pages", "roles"),
+    "API↔Permission": ("apis", "permissions"),
+    "Workflow↔BusinessRule": ("businessRules", "workflows", "pages", "apis",
+                              "data.entities", "roles", "permissions"),
+    "Workflow↔API": ("workflows", "apis", "pages", "data.entities"),
+    "Page↔Function": ("pages", "pageLayouts", "workflows", "data.entities"),
+    "Design↔DesignSystem": ("designSystem",),
+    "Requirement↔Code": ("requirements", "pages", "apis", "workflows",
+                         "businessRules", "components", "data.entities",
+                         "codeMap"),
+    "Requirement↔Test": ("requirements", "tests"),
+    "Blueprint↔Implementation": ("pages", "apis", "workflows", "businessRules",
+                                 "components", "data.entities", "codeMap"),
+    "Navigation↔Page": ("navigation", "pages"),
+    "Page↔Precondition": ("pages", "workflows", "data.entities"),
+    "Page↔Workflow": ("pages", "workflows"),
+    "Page↔Layout": ("pages", "pageLayouts"),
+    "Widget↔DataSource": ("widgets", "pages", "data.entities"),
 }
 
 #: Methods that change state and therefore need an explicit permission (§100).
@@ -415,7 +451,7 @@ def check_design_system(doc: dict) -> list[Finding]:
 
     # The groups `project_design_tokens` reads. A group that is missing does
     # not fail the projection; it silently emits fewer variables.
-    return [
+    out = [
         Finding("Design↔DesignSystem", section="designSystem",
                 artifact_id=group,
                 detail=f"{group!r} is missing, so nothing projects into "
@@ -423,6 +459,83 @@ def check_design_system(doc: dict) -> list[Finding]:
         for group in ("colors", "spacing", "typography", "radius")
         if not (design.get(group) or {})
     ]
+    out.extend(check_palette_contrast(doc))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# THE PALETTE THAT SHIPS IS READABLE. A design (or a palette the user asks Smith
+# to change to) states colours; the token contract turns them into the tokens
+# every component reads. If a chosen colour renders its own text below the WCAG
+# AA ratio — danger text on the danger tint, foreground on the background — the
+# page is legible-looking in the design tool and unreadable in the build. Judged
+# on the resolved palette (Blueprint values + contract defaults + computed
+# foregrounds), so the finding routes to the designSystem owner before it ships,
+# never after. This is the colour-layer twin of §73: a token pair that does not
+# meet is a promise the palette cannot keep.
+# ---------------------------------------------------------------------------
+
+#: WCAG AA: 4.5:1 for body text, 3:1 for large/UI text. Body text on a surface
+#: and small chip text on a tint need 4.5; a solid button/badge fill carries
+#: large/UI text and needs 3. The pair's kind decides which applies.
+_AA_TEXT = 4.5
+_AA_LARGE = 3.0
+
+_STATUS_ROLES = ("destructive", "success", "warning", "info")
+
+
+def _contrast_ratio(a: str, b: str) -> float | None:
+    from services.blueprint.projection import triplet_luminance
+    la, lb = triplet_luminance(a), triplet_luminance(b)
+    if la is None or lb is None:
+        return None
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def check_palette_contrast(doc: dict) -> list[Finding]:
+    """Every text/surface token pair the contract defines meets WCAG AA on the
+    palette that will render. A `contrastOf` token is checked against its base;
+    each status `-subtle-foreground` against its `-subtle` tint."""
+    try:
+        from services.blueprint.projection import resolved_palette, _token_contract
+    except Exception:  # noqa: BLE001 — a check that cannot run stays silent
+        return []
+    palette = resolved_palette(doc)
+    if not palette:
+        return []
+    # (foreground, background, kind, threshold). Surface body text and small
+    # chip text need 4.5; a solid button/badge fill is large/UI text at 3.
+    # `muted-foreground`/`muted` is deliberately low-emphasis — WCAG exempts such
+    # secondary text and holding it to 4.5 fires on nearly every standard palette,
+    # so it is not among the pairs a palette must clear.
+    pairs: list[tuple[str, str, str, float]] = [
+        ("foreground", "background", "body text on the page", _AA_TEXT),
+        ("card-foreground", "card", "text on a card", _AA_TEXT),
+        ("popover-foreground", "popover", "text in a popover", _AA_TEXT),
+    ]
+    for role in _STATUS_ROLES:
+        pairs.append((f"{role}-subtle-foreground", f"{role}-subtle",
+                      "chip text on its tint", _AA_TEXT))
+    for role in ("primary", "secondary", "accent", *_STATUS_ROLES):
+        pairs.append((f"{role}-foreground", role,
+                      f"label on a {role} fill", _AA_LARGE))
+
+    out: list[Finding] = []
+    for fg, bg, what, threshold in pairs:
+        if fg not in palette or bg not in palette:
+            continue
+        ratio = _contrast_ratio(palette[fg], palette[bg])
+        if ratio is not None and ratio < threshold:
+            out.append(Finding(
+                "Design↔DesignSystem", section="designSystem", artifact_id=fg,
+                detail=(f"{fg} on {bg} is {ratio:.1f}:1 ({what}), below the "
+                        f"{threshold:.1f}:1 it needs to be readable — the colour the "
+                        f"palette gives {bg} cannot carry {fg}'s text. Darken or lighten "
+                        f"one until they meet, or restate the role so the projector "
+                        f"derives a foreground that does."),
+            ))
+    return out
 
 
 def check_requirement_code(doc: dict) -> list[Finding]:
@@ -564,7 +677,116 @@ def check_page_workflow(doc: dict) -> list[Finding]:
                         "Page↔Workflow", section="pages", artifact_id=page.get("id"),
                         detail=f"action targets missing workflow {action}",
                     ))
+
+    # A PAGE'S ACTIONS NEED A WORKFLOW ON ITS OWN ENTITY. A page names its
+    # actions for what they do — "approve", "reject", "resolve" — not for a
+    # FLOW id, so the id check above never sees them. When a page declares such
+    # an action on entity E and NO workflow operates on E, the workflow the
+    # action names does not exist: the composer has nothing correct to wire the
+    # button to, reaches for a workflow on some OTHER entity, and the record
+    # floor refuses the whole page — which is then dropped. Measured on
+    # NeighbourKit: KycVerification, ConditionEvidence and Dispute had zero
+    # workflows touching them, and all six of their pages (KYC approve/reject,
+    # dispute resolve, handover/return capture) dropped for exactly this. The
+    # gap is a DEFINE defect, caught here so it re-asks the workflow agent
+    # before the expensive compose→refuse→drop, not after.
+    #
+    # A workflow touches an entity by taking it as a `record` input. The check
+    # is entity-level (not a per-verb name match): a page whose entity no
+    # workflow touches cannot have ANY of its record actions wired, whatever
+    # they are called.
+    wf_entities = {
+        str(i.get("entity"))
+        for w in workflows for i in (w.get("inputs") or [])
+        if i.get("kind") == "record" and i.get("entity")
+    }
+    ent_name = {e.get("id"): (e.get("name") or e.get("id")) for e in _entities(doc)}
+    for page in _live(doc.get("pages")):
+        entity = str((page.get("data") or {}).get("primaryEntity") or "")
+        if not entity or entity in wf_entities:
+            continue
+        acts = [_action_label(a) for a in (page.get("actions") or [])
+                if _acts_on_existing_record(a)]
+        if not acts:
+            continue
+        en = ent_name.get(entity, entity)
+        out.append(Finding(
+            "Page↔Workflow", section="workflows", artifact_id=page.get("id"),
+            detail=(f"{page.get('route') or page.get('id')} declares action(s) "
+                    f"[{', '.join(acts)}] on {en}, but no workflow operates on "
+                    f"{en} — those actions name workflows that do not exist. "
+                    f"Declare the workflow(s) they run, each acting on {en}."),
+        ))
+
+    # A DESTRUCTIVE ACTION NEEDS A WORKFLOW THAT DELETES. The entity-level check
+    # above passes as soon as ANY workflow touches the entity, so a page that
+    # declares `delete` on an entity whose only workflows CREATE and UPDATE it
+    # slips through — `delete` is the one mutating verb no other write op can
+    # serve. With no delete workflow to wire the Delete button to, the composer
+    # reaches for the nearest write workflow (Update), and the button silently
+    # updates instead of removing. Checked per-op, on the DB operation
+    # (`db_delete`) rather than a label, so the workflow author is asked for the
+    # missing Delete workflow before the compose→refuse cycle, not after.
+    from services.blueprint.functional_completeness import (
+        entities_with_delete_workflow, is_destructive_action,
+    )
+    deletable = entities_with_delete_workflow(doc)
+    for page in _live(doc.get("pages")):
+        entity = str((page.get("data") or {}).get("primaryEntity") or "")
+        if not entity or entity in deletable:
+            continue
+        dels = [_action_label(a) for a in (page.get("actions") or [])
+                if is_destructive_action(a)]
+        if not dels:
+            continue
+        en = ent_name.get(entity, entity)
+        out.append(Finding(
+            "Page↔Workflow", section="workflows", artifact_id=page.get("id"),
+            detail=(f"{page.get('route') or page.get('id')} declares [{', '.join(dels)}] "
+                    f"on {en}, but no workflow deletes {en} (a step whose action is "
+                    f"'db_delete'). Another workflow on {en} cannot serve a delete — an "
+                    f"Update leaves the record in place — so a Delete control has nothing "
+                    f"correct to run and gets wired to a write workflow that does not "
+                    f"delete. Declare a workflow that deletes the {en} record by id."),
+        ))
     return out
+
+
+#: Action words that navigate or dismiss rather than run a workflow.
+_NAVIGATION_ACTIONS = frozenset({
+    "view", "back", "close", "cancel", "next", "previous", "prev", "open",
+    "details", "detail", "done", "go", "list", "search", "filter", "refresh",
+})
+#: Action words that CREATE a new record. Their workflow outputs the entity
+#: rather than taking it as an input, so a create page legitimately has no
+#: workflow that reads its entity — it is not evidence of a missing one. (The
+#: separate record-floor catches a create wired to a mis-entitied workflow.)
+_CREATE_ACTIONS = frozenset({
+    "create", "add", "new", "submit", "register", "request", "raise", "start",
+})
+
+
+def _action_label(a: object) -> str:
+    if isinstance(a, str):
+        return a
+    if isinstance(a, dict):
+        return str(a.get("name") or a.get("label") or a.get("id") or "")
+    return str(a)
+
+
+def _acts_on_existing_record(a: object) -> bool:
+    """Whether an action operates on an EXISTING record of the page's entity —
+    approve, reject, resolve, confirm, delete — and so needs a workflow that
+    reads that entity. FLOW-id actions are checked by id above; a navigation
+    runs nothing; a create/submit makes a NEW record (its workflow outputs the
+    entity, does not read it). Everything else is assumed to act on the record
+    in front of it, so a missing entity workflow is a real gap."""
+    name = _action_label(a).strip().lower()
+    if not name or name.startswith("flow-"):
+        return False
+    first = name.replace("-", " ").replace("_", " ").split()
+    verb = first[0] if first else ""
+    return verb not in _NAVIGATION_ACTIONS and verb not in _CREATE_ACTIONS
 
 
 

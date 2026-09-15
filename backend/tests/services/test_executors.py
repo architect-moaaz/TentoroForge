@@ -99,8 +99,20 @@ def test_bodies_travel_as_strings_because_free_form_objects_cannot_be_constraine
     assert body["type"] == "string"
 
 
-def test_uses_the_current_default_model():
-    assert DEFAULT_MODEL == "claude-opus-5"
+def test_who_runs_on_what():
+    """Two decisions (2026-09-10): the specialists and the observer on Sonnet
+    5, Smith on Opus 5. `DEFAULT_MODEL` is the specialists' model — it is
+    what a bare `AnthropicModel()` and `tiered_router()` run on."""
+    from services.blueprint.executors import (
+        AGENT_MODEL, SMITH_MODEL, AnthropicModel, tiered_router,
+    )
+
+    assert AGENT_MODEL == "claude-sonnet-5"
+    assert SMITH_MODEL == "claude-opus-5"
+    assert DEFAULT_MODEL == AGENT_MODEL
+    assert AnthropicModel().model == AGENT_MODEL
+    assert tiered_router().default.model == AGENT_MODEL
+    assert set(tiered_router().assignments().values()) == {AGENT_MODEL}
 
 
 # --- §101: capability-scoped context ---------------------------------------
@@ -328,7 +340,7 @@ def test_router_sends_each_node_to_its_assigned_model():
 
     router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
     assert router.for_task("testing", "testing").model == "kimi-k2-0711-preview"
-    assert router.for_task("data_model", "data_model").model == "claude-opus-5"
+    assert router.for_task("data_model", "data_model").model == DEFAULT_MODEL
 
 
 def test_router_can_route_by_agent_as_well_as_node():
@@ -353,7 +365,7 @@ def test_assignments_report_what_runs_where():
     router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
     a = router.assignments()
     assert a["testing"] == "kimi-k2-0711-preview"
-    assert a["data_model"] == "claude-opus-5"
+    assert a["data_model"] == DEFAULT_MODEL
     assert set(a) == set(DAG), "every node must have a declared model"
 
 
@@ -506,7 +518,7 @@ def test_a_run_can_mix_anthropic_gemini_and_an_openai_compatible_provider(svc):
         },
     )
     a = router.assignments()
-    assert a["data_model"] == "claude-opus-5"
+    assert a["data_model"] == DEFAULT_MODEL
     assert a["testing"] == "kimi-k2-0711-preview"
     assert a["business_rules"] == "gemini-2.5-pro"
     assert len(set(a.values())) >= 3
@@ -1603,6 +1615,26 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     assert r.for_task("ux_architecture", "x").effort == "medium"
 
 
+def test_the_client_timeout_is_the_sdks_own_type(monkeypatch):
+    """`anthropic.Timeout` is whichever httpx the installed SDK speaks. Probing
+    for httpx2 built the wrong Timeout whenever that package was merely
+    present, and the SDK surfaced the type error as a connection error."""
+    import anthropic
+
+    from services.blueprint.executors import AnthropicModel
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
+    AnthropicModel()._anthropic()
+    assert isinstance(captured["timeout"], anthropic.Timeout)
+    assert captured["default_headers"] == {"accept-encoding": "gzip"}
+
+
 # ---------------------------------------------------------------------------
 # Workflows: declared once, authored one at a time
 # ---------------------------------------------------------------------------
@@ -1890,3 +1922,41 @@ def test_the_field_authors_reply_updates_the_named_entity_whatever_it_called_it(
     assert len(detailed["fields"]) == 3 and detailed["labelField"] == "quantity"
     assert svc.doc["data"]["constraints"][0]["entity"] == part, (
         "a constraint naming an entity the document already holds resolves")
+
+
+# --- §34: the app composed once ---------------------------------------------
+
+def _page(pid="PAGE-001", route="/candidates"):
+    return {"id": pid, "name": "Candidates", "route": route, "purpose": "Scan",
+            "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-001"}}
+
+
+def test_the_composition_prompt_is_the_whole_app_with_names_only(svc):
+    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
+    system, user = build_prompt(svc.doc, "composition")
+    assert "Name components from this list only" in system
+    assert "props:" not in system, "the index carries names, not signatures"
+    assert '"PAGE-001"' in user and '"PAGE-002"' in user
+    assert 'natural_key "composition"' in user
+
+
+def test_the_page_composer_inherits_the_apps_conventions(svc):
+    """A page authored bespoke used to re-decide the header, the filters, the
+    empty state. Now the app decided them once, and the composer is told —
+    in the cached prefix, since the decisions are the app's, not the page's."""
+    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
+    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    svc.doc["composition"] = {
+        "vision": "Calm and dense",
+        "conventions": [{"topic": "header", "rule": "Title left, action right"}],
+        "pages": [{"page": "PAGE-001", "layout": "single_column",
+                   "sections": [{"name": "List", "purpose": "scan"}]},
+                  {"page": "PAGE-002", "layout": "single_column",
+                   "sections": [{"name": "List", "purpose": "scan"}]}],
+    }
+    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    assert "Calm and dense" not in before
+    assert "Calm and dense" in system and "Title left, action right" in system
+    assert "composition.sketch" in user and "composition.sketch" not in plain_user
+    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002")
+    assert other == system, "the prefix must stay identical across the fan-out"

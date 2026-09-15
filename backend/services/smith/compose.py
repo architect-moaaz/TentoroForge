@@ -230,6 +230,9 @@ def compose_route(
             )
         except (BlueprintInvalid, InvalidPatternTemplate) as exc:
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+            from services.blueprint.refusals import record_refusal
+            record_refusal(svc.output_dir, page["id"], attempt,
+                           list(result.proposals), f"{type(exc).__name__}: {exc}")
             if attempt == MAX_ATTEMPTS:
                 raise ComposeError(
                     f"the composition of {page.get('route')} was refused "

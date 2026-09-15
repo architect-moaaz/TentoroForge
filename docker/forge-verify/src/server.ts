@@ -34,6 +34,56 @@ const app = Fastify({ logger: { level: "info" } });
 
 app.get("/healthz", async () => ({ ok: true, browsers_warm: true }));
 
+// POST /screenshot — headless capture of one URL, returns image/png.
+//
+// Smith's render-review loop needs to see a page as it renders. The browser
+// pool that verification already keeps warm is exactly the tool, so screenshots
+// ride it rather than standing up a second Playwright process: navigate, let it
+// settle, capture. Best-effort — a page that will not load returns 500, and the
+// caller treats a missing shot as a page it could not review, never a failure.
+app.post("/screenshot", async (req, reply) => {
+  const body = (req.body || {}) as {
+    url?: string; width?: number; height?: number;
+    fullPage?: boolean; waitMs?: number;
+  };
+  if (!body.url) { reply.code(400); return { error: "url required" }; }
+  const { context, release } = await pool.acquire();
+  try {
+    const page = await context.newPage();
+    await page.setViewportSize({
+      width: body.width || 1440,
+      height: body.height || 900,
+    });
+    // DOM first — fast and reliable. Do NOT block on "networkidle": a dev
+    // server keeps an HMR/websocket connection open, so the network never goes
+    // idle and every capture used to burn the full 25s timeout (measured: 26s a
+    // page), which under load overran the caller's timeout and returned no shot
+    // at all — the review window then showed nothing. Try networkidle only
+    // briefly (production settles inside it; dev falls through), then give
+    // client-side rendering an explicit moment.
+    await page
+      .goto(body.url, { waitUntil: "domcontentloaded", timeout: 15000 })
+      .catch(() => { /* capture whatever rendered, even on a slow/partial load */ });
+    await page
+      .waitForLoadState("networkidle", { timeout: 3000 })
+      .catch(() => { /* a dev server never idles — fall through to the settle */ });
+    await page.waitForTimeout(Math.min(Math.max(body.waitMs ?? 800, 0), 6000));
+    const png = await page.screenshot({
+      fullPage: body.fullPage ?? true,
+      type: "png",
+    });
+    await page.close().catch(() => {});
+    reply.header("content-type", "image/png");
+    reply.header("cache-control", "no-store");
+    return reply.send(png);
+  } catch (err: any) {
+    reply.code(500);
+    return { error: err?.message || String(err) };
+  } finally {
+    await release();
+  }
+});
+
 app.post("/run", async (req, reply) => {
   const body = req.body as RunRequest;
   if (!body?.project_id || !body?.interactions?.length) {

@@ -37,6 +37,7 @@ placements are marked and are the parts to argue with.
 """
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
+    ArtifactProposal,
+    InvalidComposition,
     InvalidPatternTemplate,
     InvalidWorkflowStep, InvalidBusinessRule,
     apply_agent_result,
@@ -302,8 +305,21 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Dropping the two nodes that used to sit in front of this one moved it two
     # waves earlier, into the same wave as `workflows` — concurrent with the
     # thing it reads.
+    # §34 — THE WHOLE APP SKETCHED ONCE, BEFORE ANY PAGE IS. One call, no
+    # props: per page a layout and ordered sections, plus the conventions
+    # every page inherits. Per-page composition never sees the page next
+    # door, so a bespoke page could re-decide the header, the filters and the
+    # empty state and nothing had looked at both. This is the only call that
+    # sees every page at once, and it is what gives the fan-out below a
+    # shared rhythm — the one thing per-page authoring cannot give itself.
+    # After the page set is complete and the design language is final, so
+    # the sketch is made of real pages under the design the user chose.
+    _n("composition", "a2ui_composition",
+       ("page_details", "design_system", "figma_design_system"), ("composition",),
+       note="§34; whole-app skeleton and conventions, no props, one call"),
     _n("page_layouts", "a2ui_pages",
-       ("page_details", "design_system", "figma_design_system", "workflows"),
+       ("composition", "page_details", "design_system", "figma_design_system",
+        "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),
@@ -630,6 +646,9 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 #: any of them.
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
+    # A sketch is a composition of components, and adding a page has to give
+    # that page a sketch — so the composition follows the pages, not the frame.
+    "composition",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
@@ -1015,6 +1034,20 @@ class RunReport:
     #: failure there (a low credit balance, a transient fault) is recorded here
     #: rather than in `failed`, and does not hold a built application in `draft`.
     degraded: dict[str, str] = field(default_factory=dict)
+    #: Node -> the observer's verdict on it (§73, closed at the node). Every
+    #: agent node the observer watched has an entry, passing or not, so a
+    #: report can be read for what was judged and not only for what failed.
+    observed: dict[str, dict] = field(default_factory=dict)
+    #: Labels the observer sent back to their author and then passed.
+    repaired: list[str] = field(default_factory=list)
+    #: Label -> what stayed wrong after every repair round. The artifact is
+    #: flagged OUT_OF_SYNC (§76) and left as its author last wrote it; it is
+    #: not a failure of the run, because nothing was lost — it is a divergence
+    #: the report names rather than a repair the platform hid.
+    unrepaired: dict[str, str] = field(default_factory=dict)
+    #: Subjects composed by the node's fallback after every model attempt was
+    #: refused (`FALLBACK_BY_NODE`) — served plain rather than not at all.
+    fallbacks: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -1069,6 +1102,7 @@ def run(
     user_request: str = "",
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -1085,6 +1119,14 @@ def run(
     reaches disk reaches the observer first. That is how the virtual office
     animates: it reads this same account rather than keeping its own, so a node
     outcome recorded here cannot be missing from the picture.
+
+    ``observer_agent`` is a :class:`services.blueprint.observer.Observer`, or
+    nothing. With one, every agent node's outcome is judged the moment its
+    last subject lands — on a worker, while the rest of the graph carries on —
+    and a node the observer fails is sent back to its author with the findings
+    before anything downstream starts (§73). Injected for the same reason the
+    executor is: with no critic it costs nothing and calls no model, so the
+    loop is testable; with one it is the same loop with a judgement in it.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
     in_plan = set(order)
@@ -1100,6 +1142,26 @@ def run(
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
 
+    # A PULSE WHILE THE LONG STEPS RUN. page_layouts and the observer repair go
+    # minutes between events, so the ledger fell silent and a live run looked
+    # dead — a status poll showed no progress and a restart guard killed a build
+    # that was still composing. A daemon heartbeat keeps the ledger's mtime
+    # fresh while the run is alive, and stops with it. Best-effort throughout.
+    import threading
+
+    _hb_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not _hb_stop.wait(_HEARTBEAT_SECONDS):
+            try:
+                ledger.heartbeat()
+            except Exception:  # noqa: BLE001 — a pulse must not break the run
+                pass
+
+    _hb = threading.Thread(target=_heartbeat, name="forge-run-heartbeat",
+                           daemon=True)
+    _hb.start()
+
     # §28's graph declares which nodes are independent; `_execute` starts a
     # node the moment its in-plan dependencies are complete, recomputed there
     # because a plan is a subset and because a node that failed must never
@@ -1107,7 +1169,8 @@ def run(
     try:
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
-                        user_request=user_request, app_root=app_root)
+                        user_request=user_request, app_root=app_root,
+                        observer_agent=observer_agent)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1116,6 +1179,8 @@ def run(
         # from there and one of them reached the wrong conclusion.
         ledger.crashed(exc)
         raise
+    finally:
+        _hb_stop.set()
 
 
 def _execute(
@@ -1131,6 +1196,7 @@ def _execute(
     commit: bool,
     user_request: str,
     app_root: str | None,
+    observer_agent: Any = None,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1156,8 +1222,22 @@ def _execute(
     `requirements` — and for those, :func:`_yields_to` holds the later node's
     results until the earlier one has finished, so their numbering is the
     plan's, not the network's.
+
+    THE OBSERVER SITS BETWEEN "FINISHED" AND "DONE". A node whose calls have
+    all landed is *finished*; with an observer it is not *done* — nothing
+    downstream may start — until the observer has judged it and every
+    subject it failed has been re-authored and judged again, or the rounds
+    are spent and what is left is flagged. The judgement runs on a worker
+    like any call, so the rest of the graph keeps moving; only the node's
+    own dependents wait, which is exactly §28's rule. A declaration node
+    whose section a later node is still authoring (`data_model` before
+    `entity_fields`) is not judged on its own — the author is.
     """
     from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+
+    from services.blueprint.observer import (
+        OBSERVER_AGENT, RepairTask, flag_unrepaired,
+    )
 
     started: set[str] = set()
     finished: set[str] = set()
@@ -1165,6 +1245,11 @@ def _execute(
     futures: dict[Future, TaskSpec] = {}
     #: Results held back by :func:`_yields_to`, in arrival order.
     deferred: list[tuple[TaskSpec, Any]] = []
+    #: Future -> "observe" | "repair" for the observer's own traffic; a
+    #: future absent here is an ordinary call.
+    kinds: dict[Future, str] = {}
+    watches: dict[str, _Watch] = {}
+    rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
         return [
@@ -1196,9 +1281,17 @@ def _execute(
             key, "; ".join(report.degraded.get(lbl, "") for lbl in labels)[:200],
         )
 
-    def finish(key: str) -> None:
+    def finish(pool: ThreadPoolExecutor, key: str) -> None:
         state = runs[key]
         finished.add(key)
+        if observer_agent is not None and _watchable(key, state, order, in_plan,
+                                                    finished):
+            observe(pool, key, _applied(state))
+            return
+        complete(key)
+
+    def complete(key: str) -> None:
+        state = runs[key]
         # Only a node that authored nothing at all has genuinely failed;
         # anything less is a partial result its dependents can still use.
         if state.subjects and len(state.failed) == len(state.subjects):
@@ -1263,7 +1356,7 @@ def _execute(
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
         if not subjects:
-            finish(key)
+            finish(pool, key)
             return
         pump(pool, key)
 
@@ -1293,12 +1386,170 @@ def _execute(
                 commit=commit, user_request=user_request,
                 report=report, ledger=ledger,
             )
+            # PERSIST AS GENERATED. A composed page reaches disk the moment its
+            # layout commits — under the same lock that guarded the commit, so it
+            # reads exactly what landed — rather than waiting for the frontend
+            # node. A build interrupted at page_layouts then still has, and can
+            # render, the pages it made. Best-effort; never fail the run over it.
+            if verdict == "applied" and commit and app_root \
+                    and key == "page_layouts" and spec.subject:
+                try:
+                    from services.blueprint.projection import project_page_schema
+                    project_page_schema(svc.doc, spec.subject, app_root)
+                except Exception:  # noqa: BLE001 — the node re-projects at the end
+                    pass
         state.in_flight.discard(spec.subject)
         if verdict == "retry":
             state.queue.append(spec.subject)
         pump(pool, key)
         if not state.in_flight and not state.queue:
-            finish(key)
+            finish(pool, key)
+
+    # -- the observer's half ------------------------------------------------
+
+    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str]) -> None:
+        """Judge ``subjects`` of ``key`` on a worker, against the document as
+        it is right now. The snapshot is taken here, under the lock, so the
+        observer reads what the node finished with and not what the next
+        apply writes."""
+        watches.setdefault(key, _Watch(
+            subjects=list(subjects),
+            authored={k: set(v) for k, v in runs[key].authored.items()},
+        ))
+        with svc.lock:
+            snapshot = copy.deepcopy(svc.doc)
+        fut = pool.submit(
+            observer_agent.observe, key, agent=DAG[key].agent,
+            subjects=list(subjects), doc=snapshot,
+            pending=_pending_sections(in_plan, finished),
+            planned=_planned_sections(in_plan), user_request=user_request,
+            subject_of=_subject_resolver(DAG[key], snapshot),
+        )
+        futures[fut] = TaskSpec(task_id=f"OBSERVE-{key}", node=key,
+                                agent=OBSERVER_AGENT)
+        kinds[fut] = "observe"
+
+    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any) -> None:
+        w = watches[key]
+        if isinstance(obs, Exception):
+            # The observer's own failure is not the node's. Recorded, and the
+            # node completes as its author left it.
+            logger.warning("[%s] observer failed: %s", key, _reason(obs))
+            report.observed[key] = {"node": key, "ok": None,
+                                    "error": _reason(obs)}
+            complete(key)
+            return
+        _record_observation(report, ledger, obs)
+        for subject in obs.subjects:
+            label = f"{key}:{subject}" if subject else key
+            if obs.findings.get(subject):
+                # Did the round that just ran change anything at all? If a repair
+                # already ran and came back with the IDENTICAL findings, the
+                # re-author moved nothing — a second identical brief will not help
+                # (a deterministic defect the agent cannot fix, e.g. a data-model
+                # gap). Mark it stuck so `advance` flags it now instead of burning
+                # the last round. Compared on identity, not count, so a real
+                # re-author whose output merely shifted keeps its full rounds.
+                prev = w.last.get(subject)
+                if prev is not None:
+                    def _sig(fs):
+                        return frozenset((f.edge, f.artifact_id, f.detail) for f in fs)
+                    if _sig(obs.findings[subject]) == _sig(prev.findings.get(subject, [])):
+                        w.stuck.add(subject)
+                w.open[subject] = RepairTask(
+                    node=key, agent=DAG[key].agent, subject=subject,
+                    feedback=obs.brief(subject),
+                )
+                w.last[subject] = obs
+            elif subject in w.open:
+                w.open.pop(subject)
+                w.stuck.discard(subject)
+                report.repaired.append(label)
+        advance(pool, key)
+
+    def _flag(key: str, subject: str, task: Any) -> None:
+        """Leave a subject as its author last wrote it, flagged OUT_OF_SYNC."""
+        obs = watches[key].last[subject]
+        with svc.lock:
+            flag_unrepaired(svc, obs, subject)
+        why = "; ".join(
+            f"{f.edge}: {f.detail}" for f in obs.findings.get(subject, [])
+        )[:600]
+        report.unrepaired[task.label] = why
+        _note(ledger, "unrepaired", key, subject, why)
+
+    def advance(pool: ThreadPoolExecutor, key: str) -> None:
+        """Repair what is open, or flag it — once the rounds are spent, or as soon
+        as a round leaves a subject no better (see `_Watch.stuck`)."""
+        w = watches[key]
+        # EARLY STOP: subjects a repair round did not improve. Flag them now
+        # rather than re-authoring against an identical brief that already failed.
+        for subject in [s for s in list(w.open) if s in w.stuck]:
+            _flag(key, subject, w.open.pop(subject))
+            w.stuck.discard(subject)
+        if not w.open:
+            complete(key)
+            return
+        if w.round >= OBSERVER_ROUNDS_BY_NODE.get(key, rounds):
+            for subject, task in list(w.open.items()):
+                _flag(key, subject, task)
+            complete(key)
+            return
+        w.round += 1
+        for subject, task in w.open.items():
+            spec = TaskSpec(
+                task_id=f"TASK-{task.label}-observer{w.round}",
+                node=key, agent=task.agent, attempt=w.round,
+                subject=subject, feedback=task.feedback,
+            )
+            _note(ledger, "repair", key, subject, w.round, rounds, task.feedback)
+            fut = pool.submit(_call, executor, spec)
+            futures[fut] = spec
+            kinds[fut] = "repair"
+            w.awaiting.add(subject)
+
+    def settle_repair(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
+        key = spec.node
+        w = watches[key]
+        w.awaiting.discard(spec.subject)
+        with svc.lock:
+            refused, application = _repair_apply(
+                svc, outcome, commit=commit, user_request=user_request)
+            if refused is None:
+                # A REPAIR IS THE WHOLE ANSWER, NOT AN ADDENDUM. Ids come
+                # from natural keys, so a re-authoring that renames a module
+                # or re-spells a constraint's expression is a new artifact
+                # beside the old one — measured live: three "Notes" modules
+                # and every index constraint twice, which the observer then
+                # rightly flagged and could not repair. What the subject
+                # authored before and did not re-propose is retired here.
+                now = _proposed_identities(outcome, application)
+                stale = w.authored.get(spec.subject, set()) - now
+                if stale:
+                    _retire(svc, stale,
+                            note=f"superseded by the observer's repair of "
+                                 f"{spec.task_id}")
+                w.authored[spec.subject] = now
+        if refused is not None:
+            # The author's repair was refused; the original stands, and the
+            # next round is told why. Nothing half-applied: apply validates
+            # before it commits.
+            task = w.open[spec.subject]
+            w.open[spec.subject] = RepairTask(
+                node=key, agent=task.agent, subject=spec.subject,
+                feedback=f"{task.feedback}\n\nYour previous repair was "
+                         f"rejected: {refused}",
+            )
+        else:
+            w.landed.append(spec.subject)
+        if w.awaiting:
+            return
+        landed, w.landed = w.landed, []
+        if landed:
+            # Verify again — the half of the loop that decides.
+            observe(pool, key, landed)
+        else:
+            advance(pool, key)
 
     def flush(pool: ThreadPoolExecutor) -> None:
         """Apply what arrived, holding back what must wait its turn."""
@@ -1332,6 +1583,13 @@ def _execute(
                     outcome = fut.result()
                 except Exception as exc:  # noqa: BLE001 — a deterministic node's own failure
                     outcome = exc
+                kind = kinds.pop(fut, None)
+                if kind == "observe":
+                    settle_observation(pool, spec.node, outcome)
+                    continue
+                if kind == "repair":
+                    settle_repair(pool, spec, outcome)
+                    continue
                 deferred.append((spec, outcome))
             flush(pool)
     except BaseException:
@@ -1359,6 +1617,174 @@ def _execute(
 
     ledger.finish(report)
     return report
+
+
+@dataclass
+class _Watch:
+    """One node's passage through the observer: what is open, what round."""
+
+    subjects: list[str]
+    round: int = 0
+    #: Subject -> the repair task it is waiting on (or about to be given).
+    open: dict[str, Any] = field(default_factory=dict)
+    #: Subject -> the observation that last failed it.
+    last: dict[str, Any] = field(default_factory=dict)
+    #: Repair calls out on a worker this round.
+    awaiting: set[str] = field(default_factory=set)
+    #: Repairs applied this round, to be judged again together.
+    landed: list[str] = field(default_factory=list)
+    #: Subject -> identities the node's current answer for it consists of.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
+    #: Subjects a repair round left NO better (finding count did not drop). A
+    #: second identical brief will not help, so they are flagged now instead of
+    #: burning the remaining round — the observer's biggest source of wasted
+    #: re-authoring on hard apps (measured: NKit page_layouts).
+    stuck: set[str] = field(default_factory=set)
+
+
+def _applied(state: _NodeRun) -> list[str]:
+    """The subjects a node actually authored: given, not failed. A blocked
+    subject is in ``failed`` too."""
+    return [s for s in state.subjects if s not in state.failed]
+
+
+def _watchable(key: str, state: _NodeRun, order: Sequence[str],
+               in_plan: set[str], finished: set[str]) -> bool:
+    """Whether the observer judges this node now.
+
+    Not if it authored nothing this run — there is no outcome to judge. And
+    not if a later node in the plan is still to write a section this one
+    produces: `data_model` names the entities and `entity_fields` details
+    them, and a declaration judged on its own would be sent back for the
+    fields its author has not written yet. The author is judged instead, and
+    its findings route to the same agent.
+    """
+    if not _applied(state):
+        return False
+    mine = set(DAG[key].produces)
+    return not any(
+        other != key and other in in_plan and other not in finished
+        and DAG[other].produces & mine
+        for other in order
+    )
+
+
+def _pending_sections(in_plan: set[str], settled: set[str]) -> set[str]:
+    """Sections a node still to run in this plan will write."""
+    return {s for k in in_plan if k not in settled for s in DAG[k].produces}
+
+
+def _planned_sections(in_plan: set[str]) -> set[str]:
+    return {s for k in in_plan for s in DAG[k].produces}
+
+
+def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
+    """For a fan-out whose subject is not the artifact's own id, how a finding
+    on an artifact finds the subject to re-author. `page_details` fans out
+    per feature — an entity's pages together — so a finding on PAGE-004 is
+    the feature that page belongs to."""
+    if node.fanout != "page_features":
+        return None
+    by_page = {
+        p["id"]: (str((p.get("data") or {}).get("primaryEntity") or "") or p["id"])
+        for p in doc.get("pages") or []
+        if isinstance(p, dict) and p.get("id")
+    }
+    return by_page.get
+
+
+def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
+    report.observed[obs.node] = obs.summary()
+    for subject in obs.subjects:
+        hits = obs.findings.get(subject, [])
+        _note(ledger, "observed", obs.node, subject, not hits, len(hits),
+              obs.critic)
+
+
+def _repair_apply(
+    svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
+) -> tuple[str | None, Any]:
+    """Apply one repair. ``(None, application)`` when it landed; otherwise
+    ``(why it was refused, None)``.
+
+    A refused repair leaves the original artifact exactly as it was — apply
+    validates before it commits — so what the observer then flags is the
+    author's last accepted answer, never a half-applied fix.
+    """
+    if isinstance(outcome, Exception):
+        return _reason(outcome), None
+    if outcome is None:
+        return "the executor returned nothing", None
+    try:
+        application = apply_agent_result(
+            svc, outcome, commit=commit, user_request=user_request,
+        )
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+            InvalidWorkflowStep, InvalidBusinessRule) as exc:
+        return _reason(exc), None
+    if application.applied:
+        return None, application
+    return _asked(application), None
+
+
+def _proposed_identities(result: Any, application: Any) -> set[tuple]:
+    """What one accepted result consists of, as identities the document keeps.
+
+    An id-bearing artifact is ``("id", section, id)``; a keyed-list row
+    (a constraint, a relationship, a layout) is ``("keyed", section, key)``
+    with the key the section is deduplicated on. Singletons merge and have
+    no identity. Ids are read off ``application.artifacts``, which
+    :func:`apply_agent_result` fills one per id-bearing proposal, in order.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS, SINGLETON_SECTIONS
+
+    out: set[tuple] = set()
+    ids = list(getattr(application, "artifacts", None) or [])
+    i = 0
+    for p in getattr(result, "proposals", None) or []:
+        section = p.section
+        if section in KEYED_LIST_SECTIONS:
+            keys = KEYED_LIST_SECTIONS[section]
+            out.add(("keyed", section, tuple(p.body.get(k) for k in keys)))
+        elif section in SINGLETON_SECTIONS:
+            continue
+        else:
+            if i < len(ids):
+                out.add(("id", section, ids[i]))
+            i += 1
+    return out
+
+
+def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None:
+    """Take a subject's superseded artifacts out of play.
+
+    An id-bearing artifact is marked ``DEPRECATED`` with the note — every
+    consumer already skips that status, and §22 lets it be revived. A keyed
+    row has no status to carry, so it is removed. Saved once.
+    """
+    from services.blueprint.service import KEYED_LIST_SECTIONS
+
+    for ident in identities:
+        kind, section, key = ident
+        if kind == "id":
+            try:
+                svc.set_status(str(key), "DEPRECATED", note=note)
+            except Exception:  # noqa: BLE001 — already gone is already retired
+                continue
+        elif kind == "keyed":
+            keys = KEYED_LIST_SECTIONS[section]
+            if "." in section:
+                parent, child = section.split(".", 1)
+                bucket = (svc.doc.get(parent) or {}).get(child)
+            else:
+                bucket = svc.doc.get(section)
+            if isinstance(bucket, list):
+                bucket[:] = [
+                    row for row in bucket
+                    if not (isinstance(row, dict)
+                            and tuple(row.get(k) for k in keys) == key)
+                ]
+    svc.save()
 
 
 def _call(executor: Executor, spec: TaskSpec) -> Any:
@@ -1487,7 +1913,94 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
+    # A page refusal names one specific fault and the composer answers it, so
+    # retries converge: across 1,132 compositions, 66 pages were accepted on
+    # the retry and 69 more were still converging when the two-attempt cap
+    # cut them off. Four attempts rescue those; a page that passes first time
+    # costs nothing extra.
+    "page_layouts": 4,
 }
+
+#: Observer repair rounds per node, where the default (the observer's own
+#: `rounds`) is wrong. `page_layouts`: 0 — the critic has judged 149 composed
+#: pages and 78 repaired ones and passed none; two repair rounds per page were
+#: minutes spent to reach the verdict the first look gave. The verdict is still
+#: taken and recorded as the page's note; nothing is re-composed for it.
+OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
+    "page_layouts": 0,
+}
+
+
+def _template_page_result(svc: "BlueprintService", subject: str, task_id: str) -> Any:
+    """The composer of last resort for one page — the deterministic template
+    from the page's own contract (see ``template_page``). ``None`` when the
+    page's family has none."""
+    from services.blueprint.template_page import template_layout
+    with svc.lock:
+        page = next((p for p in svc.doc.get("pages") or [] if p.get("id") == subject), None)
+        body = template_layout(svc.doc, page) if page else None
+    if not body:
+        return None
+    return AgentResult(task_id=task_id, agent=DAG["page_layouts"].agent,
+                       proposals=[ArtifactProposal(section="pageLayouts",
+                                                   natural_key=subject, body=body)],
+                       confidence=0.5)
+
+
+#: What composes a subject when every model attempt has been refused — the
+#: last resort a node has before its subject is lost.
+FALLBACK_BY_NODE: dict[str, Any] = {
+    "page_layouts": _template_page_result,
+}
+
+
+def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
+    """The feedback for the next attempt: EVERY refusal so far, not the last.
+
+    Fed only its latest refusal, the composer cycled: told a Table cannot run
+    Create it rebound the row to Update; told a Table cannot run Update it
+    dropped Delete; told Delete was missing it wired Delete to Create — four
+    attempts on /master-data, each fixing the fault it was shown and undoing
+    one it was no longer shown. Held to all of them at once, attempt two has
+    everything attempt four learned."""
+    line = f"- attempt {attempt}: {reason.strip()}"
+    if not previous.strip():
+        return ("Every refusal so far — the next reply must satisfy ALL of them "
+                f"together, not trade one for another:\n{line}")
+    return f"{previous.rstrip()}\n{line}"
+
+
+def _fallback_compose(svc: "BlueprintService", key: str, subject: str, *,
+                      attempt: int, reason: str, commit: bool, user_request: str,
+                      report: "RunReport", ledger: Any = None,
+                      authored: dict | None = None) -> bool:
+    """The node's composer of last resort, once every model attempt was
+    refused. Held to the same contract as an authored result; ``True`` when
+    its subject landed, in which case the report counts it under
+    ``fallbacks`` and the ledger says what it replaced."""
+    make = FALLBACK_BY_NODE.get(key)
+    if make is None or not subject:
+        return False
+    label = f"{key}:{subject}"
+    try:
+        result = make(svc, subject, f"TASK-{label}-fallback")
+        if result is None:
+            return False
+        application = apply_agent_result(svc, result, commit=commit, user_request=user_request)
+    except Exception as exc:  # noqa: BLE001 — a fallback that fails is a failure, not a crash
+        logger.warning("[fallback] %s: %s", label, exc)
+        return False
+    if not application.applied:
+        return False
+    report.artifacts.extend(application.artifacts)
+    report.fallbacks.append(label)
+    if authored is not None:
+        authored.setdefault(subject, set()).update(_proposed_identities(result, application))
+    logger.info("[fallback] %s composed from its template after %d refused attempt(s): %s",
+                label, attempt, reason[:160])
+    _note(ledger, "node_retry", key, subject, attempt, attempt,
+          f"composed from the template instead: {reason[:200]}")
+    return True
 
 
 #: How many model calls one fanning-out node keeps in flight. Pages are
@@ -1514,6 +2027,11 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: subject waits in the node's own queue and never occupies one of the run's
 #: worker threads doing nothing.
 FANOUT_CONCURRENCY = 12
+
+#: Seconds between ledger heartbeats while a run is alive. Short enough that a
+#: status poll or a restart guard checking a ~90s freshness window always sees a
+#: live run as live, long enough to add nothing meaningful to a run's I/O.
+_HEARTBEAT_SECONDS = 20.0
 
 #: How many model calls the whole run keeps in flight, across every node that
 #: is ready at once. Four fanning-out nodes would otherwise open forty-eight
@@ -1549,6 +2067,11 @@ class _NodeRun:
     in_flight: set[str] = field(default_factory=set)
     #: Subject -> attempts made so far.
     attempts: dict[str, int] = field(default_factory=dict)
+    #: Subject -> the identities its accepted proposals wrote (see
+    #: :func:`_proposed_identities`). What a repair of that subject is
+    #: measured against: anything here the repair does not re-propose is
+    #: retired, because a repair is the subject's whole answer.
+    authored: dict[str, set[tuple]] = field(default_factory=dict)
 
 
 def _apply_subject(
@@ -1585,10 +2108,17 @@ def _apply_subject(
             return 0
 
     def _rejected(reason: str) -> str:
-        """The proposal was refused. Either it goes round again (§103) or
-        this was the last attempt and the subject is lost."""
-        state.feedback[subject] = reason
+        """The proposal was refused. Either it goes round again (§103), or
+        this was the last attempt: the node's fallback composes the subject,
+        or the subject is lost."""
+        state.feedback[subject] = accumulate_refusals(
+            state.feedback.get(subject, ""), attempt, reason)
         if attempt >= max_attempts:
+            if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
+                                 commit=commit, user_request=user_request, report=report,
+                                 ledger=ledger, authored=state.authored):
+                _note(ledger, "node_subject", key, subject, _at(), total, True)
+                return "applied"
             report.failed.append(label)
             report.failed_because[label] = reason
             state.failed.append(subject)
@@ -1604,15 +2134,21 @@ def _apply_subject(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+                InvalidWorkflowStep, InvalidBusinessRule) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
         # no end event written.
+        from services.blueprint.refusals import record_refusal
+        record_refusal(svc.output_dir, subject or key, 0,
+                       list(getattr(outcome, "proposals", None) or []), _reason(exc))
         return _rejected(_reason(exc))
 
     if application.applied:
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
+        state.authored.setdefault(subject, set()).update(
+            _proposed_identities(outcome, application))
         _note(ledger, "node_subject", key, subject, _at(), total, True)
         return "applied"
     if application.needs_clarification or outcome.status == "blocked":
@@ -1723,9 +2259,13 @@ def _run_agent_subject(
         except Exception as exc:  # §102 — one classified outcome, not a crash
             # Carried into the next attempt for the same reason an apply
             # rejection is: a retry that is not told what went wrong is just
-            # the same request again.
-            feedback = str(exc)
+            # the same request again — and one told only its latest refusal
+            # trades faults (see `accumulate_refusals`).
+            feedback = accumulate_refusals(feedback, attempt, str(exc))
             if attempt == max_attempts:
+                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
+                                     commit=commit, user_request=user_request, report=report):
+                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -1735,14 +2275,18 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
-            feedback = str(exc)
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+                InvalidWorkflowStep, InvalidBusinessRule) as exc:
+            feedback = accumulate_refusals(feedback, attempt, str(exc))
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed
             # contract validation took the other seventeen with it, and the
             # traceback surfaced instead of a report. Nothing was written —
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
+                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
+                                     commit=commit, user_request=user_request, report=report):
+                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -1905,11 +2449,14 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
     """Everything the server reads: workflow definitions and seed rows."""
-    from services.blueprint.projection import project_seed, project_workflows
+    from services.blueprint.projection import (
+        project_dispatches, project_seed, project_workflows,
+    )
 
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
+    project_dispatches(svc.doc, app_root)
     project_seed(svc.doc, app_root)
     svc.save()
 
@@ -1929,9 +2476,10 @@ def _project_install(svc: BlueprintService, app_root: str) -> Any:
     from services.blueprint.assembly import install_dependencies, prepare_app_root
 
     short_id = (svc.doc.get("application") or {}).get("id", "forge")
+    doc = copy.deepcopy(svc.doc)   # read once, under the lock; the thread never touches svc
 
     def work() -> int:
-        prepare_app_root(app_root, project_short_id=short_id)
+        prepare_app_root(app_root, project_short_id=short_id, doc=doc)
         return install_dependencies(app_root)
 
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-install")

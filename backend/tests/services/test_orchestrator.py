@@ -697,10 +697,13 @@ def test_one_failed_subject_does_not_take_the_whole_node(svc):
         return _layout_result(spec)
 
     report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
-    # every subject was attempted, not abandoned at the first failure
-    assert seen == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    # every subject was attempted, not abandoned at the first failure — and a
+    # page gets its four attempts (ATTEMPTS_BY_NODE) whatever the run's default
+    assert seen[:3] == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    assert seen.count("PAGE-002") == 4 and set(seen) == {"PAGE-001", "PAGE-002", "PAGE-003"}
     assert "page_layouts" in report.completed
-    assert any("PAGE-002" in f for f in report.failed)
+    # these pages carry no entity or pattern, so no template can stand in
+    assert any("PAGE-002" in f for f in report.failed) and report.fallbacks == []
 
 
 def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
@@ -1353,8 +1356,14 @@ def test_pages_compose_against_declared_workflows_not_their_steps():
     assert "workflow_steps" in DAG["integration"].depends_on
     assert DAG["workflow_steps"].fanout == "workflows"
     assert DAG["workflow_steps"].depends_on == frozenset({"workflows"})
+    # The scheduler is readiness-driven, so what matters is that no path
+    # leads from the step authoring to the page composer. The wave index is
+    # one behind since the whole-app `composition` call sits between the
+    # contracts and the pages: one short call, not the longest node of a build.
+    assert "page_layouts" not in descendants("workflow_steps")
     at = {k: i for i, level in enumerate(levels()) for k in level}
-    assert at["page_layouts"] == at["workflow_steps"]
+    assert at["composition"] == at["workflow_steps"]
+    assert at["page_layouts"] == at["workflow_steps"] + 1
 
 
 def test_workflow_steps_fan_out_over_the_declared_workflows(svc):
@@ -1554,7 +1563,10 @@ def test_workflows_are_declared_against_the_page_set_and_contracts_run_beside_th
     assert "page_details" in DAG["apis"].depends_on
     at = {k: i for i, level in enumerate(levels()) for k in level}
     assert at["page_details"] == at["workflows"]
-    assert at["page_layouts"] == at["workflow_steps"]
+    # `composition` reads the finished contracts and runs beside the step
+    # authoring; the pages follow it and never wait on the steps.
+    assert at["composition"] == at["workflow_steps"]
+    assert "page_layouts" not in descendants("workflow_steps")
 
 
 def test_a_feature_is_an_entitys_pages_and_an_orphan_page_is_its_own(svc):
@@ -1682,3 +1694,57 @@ def test_each_entity_is_detailed_by_its_own_call_onto_the_named_row(svc):
     assert sorted(seen) == sorted(ids)
     assert len(svc.doc["data"]["entities"]) == 2, "detailing created a second entity"
     assert all(len(e["fields"]) == 2 for e in svc.doc["data"]["entities"])
+
+
+# --- §34: the app composed once, before any page -----------------------------
+
+def test_the_app_is_composed_once_before_any_page():
+    node = DAG["composition"]
+    assert {"page_details", "design_system", "figma_design_system"} <= node.depends_on
+    assert not node.fanout, "one call for the whole app, not one per page"
+    assert "composition" in DAG["page_layouts"].depends_on
+
+
+def test_a_page_change_recomposes_the_app(ats):
+    """Adding a page must give that page a sketch, so the composition follows
+    the pages rather than the frame — the same reasoning that keeps
+    pageLayouts incremental."""
+    from services.blueprint.orchestrator import is_foundational
+
+    assert not is_foundational(DAG["composition"])
+    plan = incremental_plan(ats, [ats["pages"][0]["id"]])
+    assert "composition" in plan
+    assert plan.index("composition") < plan.index("page_layouts")
+
+
+def test_every_refusal_so_far_reaches_the_next_attempt(svc):
+    """Fed only its latest refusal, the composer cycled on /master-data: each
+    attempt fixed the fault it was shown and undid one it was no longer shown.
+    Attempt three must still be holding attempt one's refusal."""
+    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.orchestrator import DAG, RunReport, _run_agent_subject
+
+    seen: list[str] = []
+    reasons = iter(["a Table cannot run Create Record", "declares `edit` but nothing updates",
+                    "a Table cannot run Update Record"])
+
+    def executor(spec):
+        seen.append(spec.feedback)
+        raise InvalidPatternTemplate(next(reasons))
+
+    report = RunReport()
+    _run_agent_subject(svc, executor, "page_layouts", DAG["page_layouts"], "",
+                       max_attempts=3, commit=False, user_request="", report=report)
+    assert seen[0] == ""
+    assert "attempt 1: a Table cannot run Create Record" in seen[1]
+    assert ("attempt 1: a Table cannot run Create Record" in seen[2]
+            and "attempt 2: declares `edit`" in seen[2])            # both, in order
+    assert seen[2].index("attempt 1") < seen[2].index("attempt 2")
+    assert "satisfy ALL of them together" in seen[2]
+
+
+def test_the_fan_out_path_accumulates_too(svc):
+    from services.blueprint.orchestrator import accumulate_refusals
+    fb = accumulate_refusals("", 1, "first")
+    fb = accumulate_refusals(fb, 2, "second")
+    assert fb.splitlines()[1:] == ["- attempt 1: first", "- attempt 2: second"]

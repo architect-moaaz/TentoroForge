@@ -190,3 +190,15 @@ def test_text_classification_specific_rules_still_take_priority():
     schema_type, props = classify("Heading 2", "TEXT")
     assert schema_type == "Heading"
     assert props == {"level": 2}
+
+
+def test_a_frame_named_body_that_holds_children_is_structure_not_text():
+    """One real file nested every screen as Screen > Body > Shell > …. "Body"
+    is a text role, and typing the frame Text made it a leaf whose fold
+    swallowed the whole screen into one text node — on all fifteen pages. A
+    frame with children is structure whatever it is called; the role still
+    applies to a TEXT layer or a childless frame."""
+    assert classify("Body", "FRAME", child_count=1)[0] not in ("Text", "Heading")
+    assert classify("Card Text", "FRAME", child_count=3)[0] not in ("Text", "Heading")
+    assert classify("Body", "TEXT") == ("Text", {})
+    assert classify("Body", "FRAME", child_count=0) == ("Text", {})

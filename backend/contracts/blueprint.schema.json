@@ -49,6 +49,13 @@
         "description": {
           "type": "string",
           "default": ""
+        },
+        "uiDesigner": {
+          "type": "string",
+          "enum": [
+            "forge",
+            "uxpilot"
+          ]
         }
       },
       "required": [
@@ -574,6 +581,9 @@
           },
           "figmaFrame": {
             "type": "string"
+          },
+          "designedBy": {
+            "$ref": "#/properties/application/properties/uiDesigner"
           },
           "components": {
             "type": "array",
@@ -1628,6 +1638,10 @@
                     "description": "Role names that read and write this entity unscoped. Name a role only where the product genuinely grants it every row.",
                     "default": []
                   },
+                  "actorColumn": {
+                    "type": "string",
+                    "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
+                  },
                   "note": {
                     "type": "string",
                     "description": "Why this rule exists, in one sentence.",
@@ -2223,6 +2237,114 @@
       },
       "default": []
     },
+    "composition": {
+      "type": "object",
+      "properties": {
+        "vision": {
+          "type": "string",
+          "default": ""
+        },
+        "conventions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "topic": {
+                "type": "string"
+              },
+              "rule": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "topic",
+              "rule"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "$ref": "#/properties/modules/items/properties/pages/items"
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "single_column",
+                  "main_aside",
+                  "two_pane",
+                  "full_bleed"
+                ]
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "e.g. Pipeline summary"
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "description": "What the user does in this section"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "emphasis": {
+                      "type": "string",
+                      "enum": [
+                        "primary",
+                        "secondary"
+                      ],
+                      "default": "secondary"
+                    },
+                    "region": {
+                      "type": "string",
+                      "enum": [
+                        "main",
+                        "aside",
+                        "full"
+                      ],
+                      "default": "main"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "purpose"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "rationale": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "page",
+              "layout",
+              "sections"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "requirements": {
       "type": "array",
       "items": {
@@ -2297,6 +2419,9 @@
             "default": []
           },
           "assumption": {
+            "type": "string"
+          },
+          "owner": {
             "type": "string"
           }
         },

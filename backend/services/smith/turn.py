@@ -295,6 +295,14 @@ STATE_TASKS: dict[str, str] = {
         "each one's confidence honestly — what the user stated outright is not "
         "the same as what you inferred from the domain, and the difference is "
         "what decides which questions get asked next.\n\n"
+        "Most requirements are about a page or a capability; leave their `owner` "
+        "unset. Set `owner` only for a requirement that ONE section satisfies "
+        "for the whole application rather than any single page — an app-wide "
+        "visual style, colour palette or theme is satisfied by `designSystem`; "
+        "an app-wide security or access posture by `security`. Naming the owner "
+        "keeps a global promise from being demanded of every page that merely "
+        "runs under it (a page's component tree carries no colour and could "
+        "never satisfy a palette requirement).\n\n"
         "Do not propose pages, entities or workflows yet. Specialist agents "
         "author those from the requirements once the definition is accepted; "
         "designing them now would be guessing ahead of the clarification."
@@ -592,7 +600,21 @@ def _catalog_addenda(catalogs: tuple[str, ...]) -> str:
             "declares it needs, with real values. Connect steps with `next` "
             "(a branching node's first target is the then-branch, its second the "
             "else-branch); the workflow's `trigger.kind` is a catalog trigger and "
-            "an `end` step is the terminal.\n\n" + workflow_nodes().digest()
+            "an `end` step is the terminal.\n\n"
+            # WHAT A CONDITION MAY SAY. The engine evaluates FEEL and nothing
+            # else; a plan that wrote `exists(approvals where …)` for
+            # "never a user who already signed this case" was refused as
+            # unparseable, and the refusal only reached the model after the
+            # plan was drafted. Said up front, with the shape that does work.
+            "A step's `condition` is a FEEL expression over the fields in "
+            "scope: `=` not `==`, `and`/`or`/`not`, field names without braces "
+            "(`caseType`, never `input.caseType`), membership as "
+            "`stage in [\"A\",\"B\"]` with square brackets. There are no "
+            "subqueries: `exists(...)`, `where`, and functions over other "
+            "records are not FEEL. When a decision depends on other records, "
+            "load them with a query step first and compare a field of what it "
+            "returned (`signed_count = 0`).\n\n"
+            + workflow_nodes().digest()
         )
     return out
 
@@ -606,6 +628,7 @@ def interpret(
     agent: str = "smith",
     state: str = "",
     retries: int = 1,
+    rejected: str | None = None,
 ) -> TurnPlan:
     """One interpretation call, re-asked once if the plan does not validate.
 
@@ -613,6 +636,11 @@ def interpret(
     adjust the reply. Compare ``make_executor``, which does the same thing for
     agent envelopes: repair *before* anything is committed is the system
     working, because a rejected plan never became an artifact.
+
+    ``rejected`` is a verdict from AFTER interpretation — the Blueprint refused
+    the plan on apply (a workflow condition the engine cannot parse, a page
+    template the contract refuses). The first ask then already carries it, so
+    the model corrects the plan rather than drafting the same one again.
     """
     system, user = build_interpret_prompt(
         context, agent=agent,
@@ -620,10 +648,14 @@ def interpret(
         state=state,
     )
     last: Exception | None = None
+    if rejected:
+        last = TurnRejected(
+            rejected,
+            catalogs=("workflow_nodes",) if "step" in rejected.lower() else ())
 
     for attempt in range(retries + 1):
         prompt = user
-        if attempt and last:
+        if last:
             prompt = (
                 f"{user}\n\nYour previous reply was rejected: {last}\n"
                 "Return a corrected plan. Do not explain the mistake, and do "
@@ -632,6 +664,17 @@ def interpret(
             prompt += _catalog_addenda(getattr(last, "catalogs", ()))
         raw = client(system=system, user=prompt, schema=TURN_SCHEMA)
         text = raw.text if isinstance(raw, ModelReply) else raw
+        if isinstance(raw, ModelReply) and raw.stop_reason == "max_tokens":
+            # THE PLAN WAS LONGER THAN THE BUDGET, NOT WRONG. A request for a
+            # dozen workflows in one turn came back as 50,000 characters of
+            # valid JSON cut mid-string, was reported as "was not JSON", and
+            # re-asked once with that verdict appended — which produced the
+            # same cut-off reply. Say what happened; asking again the same
+            # way cannot help, and the user can split the request.
+            raise TurnRejected(
+                "the reply was cut off at the output limit "
+                f"({len(text):,} characters) — the change is too large for one "
+                "turn; ask for part of it at a time")
         try:
             plan = parse_turn(text)
             validate_turn(plan, doc, asked=asked, agent=agent)

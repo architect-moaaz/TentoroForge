@@ -335,11 +335,13 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # missed the one it was added for, so the users table was absent from every
     # migration and login failed with "relation does not exist" — the same
     # symptom as before the fix, from the opposite cause.
-    from services.blueprint.assembly import SCAFFOLD_OWNED
+    from services.blueprint.assembly import SCAFFOLD_DEFAULTS, SCAFFOLD_OWNED
 
+    projected = {_module_name(e) for e in entities}
     platform = sorted(
-        Path(rel).stem for rel in SCAFFOLD_OWNED
+        Path(rel).stem for rel in (*SCAFFOLD_OWNED, *SCAFFOLD_DEFAULTS)
         if rel.startswith("src/db/schema/") and rel.endswith(".ts")
+        and Path(rel).stem not in projected   # an entity that claimed it is exported above
     )
     platform += sorted(
         f.stem for f in root.glob("_forge_*.ts") if f.stem not in platform
@@ -446,7 +448,10 @@ def project_frontend(doc: dict, app_root: str | Path,
     # A page that stopped planning must not leave its last good schema behind:
     # the directory would still hold eighteen files and read as a complete
     # projection while one of them was silently out of date.
-    written_set = set(written)
+    # `shell.json` is the rail, written by `project_shell`, not a page: the
+    # sweep deleted it on every frontend projection and the layout fell back
+    # to its flat menu.
+    written_set = set(written) | {"src/schemas/shell.json"}
     stale = sorted(
         str(f.relative_to(root)) for f in root.rglob("*.json")
         if f"src/schemas/{f.relative_to(root)}" not in written_set
@@ -469,6 +474,53 @@ def project_frontend(doc: dict, app_root: str | Path,
         "templates": result["templates"],
         "codeMap": code_map,
     }
+
+
+def project_page_schema(doc: dict, page_id: str, app_root: str | Path) -> str | None:
+    """Persist ONE page's schema to disk the moment its layout is composed.
+
+    The whole-app projection (``apply_frontend_projection``) runs in the frontend
+    node, AFTER every page has composed — so a build interrupted at page_layouts
+    kept the composed pages in the Blueprint but had none of them on disk, and
+    could render nothing. This writes the just-composed page's schema (and keeps
+    the route registry current so it resolves immediately), so a partial build
+    persists — and can render — the pages it has made.
+
+    Best-effort and idempotent: it writes only THIS page, never prunes another,
+    and skips a page that only planned to a placeholder (nothing real yet). The
+    frontend node still re-projects the whole app — shell, tokens, pruning — at
+    the end; this is the incremental head-start, not a replacement.
+
+    Returns the slug written, or ``None`` when there was nothing to persist.
+    """
+    from services.blueprint.page_planner import load_catalog, plan_pages
+
+    if not page_id or not app_root:
+        return None
+    try:
+        planned = (plan_pages(doc, load_catalog()) or {}).get("planned") or {}
+    except Exception:  # noqa: BLE001 — planning must not fail the run it records
+        return None
+    schema = planned.get(page_id)
+    if not isinstance(schema, dict) or (schema.get("meta") or {}).get("fallback"):
+        return None  # not composed to anything real yet — nothing to write
+
+    pages = {p.get("id"): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+    name = _route_slug((pages.get(page_id) or {}).get("route") or page_id)
+    root = Path(app_root) / "src" / "schemas"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{name}.json").write_text(
+            json.dumps(schema, indent=2, sort_keys=True) + "\n", "utf-8")
+        # Keep the registry in step with what is on disk, so the route resolves
+        # the instant its schema lands — a schema with no registry entry is a
+        # page that may never render.
+        present = sorted(
+            f"src/schemas/{p.stem}.json" for p in root.glob("*.json"))
+        _write_route_registry(root, present)
+    except Exception:  # noqa: BLE001 — a failed early write is retried at the node
+        return None
+    return name
 
 
 def _route_slug(route: str) -> str:
@@ -568,10 +620,26 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
 
-    def item(node: dict) -> dict[str, Any]:
+    # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
+    # reached through a row or an action that fills a concrete id, never from the
+    # sidebar: Next's <Link> refuses a literal "[id]" href ("Dynamic href … not
+    # supported"), and landing there passes the string "[id]" to the database as
+    # a uuid. So a nav node pointing at one carries no route (it drops from the
+    # rail); a group left with no linkable child drops entirely.
+    def _navigable(route: str | None) -> bool:
+        return bool(route) and "[" not in route
+
+    def item(node: dict) -> dict[str, Any] | None:
+        """A rail entry, or None when the node points at a page that cannot be a
+        rail destination. A node with NO page is kept route-less and visible
+        (§49); a node whose page is a DYNAMIC route is dropped — Next refuses a
+        literal "[id]" href and landing there crashes on the uuid."""
+        page_id = str(node.get("page") or "")
+        route = routes.get(page_id)
+        if page_id and route and not _navigable(route):
+            return None
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
-        route = routes.get(str(node.get("page") or ""))
-        if route:
+        if _navigable(route):
             out["route"] = route
         if node.get("icon"):
             out["icon"] = str(node["icon"])
@@ -584,10 +652,13 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             group: dict[str, Any] = {"label": str(node.get("label") or "")}
             if node.get("icon"):
                 group["icon"] = str(node["icon"])
-            group["items"] = [item(k) for k in kids]
-            groups.append(group)
+            group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            if group["items"]:
+                groups.append(group)
         else:
-            groups.append(item(node))
+            leaf = item(node)
+            if leaf is not None:
+                groups.append(leaf)
 
     app_name = str((doc.get("application") or {}).get("name") or "App")
     # WHERE THE APPLICATION OPENS. The scaffold's root page redirected to a
@@ -596,9 +667,12 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # initial route; failing that, the first destination in the rail.
     initial = ((nav.get("initialRoute") or {}).get("default")
                if isinstance(nav.get("initialRoute"), dict) else nav.get("initialRoute"))
-    if not initial or str(initial) in ("/", "/home"):
-        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route") or it.get("href")), None)
-        initial = (first.get("route") or first.get("href")) if first else None
+    # The landing route must be concrete — a dynamic "[id]" initialRoute lands
+    # the app on a route it cannot render. Reject it and fall back to the first
+    # navigable rail destination (which is already dynamic-free above).
+    if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
+        first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
+        initial = first.get("route") if first else None
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
@@ -658,7 +732,13 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 if t in by_id and by_id[t].get("route")
             }),
         })
-        if page.get("entry") and access not in entry_by_access:
+        # The GATED entry must be concrete — it is the login redirect and the
+        # landing page, and a dynamic "[id]" route has no id to fill (Next
+        # refuses the href, the DB gets "[id]" as a uuid). A PUBLIC entry may be
+        # a pattern (`/survey/[slug]`, opened via a real link), so it is allowed
+        # to be dynamic; only the authenticated/gated door is held concrete.
+        if page.get("entry") and access not in entry_by_access and (
+                access == "public" or "[" not in route):
             entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
@@ -691,6 +771,15 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if src and dst and (src, dst) not in seen:
                 seen.add((src, dst))
                 transitions.append({"from": src, "to": dst, "trigger": ""})
+
+    # A gated app still needs a concrete front door when no page was marked as
+    # the entry (or the only one marked was dynamic): fall back to the first
+    # non-dynamic gated route, so the login redirect and "back to the app" link
+    # always have a route that renders.
+    if "authenticated" not in entry_by_access:
+        concrete = next((r for r in gated_routes if "[" not in r), None)
+        if concrete:
+            entry_by_access["authenticated"] = concrete
 
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
@@ -784,6 +873,181 @@ def _kebab(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
 
 
+import functools
+
+
+@functools.lru_cache(maxsize=1)
+def _token_contract() -> dict:
+    """The library's design-token contract — THE single source for which
+    ``var(--…)`` names exist, which Blueprint role feeds each, and the default
+    each falls back to. Read from the library package the backend runs beside
+    (the staged tree and the repo both carry ``packages/library``); an absent
+    file leaves the projector on its legacy alias path rather than crashing."""
+    here = Path(__file__).resolve()
+    for base in here.parents:
+        cand = base / "packages" / "library" / "src" / "theme" / "token-contract.json"
+        if cand.is_file():
+            try:
+                return json.loads(cand.read_text("utf-8"))
+            except (OSError, ValueError):
+                return {}
+    return {}
+
+
+_TRIPLET = re.compile(r"^-?\d+(\.\d+)?\s+\d+(\.\d+)?%\s+\d+(\.\d+)?%$")
+
+
+def _as_triplet(value: str) -> str | None:
+    """A Blueprint colour as the HSL triplet the contract stores — `#B91C1C` ->
+    `0 74% 42%`, and a value already in triplet form passes through. Anything
+    else (a named colour, an rgb()) has no triplet and is skipped, so the
+    contract's default stands rather than a poisoned `hsl(<garbage>)`."""
+    v = str(value).strip()
+    if _TRIPLET.match(v):
+        return v
+    return _hsl_triplet(v)
+
+
+def triplet_luminance(triplet: str) -> float | None:
+    """WCAG relative luminance of an `H S% L%` triplet, or None if unparseable.
+    The one place HSL→sRGB→luminance is computed; verification imports it so the
+    projector's chosen foreground and the contrast check agree."""
+    try:
+        h, s, l = triplet.split()
+        h = float(h) % 360
+        s = float(s.rstrip("%")) / 100
+        l = float(l.rstrip("%")) / 100
+    except (ValueError, AttributeError):
+        return None
+    c = (1 - abs(2 * l - 1)) * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = l - c / 2
+    r, g, b = {0: (c, x, 0), 1: (x, c, 0), 2: (0, c, x),
+               3: (0, x, c), 4: (x, 0, c), 5: (c, 0, x)}[int(h // 60) % 6]
+
+    def _lin(v: float) -> float:
+        v += m
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def _readable_on(triplet: str) -> str:
+    """A near-black or near-white foreground for a background triplet, chosen by
+    WCAG luminance (not HSL lightness — a saturated amber reads bright at L=50%
+    and needs DARK text, which a lightness threshold gets wrong). 0.179 is the
+    crossover where black and white contrast equally. Fills a `contrastOf` token
+    whose Blueprint role states no text colour, so a tint or a dark fill never
+    renders unreadable default text."""
+    lum = triplet_luminance(triplet)
+    if lum is None:
+        return "0 0% 100%"
+    return "222 84% 5%" if lum > 0.179 else "0 0% 100%"
+
+
+def _resolve_role(colors: dict, roles: list[str]) -> str | None:
+    """The first Blueprint colour that matches one of `roles`, by exact key or
+    kebab-insensitive match (`textPrimary` == `text-primary`)."""
+    by_kebab = {_kebab(k): v for k, v in colors.items()
+                if isinstance(v, str) and v}
+    for role in roles:
+        v = colors.get(role)
+        if isinstance(v, str) and v:
+            return v
+        v = by_kebab.get(_kebab(role))
+        if isinstance(v, str) and v:
+            return v
+    return None
+
+
+def resolved_palette(doc: dict, theme: str = "light") -> dict[str, str]:
+    """Every contract colour token as the HSL triplet that WILL render — the
+    Blueprint-fed value where the design states the role (and computed
+    foregrounds), the contract's own default otherwise. Verification judges
+    contrast on this, the palette that actually ships, so a palette the user
+    chooses is refused before it renders unreadable text rather than after."""
+    colors = (doc.get("designSystem") or {}).get("colors") or {}
+    contract = _token_contract().get("colorTokens") or []
+    # 1. Role tokens: the Blueprint value where it states the role, else the
+    #    contract default for this theme.
+    out: dict[str, str] = {}
+    for spec in contract:
+        tok = str(spec["token"])
+        if spec.get("contrastOf"):
+            continue
+        raw = _resolve_role(colors, spec.get("role") or [])
+        trip = _as_triplet(raw) if raw is not None else None
+        out[tok] = trip or spec.get(theme) or spec.get("light") or ""
+    # 2. Foregrounds: ALWAYS computed for readability against the RESOLVED base,
+    #    never a hand-set default that could disagree with a base the design
+    #    changed (a white default over an amber accent is the bug this avoids).
+    for spec in contract:
+        base = spec.get("contrastOf")
+        if base and out.get(base):
+            out[str(spec["token"])] = _readable_on(out[base])
+    return {k: v for k, v in out.items() if v}
+
+
+def _project_contract_colors(colors: dict) -> list[str]:
+    """Emit every contract token the Blueprint feeds, in the contract's order.
+
+    Role tokens are filled from the Blueprint colour that matches; `contrastOf`
+    tokens are computed from the resolved value of the token they contrast. A
+    token the Blueprint does not drive is left unset here so the library's
+    `theme.css` default stands — the projector overrides exactly what the design
+    states, nothing more. Returns [] when the contract is unavailable, and the
+    caller falls back to the legacy alias emission.
+    """
+    color_tokens = (_token_contract().get("colorTokens") or [])
+    if not color_tokens:
+        return []
+    emitted: dict[str, str] = {}
+    consumed: set[str] = set()          # blueprint roles a contract token claims
+    for spec in color_tokens:
+        roles = spec.get("role")
+        if not roles:
+            continue
+        consumed.update(_kebab(r) for r in roles)
+        raw = _resolve_role(colors, roles)
+        if raw is None:
+            continue
+        trip = _as_triplet(raw)
+        if trip is not None:
+            emitted[str(spec["token"])] = trip
+    for spec in color_tokens:
+        base = spec.get("contrastOf")
+        if base and base in emitted:
+            emitted[str(spec["token"])] = _readable_on(emitted[base])
+    lines = [f"  --{spec['token']}: {emitted[spec['token']]};"
+             for spec in color_tokens if spec["token"] in emitted]
+
+    # PASS THROUGH THE ROLES THE CONTRACT DOES NOT CLAIM. The Blueprint may name
+    # app-specific colours the shadcn contract has no slot for — `sidebarBackground`
+    # that the rail reads, a `primaryHover` a scaffold uses. Emit each under its
+    # own name so nothing an app depends on is dropped, but skip any role a
+    # contract token already consumed, so a `danger` that became `--destructive`
+    # does not also reappear as a dead `--danger` twin. Wrapped-set names keep the
+    # hsl() triplet; the rest keep their value (a custom colour is read raw).
+    contract_names = {str(spec["token"]) for spec in color_tokens}
+    for role, value in sorted(colors.items()):
+        if not (isinstance(value, str) and value):
+            continue
+        name = _kebab(role)
+        if name in consumed or name in contract_names:
+            continue
+        out_value = (_hsl_triplet(value) or value) if role in _WRAPPED_ROLES else value
+        lines.append(f"  --{name}: {out_value};")
+    return lines
+
+
+#: shadcn names the scaffold wraps in `hsl()`, so a passthrough role among them
+#: must be a triplet. The contract covers these already; this only matters for a
+#: legacy tree whose Blueprint names one directly.
+_WRAPPED_ROLES = {"background", "foreground", "primary", "primaryForeground",
+                  "secondary", "secondaryForeground", "accent", "accentForeground",
+                  "muted", "mutedForeground", "destructive", "destructiveForeground",
+                  "border", "input", "ring", "card", "cardForeground"}
+
+
 #: A CSS length unit, or none for a bare `0`. `fr`/`%` included: spacing and
 #: radius scales legitimately use them.
 _CSS_UNIT = (r"(?:px|rem|em|%|fr|vh|vw|vmin|vmax|vi|vb|svh|lvh|dvh|svw|lvw|dvw|"
@@ -863,29 +1127,38 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     colors = design.get("colors") or {}
     lines: list[str] = []
 
-    # THE NAMES THE SCAFFOLD WRAPS IN hsl(). This said "these four… the rest
-    # keep their hex" — and the scaffold's sign-in page paints its brand panel
-    # with `hsl(var(--accent))`, so a hex accent became `hsl(#c9a84c)`: invalid,
-    # silently dropped, and the design's gold never reached the one page every
-    # user sees first. The wrapped set is shadcn's, which is what the scaffold
-    # is — the same names `_COLOR_TOKENS` below already lists.
-    WRAPPED = {"background", "foreground", "primary", "primaryForeground",
-               "secondary", "secondaryForeground", "accent", "accentForeground",
-               "muted", "mutedForeground", "destructive", "destructiveForeground",
-               "border", "input", "ring", "card", "cardForeground"}
-    for role, value in sorted(colors.items()):
-        if isinstance(value, str) and value:
-            out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
-            lines.append(f"  --{_kebab(role)}: {out_value};")
-    for token, candidates in _TOKEN_ALIASES:
-        if any(line.startswith(f"  {token}:") for line in lines):
-            continue
-        for role in candidates:
-            raw = colors.get(role)
-            if isinstance(raw, str) and raw:
-                triplet = _hsl_triplet(raw)
-                lines.append(f"  {token}: {triplet or raw};")
-                break
+    # ONE CONTRACT, emitted from the library's token-contract.json: every
+    # `var(--…)` a component reads has a home, filled from the Blueprint role
+    # that feeds it, in the HSL-triplet form the scaffold wraps in `hsl()`.
+    # This replaced a hand-kept `WRAPPED` set + alias table + a pile of
+    # role-named hex twins nothing read: status colours reached the app under
+    # one name in one place (`--success`, not both a dead `--success` hex twin
+    # AND Badge's unfed `--color-success-100`), and `surface` finally reached
+    # `--card`/`--popover`. When the contract file is not beside the backend the
+    # projector falls back to the legacy alias emission below rather than
+    # emitting nothing.
+    lines.extend(_project_contract_colors(colors))
+    if not lines:
+        # THE NAMES THE SCAFFOLD WRAPS IN hsl(). Legacy path — kept for a tree
+        # that carries no token-contract.json. The wrapped set is shadcn's,
+        # which is what the scaffold is.
+        WRAPPED = {"background", "foreground", "primary", "primaryForeground",
+                   "secondary", "secondaryForeground", "accent", "accentForeground",
+                   "muted", "mutedForeground", "destructive", "destructiveForeground",
+                   "border", "input", "ring", "card", "cardForeground"}
+        for role, value in sorted(colors.items()):
+            if isinstance(value, str) and value:
+                out_value = (_hsl_triplet(value) or value) if role in WRAPPED else value
+                lines.append(f"  --{_kebab(role)}: {out_value};")
+        for token, candidates in _TOKEN_ALIASES:
+            if any(line.startswith(f"  {token}:") for line in lines):
+                continue
+            for role in candidates:
+                raw = colors.get(role)
+                if isinstance(raw, str) and raw:
+                    triplet = _hsl_triplet(raw)
+                    lines.append(f"  {token}: {triplet or raw};")
+                    break
 
     radius = design.get("radius")
     if isinstance(radius, str) and radius:
@@ -980,8 +1253,104 @@ _OPERATION_ACTION: dict[str, str] = {
 _DB_EVALUATED = {"now()", "current_date", "current_timestamp", "current_time"}
 
 
+#: WHO A HUMAN STEP WAITS ON. The Blueprint states `assignType: "role"` and
+#: `assignTarget: ["Reception", "Front Office Manager"]`; the runtime reads
+#: `assigneeRole` / `assignee` (or `assignment: {strategy, value}`), and with
+#: neither present it filed the task under "admin" — a user that does not
+#: exist — so a guest's refund request created a task no inbox showed
+#: (Criterion Refunds v2, 2026-09-14). Several roles ride as one
+#: comma-joined `assigneeRole`; the inbox matches a role by membership.
+_HUMAN_STEPS = frozenset({"user_task", "approval", "assignment", "task_pool"})
+
+
+def _name_the_assignee(config: dict[str, Any], wf_id: str, step: dict) -> None:
+    if config.get("assignee") or config.get("assigneeRole") or config.get("assignment"):
+        return
+    kind = str(config.get("assignType") or "").strip().lower()
+    target = config.get("assignTarget")
+    targets = [str(t).strip() for t in (target if isinstance(target, list) else [target])
+               if t not in (None, "")]
+    if not targets:
+        return
+    if kind in ("user", "person", "email"):
+        config["assignee"] = targets[0]
+    elif kind in ("role", "roles", "") :
+        config["assigneeRole"] = ",".join(targets)
+    elif kind in ("group", "team"):
+        config["assignmentStrategy"] = "group"
+        config["assigneePool"] = targets
+    else:
+        logger.warning("[projection] %s/%s: assignType %r is not one the runtime "
+                       "resolves — task will be unassigned", wf_id, step.get("key"), kind)
+
+
+#: WHAT A HUMAN STEP ASKS THE PERSON. The Blueprint states what later steps
+#: read from a task — `{{triage_with_override.overrideReason}}` — and never
+#: a form; the generic task page collected a decision and a comment, the
+#: placeholder stayed text, and the insert failed on a uuid column. The
+#: names the workflow reads off a task that the runtime does not provide
+#: are the fields the task must ask for.
+_TASK_RUNTIME_OUTPUTS = frozenset({"userId", "completedBy", "decision", "comment", "output", "value"})
+_STEP_REF = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def task_form_fields(step_key: str, steps: list[dict]) -> list[dict[str, Any]]:
+    """Fields a human step must collect: `{{<key>.<field>}}` read by any step."""
+    names: list[str] = []
+    for other in steps:
+        if not isinstance(other, dict) or other.get("key") == step_key:
+            continue
+        for src, field in _STEP_REF.findall(json.dumps(other.get("config") or {})):
+            if src == step_key and field not in _TASK_RUNTIME_OUTPUTS and field not in names:
+                names.append(field)
+    fields = []
+    for name in names:
+        label = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).replace("_", " ").strip().capitalize()
+        kind = "textarea" if re.search(r"reason|note|comment|description|justification", name, re.I) else "text"
+        fields.append({"name": name, "label": label, "kind": kind, "required": True})
+    return fields
+
+
+#: A SET-VARIABLE THAT COMPUTES. The runtime evaluates `expression` and stores
+#: `value` as it is; an author who writes the rule into `value` —
+#: `refundType in ["Gesture (SR)", …]` — stored the rule's text as the flag.
+_EXPRESSION_MARKS = re.compile(r"\b(and|or|not|in)\b|[=<>()+*/]|\bcount\(|\bdate\(|\bnow\(")
+
+
+def _reads_as_expression(value: Any) -> bool:
+    return (isinstance(value, str) and "{{" not in value
+            and bool(_EXPRESSION_MARKS.search(value)))
+
+
+#: A WORKFLOW CONDITION SPEAKS FEEL. The engine evaluates `expression` with
+#: FEEL-lite and, unlike the page renderer, folds nothing: `caseRow == null`
+#: failed to parse and the gate that was meant to bar a poster failed the
+#: whole run instead. JavaScript spelling — `==`, `===`, `!==`, `&&`, `||` —
+#: is translated outside string literals.
+_WF_JS_SPELLING = (
+    (re.compile(r"!=="), "!="),
+    (re.compile(r"==="), "="),
+    (re.compile(r"(?<![!<>=])==(?!=)"), "="),
+    (re.compile(r"\s*&&\s*"), " and "),
+    (re.compile(r"\s*\|\|\s*"), " or "),
+)
+_WF_STRING_LITERAL = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+
+
+def feel_condition(expr: Any) -> Any:
+    if not isinstance(expr, str) or not expr.strip():
+        return expr
+    out: list[str] = []
+    for i, part in enumerate(_WF_STRING_LITERAL.split(expr)):
+        if i % 2 == 0:
+            for pat, rep in _WF_JS_SPELLING:
+                part = pat.sub(rep, part)
+        out.append(part)
+    return "".join(out)
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
-                 wf_id: str = "") -> dict[str, Any]:
+                 wf_id: str = "", steps: list[dict] | None = None) -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
     variant, then what the step declares.
 
@@ -1006,6 +1375,29 @@ def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
     config: dict[str, Any] = {**catalog.defaults(ntype, declared), **declared}
     if entity.get("table") and "table" not in config:
         config["table"] = entity["table"]
+    if ntype in _HUMAN_STEPS:
+        _name_the_assignee(config, wf_id, step)
+        if not config.get("formBinding") and steps:
+            fields = task_form_fields(str(step.get("key")), steps)
+            if fields:
+                config["formBinding"] = {"fields": fields}
+    if ntype == "action" and config.get("actionType") == "set_variable":
+        if "expression" not in config and _reads_as_expression(config.get("value")):
+            config["expression"] = config.pop("value")
+    if ntype == "condition" and isinstance(config.get("expression"), str):
+        config["expression"] = feel_condition(config["expression"])
+    if ntype == "action" and config.get("actionType") == "set_variable" and isinstance(config.get("expression"), str):
+        config["expression"] = feel_condition(config["expression"])
+    if ntype == "condition" and steps and isinstance(config.get("expression"), str):
+        # A db_query answers `{rows, count}`; `count(<step>)` counted the
+        # object's keys, so "Duplicate case found?" was always yes.
+        queries = {str(o.get("key")) for o in steps
+                   if isinstance(o, dict) and o.get("type") == "action"
+                   and str((o.get("config") or {}).get("actionType") or "") == "db_query"}
+        config["expression"] = re.sub(
+            r"\bcount\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
+            lambda m: f"{m.group(1)}.count" if m.group(1) in queries else m.group(0),
+            config["expression"])
 
     if (ntype == "action" and config.get("actionType") in ("db_insert", "db_update")
             and entity.get("table")):
@@ -1134,7 +1526,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
                 s["key"], s.get("type"), len(chain),
-                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug)),
+                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])
@@ -1162,7 +1554,132 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         written.append(rel)
         code_map.append({"artifact": wf.get("id"), "service": [rel]})
 
+    written.append(project_launch_roles(doc, app_root)["files"][0])
     return {"files": written, "workflows": len(written), "codeMap": code_map}
+
+
+def launch_roles(doc: dict) -> dict[str, list[str] | None]:
+    """Each workflow -> the role names allowed to launch it: the union of the
+    roles the pages it launches from serve; "*" when one of them is public;
+    None when the Blueprint names no launching page (unrestricted)."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
+    pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
+    out: dict[str, list[str] | None] = {}
+    for w in _live(doc.get("workflows")):
+        if not w.get("id"):
+            continue
+        launched = [pages[pid] for pid in (w.get("launchedFrom") or []) if pid in pages]
+        if not launched:
+            out[w["id"]] = None
+            continue
+        roles: set[str] = set()
+        for pg in launched:
+            if (pg.get("access") or "authenticated") == "public":
+                roles.add("*")
+            for u in pg.get("users") or []:
+                nm = names.get(u, u)
+                roles.add("*" if nm == "Guest" else str(nm))
+        out[w["id"]] = sorted(roles)
+    return out
+
+
+def _workflow_slug(w: dict) -> str:
+    return to_snake(w.get("name") or w.get("id") or "workflow").replace("_", "-")
+
+
+def project_dispatches(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/contracts/dispatches.json``: every control→workflow wire
+    with the payload the control sends (sampled per key). The build-time dry
+    run (`verify-dispatches.ts`) executes each through the real engine — the
+    same `_buildWhere`, the same Drizzle columns — without touching the
+    database, so "verified" covers the app that ships, not the document."""
+    from services.blueprint.dispatch_contract import dispatches
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    entries = dispatches(doc)
+    (out / "dispatches.json").write_text(
+        json.dumps({"dispatches": entries}, indent=2, sort_keys=True) + "\n", "utf-8")
+    return {"files": ["src/contracts/dispatches.json"], "dispatches": len(entries)}
+
+
+def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/workflows/launch-roles.ts`` - who may launch each workflow."""
+    roles = launch_roles(doc)
+    slugs = {w.get("id"): _workflow_slug(w) for w in _live(doc.get("workflows")) if w.get("id")}
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// A workflow may be launched by the roles the pages it launches from serve;",
+        '// "*" admits an anonymous caller (a public page); null leaves it open.',
+        "export const LAUNCH_ROLES: Record<string, string[] | null> = {",
+    ]
+    for wid, allowed in roles.items():
+        val = "null" if allowed is None else json.dumps(allowed)
+        lines.append(f"  {json.dumps(wid)}: {val},")
+        if slugs.get(wid) and slugs[wid] != wid:
+            lines.append(f"  {json.dumps(slugs[wid])}: {val},")
+    lines += ["};", ""]
+    out = Path(app_root) / "src" / "lib" / "workflows"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "launch-roles.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": ["src/lib/workflows/launch-roles.ts"], "workflows": len(roles)}
+
+
+def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
+    """Each entity slug -> the roles that may read it and the roles that may
+    write it, from the pages that use it.
+
+    Reception read every user account through the data API: the Users page
+    was Admin's, but nothing carried that to the endpoint. A role may read an
+    entity when one of its pages binds it (a list, a record, a dropdown's
+    source) or an ownership rule names it unscoped; it may write an entity
+    when one of its pages is ABOUT it. "*" admits an anonymous reader for an
+    entity a public page reads."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
+    entities = {e.get("id"): e for e in (doc.get("data") or {}).get("entities") or [] if e.get("id")}
+    by_name = {e.get("name"): eid for eid, e in entities.items()}
+    slug_of = {eid: str(e.get("table") or str(e.get("name")).lower()) for eid, e in entities.items()}
+    layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    readers: dict[str, set[str]] = {eid: set() for eid in entities}
+    writers: dict[str, set[str]] = {eid: set() for eid in entities}
+    for pg in _live(doc.get("pages")):
+        roles = {("*" if names.get(u, u) == "Guest" else str(names.get(u, u))) for u in (pg.get("users") or [])}
+        if (pg.get("access") or "authenticated") == "public":
+            roles.add("*")
+        primary = (pg.get("data") or {}).get("primaryEntity")
+        if primary in entities:
+            readers[primary] |= roles
+            writers[primary] |= roles
+        for s in (layouts.get(pg.get("id"), {}).get("dataSources") or []):
+            eid = by_name.get(s.get("entity"), s.get("entity"))
+            if eid in entities:
+                readers[eid] |= roles
+        for eid in (pg.get("data") or {}).get("supportingEntities") or []:
+            if eid in entities:
+                readers[eid] |= roles
+    # Ownership rules are dicts beside prose notes.
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
+            readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
+    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])} for eid in entities}
+
+
+def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/entity-access.ts`` - who may read and write each entity."""
+    access = entity_access(doc)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// The roles that may read and write each entity, from the pages that use",
+        "// it. An entity absent here is open to any signed-in role.",
+        "export const ENTITY_ACCESS: Record<string, { read: string[]; write: string[] }> = "
+        + json.dumps(access, indent=2) + ";",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "entity-access.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": ["src/lib/entity-access.ts"], "entities": len(access)}
 
 
 # ---------------------------------------------------------------------------
@@ -1300,8 +1817,16 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
                    if e.get("status") != "DEPRECATED"]:
         readers = _entity_readers(doc, entity)
         cols: dict[str, dict] = {}
+        # THE COLUMN THE RUNTIME KNOWS, NOT THE FIELD THE BLUEPRINT NAMED. On a
+        # platform table the Blueprint's `passwordHash` folds into the
+        # platform's `password` (reconcile_platform_table); a manifest keyed by
+        # `passwordHash` masks nothing, and the users list returned the bcrypt
+        # hash to every caller.
+        table_name = entity.get("table") or to_snake(entity.get("name") or "")
+        synonyms = _PLATFORM_SYNONYMS.get(table_name, {}) if platform_table(table_name) else {}
         for field in entity.get("fields") or []:
             name = field.get("name") or ""
+            name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
             if not mask:
                 lowered = re.sub(r"[^a-z]", "", name.lower())
@@ -1364,6 +1889,27 @@ def project_sensitive_columns(doc: dict, app_root: str | Path) -> dict[str, Any]
             "columns": sum(len(v) for v in manifest.values())}
 
 
+#: The string family a free-text search can query. The check that consumes this
+#: used to accept only "text"/"string"/"str", so an entity whose columns were
+#: typed `varchar` (what the registry and Drizzle actually emit — `fullName`,
+#: `email`, `phoneNumber`) read as having NO text column, and its page's search
+#: box was refused every round with a defect the page composer cannot fix (the
+#: columns exist; only the type vocabulary was too narrow). `varchar(255)` and
+#: friends carry a length, so the type is compared with the length stripped.
+_TEXT_TYPES = {
+    "text", "string", "str", "varchar", "char", "nvarchar", "nchar", "citext",
+    "longtext", "mediumtext", "tinytext", "clob",
+    "email", "tel", "phone", "url", "slug", "name",
+}  # deliberately NOT uuid/enum/number/date — those are not free-text search targets
+
+
+def _is_text_type(t: Any) -> bool:
+    """Whether a column type is free-text a search can match against — the whole
+    string family, not just the word "text"; a `varchar(255)` length is ignored."""
+    base = str(t or "").lower().split("(")[0].strip()
+    return base in _TEXT_TYPES
+
+
 def searchable_columns(doc: dict) -> dict[str, list[str]]:
     """Columns a search op may query, per entity.
 
@@ -1380,7 +1926,7 @@ def searchable_columns(doc: dict) -> dict[str, list[str]]:
         hidden = set(masked.get(name, {}))
         cols = [
             f.get("name") for f in entity.get("fields") or []
-            if str(f.get("type") or "").lower() in ("text", "string", "str")
+            if _is_text_type(f.get("type"))
             and not f.get("primaryKey")
             and f.get("name") not in hidden
         ]
@@ -1515,6 +2061,11 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             "scope": item.get("scope") or "user",
             "unscopedRoles": list(item.get("unscopedRoles") or []),
         }
+        # WHERE THE ACTOR'S VALUE COMES FROM. The users column a workspace
+        # scope compares against; the session carries it and the engine reads
+        # it. Without one, `scope: "workspace"` compared every row to nothing.
+        if item.get("actorColumn"):
+            rule["actorColumn"] = str(item["actorColumn"])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -1562,6 +2113,8 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         '  scope: "user" | "workspace";\n'
         "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
         "  unscopedRoles: string[];\n"
+        "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
+        "  actorColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
@@ -1732,7 +2285,47 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out = Path(app_root) / "src" / "lib"
     out.mkdir(parents=True, exist_ok=True)
     (out / "public-resources.ts").write_text("\n".join(lines), "utf-8")
-    return {"files": ["src/lib/public-resources.ts"], "resources": slugs}
+    project_entity_access(doc, app_root)
+    return {"files": ["src/lib/public-resources.ts", "src/lib/entity-access.ts"], "resources": slugs}
+
+
+def role_routes(doc: dict) -> list[dict[str, Any]]:
+    """Each role-restricted page's route and the role NAMES that may open it.
+
+    A page declares `access: "role_restricted"` and `users: [ROLE-…]`; the
+    middleware compared nothing to those and gated the route on a session
+    alone, so Reception opened the Income Auditor's queue and the Users
+    admin page, and could act there (Criterion Refunds v2, 2026-09-14). The
+    session carries the role's NAME, so that is what is projected.
+    """
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles"))
+             if r.get("id") and r.get("name")}
+    out: list[dict[str, Any]] = []
+    for page in _live(doc.get("pages")):
+        if (page.get("access") or "authenticated") != "role_restricted":
+            continue
+        roles = sorted({names.get(u, u) for u in (page.get("users") or []) if u})
+        if not roles:
+            continue   # nothing to compare to; the session gate still applies
+        out.append({"route": page.get("route") or "/", "roles": roles})
+    return sorted(out, key=lambda r: r["route"])
+
+
+def _route_regex(route: str) -> str:
+    """`/refund-cases/[id]` → `^/refund-cases/[^/]+$`, a regex source string.
+
+    Emitted through `new RegExp(<json string>)`, not a `/…/` literal: a route's
+    own slashes would end a literal early, and `re.escape` spells `-` as `\-`.
+    """
+    parts = []
+    for seg in route.strip("/").split("/"):
+        if not seg:
+            continue
+        if seg.startswith("[") and seg.endswith("]"):
+            parts.append("[^/]+")
+        else:
+            parts.append(re.sub(r"([.+*?^${}()|\[\]\\])", r"\\\1", seg))
+    return "^/" + "/".join(parts) + "$" if parts else "^/$"
 
 
 def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -1777,13 +2370,36 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   by role: {route}')
     for route in apis:
         lines.append(f'//   public: /{route}  (reached by a public page)')
+    gated_by_role = role_routes(doc)
+    role_lines = [
+        f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
+        for r in gated_by_role
+    ]
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
+        'import { NextResponse } from "next/server";',
         '',
-        'export default withAuth({',
-        '  pages: { signIn: "/login" },',
-        '});',
+        '// A role-restricted page names the roles that may open it; the session',
+        '// carries the role. Anyone else is sent to the 403 page, signed in or',
+        '// not-yet — a session alone is not a permission.',
+        'const ROLE_ROUTES: Array<{ route: RegExp; roles: string[] }> = [',
+        *role_lines,
+        '];',
+        '',
+        'export default withAuth(',
+        '  function middleware(req) {',
+        '    const role = String((req.nextauth.token as { role?: unknown } | null)?.role ?? "");',
+        '    const path = req.nextUrl.pathname;',
+        '    for (const r of ROLE_ROUTES) {',
+        '      if (r.route.test(path) && !r.roles.includes(role)) {',
+        '        return NextResponse.redirect(new URL("/403", req.url));',
+        '      }',
+        '    }',
+        '    return NextResponse.next();',
+        '  },',
+        '  { pages: { signIn: "/login" } },',
+        ');',
         '',
         'export const config = {',
         f'  matcher: ["{matcher}"],',
@@ -1799,6 +2415,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "public": access["public"],
         "publicApis": apis,
         "gated": len(access["authenticated"]) + len(access["role_restricted"]),
+        "byRole": gated_by_role,
     }
 
 

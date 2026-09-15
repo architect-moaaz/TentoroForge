@@ -65,9 +65,12 @@ export async function executeWorkflow(
 ): Promise<WorkflowExecutionResult> {
   const startedAt = new Date().toISOString();
 
+  // THE ACTING USER IS A VARIABLE. A step reads `{{user.role}}` and a gate
+  // reads `user.homePropertyId`; the server's user wins over anything the
+  // request carried under that name, so a caller cannot pose as a stage.
   const ctx: WorkflowExecutionContext = {
     input,
-    variables: { ...input },
+    variables: { ...input, ...(user ? { user: { ...user } } : {}) },
     log: [],
     user,
   };
@@ -214,6 +217,35 @@ export async function executeWorkflow(
 /**
  * Resolve input parameters for a node from process variables.
  */
+/** `{{path}}` inside a config string, read from ctx.variables. */
+function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
+  if (typeof value !== "string" || !value.includes("{{")) return value;
+  // `a.b[0].c`: dotted, with a bracketed index reaching into a query's rows.
+  const segments = (path: string): (string | number)[] =>
+    path.trim().split(".").flatMap((p) => {
+      const m = /^([A-Za-z_$][\w$]*)((?:\[\d+\])*)$/.exec(p);
+      if (!m) return [p];
+      const idx = Array.from(m[2].matchAll(/\[(\d+)\]/g), (x) => Number(x[1]));
+      return [m[1], ...idx];
+    });
+  const read = (path: string) =>
+    segments(path).reduce<any>((cur, p) => {
+      if (cur === null || cur === undefined) return undefined;
+      // An id is its own id: `{{property.id}}` over a foreign-key value.
+      if (p === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
+      return cur[p as any];
+    }, variables);
+  const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
+  if (whole) {
+    const v = read(whole[1]);
+    return v === undefined ? null : v;
+  }
+  return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, p) => {
+    const v = read(p);
+    return v === null || v === undefined ? "" : String(v);
+  });
+}
+
 function resolveInputParams(
   node: WorkflowNode,
   ctx: WorkflowExecutionContext,
@@ -678,12 +710,23 @@ async function executeNode(
           logEntry.completedAt = new Date().toISOString();
           const decision = ctx.variables[`__step_${node.id}_decision`];
           const comment = ctx.variables[`__step_${node.id}_comment`];
+          const completedBy = ctx.variables[`__step_${node.id}_completedBy`];
+          // What the person entered on the task (its formBinding fields) rides
+          // as the task's output beside who completed it, so a later step
+          // reads `{{<task>.overrideReason}}` and `{{<task>.userId}}` — the
+          // names the Blueprint writes — instead of the placeholder text.
+          const submitted = ctx.variables[`__step_${node.id}_form`];
           logEntry.output = {
             ...logEntry.output,
+            ...(submitted && typeof submitted === "object" ? submitted : {}),
             waitingForHumanAction: false,
-            completedBy: ctx.variables[`__step_${node.id}_completedBy`],
+            completedBy,
+            userId: completedBy,
             decision,
+            comment,
           };
+          ctx.variables[node.id] = logEntry.output;
+          ctx.variables[`__${node.id}_output`] = logEntry.output;
           // Write the decision into the approval node's declared outputParams so
           // downstream nodes (e.g. a db_update setting the entity's status) see
           // approved/rejected instead of the pending default. A status/decision-
@@ -1071,9 +1114,14 @@ async function handleAction(
   if (actionType === "set_variable" && config.variableName) {
     let value: unknown;
     if ("variableValue" in config) {
-      value = (config as any).variableValue;
+      value = interpolateValue((config as any).variableValue, ctx.variables);
     } else if ("value" in (config as any)) {
-      value = (config as any).value;
+      // A `value` written as `{{triage_case.userId}}` is a reference, not
+      // the text: stored as text, it reached a uuid column as the placeholder
+      // and the insert failed. A lone reference yields the RAW value (an id,
+      // an object); a reference inside prose yields the text; an unresolved
+      // reference yields null, never its own spelling.
+      value = interpolateValue((config as any).value, ctx.variables);
     } else if (preEvaluated.has("expression")) {
       // A14-3: already evaluated by the input mapper — using it directly is
       // the whole fix. Re-evaluating would be the double-evaluation bug.

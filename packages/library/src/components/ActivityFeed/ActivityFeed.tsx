@@ -84,11 +84,11 @@ export function ActivityFeed({ entries, title = "Activity", maxHeight, limit, fi
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-[11px] font-semibold">
               {e.avatarUrl
                 ? <img src={e.avatarUrl} alt={e.actorName} className="h-full w-full rounded-full object-cover" />
-                : <span>{getInitials(e.actorName, e.avatarInitials)}</span>}
+                : <span>{getInitials(e.actorName || e.action, e.avatarInitials)}</span>}
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-xs leading-tight">
-                <span className="font-medium">{e.actorName}</span>
+                {e.actorName && <span className="font-medium">{e.actorName}</span>}
                 {e.action && <span className="text-muted-foreground"> {e.action} </span>}
                 {e.target && <span className="font-medium">{e.target}</span>}
               </p>

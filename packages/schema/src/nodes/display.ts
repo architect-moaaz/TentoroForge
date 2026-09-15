@@ -34,13 +34,20 @@ export const KeyValueListNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("KeyValueList"),
   props: z.object({
-    items: z.array(z.object({
-      label: z.string().min(1),
-      // value can be empty — the renderer handles empty-state UI
-      // (greyed dash, "Not set", etc.). label stays .min(1).
-      value: z.string(),
-      copyable: z.boolean().optional(),
-    }).strict()).min(1),
+    // A pair, or a data row: a dashboard card bound this to the support
+    // cases of a property, and validation stripped every column a case has,
+    // leaving "— —". The component shapes a row into a pair by its own
+    // columns (style/rowShape.ts).
+    items: z.array(z.union([
+      z.object({
+        label: z.string().min(1),
+        // value can be empty — the renderer handles empty-state UI
+        // (greyed dash, "Not set", etc.). label stays .min(1).
+        value: z.string(),
+        copyable: z.boolean().optional(),
+      }).strict(),
+      z.record(z.unknown()),
+    ])).min(1),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();
@@ -124,12 +131,34 @@ export const ListNode = z.object({
   id: z.string().min(1).optional(),
   type: z.literal("List"),
   props: z.object({
-    items: z.array(z.object({
-      title:    z.string().min(1),
-      subtitle: z.string().optional(),
-      icon:     z.string().optional(),
-    }).strict()).min(1),
+    // AN ITEM, OR A DATA ROW. A record page binds a List to a child
+    // collection — the notes of a case, each with `body` and `createdAt`.
+    // Admitting only {title, subtitle, icon} had the renderer strip every
+    // column a row actually has and show blank lines; the component shapes a
+    // row into an item by the row's own columns.
+    //
+    // A BOUND SOURCE, OR A LITERAL LIST. Like `Table.rows`, `items` may be a
+    // data binding (`{{condition_evidences}}`) resolved at render — the
+    // converter binds `items` as a data prop and the renderer honours a bound
+    // List as an iterator, but the shape here admitted only a literal array, so
+    // every data-bound List failed strict validation, collided with the
+    // fallback, and the whole page "did not strictly validate; rendering as-is".
+    items: z.union([
+      z.string(),
+      z.array(z.union([
+        z.object({
+          title:    z.string().min(1),
+          subtitle: z.string().optional(),
+          icon:     z.string().optional(),
+        }).strict(),
+        z.record(z.unknown()),
+      ])).min(1),
+    ]),
     divided: z.boolean().optional(),
+    /** A route template filled per item — `/refund-cases/{{id}}` — so an
+     *  item opens its record. Set by the planner when the bound entity has a
+     *  detail page; an authored value wins. */
+    itemHref: z.string().optional(),
   }).strict(),
   style: StyleSlot.optional(),
 }).strict();

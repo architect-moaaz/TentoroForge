@@ -208,7 +208,8 @@ def test_a_passing_build_reports_both_exit_codes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
-    assert assembly.verify_build(tmp_path) == {"install": 0, "build": 0}
+    # No dispatch manifest in an empty tree: the dry run reports zero checked.
+    assert assembly.verify_build(tmp_path) == {"install": 0, "build": 0, "dispatches": 0}
 
 
 def test_the_runtime_injector_installs_around_projected_files_not_over_them():
@@ -241,14 +242,12 @@ def test_remove_except_keeps_preserved_paths_and_clears_the_rest(tmp_path):
     assert not (tmp_path / "src/lib/workflows/engine.ts").exists()
 
 
-def test_assembly_reports_placeholders_that_survived_into_jsx(tmp_path):
+def test_assembly_refuses_placeholders_that_survived_into_jsx(tmp_path):
     """`{{app_name}}` in JSX text is an object literal, not inert text — it
     compiles, passes both gates, and throws ReferenceError at prerender. The
-    guard that recognises it existed for a year with only a legacy-router
-    caller, so the pipeline that builds today never ran it.
-
-    Both directions matter. A clean app must still write the report, because
-    "found nothing" and "never ran" have to stay distinguishable.
+    guard that recognises it reported for a year; the assembly now REFUSES
+    over it, naming the file and the token, and still writes the report first
+    so "found nothing" and "never ran" stay distinguishable.
     """
     app = tmp_path / "app"
     doc = {"application": {"name": "T"}}
@@ -266,11 +265,15 @@ def test_assembly_reports_placeholders_that_survived_into_jsx(tmp_path):
         encoding="utf-8",
     )
 
-    dirty = assembly.assemble(doc, app, project_short_id="t")
-    hits = dirty["residualPlaceholders"]
-    assert [h["token"] for h in hits] == ["app_name"], hits
-    assert hits[0]["file"].endswith("planted.tsx")
-
+    try:
+        assembly.assemble(doc, app, project_short_id="t")
+    except assembly.BuildFailed as e:
+        assert "src/app/planted.tsx:{{app_name}}" in str(e)
+    else:
+        raise AssertionError("a shipped placeholder must refuse the assembly")
+    report = json.loads((app / "contracts" / "placeholder-report.json").read_text())
+    assert [h["token"] for h in report["findings"]] == ["app_name"]
+    assert report["findings"][0]["file"] == "src/app/planted.tsx"
 
 def test_assembly_substitutes_the_interface_language(tmp_path):
     """§11 — an Arabic Blueprint has to reach <html lang/dir>. layout.tsx is a
@@ -304,3 +307,128 @@ def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
     seen.clear()
     assembly.verify_build(tmp_path, install=False)
     assert [c[:3] for c in seen] == [["npm", "run", "build"]]
+
+
+def test_the_scaffold_is_filled_the_moment_it_is_laid_down(tmp_path):
+    """The install node copies the scaffold at second zero; only the preview
+    node's assemble used to fill its placeholders. A run that failed between
+    the two (a refused page) left the app introducing itself as __APP_NAME__
+    on its sign-in page and throwing `app_name is not defined` from its 404
+    page. Laying the scaffold down now fills it in the same step."""
+    app = tmp_path / "app"
+    assembly.copy_scaffold(app, project_short_id="t1")
+    doc = {"application": {"id": "t1", "name": "Recruitment Tracker", "domain": "hr"},
+           "pages": [{"route": "/login"}, {"route": "/overview"}]}
+    touched = assembly.interpolate_scaffold(app, doc)
+    assert "__APP_NAME__" in touched and "src/app/not-found.tsx" in touched
+
+    left = {}
+    for f in (app / "src").rglob("*.tsx"):
+        text = f.read_text("utf-8")
+        hits = [t for t in ("__APP_NAME__", "{{app_name}}", "{{home_route}}",
+                            "__AUTH_HEADLINE__", "__AUTH_SUBHEAD__") if t in text]
+        if hits:
+            left[str(f.relative_to(app))] = hits
+    assert left == {}, left
+    assert 'Return to Recruitment Tracker' in (app / "src/app/not-found.tsx").read_text()
+    assert assembly.interpolate_scaffold(app, doc) == []      # idempotent
+
+
+def test_prepare_app_root_fills_the_scaffold_when_given_the_blueprint(tmp_path, monkeypatch):
+    monkeypatch.setattr(assembly, "vendor_engines", lambda out: [])
+    app = tmp_path / "app"
+    doc = {"application": {"id": "t2", "name": "Ledger", "domain": "finance"},
+           "pages": [{"route": "/login"}, {"route": "/accounts"}]}
+    assembly.prepare_app_root(app, project_short_id="t2", doc=doc)
+    assert "__APP_NAME__" not in (app / "src/app/login/page.tsx").read_text()
+    assert "{{app_name}}" not in (app / "src/app/not-found.tsx").read_text()
+
+
+# --- the shipped-file contract and the dispatch dry run --------------------
+
+def test_the_token_contract_is_read_off_the_templates():
+    tokens = assembly.scaffold_tokens()
+    assert {"__APP_NAME__", "{{app_name}}", "{{home_route}}", "__AUTH_HEADLINE__"} <= tokens
+    assert all(t.startswith("__") or t.startswith("{{") for t in tokens)
+
+
+def test_a_shipped_placeholder_refuses_the_assembly_by_file_and_token(tmp_path):
+    app = tmp_path / "app"
+    (app / "src" / "app").mkdir(parents=True)
+    (app / "src" / "app" / "page.tsx").write_text("<h1>__APP_NAME__</h1>")
+    (app / "src" / "app" / "not-found.tsx").write_text("Return to {{app_name}}")
+    assert assembly.unfilled_scaffold_tokens(app) == [
+        "src/app/not-found.tsx:{{app_name}}", "src/app/page.tsx:__APP_NAME__"]
+    try:
+        assembly.refuse_unfilled_scaffold(app)
+    except assembly.BuildFailed as e:
+        assert "src/app/page.tsx:__APP_NAME__" in str(e)
+    else:
+        raise AssertionError("shipped placeholders must refuse")
+    (app / "src" / "app" / "page.tsx").write_text("<h1>Ledger</h1>")
+    (app / "src" / "app" / "not-found.tsx").write_text("Return to Ledger")
+    assembly.refuse_unfilled_scaffold(app)                       # clean: silent
+
+
+def test_prepare_app_root_refuses_a_scaffold_it_could_not_fill(tmp_path, monkeypatch):
+    monkeypatch.setattr(assembly, "vendor_engines", lambda out: [])
+    monkeypatch.setattr(assembly, "interpolate_scaffold", lambda out, doc: [])   # nothing filled
+    try:
+        assembly.prepare_app_root(tmp_path / "app", project_short_id="t3",
+                                  doc={"application": {"id": "t3", "name": "X"}, "pages": []})
+    except assembly.BuildFailed as e:
+        assert "__APP_NAME__" in str(e)
+    else:
+        raise AssertionError("an unfilled scaffold must refuse at install")
+
+
+def test_the_dry_run_is_skipped_without_a_manifest(tmp_path):
+    assert assembly.verify_dispatches(tmp_path) == 0
+
+
+def test_a_wire_that_would_refuse_fails_the_build_naming_the_control(tmp_path, monkeypatch):
+    import subprocess
+    app = tmp_path / "app"
+    (app / "src/lib/workflows").mkdir(parents=True); (app / "src/contracts").mkdir(parents=True)
+    (app / assembly.DISPATCH_VERIFIER).write_text("// verifier")
+    (app / assembly.DISPATCH_MANIFEST).write_text("{}")
+    (app / ".env.local").write_text('DATABASE_URL="postgres://u:p@localhost:5/x"\n')
+    seen = {}
+
+    class P:
+        returncode = 1
+        stderr = ""
+        stdout = "noise\n" + json.dumps({"ok": False, "checked": 1, "failed": 1, "results": [
+            {"route": "/records/[id]", "control": "Button", "label": "Delete Record", "workflow": "FLOW-D",
+             "ok": False, "problems": [{"node": "do", "actionType": "db_delete",
+                                        "problem": "WHERE id is empty — trigger form is missing an input"}]}]})
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["env"] = cmd, kw.get("env") or {}
+        return P()
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    try:
+        assembly.verify_dispatches(app)
+    except assembly.BuildFailed as e:
+        msg = str(e)
+        assert "would refuse at first click" in msg
+        assert "/records/[id]: Button 'Delete Record' runs FLOW-D" in msg
+        assert "WHERE id is empty" in msg
+    else:
+        raise AssertionError("a refusing wire must fail the build")
+    assert seen["cmd"] == ["npx", "tsx", assembly.DISPATCH_VERIFIER]
+    assert seen["env"]["DATABASE_URL"] == "postgres://u:p@localhost:5/x"   # the app's own
+
+
+def test_a_clean_dry_run_reports_what_it_checked(tmp_path, monkeypatch):
+    import subprocess
+    app = tmp_path / "app"
+    (app / "src/lib/workflows").mkdir(parents=True); (app / "src/contracts").mkdir(parents=True)
+    (app / assembly.DISPATCH_VERIFIER).write_text("// verifier")
+    (app / assembly.DISPATCH_MANIFEST).write_text("{}")
+
+    class P:
+        returncode = 0; stderr = ""
+        stdout = json.dumps({"ok": True, "checked": 3, "failed": 0, "results": []})
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: P())
+    assert assembly.verify_dispatches(app) == 3

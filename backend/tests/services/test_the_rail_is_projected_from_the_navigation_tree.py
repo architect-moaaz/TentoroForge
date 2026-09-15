@@ -86,3 +86,47 @@ def test_routes_resolve_through_page_ids(tmp_path):
     project_shell(doc, tmp_path)
     shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
     assert _find_sidenav(shell)["props"]["groups"][0]["items"][0]["route"] == "/home-renamed"
+
+
+# ── a dynamic route is not a rail destination ────────────────────────────────
+#
+# `/rentals/[id]/return` is reached through a row/action that fills a concrete
+# id, never from the rail: Next's <Link> refuses a literal "[id]" href ("Dynamic
+# href … not supported"), and landing there passes "[id]" to the DB as a uuid.
+
+def test_a_dynamic_route_is_dropped_from_the_rail_and_initial(tmp_path):
+    doc = {
+        "application": {"name": "Test Gen 2"},
+        "pages": [
+            {"id": "P-RET", "route": "/rentals/[id]/return"},
+            {"id": "P-NEW", "route": "/support-requests/new"},
+        ],
+        "navigation": {"style": "sidebar", "tree": [
+            {"label": "Return Rental", "page": "P-RET"},
+            {"label": "New Support Request", "page": "P-NEW"},
+        ]},
+    }
+    project_shell(doc, tmp_path)
+    shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+    routes = [g.get("route") for g in _find_sidenav(shell)["props"]["groups"]]
+    assert "/rentals/[id]/return" not in routes
+    assert routes == ["/support-requests/new"]
+    # the landing route is concrete, never the dynamic one
+    assert shell.get("initialRoute") == "/support-requests/new"
+
+
+def test_a_page_less_destination_is_still_kept_route_less(tmp_path):
+    # Regression guard: the dynamic-route drop must NOT also drop a §49
+    # destination that simply has no page yet.
+    doc = {"application": {"name": "X"},
+           "pages": [{"id": "P1", "route": "/rentals/[id]/return"}],
+           "navigation": {"style": "sidebar", "tree": [
+               {"label": "Coming soon"},                 # no page — kept
+               {"label": "Return", "page": "P1"},        # dynamic — dropped
+           ]}}
+    project_shell(doc, tmp_path)
+    shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+    groups = _find_sidenav(shell)["props"]["groups"]
+    labels = [g.get("label") for g in groups]
+    assert "Coming soon" in labels
+    assert all(g.get("route") != "/rentals/[id]/return" for g in groups)

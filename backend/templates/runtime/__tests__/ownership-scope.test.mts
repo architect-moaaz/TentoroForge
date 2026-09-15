@@ -94,6 +94,10 @@ const invoices = makeTable(tableOf("Invoice"), fieldsOf("Invoice"));
 const announcements = makeTable(tableOf("Announcement"), fieldsOf("Announcement"));
 // Ticket's rule names ownerId; the table deliberately does not carry it.
 const tickets = makeTable(tableOf("Ticket"), fieldsOf("Ticket"));
+// RefundCase is workspace-scoped; the rule names the users column that IS the workspace.
+const refundCases = makeTable(tableOf("RefundCase"), fieldsOf("RefundCase"));
+const ST_GILES = "prop-st-giles";
+const ROYAL = "prop-royal";
 
 const d = (n: number) => new Date(2026, 0, n);
 const ROWS: Record<string, any[]> = {
@@ -108,6 +112,11 @@ const ROWS: Record<string, any[]> = {
   ],
   [tickets.__name]: [
     { id: "t1", title: "Printer jammed", createdAt: d(1) },
+  ],
+  [refundCases.__name]: [
+    { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
+    { id: "r2", propertyId: ST_GILES, guestName: "Okafor", createdAt: d(2) },
+    { id: "r3", propertyId: ROYAL, guestName: "Lindqvist", createdAt: d(3) },
   ],
 };
 
@@ -278,6 +287,7 @@ const engine = await import("../data-engine.ts");
 engine.registerEntity(invoices.__name, invoices, { slug: invoices.__name });
 engine.registerEntity(announcements.__name, announcements, { slug: announcements.__name });
 engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
+engine.registerEntity(refundCases.__name, refundCases, { slug: refundCases.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -335,6 +345,26 @@ console.log("query(): a scoped entity with no actor returns nothing");
   const anon = await engine.query(invoices.__name, {}, {});
   eqJson(ids(anon.data), [], "no actor on the context → no rows");
   eqJson(anon.total, 0, "and a total that agrees");
+}
+
+console.log("query(): a workspace scope reads the actor column the rule names");
+{
+  // The session carries the users row's columns; the rule says which one is
+  // the workspace. A manager at St Giles sees St Giles cases and no others.
+  const stGiles = { user: { id: "user-fom", role: "member", homePropertyId: ST_GILES } };
+  const royal = { user: { id: "user-gm", role: "member", homePropertyId: ROYAL } };
+  const fom = await engine.query(refundCases.__name, {}, stGiles);
+  const gm = await engine.query(refundCases.__name, {}, royal);
+  eqJson(ids(fom.data), ["r1", "r2"], "the St Giles manager sees St Giles cases");
+  eqJson(ids(gm.data), ["r3"], "the Royal manager sees the Royal case");
+  eqJson(fom.total, 2, "and the total is the property's count");
+  // A session with a workspaceId but not the named column must NOT match on
+  // the fallback: the rule named a column, and that column is absent.
+  const wrongColumn = { user: { id: "user-x", role: "member", workspaceId: ST_GILES } };
+  const x = await engine.query(refundCases.__name, {}, wrongColumn);
+  eqJson(ids(x.data), [], "workspaceId is not the column the rule named → no rows");
+  const finance = await engine.query(refundCases.__name, {}, { user: { id: "user-fin", role: "finance" } });
+  eqJson(ids(finance.data), ["r1", "r2", "r3"], "finance is unscoped, as declared");
 }
 
 console.log("query(): a rule naming a column the table lacks fails closed");

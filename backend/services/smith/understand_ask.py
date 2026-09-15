@@ -58,6 +58,11 @@ Return ONLY a JSON object with exactly these keys:
       "connect_uxpilot" — they named a UX Pilot page (a uxpilot.ai link, or
                         "UX Pilot page <id>") to build from or to use as the
                         visual reference.
+      "disconnect_design" — they want the connected design gone and the
+                        screens composed from the component library instead:
+                        "disconnect the Figma design", "drop the design",
+                        "stop using the frames", "compose every page from
+                        components". Needs no fields.
     "rebuild"       — build or regenerate the WHOLE application: "build",
                       "build it", "start the build", "generate the app",
                       "rebuild everything". No route, no single screen.

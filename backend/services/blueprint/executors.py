@@ -41,6 +41,7 @@ network call.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -59,12 +60,36 @@ from services.blueprint.orchestrator import DAG, TaskSpec
 from services.blueprint.references import addendum as reference_addendum
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
-#: Per the claude-api reference: use Claude Opus 5 unless the caller asks
-#: otherwise. Note this deliberately differs from `services.llm_client`'s
-#: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-5"
+#: WHO RUNS ON WHAT — two decisions, not one (user's call, 2026-09-10).
+#:
+#: The §27 specialists and the observer run on Sonnet 5: each fills a tightly
+#: constrained shape from a slice of the Blueprint, the observer only reads and
+#: judges, and Sonnet 5 is $2/$10 against Opus 5's $5/$25. Smith stays on
+#: Opus 5: it interprets the user's words into the product definition, and
+#: everything the specialists do elaborates what it decided — a misread there
+#: is the expensive mistake, not a page composed twice.
+#:
+#: Both are read once, at import, from the environment, so a run can be
+#: pointed elsewhere without a code change — `FORGE_AGENT_MODEL` for the
+#: specialists and the observer, `FORGE_SMITH_MODEL` for Smith. Any current
+#: model id works with the request shape `AnthropicModel` sends; pre-4.6 ids
+#: reject `output_config.effort` with a 400.
+#:
+#: The per-node effort and max_tokens tables below were measured on Opus 5.
+#: Sonnet 5 uses a new tokenizer (roughly 30% more tokens for the same text)
+#: and adaptive thinking counts against `max_tokens` the same way, so the
+#: knees may sit elsewhere — the scoreboard is how to find out, not a guess.
+#: Note this deliberately differs from `services.llm_client`'s
+#: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
+AGENT_MODEL = os.environ.get("FORGE_AGENT_MODEL", "").strip() or "claude-sonnet-5"
+SMITH_MODEL = os.environ.get("FORGE_SMITH_MODEL", "").strip() or "claude-opus-5"
+
+#: What `AnthropicModel()` and `tiered_router()` run on when not told: the
+#: specialists' model. Kept under its old name because the router, the
+#: office and the tests all read it.
+DEFAULT_MODEL = AGENT_MODEL
 
 #: `max_tokens` caps thinking *and* response text together on Opus 5, where
 #: adaptive thinking is on by default.
@@ -114,6 +139,11 @@ class ModelReply:
 
     text: str
     usage: Usage | None = None
+    #: Why the model stopped — `end_turn`, `max_tokens`, … A reply cut off at
+    #: the output cap is not a malformed reply, and a reader that cannot tell
+    #: the two apart reports "was not JSON" for a plan that was simply longer
+    #: than the budget. None when the transport does not say.
+    stop_reason: str | None = None
 
 
 class ModelRefused(RuntimeError):
@@ -352,13 +382,16 @@ class AnthropicModel:
             # anthropic releases vendor `httpx2` and reject an `httpx.Timeout`
             # outright ("this SDK uses httpx2. Use httpx2.Timeout") — a rebuild
             # that pulls the newer SDK then fails EVERY agent node at construction
-            # time, before a single token is requested. Build the Timeout from
-            # whichever module the installed SDK actually uses.
-            try:
-                import httpx2 as _sdk_httpx  # type: ignore
-            except ImportError:
-                import httpx as _sdk_httpx
-
+            # time, before a single token is requested.
+            #
+            # Asking "is httpx2 importable" was the wrong question: the package
+            # outlives the SDK that pulled it in. This machine had anthropic
+            # 0.125 (httpx) beside a leftover httpx2, so every call built an
+            # httpx2.Timeout for an httpx client and died inside the SDK as a
+            # bare APIConnectionError ("'Timeout' object cannot be interpreted
+            # as an integer") — a network-shaped error for a type mismatch,
+            # the same disguise the brotli bug wore. The SDK re-exports the
+            # Timeout it speaks as `anthropic.Timeout` on 0.x and 1.x alike.
             # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
             # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
             # or nothing), and then went silent forever. No timeout was set
@@ -373,8 +406,8 @@ class AnthropicModel:
             # 115-138s each, legitimately.
             self._client = anthropic.Anthropic(
                 default_headers={"accept-encoding": self.accept_encoding},
-                timeout=_sdk_httpx.Timeout(connect=15.0, read=300.0,
-                                           write=60.0, pool=15.0),
+                timeout=anthropic.Timeout(connect=15.0, read=300.0,
+                                          write=60.0, pool=15.0),
                 max_retries=3,
             )
         return self._client
@@ -459,7 +492,7 @@ class AnthropicModel:
             output_tokens=getattr(u, "output_tokens", 0) or 0,
             cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
             cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
-        ))
+        ), stop_reason=getattr(response, "stop_reason", None))
 
 
 
@@ -877,6 +910,19 @@ two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
+    "composition": (
+        "Compose the whole application once. For every page, choose a layout "
+        "and an ordered list of sections, naming the purpose of each section "
+        "and the catalog components it is expected to use. Then state the "
+        "conventions every page will follow: how a page header reads, where "
+        "filters and the primary action sit, how empty and error states are "
+        "treated, how dense the information is.\n\n"
+        "Structure and intent only — no props, no data bindings. You are the "
+        "only call that sees every page at once, so the job is coherence: the "
+        "list page and the dashboard should read as one product, and a user "
+        "moving between them should never have to re-learn where things are. "
+        "Decide from the domain and who uses it; say why in each rationale."
+    ),
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
         "You are not designing the application and you are not authoring "
@@ -1113,7 +1159,11 @@ NODE_TASKS: dict[str, str] = {
         "user or one workspace needs an ownershipRules entry naming the entity "
         "and the column that scopes it, because that object is what the data "
         "engine turns into a WHERE clause \u2014 a prose rule beside it "
-        "documents the policy and enforces nothing. Where authorisation really "
+        "documents the policy and enforces nothing. A rule scoped to a "
+        "workspace also names `actorColumn`: the users column whose value is "
+        "the actor's workspace (homePropertyId, organisationId), because the "
+        "session carries that column and the engine compares against it. "
+        "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
         "so the absence of a scoping object reads as a decision."
     ),
@@ -1290,6 +1340,36 @@ that leaves a required group empty is refused with the group named.
 """
 
 
+COMPOSITION_ADDENDUM = """
+
+## The components that exist
+
+Name components from this list only — a section that names one that is not \
+here is rejected. Names are all you give; the per-page author is shown the \
+props and composes against them.
+
+Sketch **every** page listed below, each exactly once. A page with NO PRIMARY \
+ENTITY still gets a sketch — an entry redirect or a sign-in page has a layout \
+too, however small.
+
+{page_facts}
+{catalog}
+"""
+
+CONVENTIONS_ADDENDUM = """
+
+## The application as a whole
+
+The app was composed once before any page was, and these are its decisions. \
+Follow them; a page that re-decides them breaks the coherence the pass exists \
+to give.
+
+Vision: {vision}
+
+Conventions:
+{conventions}
+"""
+
 SHAPE_ADDENDUM = """
 
 Artifacts you write must match these shapes exactly — the Blueprint validates \
@@ -1310,6 +1390,23 @@ prose, no markdown fence, no commentary — the object and nothing else:
 ```json
 {schema}
 ```"""
+
+
+def _conventions_addendum(doc: dict) -> str:
+    """The app-level composition's decisions, for the composer that works under
+    them. Doc-level only — never the subject — so it sits in the cached prefix
+    and stays byte-identical across a fan-out. Empty when no composition pass
+    has run, so a Blueprint from before the node exists composes as it did."""
+    comp = doc.get("composition") or {}
+    if not comp.get("vision") and not comp.get("conventions"):
+        return ""
+    conventions = "\n".join(
+        f"- {c.get('topic', '')}: {c.get('rule', '')}"
+        for c in comp.get("conventions") or []
+    ) or "(none stated)"
+    return CONVENTIONS_ADDENDUM.format(
+        vision=comp.get("vision") or "(none stated)", conventions=conventions,
+    )
 
 
 def build_prompt(
@@ -1346,6 +1443,36 @@ def build_prompt(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
     system += reference_addendum(references, node)
+    if spec.agent == "a2ui_composition":
+        from services.blueprint.page_planner import (
+            app_brief, catalog_index, load_catalog, pattern_page_facts,
+        )
+
+        system += COMPOSITION_ADDENDUM.format(
+            catalog=catalog_index(load_catalog()),
+            page_facts=pattern_page_facts(doc) or "(no pages declare a pattern)",
+        )
+        if inline_schema:
+            system += SCHEMA_ADDENDUM.format(
+                schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
+            )
+        user = (
+            "Compose this application as a whole. You are given the product, "
+            "its requirements, its navigation, its roles and every page's "
+            "contract. Return one `composition` artifact with natural_key "
+            "\"composition\" whose `pages` holds one sketch per page, keyed by "
+            "the page's id.\n\n```json\n"
+            + json.dumps(app_brief(doc), indent=2, sort_keys=True)
+            + "\n```"
+        )
+        if feedback:
+            user += (
+                "\n\nYour previous attempt was rejected:\n\n" + feedback +
+                "\n\nFix exactly those. Every page must be sketched once and "
+                "every component name must be one from the list above."
+            )
+        return system, user
+
     if spec.agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
@@ -1358,7 +1485,18 @@ def build_prompt(
             placeholders=", ".join(PLACEHOLDER_VOCABULARY),
             repeats=", ".join(REPEAT_SOURCES),
         )
+        system += _conventions_addendum(doc)
         brief = page_brief(doc, subject) if subject else {}
+        # THIS PAGE'S PLACE IN THE WHOLE. Subject-specific, so it belongs in
+        # the user turn, not the cached prefix.
+        sketch_note = (
+            "`composition.sketch` is this page's place in the whole-app "
+            "composition: realise those sections, in that order, from the "
+            "catalog. `composition.siblings` shows what the pages next to "
+            "this one look like — match their rhythm rather than inventing "
+            "your own.\n\n"
+            if (brief.get("composition") or {}).get("sketch") else ""
+        )
         # THE DESIGN LANGUAGE GOES IN THE CACHED PREFIX, NOT THE PAGE BRIEF.
         #
         # `designSystem` is 15,923 characters — 66% of a brief — and byte-
@@ -1425,6 +1563,7 @@ def build_prompt(
             "the control needs, the control navigates instead or is left "
             "out; there is no workflow this application runs that is not in "
             "that list.\n\n"
+            + sketch_note +
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
             + json.dumps(brief, indent=2, sort_keys=True)
@@ -2639,6 +2778,53 @@ def make_executor(
                 )],
                 confidence=0.95,
             )
+        # THE DESIGNER THE USER CHOSE. `application.uiDesigner` (or the
+        # page's own `designedBy`) says whether UX Pilot generates this page
+        # from its brief. A drawn frame still wins above: a screen a person
+        # designed is the thing that was designed, whoever else was asked.
+        # See docs/plans/2026-09-13-ux-pilot-page-generation.md.
+        from services.uxpilot import generate as uxpilot_pages
+
+        fallback_note = ""
+        if uxpilot_pages.designer_for(svc.doc, page) == "uxpilot":
+            tell(reasoning, f"Asking UX Pilot to design {page.get('route')}.",
+                 "step", spec.node)
+            outcome = uxpilot_pages.compose(
+                svc, page, app_root=Path(svc.output_dir) / "app",
+                feedback=spec.feedback or "")
+            if outcome.root is not None:
+                tell(reasoning,
+                     f"Built {page.get('route')} from UX Pilot design "
+                     f"{outcome.design_id or '(unnamed)'}"
+                     + (" (reused; brief unchanged)." if outcome.reused else "."),
+                     "step", spec.node)
+                rationale = (f"generated by UX Pilot (design {outcome.design_id}) "
+                             f"from the page brief (§34)")
+                if outcome.warnings:
+                    rationale += "; unbound: " + "; ".join(outcome.warnings)
+                return AgentResult(
+                    task_id=spec.task_id,
+                    agent=spec.agent,
+                    proposals=[ArtifactProposal(
+                        section="pageLayouts",
+                        natural_key=spec.subject,
+                        body={"page": spec.subject,
+                              "root": _as_template(outcome.root),
+                              "composedBy": "uxpilot",
+                              "dataSources": list(outcome.data_sources),
+                              "rationale": rationale,
+                              "requirements": list(page.get("requirements") or [])},
+                    )],
+                    confidence=0.95,
+                    issues=list(outcome.warnings),
+                )
+            # THE USER CLICKED UX PILOT AND DID NOT GET IT. Neither a hole
+            # nor a silent swap: the page is composed by A2UI below and the
+            # layout says so, so the mismatch with `designedBy` is visible.
+            fallback_note = (f"UX Pilot could not design this page ({outcome.reason}); "
+                             f"composed by the Forge UI Designer instead")
+            tell(reasoning, f"{fallback_note} for {page.get('route')}.", "step", spec.node)
+
         # Read under the lock, compose outside it: the context is a slice of
         # the document, the composition is minutes of network.
         with svc.lock:
@@ -2658,6 +2844,7 @@ def make_executor(
                 # could read it — so on a page A2UI owns, the correction
                 # reached nobody.
                 feedback=spec.feedback or "",
+                contract=page,
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
@@ -2679,6 +2866,13 @@ def make_executor(
                     f"A2UI composed this page and it was refused: {reason}. "
                     f"Compose it yourself, and do not reproduce that fault."
                 )
+            if fallback_note:
+                # The authoring agent writes its own rationale; the only way
+                # the fallback stays visible on its layout is through what it
+                # is told.
+                spec.feedback = (
+                    f"{spec.feedback}\n\n" if spec.feedback else ""
+                ) + f"{fallback_note}. Say so in the rationale."
             return None
         return AgentResult(
             task_id=spec.task_id,
@@ -2704,14 +2898,38 @@ def make_executor(
                       # two extra lists — and shipped the tree that read them.
                       "dataSources": list(out.get("schema", {})
                                           .get("dataSources") or []),
-                      "rationale": "composed by A2UI (§34)",
+                      "rationale": "composed by A2UI (§34)"
+                                   + (f"; {fallback_note}" if fallback_note else ""),
                       "requirements": list(page.get("requirements") or [])},
             )],
             confidence=0.95,
         )
 
+    def _patch_page(spec: TaskSpec) -> AgentResult | None:
+        """A repair of a page that already has an accepted tree is an edit
+        of that tree (see ``page_patch``); ``None`` means compose in full."""
+        from services.blueprint.page_patch import patch_page_layout
+        from services.llm_client import tell
+        client = (model.for_task(spec.node, spec.agent)
+                  if isinstance(model, ModelRouter) else model)
+        try:
+            return patch_page_layout(
+                svc, spec, client, usage=usage,
+                tell=lambda msg: tell(reasoning, msg, "step", spec.node))
+        except Exception as exc:  # noqa: BLE001 — a patch that breaks is a compose
+            logger.warning("[patch] %s: %s", spec.subject, exc)
+            return None
+
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent == "a2ui_pages" and spec.subject:
+            # A REPAIR EDITS; A FIRST PASS COMPOSES. `feedback` is set only on
+            # a retry or an observer repair, and only a page with an accepted
+            # tree can be edited — a fresh page, or one whose layout the review
+            # invalidated, has nothing to patch and composes in full.
+            if spec.feedback:
+                patched = _patch_page(spec)
+                if patched is not None:
+                    return patched
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed

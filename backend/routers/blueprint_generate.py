@@ -616,7 +616,108 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
             for n in report.failed
         ],
         "unbuilt": _unbuilt_pages(doc),
+        # §73 closed at the node: what the observer sent back and got right,
+        # and what it flagged because no round brought it round.
+        "repaired": list(getattr(report, "repaired", []) or []),
+        "fallbacks": list(getattr(report, "fallbacks", []) or []),
+        "unrepaired": [
+            {"node": n, "why": why}
+            for n, why in (getattr(report, "unrepaired", {}) or {}).items()
+        ],
     }
+
+
+def _build_complete_message(doc: dict | None) -> str | None:
+    """One line, in Smith's voice, saying the build finished — or ``None``
+    when nothing was built to announce.
+
+    A build OUTLIVES THE STREAM THAT LAUNCHED IT. A long run or a dropped
+    connection releases the panel with "still running… reload", and the
+    completion card is rebuilt from telemetry — but the conversation kept only
+    the last thing said, so a reload showed the app looking unfinished when it
+    was done. Every other thing Smith says is a `message`, which `_remember`
+    writes to the transcript; the one moment the user most wants confirmed was
+    the only one that never spoke. Emitting it here persists it, so the user is
+    told the app is ready whenever they next look, not only if they were
+    watching when it landed.
+    """
+    if not doc:
+        return None
+    served_pages = [p for p in (doc.get("pages") or [])
+                    if str(p.get("status") or "").upper() != "REMOVED"]
+    unbuilt = _unbuilt_pages(doc)
+    funnel = (doc.get("runtime") or {}).get("pages") or {}
+    planned = funnel.get("planned")
+    if planned is None:
+        planned = len(served_pages)
+    served = funnel.get("served")
+    if served is None:
+        served = max(planned - len(unbuilt), 0)
+
+    if planned == 0:
+        # Nothing to announce — a run that stopped before it composed a page
+        # is not a built application, and saying so would be a false claim.
+        return None
+
+    if not unbuilt:
+        s = "" if planned == 1 else "s"
+        return (f"Your application is built — {planned} page{s} ready. Open the "
+                f"preview to see it, or Publish when you're happy with it.")
+
+    # Honest about the shortfall: a dropped page 404s, and telling the user it
+    # is "built" without saying which route is missing is the silent-loss this
+    # whole seam exists to prevent.
+    routes = sorted({(u.get("detail") or "").split(" ", 1)[0]
+                     for u in unbuilt if u.get("detail")}
+                    ) or [str(u.get("page")) for u in unbuilt]
+    n = len(unbuilt)
+    page_word = "page" if n == 1 else "pages"
+    return (f"Your application is built — {served} of {planned} pages are ready "
+            f"to preview. {n} {page_word} couldn't be composed "
+            f"({', '.join(routes)}) and {'is' if n == 1 else 'are'} not served "
+            f"yet; everything else works. Preview what's there, or tell me to "
+            f"retry {'it' if n == 1 else 'them'}.")
+
+
+#: What Smith offers after a build. The first is the consent that runs the
+#: review; the second declines. Frontend sends the picked option back as the
+#: message, so the consent test matches the option text exactly (plus the
+#: obvious typed phrasings).
+_VERIFY_OFFER_OPTIONS = ("Verify & fix", "Not now")
+
+_VERIFY_OFFER_TEXT = (
+    "Want me to auto-verify and fix it? I'll look at every page as it renders — "
+    "is it laid out well, does it match what you asked for — and check the "
+    "buttons, search and links actually work, then re-compose anything that's off."
+)
+
+
+def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
+                             where: str = "") -> None:
+    """Say the build finished and, when offered, ask to verify — as ONE act.
+
+    Both go through the same ``emit`` at the same moment, so both are persisted
+    (the chat path writes every ``message`` to the transcript) and both reach a
+    panel that reloads after a long build. The offer used to be emitted by the
+    caller *after* ``_run_dag`` returned; a build that outran its turn released
+    the panel, finished in the background, announced completion from here, and
+    the offer — a few lines later, with the stream already gone and nothing
+    persisting it — never arrived. The user never saw the option to verify.
+
+    Best-effort: an announcement that cannot be worded must not fail a build
+    that succeeded.
+    """
+    try:
+        done = _build_complete_message(doc)
+        if not done:
+            return
+        emit("message", {"text": done})
+        if offer_verify:
+            emit("message", {"text": _VERIFY_OFFER_TEXT,
+                             "options": list(_VERIFY_OFFER_OPTIONS),
+                             "status": "asked"})
+    except Exception:  # noqa: BLE001 — never let the announcement fail the build
+        logger.warning("[blueprint] %s: could not announce completion", where)
 
 
 def _output_dir(project: Any) -> Path:
@@ -674,6 +775,7 @@ async def generate_via_blueprint(
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
+    from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import (
         DAG, completed_nodes, levels, run, nodes_recorded_done)
     from services.blueprint.service import BlueprintService
@@ -780,7 +882,12 @@ async def generate_via_blueprint(
             # in a constrained shape does not need a frontier thinking budget.
             # The nodes everything downstream derives from stay at `high`.
             usage = RunUsage()
-            executor = make_executor(svc, tiered_router(), usage=usage)
+            router = tiered_router()
+            executor = make_executor(svc, router, usage=usage)
+            # §73 — the observer judges each node as it lands and sends what
+            # is incomplete back to its author before dependents run. Its
+            # spend is in the same ledger, under observer:<node>.
+            watcher = anthropic_observer(router, usage=usage)
             # Progress is read off the run ledger — the account the
             # orchestrator keeps anyway — rather than counted around the
             # executor. Counting calls marked a fan-out node done at its
@@ -790,7 +897,7 @@ async def generate_via_blueprint(
 
             report = run(svc, executor, plan=plan, commit=True,
                          user_request=req.description, app_root=app_root,
-                         observer=progress)
+                         observer=progress, observer_agent=watcher)
 
             # §26 — what the finished application should contain, so the run
             # can be checked against the plan rather than only watched.
@@ -1238,8 +1345,12 @@ async def smith_chat(
         # The telemetry is still not written to the transcript — it would make
         # the conversation unreadable. It goes to the run registry instead, so
         # a page that loads mid-run can rebuild the progress bar without the
-        # stream that produced it.
-        run_registry.note(str(project_id), event, data)
+        # stream that produced it. `review` is the exception: it is a live view
+        # of Smith looking at the render, carrying full-page screenshots as data
+        # URIs, and persisting those would bloat the registry for a window that
+        # only means anything while the review is happening. Streamed, not kept.
+        if event != "review":
+            run_registry.note(str(project_id), event, data)
 
     # One per request: turns from this conversation queue behind each other
     # and nothing else waits on them.
@@ -1277,6 +1388,32 @@ async def smith_chat(
                 # it below, which is exactly what used to happen immediately.
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
+
+            # THE ANSWER TO "WHO SHOULD DESIGN THE SCREENS?". Asked when the
+            # user pressed Approve on a definition with pages and no answer
+            # on record (below); the option they clicked arrives here as the
+            # next message, with the question as the turn before it. The
+            # answer is recorded on the application and the build the
+            # approval asked for starts — the question interrupted it, it
+            # did not cancel it. See services/smith/ui_designer.py.
+            if svc is not None:
+                from services.smith import ui_designer
+
+                picked = ui_designer.answer_in(
+                    req.message, [(t.role, t.text) for t in req.history])
+                if picked:
+                    said = ui_designer.record(svc, picked)
+                    if picked == ui_designer.UXPILOT and not ui_designer.configured(output_dir):
+                        emit("message", {"text": ui_designer.CONFIGURE_TEXT,
+                                         "status": "needs_user"})
+                        return {"status": "needs_user"}
+                    emit("message", {"text": said, "status": "resolved"})
+                    # The brief the approval carried, not the option's text:
+                    # "UX Pilot" is an answer, not a request.
+                    brief = str((svc.doc.get("application") or {}).get("description") or "")
+                    return _run_dag(str(output_dir), app_root, brief,
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "")
 
             # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
             # reason about. Answer it deterministically from the Blueprint and
@@ -1333,9 +1470,46 @@ async def smith_chat(
             # turn. So the definition was written, the gate was shown, and
             # pressing approve started a conversation instead of a build.
             if req.approved:
-                return _run_dag(str(output_dir), app_root, req.message,
-                                approved=True, emit=emit,
-                                app_name=getattr(project, "name", "") or "")
+                # WHO DESIGNS THE SCREENS, ASKED ONCE. The page contracts the
+                # UX Pilot agent prompts from now exist and nothing has been
+                # composed yet, which makes this the one moment the question
+                # is both answerable and free. An application already
+                # answered — or with no pages to design — builds straight
+                # away. A UX Pilot choice without a key is refused here,
+                # before any page is attempted, rather than page by page.
+                if svc is not None:
+                    from services.smith import ui_designer
+
+                    if ui_designer.undecided(svc.doc):
+                        emit("message", {"text": ui_designer.question(svc.doc),
+                                         "options": list(ui_designer.OPTIONS),
+                                         "status": "asked"})
+                        return {"status": "asked"}
+                    if (ui_designer.chosen(svc.doc) == ui_designer.UXPILOT
+                            and not ui_designer.configured(output_dir)):
+                        emit("message", {"text": ui_designer.CONFIGURE_TEXT,
+                                         "status": "needs_user"})
+                        return {"status": "needs_user"}
+                # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
+                # offers it beside the completion line for every approved build
+                # (see there), so a build that outran its turn still delivers the
+                # offer. The review runs on the next turn, only if the user takes
+                # it (see `_is_verify_consent`).
+                built = _run_dag(str(output_dir), app_root, req.message,
+                                 approved=True, emit=emit,
+                                 app_name=getattr(project, "name", "") or "")
+                return built
+
+            # THE USER TOOK THE VERIFY OFFER. A built application and a message
+            # that is the consent to the review Smith offered after the build —
+            # so run it now. Gated on `_is_built`: the offer only exists for a
+            # built app, and "verify" said to a definition is not this.
+            if svc is not None and _is_built(output_dir) \
+                    and _is_verify_consent(req.message):
+                _run_smith_review(str(output_dir), app_root, emit=emit,
+                                  app_name=getattr(project, "name", "") or "",
+                                  routes=_verify_scope(req.message))
+                return {"status": "verified"}
 
             if not defined:
                 # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
@@ -1343,10 +1517,9 @@ async def smith_chat(
                 # answer, and every later node builds on it. A question worth
                 # thirty seconds here saves a rebuild.
                 #
-                # Only on the opening message. `history` is empty exactly once
-                # per conversation, so this asks once and then defines —
-                # whether or not the answer was any good. A clarifier that can
-                # fire twice can fire forever.
+                # Asked in turns, one at a time, until the open decisions are
+                # settled or a turn cap is reached (see below) — not batched
+                # into a single opening wall of questions.
                 # THE DESIGN THE BRIEF NAMES. "Import from Figma" is an opening
                 # message with the file link in it; read as prose the link was
                 # lost — the definition ran, the clarifier asked which palette,
@@ -1359,23 +1532,48 @@ async def smith_chat(
                 _the_brief = _brief_from(req.history, req.message)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
 
-                if not req.history:
+                # §16 asks rather than assumes — but ONE decision at a time, in
+                # turns, so each question gets a considered answer instead of a
+                # wall of them arriving together. Runs on every turn against the
+                # accumulated brief (which now carries the earlier answers), so
+                # `clarify_brief` asks the NEXT open decision and returns nothing
+                # once they are settled. Bounded rather than one-shot: a
+                # clarifier that can fire twice could fire forever, so a turn cap
+                # stops it — after the cap, define with what is known.
+                #
+                # The cap counts prior USER turns — the same turns `_brief_from`
+                # folds into the brief, so it is guaranteed consistent with what
+                # was actually accumulated (it does not depend on whether the
+                # frontend echoes Smith's own questions back in `history`). Zero
+                # on the opening message, one after the first answer, and so on:
+                # a cap of 4 permits a question on the opening turn and after
+                # each of the next three answers.
+                _MAX_CLARIFY_TURNS = 4
+                _user_turns = sum(
+                    1 for t in (req.history or [])
+                    if str(getattr(t, "role", None)
+                           or (t.get("role") if isinstance(t, dict) else "")
+                           ) == "user"
+                    and str(getattr(t, "text", None)
+                            or (t.get("text") if isinstance(t, dict) else "")
+                            ).strip())
+                if _user_turns < _MAX_CLARIFY_TURNS:
                     from services.smith.clarify_brief import clarify_brief
 
-                    asked = clarify_brief(req.message,
+                    asked = clarify_brief(_the_brief,
                                           design_attached=bool(named_design))
                     if asked:
-                        # One message per question, so each carries its own
-                        # options and the panel can offer them as answers. They
-                        # are answered in one reply — the exchange reaches the
-                        # next turn through `history`, and the reply is added to
-                        # the brief rather than replacing it.
-                        for item in asked:
-                            emit("message", {
-                                "text": item["question"],
-                                "options": item.get("options") or [],
-                                "status": "asked",
-                            })
+                        # ONE question this turn — it carries its own options,
+                        # and its answer reaches the next turn through `history`,
+                        # where it joins the brief rather than replacing it. The
+                        # next turn re-asks against the fuller brief and moves on
+                        # to whatever is still open.
+                        item = asked[0]
+                        emit("message", {
+                            "text": item["question"],
+                            "options": item.get("options") or [],
+                            "status": "asked",
+                        })
                         return {"status": "asked"}
 
                 # DEFECT-C-06: a page that would do nothing is refused, not
@@ -1515,7 +1713,11 @@ async def smith_chat(
             # Shielded so the timeout does not cancel the executor future — the
             # background thread cannot be cancelled anyway, and shielding lets it
             # set its result cleanly (no "set result on cancelled future" noise).
-            _fut = asyncio.shield(loop.run_in_executor(None, work))
+            # Keep the INNER future too: `wait_for` cancels the shield on timeout,
+            # but the inner build keeps running, and it is the inner one we wait
+            # on to emit the real completion afterwards.
+            _inner = loop.run_in_executor(None, work)
+            _fut = asyncio.shield(_inner)
             try:
                 emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
             except asyncio.TimeoutError:
@@ -1524,13 +1726,32 @@ async def smith_chat(
                     "the work continues in the background",
                     _turn_timeout, project_id,
                 )
+                # A LONG BUILD IS NOT A STUCK ONE, AND THE USER SHOULD NOT HAVE
+                # TO RELOAD. The turn is released so the panel stops holding one
+                # connection open for an hour, but the DAG keeps running and the
+                # panel keeps its status current by polling the run registry; the
+                # completion message is posted here when it lands. So say what is
+                # actually happening — still working, tracking it, will report —
+                # not "reload in a moment", which read as "something went wrong".
                 emit("message", {
-                    "text": "This is taking longer than expected. It is still "
-                            "running and will finish in the background — reload "
-                            "in a moment to see the result.",
-                    "status": "needs_user",
+                    "text": "Still building — this one's taking a while, but it's "
+                            "moving, not stuck. I'm tracking it and I'll post the "
+                            "result here the moment it's done; you don't need to "
+                            "do anything.",
                 })
                 emit("done", {"status": "timeout"})
+                # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
+                # was released, but the run registry (which the panel now polls)
+                # must still learn the run ended — otherwise it stays "running"
+                # with every node done. Emit the REAL done on completion; it is a
+                # no-op for the closed stream and the signal the registry (and any
+                # reconnected client) needs to mark the run complete.
+                def _late_done(f: Any) -> None:
+                    try:
+                        emit("done", f.result())
+                    except Exception:  # noqa: BLE001 — the run already ran
+                        pass
+                _inner.add_done_callback(_late_done)
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("smith turn failed for %s", project_id)
             emit("error", {"message": str(exc)})
@@ -1606,10 +1827,24 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
-             approved: bool, emit, app_name: str = "") -> dict:
-    """Invoke §28's graph and narrate it. Never reorders it (§116)."""
+             approved: bool, emit, app_name: str = "",
+             announce_completion: bool = True) -> dict:
+    """Invoke §28's graph and narrate it. Never reorders it (§116).
+
+    When an approved build reaches completion it offers to verify — as part of
+    the completion announcement, the same emit at the same moment, so the offer
+    is persisted and reaches a reloaded panel exactly as the "your application is
+    built" line does. Offering it *after* ``_run_dag`` returned (in one of the
+    several callers) meant a build that outran its turn — the common case —
+    released the panel, finished in the background, announced completion from
+    here, but the offer, emitted later in the caller with the stream gone and
+    nothing persisting it, never arrived. Gating on ``approved`` here covers
+    every build entry point at once; the review re-compose passes
+    ``announce_completion=False`` and so never re-offers.
+    """
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
+    from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import completed_nodes, levels, run, nodes_recorded_done
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
@@ -1673,12 +1908,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                   "awaitingApproval": not approved})
 
     usage = RunUsage()
-    executor = make_executor(svc, tiered_router(), usage=usage)
+    router = tiered_router()
+    executor = make_executor(svc, router, usage=usage)
+    watcher = anthropic_observer(router, usage=usage)
     progress = Progress(emit, total=len(plan))
 
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
-                 observer=progress)
+                 observer=progress, observer_agent=watcher)
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
     # approve/build gates were unreachable. A define that produced requirements
@@ -1699,6 +1936,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         logger.info("[blueprint] %s built: state=%s completed=%d failed=%s",
                     Path(output_dir).name, state, len(report.completed),
                     report.failed or "-")
+        # Smith says, in the conversation, that the generation is done — the one
+        # message the build path never spoke. Persisted like every other, so a
+        # reload shows "built" even when the stream that launched it was long
+        # gone by the time it landed. Best-effort: a completion that cannot be
+        # worded must not fail a build that succeeded.
+        if announce_completion:
+            _announce_build_complete(svc.doc, emit, offer_verify=approved,
+                                     where=Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
@@ -1706,3 +1951,174 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": not approved, "forecast": counts,
             "state": state,
             "report": _report_payload(report, svc.doc)}
+
+
+def _is_verify_consent(message: str) -> bool:
+    """Whether a message is the user taking the verify-and-fix offer. Precise on
+    purpose — the offer's own option, the Verify & Fix chip's own sentences,
+    and a few unambiguous phrasings — so a message that merely mentions
+    verifying ("did you verify the login page?") does not silently launch a run.
+
+    The chip sends "Verify the app and fix anything that's broken.", "Verify
+    only the current page: /route" and "Verify only the critical journeys." —
+    none of which the exact list held, so the click fell through to the chat
+    turn and nothing verified. A message that OPENS with the verb is the ask;
+    a question about a past run is not."""
+    m = " ".join((message or "").strip().lower().split())
+    if not m or "not now" in m or m.startswith("no") or m.startswith("don"):
+        return False
+    if m in {
+        "verify & fix", "verify and fix", "verify", "auto-verify and fix",
+        "auto verify and fix", "yes verify", "verify it", "verify the app",
+        "check and fix", "verify & fix it",
+    }:
+        return True
+    if m.startswith(("did you", "have you", "were you", "did it", "can you verify",
+                     "could you verify", "how do")):
+        return False
+    return m.startswith(("verify ", "verify.", "verify!", "auto-verify ",
+                         "auto verify ", "check and fix "))
+
+
+def _verify_scope(message: str) -> list[str] | None:
+    """The routes a verify ask narrows to — "verify only the current page:
+    /admin/foo" — or ``None`` for the whole app. The chip's "critical journeys"
+    scope has no journey notion in the review; it reviews the app."""
+    m = re.search(r"only\s+the\s+current\s+page[:\s]+([/\w\-\[\]\.]+)",
+                  message or "", re.IGNORECASE)
+    if not m:
+        return None
+    route = m.group(1).rstrip(".,")
+    return [route if route.startswith("/") else "/" + route]
+
+
+def _run_smith_review(output_dir: str, app_root: str, *, emit,
+                      app_name: str = "", routes: list[str] | None = None) -> None:
+    """Smith's OUTER render loop: review the built app, re-compose the pages a
+    visual review flags, rebuild, review again — bounded. Best-effort and a
+    clean no-op when the app cannot be screenshotted; it must never fail a build
+    that otherwise succeeded.
+
+    The loop's control flow lives in ``services.smith.review_loop``; this binds
+    it to the real critique (screenshots + the vision critic) and the real
+    re-compose (drop the flagged pages' layouts, leave their briefs in the
+    transient file the composer reads, and re-run the build as a resume). The
+    re-run passes ``announce_completion=False`` so the sub-builds do not each
+    re-announce "built" — the loop narrates its own rounds instead.
+    """
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.review_loop import run_review_loop
+        from services.smith.review_wiring import (
+            make_critique, invalidate_for_recompose,
+            write_review_briefs, clear_review_briefs,
+            layouts_of, restore_refused_layouts, refused_pages,
+            unrepaired_pages, Rebuilt,
+        )
+        from services.smith.review_gaps import settle_crud_gaps
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[review] unavailable: %s", exc)
+        return
+
+    def read_doc() -> dict:
+        # Fresh each call, so a re-review sees the rebuilt document.
+        return BlueprintService.load(output_dir=output_dir).doc
+
+    def _routes_for(page_ids: list[str]) -> list[str]:
+        by_id = {str(p.get("id")): str(p.get("route") or p.get("id"))
+                 for p in (read_doc().get("pages") or []) if isinstance(p, dict)}
+        return [by_id.get(pid, pid) for pid in page_ids]
+
+    def settle(_only: set[str] | None) -> dict[str, str]:
+        # What the Blueprint itself lacks for a page to be composable — a
+        # declared Delete with no delete workflow — declared before any page
+        # is re-composed, so the composer has the target and not a guess.
+        svc = BlueprintService.load(output_dir=output_dir)
+        return settle_crud_gaps(svc, emit=emit)
+
+    def recompose_and_rebuild(briefs: dict) -> Rebuilt:
+        svc = BlueprintService.load(output_dir=output_dir)
+        before = layouts_of(svc.doc, briefs)
+        hit = invalidate_for_recompose(svc.doc, briefs)
+        if not hit:
+            return Rebuilt()
+        svc.save()
+        write_review_briefs(output_dir, {pid: briefs[pid] for pid in hit})
+        emit("review", {"phase": "fixing", "pages": _routes_for(hit)})
+        try:
+            built = _run_dag(output_dir, app_root, "", approved=True, emit=emit,
+                             app_name=app_name, announce_completion=False)
+        finally:
+            clear_review_briefs(output_dir)
+        # A REFUSED RE-COMPOSE LEAVES THE PAGE AS IT WAS, NOT AS NOTHING. The
+        # layout was dropped so the resume would re-compose it; when the
+        # composer produced no tree the contract accepts, the Blueprint held
+        # no tree at all for a route it serves. Restore the pre-image and
+        # report the refusal so the loop does not spend a round repeating it.
+        refused = refused_pages(built)
+        if refused:
+            svc = BlueprintService.load(output_dir=output_dir)
+            if restore_refused_layouts(svc.doc, before, refused):
+                svc.save()
+        # THE OBSERVER'S VERDICT IS THE ROUND'S VERDICT. A page it flagged
+        # unrepaired has had its repairs; the next round would pay the same
+        # chain — compose, judge, repair, judge — to reach the same line.
+        return Rebuilt(refused=refused, unrepaired=unrepaired_pages(built))
+
+    emit("review", {"phase": "start"})
+    try:
+        outcome = run_review_loop(
+            read_doc=read_doc,
+            critique=make_critique(output_dir, read_doc, emit, routes=routes),
+            recompose_and_rebuild=recompose_and_rebuild,
+            emit=emit,
+            settle=settle,
+        )
+    except Exception as exc:  # noqa: BLE001 — a review never breaks a build
+        logger.warning("[review] loop failed for %s: %s",
+                       Path(output_dir).name, exc)
+        emit("review", {"phase": "done", "skipped": True})
+        return
+
+    logger.info("[review] %s: %s", Path(output_dir).name, outcome.summary())
+    emit("review", {"phase": "done",
+                    "skipped": bool(outcome.skipped),
+                    "converged": outcome.converged,
+                    "recomposed": _routes_for(outcome.recomposed),
+                    "remaining": _routes_for(sorted(outcome.remaining)),
+                    "refused": _routes_for(sorted(outcome.refused)),
+                    "unrepaired": _routes_for(sorted(outcome.unrepaired))})
+    if not outcome.rounds:
+        return  # nothing reviewed, or nothing needed fixing — say nothing
+    n = len(outcome.recomposed)
+    page_word = "page" if n == 1 else "pages"
+    if outcome.skipped:
+        emit("message", {"text":
+            f"I re-composed {n} {page_word}, but {outcome.skipped} — open it and "
+            f"have a look."})
+        return
+    if outcome.converged:
+        emit("message", {"text":
+            f"I reviewed the built app and re-composed {n} {page_word} that "
+            f"weren't right — it looks good now."})
+        return
+    parts = [f"I reviewed the build and re-composed {n} {page_word}."]
+    if outcome.refused:
+        # Say WHICH page could not be redone and WHY — the refusal names the
+        # contract problem — instead of counting it among "still had issues".
+        for pid, why in sorted(outcome.refused.items()):
+            route = _routes_for([pid])[0]
+            parts.append(f"I couldn't re-compose {route}: {why.split(';')[0].strip()}")
+    if outcome.unrepaired:
+        # The composer's best answer stands; say what it still misses and
+        # that a further round would not change the verdict.
+        for pid, why in sorted(outcome.unrepaired.items()):
+            route = _routes_for([pid])[0]
+            parts.append(f"{route} is composed but still misses: "
+                         f"{why.split(';')[0].strip()} — left as is rather than "
+                         f"spending another round on the same verdict.")
+    r = len(outcome.remaining)
+    if r:
+        parts.append(f"{r} still had issues I couldn't fully resolve in "
+                     f"{outcome.rounds} rounds — worth a look.")
+    emit("message", {"text": " ".join(parts)})

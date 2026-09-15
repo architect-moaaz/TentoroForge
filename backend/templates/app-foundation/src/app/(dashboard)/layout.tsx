@@ -56,6 +56,11 @@ function humanize(title: string | undefined, route: string): string {
 // full of "Contract Detail" / "User Detail" entries is a same-generator tell.
 function isDetailPage(title: string | undefined, route: string): boolean {
   const t = (title || "").trim();
+  // A dynamic route (`/x/[id]`, `/x/[id]/edit`) is reached through a row/action
+  // with a concrete id, never from the rail — Next's <Link> refuses a literal
+  // "[id]" href. Exclude any route with a dynamic segment, not only ones spelled
+  // "detail".
+  if (/\[[^\]]+\]/.test(route)) return true;
   return /Detail(Page)?$/.test(t) || /\bDetail\s*$/.test(t) ||
     /(^|[-/])details?($|[-/])/.test(route.toLowerCase());
 }

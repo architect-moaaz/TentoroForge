@@ -27,9 +27,9 @@ export function RadarChartImpl(props: ChartPropsType) {
     <div style={{ width: "100%", height: props.height ?? 260, fontFamily: numericFamily }}>
       <ResponsiveContainer>
         <ReRadarChart data={data}>
-          <PolarGrid stroke="var(--color-border-default)" />
-          <PolarAngleAxis dataKey={axisKey} tick={{ fontSize: 11, fill: "var(--color-text-tertiary)" }} />
-          <PolarRadiusAxis tick={{ fontSize: 10, fill: "var(--color-text-tertiary)" }} />
+          <PolarGrid stroke="hsl(var(--border))" />
+          <PolarAngleAxis dataKey={axisKey} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+          <PolarRadiusAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
           {props.showTooltip !== false && <Tooltip />}
           {props.showLegend !== false && <Legend wrapperStyle={{ fontSize: 11 }} />}
           {props.series.map((s, i) => (

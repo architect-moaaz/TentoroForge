@@ -20,8 +20,8 @@ const DEFAULT_PALETTE = [
   "hsl(var(--accent))",
   "hsl(var(--success))",
   "hsl(var(--warning))",
-  "var(--color-primary-700, hsl(var(--primary) / 0.7))",
-  "var(--color-accent-700,  hsl(var(--accent) / 0.7))",
+  "hsl(var(--primary) / 0.7)",
+  "hsl(var(--accent) / 0.7)",
 ];
 
 export function AreaChartImpl(props: ChartPropsType) {
@@ -32,10 +32,10 @@ export function AreaChartImpl(props: ChartPropsType) {
       <ResponsiveContainer>
         <ReAreaChart data={Array.isArray(props.data) ? props.data : []}>
           {props.showGrid !== false && (
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-default)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
           )}
-          <XAxis dataKey={props.xKey} stroke="var(--color-text-tertiary)" fontSize={11} />
-          <YAxis stroke="var(--color-text-tertiary)" fontSize={11} />
+          <XAxis dataKey={props.xKey} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+          <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
           {props.showTooltip !== false && <Tooltip />}
           {props.showLegend !== false && <Legend wrapperStyle={{ fontSize: 11 }} />}
           {props.series.map((s, i) => {

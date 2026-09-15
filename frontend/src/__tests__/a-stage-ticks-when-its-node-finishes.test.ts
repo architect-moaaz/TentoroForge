@@ -22,6 +22,7 @@ const EMPTY: BlueprintRun = {
   usage: null,
   status: "idle",
   error: null,
+  review: null,
 };
 
 const planned = () =>

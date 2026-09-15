@@ -80,6 +80,32 @@ wait_ready() {
   return 1
 }
 
+# DO NOT RESTART OVER A LIVE BUILD. Killing the backend mid-run orphans the
+# build — it dies at whatever node it was on, never completes, and shows neither
+# a publish button nor a verify offer. A run is live when its ledger has a
+# run:start, no run:end, and a heartbeat within the last ~90s (the run writes
+# run:heartbeat every 20s, so a live run is never stale; a crashed one goes
+# stale and does not block). Refuse unless FORCE=1.
+if [ "${FORCE:-0}" != "1" ]; then
+  live="$(
+    for f in "$ROOT"/output/*/.forge/runs/*.jsonl; do
+      [ -f "$f" ] || continue
+      grep -q '"event": "run:start"' "$f" 2>/dev/null || continue
+      grep -q '"event": "run:end"' "$f" 2>/dev/null && continue
+      # newer than 90s?
+      if [ -n "$(find "$f" -newermt '-90 seconds' 2>/dev/null)" ]; then
+        echo "$f"
+      fi
+    done
+  )"
+  if [ -n "$live" ]; then
+    echo "✋ A build looks live (recent heartbeat, no run:end):"
+    echo "$live" | sed 's#^#    #'
+    echo "   Restarting now would kill it. Wait for it to finish, or re-run with FORCE=1 to override."
+    exit 1
+  fi
+fi
+
 echo "▶ Stopping any existing services on 6500–6503, 6600…"
 free_port 6500
 free_port 6501

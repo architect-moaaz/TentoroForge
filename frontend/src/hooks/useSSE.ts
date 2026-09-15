@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useChatStore } from "@/stores/chat";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
@@ -221,6 +221,39 @@ export function useSSE() {
     abortRef.current?.abort();
     stopStreaming();
   }, [stopStreaming]);
+
+  // RECONNECT ON TAB WAKE. A long build streams over a single fetch/SSE
+  // connection; Chrome suspends a backgrounded/asleep tab's network I/O
+  // (net::ERR_NETWORK_IO_SUSPENDED), which drops the stream. The in-line
+  // `attemptReconnect` fires immediately — but its retries ALSO fail while the
+  // tab is still suspended, so they exhaust the 3-attempt budget in ~7s and give
+  // up with "Connection lost", and nothing re-tries once I/O is actually back.
+  //
+  // This re-arms the reconnect exactly when the tab can do I/O again — it
+  // becomes visible, or the browser reports `online` — provided there is a live,
+  // non-terminal session we are no longer streaming (the "we gave up but the
+  // build is still running server-side" state). It resumes from
+  // `since = lastIdx + 1`, so buffered events that arrived during the suspension
+  // replay without duplication. A session that already reached a terminal event,
+  // or one still actively (re)connecting, is left alone.
+  useEffect(() => {
+    const resume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (!sessionIdRef.current || terminalRef.current) return;
+      // Still streaming or mid-backoff — the in-flight reconnect will recover on
+      // its own now that I/O is back; don't start a parallel one.
+      if (useChatStore.getState().isGenerating) return;
+      reconnectAttemptsRef.current = 0;
+      startStreaming();
+      void attemptReconnect();
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+    };
+  }, [attemptReconnect, startStreaming]);
 
   return { startStream, abort };
 }

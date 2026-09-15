@@ -113,7 +113,7 @@ export function MoneyInput({
       {label && (
         <label className="text-sm font-medium text-foreground">
           {label}
-          {required ? <span className="ms-0.5 text-danger">*</span> : null}
+          {required ? <span className="ms-0.5 text-destructive">*</span> : null}
         </label>
       )}
       <div className="inline-flex items-stretch rounded-md border border-input focus-within:ring-1 focus-within:ring-ring">

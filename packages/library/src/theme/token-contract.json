@@ -1,0 +1,50 @@
+{
+  "$comment": "THE SINGLE SOURCE OF TRUTH for the design-token contract. Owned by the library (its components consume these var(--…) names via Tailwind aliases); the backend projector (services/blueprint/projection.py) fills them from the Living Blueprint's designSystem, and check_design_system verifies every token is fed and every projected colour is read. A component may reference ONLY tokens listed here; a palette change edits the Blueprint's roles and reaches every token by this map. Values are HSL triplets (space-separated H S% L%) so a Tailwind alias `hsl(var(--x))` and a raw `var(--x)` both resolve. Add a token here, wire its Tailwind alias + theme.css default, and it is honoured end to end.",
+  "version": 1,
+  "colorTokens": [
+    { "token": "background",       "role": ["background", "surface"],            "light": "210 20% 98%",  "dark": "222 84% 5%" },
+    { "token": "foreground",       "role": ["textPrimary", "foreground", "text"], "light": "221 39% 11%",  "dark": "210 20% 98%" },
+    { "token": "card",             "role": ["surface", "background"],            "light": "0 0% 100%",    "dark": "222 84% 8%" },
+    { "token": "card-foreground",  "contrastOf": "card",                          "light": "221 39% 11%",  "dark": "210 20% 98%" },
+    { "token": "popover",          "role": ["surface", "background"],            "light": "0 0% 100%",    "dark": "222 84% 8%" },
+    { "token": "popover-foreground","contrastOf": "popover",                      "light": "221 39% 11%",  "dark": "210 20% 98%" },
+    { "token": "muted",            "role": ["surfaceMuted", "primarySubtle", "muted"], "light": "226 100% 97%", "dark": "217 33% 17%" },
+    { "token": "muted-foreground", "role": ["textSecondary", "mutedForeground", "textMuted"], "light": "220 9% 46%", "dark": "215 20% 65%" },
+    { "token": "border",           "role": ["border"],                            "light": "220 13% 91%",  "dark": "215 25% 20%" },
+    { "token": "input",            "role": ["border"],                            "light": "220 13% 91%",  "dark": "215 25% 20%" },
+    { "token": "ring",             "role": ["focusRing", "primary"],              "light": "243 75% 59%",  "dark": "243 75% 59%" },
+
+    { "token": "primary",             "role": ["primary"],                        "light": "243 75% 59%",  "dark": "243 75% 68%" },
+    { "token": "primary-foreground",  "contrastOf": "primary",                    "light": "0 0% 100%",    "dark": "222 84% 5%" },
+    { "token": "secondary",           "role": ["secondary", "accent"],            "light": "38 92% 50%",   "dark": "38 92% 55%" },
+    { "token": "secondary-foreground","contrastOf": "secondary",                  "light": "222 84% 5%",   "dark": "222 84% 5%" },
+    { "token": "accent",              "role": ["accent"],                         "light": "38 92% 50%",   "dark": "38 92% 55%" },
+    { "token": "accent-foreground",   "contrastOf": "accent",                     "light": "222 84% 5%",   "dark": "222 84% 5%" },
+
+    { "token": "destructive",                  "role": ["danger", "destructive"], "light": "0 74% 42%",   "dark": "0 74% 55%" },
+    { "token": "destructive-foreground",       "contrastOf": "destructive",       "light": "0 0% 100%",   "dark": "0 0% 100%" },
+    { "token": "destructive-subtle",           "role": ["dangerSubtle"],          "light": "0 86% 97%",   "dark": "0 63% 16%" },
+    { "token": "destructive-subtle-foreground","role": ["danger", "destructive"], "light": "0 74% 32%",   "dark": "0 86% 90%" },
+
+    { "token": "success",                  "role": ["success"],                   "light": "142 71% 29%",  "dark": "142 60% 45%" },
+    { "token": "success-foreground",       "contrastOf": "success",               "light": "0 0% 100%",    "dark": "0 0% 100%" },
+    { "token": "success-subtle",           "role": ["successSubtle"],             "light": "141 79% 93%",  "dark": "142 60% 14%" },
+    { "token": "success-subtle-foreground","role": ["success"],                   "light": "142 71% 22%",  "dark": "141 79% 88%" },
+
+    { "token": "warning",                  "role": ["warning"],                   "light": "31 92% 37%",   "dark": "38 92% 55%" },
+    { "token": "warning-foreground",       "contrastOf": "warning",               "light": "0 0% 100%",    "dark": "222 84% 5%" },
+    { "token": "warning-subtle",           "role": ["warningSubtle"],             "light": "48 96% 89%",   "dark": "31 80% 15%" },
+    { "token": "warning-subtle-foreground","role": ["warning"],                   "light": "31 92% 30%",   "dark": "48 96% 85%" },
+
+    { "token": "info",                  "role": ["info"],                         "light": "201 96% 32%",  "dark": "201 90% 55%" },
+    { "token": "info-foreground",       "contrastOf": "info",                     "light": "0 0% 100%",    "dark": "0 0% 100%" },
+    { "token": "info-subtle",           "role": ["infoSubtle"],                   "light": "204 94% 94%",  "dark": "201 90% 15%" },
+    { "token": "info-subtle-foreground","role": ["info"],                         "light": "201 96% 26%",  "dark": "204 94% 88%" }
+  ],
+  "radius": {
+    "$comment": "Components read a single `--radius`; sm/md/lg derive from it in tailwind.config. Fed from designSystem.radius (md, else control/card).",
+    "token": "radius",
+    "role": ["md", "control", "card"],
+    "default": "8px"
+  }
+}

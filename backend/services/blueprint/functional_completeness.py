@@ -33,8 +33,26 @@ from typing import Any, Iterator
 #: content; a `Button` that does nothing is a defect.
 _ACTIONABLE = ("Button", "Form")
 
+#: Page findings whose remedy is NOT the page composer's to make: the cause is
+#: upstream (a missing text column, a form field whose column the data model
+#: lacks) or the condition degrades gracefully at runtime (a search that matches
+#: nothing returns nothing, it does not break the page). Re-composing cannot fix
+#: them, so REFUSING a composition over them only burns the bounded repair rounds
+#: and ships the page degraded anyway — the "smith cannot fail" trap. They are
+#: still RETURNED (surfaced for the report and for a run that can route them to
+#: the owning agent), just not treated as a composition blocker.
+ADVISORY_PAGE_RULES = frozenset({
+    "search-without-columns",   # entity has no text column — the composer can't add one
+    "form-field-unknown",       # a form field whose column the data model lacks upstream
+})
+
 #: `{{plants}}` and `{{plants.count}}` both name `plants`.
 _BINDING = re.compile(r"\{\{([^}]+)\}\}")
+
+# A route addresses one existing record when it carries a dynamic id segment —
+# a detail page (`/records/[id]`) OR an edit page (`/records/[id]/edit`), which
+# does not END with `]`. A Next.js catch-all (`[...slug]`) is not a record id.
+_ROUTE_HAS_ID = re.compile(r"/\[[^.\]/][^\]/]*\]")
 
 
 def _dangling(schema: dict) -> list[str]:
@@ -122,6 +140,189 @@ def _workflow_refs(props: Any) -> Iterator[str]:
             yield from _workflow_refs(value)
 
 
+# ---------------------------------------------------------------------------
+# A DESTRUCTIVE CONTROL DELETES. `delete` is the one mutating verb the
+# entity-level workflow check cannot satisfy by proxy: an Update workflow can
+# stand in for neither Create nor Delete, so a page that declares `delete` on an
+# entity whose only workflows create and update it has NO workflow to delete
+# with — and the composer, given nothing correct to wire the Delete button to,
+# reaches for the nearest write workflow (Update). The button then updates the
+# record instead of removing it and looks broken. Decided on the DB operation
+# (`db_delete`) rather than a label, and on the terse verb the page contract and
+# the control label already use — the same vocabulary `detail_action_guard` and
+# `verification._acts_on_existing_record` speak.
+# ---------------------------------------------------------------------------
+
+#: Action/label verbs that REMOVE a record. Their intent can only be served by a
+#: workflow whose action is `db_delete`; no other write op deletes.
+_DESTRUCTIVE_VERBS = frozenset({"delete", "remove", "archive", "destroy", "discard"})
+
+
+def _verb_of(text: Any) -> str:
+    """The leading word of an action string or a control label, lowercased —
+    `"Delete Record"` → `"delete"`, `"delete"` → `"delete"`. The page contract
+    names actions by intent (`delete`, `filter_by_status`) and controls by label
+    (`Delete Record`); both reduce to their first word for the verb."""
+    for part in re.split(r"[^a-z0-9]+", str(text or "").lower()):
+        if part:
+            return part
+    return ""
+
+
+def is_destructive_action(action: Any) -> bool:
+    """Whether a page-contract action removes a record (delete / remove /
+    archive …). Accepts the bare string the contract uses or a dict form."""
+    label = action if isinstance(action, str) else (
+        (action or {}).get("name") or (action or {}).get("label") or (action or {}).get("id")
+        if isinstance(action, dict) else action)
+    return _verb_of(label) in _DESTRUCTIVE_VERBS
+
+
+def _workflow_db_ops(wf: dict) -> set[str]:
+    """The `db_*` action types a workflow performs, read from its steps —
+    `{"db_insert"}`, `{"db_update"}`, `{"db_delete"}`, or a union."""
+    ops: set[str] = set()
+    for step in (wf or {}).get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        at = (step.get("config") or {}).get("actionType")
+        if isinstance(at, str) and at.startswith("db_"):
+            ops.add(at)
+    return ops
+
+
+def _workflow_targets_entity(doc: dict, wf: dict, entity: str) -> bool:
+    """Whether a workflow's DB steps act on `entity` — matched on the step's
+    own `entity` id or, failing that, the entity's table name. `entity` may be
+    given as an id or a name."""
+    by_name = _entity_id_by_name(doc)
+    ent_id = entity if entity in set(by_name.values()) else by_name.get(entity, entity)
+    tables = {
+        str(e.get("table") or "").lower()
+        for e in _live((doc.get("data") or {}).get("entities"))
+        if e.get("id") == ent_id and e.get("table")
+    }
+    for step in (wf or {}).get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        cfg = step.get("config") or {}
+        if not str(cfg.get("actionType") or "").startswith("db_"):
+            continue
+        if str(step.get("entity") or "") == ent_id:
+            return True
+        if str(cfg.get("table") or "").lower() in tables:
+            return True
+    return False
+
+
+def entities_with_delete_workflow(doc: dict) -> set[str]:
+    """Entity ids some workflow DELETES — a step whose action is `db_delete`
+    on that entity's id or table. The set a destructive page action can be
+    correctly wired against."""
+    out: set[str] = set()
+    id_by_name = _entity_id_by_name(doc)
+    ids = set(id_by_name.values())
+    for e in _live((doc.get("data") or {}).get("entities")):
+        eid = str(e.get("id") or "")
+        if eid and any(
+            "db_delete" in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, eid)
+            for w in _live(doc.get("workflows"))
+        ):
+            out.add(eid)
+    return out
+
+
+def _delete_workflow_for(doc: dict, page: dict) -> str | None:
+    """The name of a workflow that deletes THIS page's primary entity, or None.
+    Used to name the correct target when a Delete control is mis-bound."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    for w in _live(doc.get("workflows")):
+        if "db_delete" in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, entity):
+            return str(w.get("name") or w.get("id") or "") or None
+    return None
+
+
+def _workflow_by_id(doc: dict, wid: str) -> dict | None:
+    return next((w for w in _live(doc.get("workflows")) if str(w.get("id")) == str(wid)), None)
+
+
+#: Control/action verbs that name a CRUD operation, and the DB op each requires.
+#: UNAMBIGUOUS verbs only — `save`/`submit`/`apply`/`modify` name no single op
+#: (a Save can insert or update), so they are left out rather than guessed. This
+#: is the closed CRUD vocabulary, not a growing exception list: a control that
+#: says one of these must run a workflow that does the matching thing.
+_VERB_DB_OP: dict[str, str] = {
+    "create": "db_insert", "add": "db_insert", "new": "db_insert", "register": "db_insert",
+    "edit": "db_update", "update": "db_update",
+    "delete": "db_delete", "remove": "db_delete", "archive": "db_delete", "destroy": "db_delete",
+}
+
+
+def _workflow_for_op(doc: dict, page: dict, op: str) -> str | None:
+    """The name of a workflow that performs `op` on THIS page's primary entity,
+    or None — the correct target to name when a control is mis-bound."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    for w in _live(doc.get("workflows")):
+        if op in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, entity):
+            return str(w.get("name") or w.get("id") or "") or None
+    return None
+
+
+def _columns_of_workflow_tables(doc: dict, wf: dict) -> set[str]:
+    """Column names of every entity a workflow's db steps write. Empty when the
+    workflow has no db step whose table resolves — the signal that we cannot
+    judge which fields a form dispatching it should collect."""
+    cols: set[str] = set()
+    for step in (wf or {}).get("steps") or []:
+        cfg = step.get("config") or {}
+        if not str(cfg.get("actionType") or "").startswith("db_"):
+            continue
+        ent = _entity_for_table(doc, cfg.get("table"))
+        if ent is not None:
+            cols |= {str(f.get("name")) for f in ent.get("fields") or [] if f.get("name")}
+    return cols
+
+
+def form_field_findings(doc: dict, page: dict, layout: dict) -> list[str]:
+    """A Form collects fields the entity it writes still has. A field is
+    accepted when it is a declared input of the Form's workflow, a column of the
+    table that workflow writes, or a session-filled column. A field that is none
+    of these is one the entity no longer has — renamed or removed — so the form
+    collects a value that goes nowhere; the write drops it or fails. The
+    form-side mirror of `unsatisfied_inputs` (which catches the reverse: a
+    workflow input no form collects)."""
+    session_filled = _session_filled_fields(doc)
+    out: list[str] = []
+    for form in _walk(layout.get("root")):
+        if form.get("type") != "Form":
+            continue
+        wid = (form.get("props") or {}).get("workflow")
+        wf = _workflow_by_id(doc, str(wid)) if wid else None
+        if wf is None:
+            continue                      # a form with no workflow: nothing to judge against
+        columns = _columns_of_workflow_tables(doc, wf)
+        if not columns:
+            continue                      # cannot judge without the target's columns
+        inputs = {str(i.get("name")) for i in wf.get("inputs") or [] if i.get("name")}
+        accepted = inputs | columns | session_filled
+        for name in sorted(_form_fields_of(form)):
+            # accept a FK spelled either `owner` or `ownerId`.
+            variants = {name, f"{name}Id", f"{name}_id",
+                        re.sub(r"(Id|_id)$", "", name)}
+            if variants & accepted:
+                continue
+            out.append(f"Form collects {name!r}, which is neither an input of "
+                       f"{wf.get('name') or wid} nor a column of the entity it writes "
+                       f"(columns: {', '.join(sorted(columns))}) — a field renamed or removed "
+                       f"leaves the form collecting a value that goes nowhere. Drop the field, "
+                       f"or point it at a column the entity has.")
+    return out
+
+
 def _bindings(node: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(node, list):
@@ -136,6 +337,188 @@ def _bindings(node: Any) -> set[str]:
         else:
             found |= _bindings(value)
     return found
+
+
+#: Verbs that OPEN a record rather than change it — satisfied by a navigation
+#: to the record's own page, or a row click.
+_VIEW_VERBS = frozenset({"view", "open", "show", "details", "detail"})
+
+_COLLECTION_PATTERNS = frozenset({"entity_list", "list", "table", "collection", "master_detail", "index"})
+_FORM_PATTERNS = frozenset({"form", "create", "edit", "new", "wizard", "configuration", "settings"})
+_RECORD_PATTERNS = frozenset({"record_workspace", "record", "detail", "show"})
+
+
+def page_family(page: dict) -> str | None:
+    """`collection`, `form`, `record`, or None — from the page's pattern, with
+    an id-bearing route read as a record page. The families the deterministic
+    template composes, and the ones an `edit` can be hosted on."""
+    pattern = str(page.get("pattern") or "").strip().lower()
+    route = str(page.get("route") or "")
+    if pattern in _COLLECTION_PATTERNS:
+        return "collection"
+    if pattern in _FORM_PATTERNS or re.search(r"/(new|create|add(-[a-z]+)?|edit)(/|$)", route):
+        return "form"                         # `/records/new`, `/add-data`, `/x/[id]/edit`
+    if pattern in _RECORD_PATTERNS or (re.search(r"\[[^\]]+\]", route) and pattern not in _FORM_PATTERNS):
+        return "record"
+    return None
+
+
+def _somewhere_to_go(doc: dict, page: dict, entity: str, by_name: dict,
+                     families: tuple[str, ...]) -> bool:
+    """A `create` or `edit` on a list is a navigation to the page that collects
+    the fields — a form page (or, for edit, the record's own page) for this
+    entity. A button or row action cannot run Create/Update itself (nothing
+    around it collects the fields), so with no such page the verb has nowhere
+    to go and demanding a control would be unsatisfiable."""
+    wanted = {entity, by_name.get(entity, "")} - {""}
+    if page_family(page) in families:
+        return True
+    return any(page_family(p) in families
+               and str((p.get("data") or {}).get("primaryEntity") or "") in wanted
+               for p in _live(doc.get("pages")))
+
+
+def _intents(props: Any, actions: set[str]) -> Iterator[dict]:
+    """Every dict inside a node's props that carries an action — the node's own
+    props, and the nested ones (`Table.rowActions[]`, `emptyAction`,
+    `headerActions[]`) — so a row action counts as the control it is."""
+    if isinstance(props, list):
+        for item in props:
+            yield from _intents(item, actions)
+        return
+    if not isinstance(props, dict):
+        return
+    if set(props) & actions:
+        yield props
+    for v in props.values():
+        if isinstance(v, (dict, list)):
+            yield from _intents(v, actions)
+
+
+def _route_shape(route: str) -> str:
+    """`/master-data/[id]`, `/master-data/{{id}}`, `/master-data/{id}` and
+    `/master-data/{{row.id}}` all name the same page."""
+    return re.sub(r"(\[[^\]/]+\]|\{\{[^}]*\}\}|\{[^}/]*\})", "*",
+                  str(route or "").split("?")[0].rstrip("/")) or "/"
+
+
+def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
+    """A page declares what a person can DO there (`actions: [view, edit,
+    delete]`); the composed tree must give each of those a control. The
+    inverse of `control-without-action`: there every control must do
+    something, here everything declared must have a control. Without it a
+    re-compose that DROPPED the Delete row action was accepted — the page
+    passed every per-control check because it had no controls to check —
+    and the user's "Delete does nothing" became "Delete is gone".
+
+    Checked only where a control could be satisfied: a CRUD verb whose
+    workflow exists on the page's entity, a view verb whose record page
+    exists. What is not there to bind is the workflow author's (Page↔Workflow),
+    not the composer's."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity or not layout:
+        return []
+    route = str(page.get("route") or page.get("id") or "")
+    by_name = _entity_id_by_name(doc)
+    ent_name = next((str(e.get("name")) for e in _live((doc.get("data") or {}).get("entities"))
+                     if str(e.get("id")) == entity), entity)
+    actions = _action_props()
+    intents = [i for n in _walk(layout.get("root")) for i in _intents(n.get("props") or {}, actions)]
+    tables = [n for n in _walk(layout.get("root")) if n.get("type") == "Table"]
+
+    def label_of(i: dict) -> str:
+        return str(i.get("label") or i.get("submitLabel") or i.get("aria-label") or "")
+
+    def runs_op(op: str) -> bool:
+        for i in intents:
+            for ref in _workflow_refs(i):
+                wf = _workflow_by_id(doc, ref)
+                if wf is not None and op in _workflow_db_ops(wf) \
+                        and _workflow_targets_entity(doc, wf, entity):
+                    return True
+            if _VERB_DB_OP.get(_verb_of(label_of(i))) == op and (set(i) & actions):
+                return True                   # "Add Record" → the form page; "Edit" → the form
+        return False
+
+    detail_routes = {str(p.get("route")) for p in _live(doc.get("pages"))
+                     if "[" in str(p.get("route") or "")
+                     and str((p.get("data") or {}).get("primaryEntity") or "") in {entity, by_name.get(entity, "")}}
+
+    def opens_record() -> bool:
+        shapes = {_route_shape(r) for r in detail_routes}
+        for t in tables:
+            if (t.get("props") or {}).get("onRowClick") or (t.get("props") or {}).get("rowHref"):
+                return True
+        for i in intents:
+            nav = i.get("navigate") or i.get("href") or i.get("to")
+            if isinstance(nav, str) and _route_shape(nav) in shapes:
+                return True
+            if _verb_of(label_of(i)) in _VIEW_VERBS and (set(i) & actions):
+                return True
+        return False
+
+    def names_a_record() -> bool:
+        # An update or a delete acts on a record the page can name: the route's
+        # own `[id]`, or a row of a Table / an item of a Repeat over the entity.
+        # /add-data declares `update` too (the contract imagines one form that
+        # creates or edits), but a Form runs ONE workflow and nothing on that
+        # route names a record — a control there would be refused for its
+        # inputs, so demanding it would only burn the composer's attempts.
+        # That contract is the planner's to reshape, not the composer's.
+        if _record_in_scope(doc, page, entity) or _reaches(doc, page, entity):
+            return True
+        wanted = {entity, by_name.get(entity, "")} - {""}
+        for n in _walk(layout.get("root")):
+            if _row_scoped(n, layout, doc) in wanted:
+                return True
+            props = n.get("props") or {}
+            if n.get("type") == "Table":
+                data = next((str(props[k]) for k in ("data", "rows", "items") if props.get(k)), "")
+                if _entity_of_source(doc, layout, data.strip("{} ").split(".")[0]) in wanted:
+                    return True
+        return False
+
+    _does = {"db_insert": "creates", "db_update": "updates", "db_delete": "deletes"}
+    out: list[str] = []
+    seen: set[str] = set()
+    for action in page.get("actions") or []:
+        label = action if isinstance(action, str) else str(
+            (action or {}).get("name") or (action or {}).get("label") or "")
+        if not label or label.upper().startswith("FLOW-"):
+            continue
+        verb = _verb_of(label)
+        op = _VERB_DB_OP.get(verb)
+        if op:
+            if op in seen or runs_op(op):
+                continue
+            wf_name = _workflow_for_op(doc, page, op)
+            if not wf_name:
+                continue                      # nothing to bind yet — Page↔Workflow's
+            if op != "db_insert" and not names_a_record():
+                continue                      # no record here to act on — the contract's
+            if op == "db_update" and not _somewhere_to_go(doc, page, entity, by_name, ("form", "record")):
+                continue                      # an Edit needs a form or record page to go to
+            if op == "db_insert" and not _somewhere_to_go(doc, page, entity, by_name, ("form",)):
+                continue                      # a Create needs a form page to go to
+            seen.add(op)
+            wf_id = next((str(w.get("id")) for w in _live(doc.get("workflows"))
+                          if str(w.get("name") or w.get("id")) == wf_name), wf_name)
+            how = (f"a `rowActions` entry on the Table, or a Button on the {ent_name}'s own page, "
+                   f"labelled '{verb.capitalize()} …' bound to {wf_name} ({wf_id})"
+                   if op != "db_insert" else
+                   f"a Button labelled '{verb.capitalize()} …' that runs {wf_name} ({wf_id}) "
+                   f"or navigates to the page whose Form does")
+            out.append(f"{route} declares `{label}` on {ent_name}, but nothing composed "
+                       f"{_does[op]} a {ent_name} — a control the contract promises is "
+                       f"missing, and a page that quietly drops it is not fixed. Add {how}.")
+        elif verb in _VIEW_VERBS and "[" not in route and detail_routes:
+            if "view" in seen or opens_record():
+                continue
+            seen.add("view")
+            out.append(f"{route} declares `{label}` on {ent_name}, but nothing composed opens "
+                       f"a {ent_name} — add a `rowActions` entry (or a Link) that navigates to "
+                       f"{sorted(detail_routes)[0]}, or an `onRowClick` on the Table.")
+    return out
 
 
 def page_findings(doc: dict) -> list[dict]:
@@ -208,6 +591,34 @@ def page_findings(doc: dict) -> list[dict]:
                                           f"which this application does not "
                                           f"define"})
                     continue
+                # A CONTROL MUST RUN A WORKFLOW THAT DOES WHAT IT SAYS. A
+                # "Delete" wired to an Update workflow changes the record instead
+                # of removing it; an "Edit" wired to the Create workflow adds a
+                # second record; nothing a person can see happens, which reads as
+                # a broken button. `workflow-not-defined` never catches it — the
+                # wrong workflow exists, so the ref resolves. Decided on the DB op
+                # the verb names (`db_insert`/`db_update`/`db_delete`), and flagged
+                # only when a correctly-typed workflow EXISTS to name: when none
+                # does, the missing workflow is the workflow author's to add
+                # (Page↔Workflow), and demanding a rebind here would ask the
+                # composer for a target that is not there yet.
+                _op_of = {"db_insert": "creates", "db_update": "updates", "db_delete": "deletes"}
+                expected = _VERB_DB_OP.get(_verb_of(
+                    props.get("label") or props.get("submitLabel") or props.get("aria-label")))
+                if expected:
+                    target = _workflow_by_id(doc, ref)
+                    if target is not None and expected not in _workflow_db_ops(target):
+                        correct = _workflow_for_op(doc, page, expected)
+                        if correct:
+                            did = next((_op_of[o] for o in _workflow_db_ops(target) if o in _op_of),
+                                       "does not")
+                            out.append({"rule": "workflow-verb-mismatch", "page": pid,
+                                        "detail": f"{route}: {kind} "
+                                                  f"{props.get('label') or props.get('submitLabel') or kind!r} "
+                                                  f"{_op_of[expected]}, but runs {target.get('name') or ref} "
+                                                  f"({ref}), which {did} — the control does something other than "
+                                                  f"what it says, so it looks broken. Bind it to {correct!r}, the "
+                                                  f"workflow that {_op_of[expected]} this record."})
                 for missing in unsatisfied_inputs(doc, page, layout, node, ref):
                     out.append({"rule": "workflow-inputs-unsatisfied", "page": pid,
                                 "detail": f"{route}: {missing}"})
@@ -225,6 +636,10 @@ def page_findings(doc: dict) -> list[dict]:
             out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
         for detail in dependent_option_findings(doc, page, layout):
             out.append({"rule": "dependent-options-unsatisfied", "page": pid, "detail": f"{route}: {detail}"})
+        for detail in form_field_findings(doc, page, layout):
+            out.append({"rule": "form-field-unknown", "page": pid, "detail": f"{route}: {detail}"})
+        for detail in declared_action_findings(doc, page, layout):
+            out.append({"rule": "declared-action-without-control", "page": pid, "detail": detail})
         unresolved = set(_dangling(
             {"dataSources": layout.get("dataSources") or [],
              "root": layout.get("root")})) - _planner_placeholders()
@@ -233,6 +648,12 @@ def page_findings(doc: dict) -> list[dict]:
                         "detail": f"{route}: binds {{{{{name}}}}}, which no "
                                   f"data source provides"})
 
+    # WHAT THE CONTROL PUTS ON THE WIRE. The checks above reason about scope —
+    # "the row names the record"; this one about the POST body — "the row
+    # action sends {id}". Both must hold. After the page loop, since it reads
+    # the projected tree (the record carried onto the control).
+    from services.blueprint.dispatch_contract import dispatch_findings
+    out.extend(dispatch_findings(doc))
     return out
 
 
@@ -246,6 +667,12 @@ def authoring_findings(doc: dict) -> list[dict]:
     out.extend(expression_findings(doc))
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
+    out.extend(column_findings(doc))
+    # A step reads what no input declares and no earlier step produces — the
+    # wire side of the contract (see dispatch_contract). Imported here: that
+    # module reads this one's helpers.
+    from services.blueprint.dispatch_contract import workflow_ref_findings
+    out.extend(workflow_ref_findings(doc))
     return out
 
 
@@ -271,12 +698,50 @@ def _entity_id_by_name(doc: dict) -> dict:
             for e in _live((doc.get("data") or {}).get("entities"))}
 
 
+def _route_record_entities(doc: dict, route: str) -> set[str]:
+    """The entities a route names through its OWN `[id]` segments.
+
+    `/tools/[id]/request` carries a ToolListing id even though the request it
+    submits is a Rental: the id-bearing prefix `/tools/[id]` is the ToolListing
+    detail page, and that page declares what the `[id]` is. So the record the
+    route holds is not the page's `primaryEntity` (the Rental being created) but
+    the entity of the detail page that owns the prefix. Resolving it from that
+    sibling page's own `primaryEntity` keeps the answer evidence-based rather
+    than parsed from the URL stem. Returns entity ids."""
+    by_route = {str(p.get("route") or ""): p for p in _live(doc.get("pages"))}
+    out: set[str] = set()
+    prefix = ""
+    for seg in route.split("/"):
+        if not seg:
+            continue
+        prefix = f"{prefix}/{seg}"
+        if not _ROUTE_HAS_ID.search(f"/{seg}"):
+            continue
+        owner = by_route.get(prefix)
+        pe = str((owner.get("data") or {}).get("primaryEntity") or "") if owner else ""
+        if pe:
+            out.add(pe)
+    return out
+
+
 def _record_in_scope(doc: dict, page: dict, entity: str) -> bool:
     route = str(page.get("route") or "")
     primary = str((page.get("data") or {}).get("primaryEntity") or "")
     by_name = _entity_id_by_name(doc)
     wanted = {entity, by_name.get(entity, "")} - {""}
-    return route.endswith("]") and primary in wanted
+    if not _ROUTE_HAS_ID.search(route):
+        return False
+    # A detail route ends with the id (`/records/[id]`); an edit route carries
+    # it mid-path (`/records/[id]/edit`). Both hold the record — matching only
+    # `endswith("]")` dropped edit pages, whose Save form then read as having no
+    # record for its Update workflow to name.
+    if primary in wanted:
+        return True
+    # An action sub-page (`/tools/[id]/request`) is ABOUT the record it creates
+    # (Rental) but still holds the record its `[id]` names (ToolListing), which
+    # is exactly the record its workflow consumes. The page's `primaryEntity`
+    # never sees it — so consult the entity the route itself names.
+    return bool(wanted & _route_record_entities(doc, route))
 
 
 def _form_fields_of(form: dict) -> set[str]:
@@ -306,6 +771,59 @@ def _form_fields_of(form: dict) -> set[str]:
                 if v:
                     names.add(str(v))
     return names
+
+
+def _form_chooses(doc: dict, layout: dict, control: dict, name: str,
+                  wanted: set[str]) -> bool:
+    """A Form that lets the person pick the record supplies it.
+
+    An intake form's property is not a record the screen already holds — it
+    is chosen on the form, from the list of properties. That is a select
+    field named for the input whose options come from a source listing that
+    entity: `interaction.optionsFrom.source` on a declarative field, or
+    `optionsFrom.source` on a Select node inside the Form. The rule accepted
+    only records the page holds, rows and repeats and `args`, so every
+    intake form on one real build — new refund case, guest request, new
+    support case, new property, new user — was refused for "nothing there
+    names one" while the form plainly asked for it.
+    """
+    form = _form_around(layout.get("root"), control)
+    if form is None:
+        return False
+    names = {name, f"{name}Id", f"{name}_id"}
+    for f in (form.get("props") or {}).get("fields") or []:
+        if not isinstance(f, dict) or str(f.get("name") or "") not in names:
+            continue
+        of = (f.get("interaction") or {}).get("optionsFrom") if isinstance(f.get("interaction"), dict) else None
+        of = of if isinstance(of, dict) else f.get("optionsFrom")
+        if isinstance(of, dict) and _entity_of_source(doc, layout, str(of.get("source") or "")) in wanted:
+            return True
+    for inner in _walk(form):
+        props = inner.get("props") or {}
+        if inner.get("type") in ("Select", "Combobox") and str(props.get("name") or "") in names:
+            of = props.get("optionsFrom")
+            if isinstance(of, dict) and _entity_of_source(doc, layout, str(of.get("source") or "")) in wanted:
+                return True
+    return False
+
+
+def _form_around(root: Any, target: dict) -> dict | None:
+    """The nearest Form holding `target`, or `target` when it is the Form."""
+    if target.get("type") == "Form":
+        return target
+
+    def walk(node: Any, form: dict | None):
+        if not isinstance(node, dict):
+            return None
+        here = node if node.get("type") == "Form" else form
+        for child in node.get("children") or []:
+            if child is target:
+                return here
+            found = walk(child, here)
+            if found is not None:
+                return found
+        return None
+    return walk(root, None)
 
 
 def _form_fields_around(root: Any, target: dict) -> set[str] | None:
@@ -356,7 +874,16 @@ def _row_scoped(control: dict, layout: dict, doc: dict) -> str | None:
     item carries that item: the entity of the source the Table or Repeat
     reads is in scope. Returns that entity's id or None."""
     if control.get("type") == "Table":
-        data = str((control.get("props") or {}).get("data") or "")
+        props = control.get("props") or {}
+        # The row source can arrive under any of the Table's data-prop names.
+        # `Table.schema.ts` accepts `data`, `rows` AND `items`, the a2ui composer
+        # emits `rows` on a list table, and the converter carries whichever it
+        # was given. Reading only `data` here made the validator blind to a
+        # perfectly-composed table — a rowAction over `rows: "{{tasks}}"` was
+        # refused for "nothing names a task" when the row plainly does. Read the
+        # same prop names the schema and converter treat as the row source.
+        data = next((str(props[p]) for p in ("data", "rows", "items")
+                     if props.get(p)), "")
         return _entity_of_source(doc, layout, data.strip("{} ").split(".")[0])
     # Inside a Repeat (or any node repeating over a source), the item is the
     # record — an Approve button drawn once per pending case.
@@ -417,6 +944,39 @@ def _session_filled_fields(doc: dict) -> set[str]:
     }
 
 
+def _session_filled_records(doc: dict, page: dict) -> set[str]:
+    """Record-input names the RUNTIME supplies from the session, so a Form on
+    this page must NOT be asked to name them.
+
+    The record analog of :func:`_session_filled_fields`. A KYC intake form
+    (`/kyc-verifications/new`) runs a workflow needing a ``member`` record — but
+    that member is the signed-in person filling it in about themselves, never a
+    record the screen displays or the user picks. The page's own primary entity
+    (``KycVerification``) carries a ``scope``/``user`` ownership rule on
+    ``memberId``: the runtime stamps that column from the session, exactly as it
+    fills a ``scope`` field. A ``memberId`` column therefore supplies a
+    ``member`` record. Scoping this to ownership rules on THIS page's primary
+    entity keeps it tight — a KYC officer approving *someone else's* verification
+    (primary ``KycVerification``, no ``member`` record input) is untouched, and a
+    page whose primary has no such rule still must name the record."""
+    primary = str((page.get("data") or {}).get("primaryEntity") or "")
+    id_to_name = {str(e.get("id")): str(e.get("name") or "")
+                  for e in _live((doc.get("data") or {}).get("entities"))}
+    primary_names = {primary, id_to_name.get(primary, "")} - {""}
+    out: set[str] = set()
+    for r in (doc.get("security") or {}).get("ownershipRules") or []:
+        if not isinstance(r, dict) or r.get("kind") not in ("scope", "attribution"):
+            continue
+        if str(r.get("entity") or "") not in primary_names:
+            continue
+        col = str(r.get("column") or "")
+        out.add(col)
+        for suf in ("Id", "_id", "ID"):
+            if col.endswith(suf) and len(col) > len(suf):
+                out.add(col[: -len(suf)])
+    return out
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -427,6 +987,7 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     args = props.get("args") if isinstance(props.get("args"), dict) else {}
     label = props.get("label") or props.get("submitLabel") or control.get("type")
     session_filled = _session_filled_fields(doc)
+    session_records = _session_filled_records(doc, page)
     out: list[str] = []
     fields = None
     for inp in wf.get("inputs") or []:
@@ -444,9 +1005,16 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
             entity = str(inp.get("entity") or "")
             if _record_in_scope(doc, page, entity) or _reaches(doc, page, entity):
                 continue
+            if name in session_records:
+                # The signed-in person is this record (a member submitting their
+                # own KYC); the runtime stamps it from the session, so a Form
+                # must not be asked to name it.
+                continue
             by_name = _entity_id_by_name(doc)
             row_entity = _row_scoped(control, layout, doc)
             if row_entity and row_entity in {entity, by_name.get(entity, "")}:
+                continue
+            if _form_chooses(doc, layout, control, name, {entity, by_name.get(entity, "")} - {""}):
                 continue
             ent_name = next((e.get("name") for e in _live((doc.get("data") or {}).get("entities"))
                              if e.get("id") == entity), entity)
@@ -736,5 +1304,55 @@ def insert_findings(doc: dict) -> list[dict]:
                                       f"the data model requires — supply each in `values`: an input by name, "
                                       f"`$now` for a time, `$user.id` for the actor, `$uuid` for a reference "
                                       f"nothing else supplies, a literal for a starting state"})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A WRITE NAMES COLUMNS THE ENTITY HAS. The mirror of insert-missing-required:
+# when a field is renamed or removed, a db step that still writes or filters it
+# names a column that is gone, and the action fails at the database — the exact
+# dependency a field change must not silently break. Judged only against an
+# entity with a declared field list, ignoring the system columns the engine
+# fills (`id`, `$now` timestamps), so it flags a genuinely absent column, not a
+# managed one.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_COLUMNS = {"id", "createdat", "updatedat", "deletedat",
+                   "created_at", "updated_at", "deleted_at",
+                   "createdbyid", "updatedbyid"}
+
+
+def column_findings(doc: dict) -> list[dict]:
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            if cfg.get("actionType") not in ("db_insert", "db_update", "db_delete"):
+                continue
+            entity = _entity_for_table(doc, cfg.get("table"))
+            if entity is None:
+                continue
+            fields = {str(f.get("name")) for f in entity.get("fields") or [] if f.get("name")}
+            if not fields:                       # cannot judge without a field list
+                continue
+            columns: set[str] = set()
+            for key in ("values", "where"):
+                block = cfg.get(key)
+                if isinstance(block, dict):
+                    columns |= {str(k) for k in block}
+            unknown = sorted(
+                c for c in columns
+                if c not in fields and c.lower().replace("_", "") not in _SYSTEM_COLUMNS
+            )
+            if unknown:
+                out.append({"rule": "workflow-column-unknown", "page": str(wf.get("id")),
+                            "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: writes or "
+                                      f"filters {', '.join(repr(c) for c in unknown)}, which {entity.get('name')} "
+                                      f"does not have (fields: {', '.join(sorted(fields))}) — a field that was "
+                                      f"renamed or removed leaves the step naming a column that is gone, and the "
+                                      f"action fails at the database. Point it at a column the entity has, or "
+                                      f"restore the field."})
     return out
 

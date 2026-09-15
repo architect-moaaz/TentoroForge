@@ -467,6 +467,36 @@ def test_a_partly_public_app_is_expressible(tmp_path):
     assert "checkout" not in matcher and "orders" not in matcher
 
 
+def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
+    """Reception opened the Income Auditor's queue and the Users admin page:
+    the middleware gated a role-restricted route on a session alone. The page
+    declares its users; the session carries the role's name; the middleware
+    compares the two and sends everyone else to /403."""
+    from services.blueprint.projection import project_middleware, role_routes
+
+    doc = {
+        "roles": [{"id": "ROLE-005", "name": "Income Auditor"}, {"id": "ROLE-008", "name": "Admin"}],
+        "pages": [
+            {"id": "PAGE-001", "route": "/income-auditor-queue", "access": "role_restricted", "users": ["ROLE-005"]},
+            {"id": "PAGE-002", "route": "/users/[id]", "access": "role_restricted", "users": ["ROLE-008"]},
+            {"id": "PAGE-003", "route": "/refund-cases", "access": "authenticated", "users": ["ROLE-005"]},
+            {"id": "PAGE-004", "route": "/reports", "access": "role_restricted"},
+        ],
+    }
+    assert role_routes(doc) == [
+        {"route": "/income-auditor-queue", "roles": ["Income Auditor"]},
+        {"route": "/users/[id]", "roles": ["Admin"]},
+    ]
+    result = project_middleware(doc, tmp_path / "app")
+    text = (tmp_path / "app" / "src" / "middleware.ts").read_text()
+    assert result["byRole"] == role_routes(doc)
+    assert '{ route: new RegExp("^/income-auditor-queue$"), roles: ["Income Auditor"] }' in text
+    assert '{ route: new RegExp("^/users/[^/]+$"), roles: ["Admin"] }' in text
+    assert "/refund-cases" not in text.split("ROLE_ROUTES")[1].split("];")[0]
+    assert 'NextResponse.redirect(new URL("/403", req.url))' in text
+    assert "req.nextauth.token" in text
+
+
 def test_a_public_landing_route_is_actually_reachable(tmp_path):
     """A negative lookahead cannot exclude the empty path, so `/` stayed gated
     however it was declared — requiring one character after the slash is what
@@ -587,8 +617,11 @@ def test_names_the_scaffold_wraps_are_emitted_as_hsl_triplets(tmp_path):
     css = (tmp_path / "src" / "app" / "tokens.css").read_text()
     assert "--primary: 202 77% 31%;" in css
     assert "--primary: #125E8A;" not in css
-    # Roles the scaffold does not wrap keep their hex.
-    assert "--focus-ring: #0B72C4;" in css
+    # A role the CONTRACT does not claim passes through under its own name and
+    # keeps its hex (the scaffold reads it raw). `focusRing` is no longer such a
+    # role — the contract consumes it into `--ring` (see the sibling test) — so
+    # this uses a genuinely app-specific colour.
+    assert "--status-paid: #1B6B3A;" in css
 
 
 def test_a_shadcn_name_the_blueprint_omits_falls_back_to_a_declared_role(tmp_path):
@@ -796,3 +829,63 @@ def test_a_select_offers_the_values_the_entity_declares():
     assert status is not None
     assert [o["value"] for o in status.get("options") or []] == [
         "draft", "submitted"]
+
+
+# --- who may launch a workflow, who may read an entity --------------------------
+
+
+def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
+    """Reception posted a refund through the API: the posting queue page was
+    Finance's, but nothing compared the caller to it."""
+    from services.blueprint.projection import launch_roles, project_launch_roles
+
+    doc = {
+        "roles": [{"id": "ROLE-001", "name": "Reception"}, {"id": "ROLE-006", "name": "Finance"}, {"id": "ROLE-009", "name": "Guest"}],
+        "pages": [
+            {"id": "PAGE-004", "route": "/posting-queue", "access": "role_restricted", "users": ["ROLE-006"]},
+            {"id": "PAGE-008", "route": "/guest/refund-request", "access": "public", "users": ["ROLE-009"]},
+            {"id": "PAGE-007", "route": "/refund-cases/new", "access": "authenticated", "users": ["ROLE-001"]},
+        ],
+        "workflows": [
+            {"id": "FLOW-008", "name": "Post Refund", "launchedFrom": ["PAGE-004"], "steps": []},
+            {"id": "FLOW-002", "name": "Guest Refund Request Submission", "launchedFrom": ["PAGE-008"], "steps": []},
+            {"id": "FLOW-001", "name": "Refund Case Intake", "launchedFrom": ["PAGE-007"], "steps": []},
+            {"id": "FLOW-099", "name": "Nightly sweep", "steps": []},
+        ],
+    }
+    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"], "FLOW-001": ["Reception"], "FLOW-099": None}
+    project_launch_roles(doc, tmp_path / "app")
+    text = (tmp_path / "app" / "src" / "lib" / "workflows" / "launch-roles.ts").read_text()
+    assert '"FLOW-008": ["Finance"]' in text and '"post-refund": ["Finance"]' in text
+    assert '"FLOW-002": ["*"]' in text and '"FLOW-099": null' in text
+
+
+def test_entity_access_comes_from_the_pages_that_use_an_entity(tmp_path):
+    """Reception read every user account: the Users page was Admin's, but
+    nothing carried that to the data endpoint."""
+    from services.blueprint.projection import entity_access, project_entity_access
+
+    doc = {
+        "roles": [{"id": "ROLE-001", "name": "Reception"}, {"id": "ROLE-006", "name": "Finance"},
+                  {"id": "ROLE-008", "name": "Admin"}, {"id": "ROLE-009", "name": "Guest"}],
+        "data": {"entities": [
+            {"id": "ENTITY-001", "name": "Property", "table": "properties"},
+            {"id": "ENTITY-002", "name": "User", "table": "users"},
+            {"id": "ENTITY-003", "name": "RefundCase", "table": "refund_cases"},
+        ]},
+        "pages": [
+            {"id": "P-USERS", "route": "/users", "access": "role_restricted", "users": ["ROLE-008"], "data": {"primaryEntity": "ENTITY-002"}},
+            {"id": "P-CASES", "route": "/refund-cases", "access": "authenticated", "users": ["ROLE-001", "ROLE-006"], "data": {"primaryEntity": "ENTITY-003"}},
+            {"id": "P-GUEST", "route": "/guest/refund-request", "access": "public", "users": ["ROLE-009"], "data": {"primaryEntity": "ENTITY-003"}},
+        ],
+        "pageLayouts": [{"page": "P-GUEST", "root": {}, "dataSources": [{"name": "properties", "entity": "Property", "op": "list"}]}],
+        "security": {"ownershipRules": [{"entity": "RefundCase", "column": "propertyId", "kind": "scope", "scope": "workspace", "unscopedRoles": ["Finance", "CEO"]}]},
+    }
+    access = entity_access(doc)
+    assert access["users"] == {"read": ["Admin"], "write": ["Admin"]}
+    assert access["properties"]["read"] == ["*"]
+    assert set(access["refund_cases"]["read"]) == {"*", "CEO", "Finance", "Reception"}
+    assert set(access["refund_cases"]["write"]) == {"*", "Finance", "Reception"}
+    project_entity_access(doc, tmp_path / "app")
+    assert '"users"' in (tmp_path / "app" / "src" / "lib" / "entity-access.ts").read_text()
+

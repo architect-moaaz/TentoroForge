@@ -13,8 +13,8 @@ const DEFAULT_PALETTE = [
   "hsl(var(--warning))",
   "hsl(var(--info))",
   "hsl(var(--destructive))",
-  "var(--color-primary-300, hsl(var(--primary) / 0.5))",
-  "var(--color-accent-300,  hsl(var(--accent) / 0.5))",
+  "hsl(var(--primary) / 0.5)",
+  "hsl(var(--accent) / 0.5)",
 ];
 
 /** Pie / donut. Each row is a slice: value = first series' dataKey (default

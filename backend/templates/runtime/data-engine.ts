@@ -107,7 +107,7 @@ export interface DataEngineContext {
   /** The acting user. `workspaceId` is read by a scope:"workspace" ownership
    *  rule; a session that does not carry one cannot reach workspace-scoped
    *  rows, which is the safe direction to fail. */
-  user?: { id: string; role?: string; email?: string; workspaceId?: string };
+  user?: { id: string; role?: string; email?: string; workspaceId?: string; [column: string]: unknown };
   /** Slice-4: original (plaintext) column names the CALLER is explicitly
    *  asking to see unmasked. The route parses `?unmask=col1&unmask=col2`
    *  and passes them here. The read path only honours the request when
@@ -117,6 +117,19 @@ export interface DataEngineContext {
 }
 
 // ─── Slice-4 encrypt-at-rest helpers ─────────────────────────────────────
+
+/** The masked form of a value held in the clear, by the manifest's mask kind. */
+function _maskPlain(value: unknown, mask: SensitiveColumnSpec["mask"]): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const s = String(value);
+  if (mask === "last4") return s.length > 4 ? "•".repeat(4) + s.slice(-4) : "•".repeat(s.length);
+  if (mask === "phone") return s.length > 4 ? "•".repeat(Math.max(0, s.length - 4)) + s.slice(-4) : "•".repeat(s.length);
+  if (mask === "email") {
+    const at = s.indexOf("@");
+    return at > 0 ? s[0] + "•••" + s.slice(at) : "•••";
+  }
+  return null; // "full": nothing of it is shown
+}
 
 /** True when the caller's role may unmask this column. Empty readers = nobody
  *  (masked-only, even for admins). "*" wildcard = any authenticated user. */
@@ -204,9 +217,20 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
     const spec = specs[col];
     const encKey = `${col}_encrypted`;
     const maskKey = `${col}_mask`;
-    if (!(encKey in record) && !(maskKey in record)) continue;
     const asked = wants.has(col);
     const allowed = asked && _canReaderUnmask(spec, ctx.user?.role);
+    if (!(encKey in record) && !(maskKey in record)) {
+      // STORED IN THE CLEAR, STILL SENSITIVE. A column the manifest names
+      // but that was written without the encrypt-at-rest siblings — the
+      // platform's bcrypt `password`, a row loaded by SQL — used to fall
+      // through here untouched, and `GET /api/data/users` answered every
+      // caller with the hash. The manifest is the rule, not the siblings:
+      // the value leaves the engine masked unless this caller may unmask.
+      if (col in record && !allowed) {
+        (record as any)[col] = _maskPlain((record as any)[col], spec.mask);
+      }
+      continue;
+    }
     let display: string | null;
     if (allowed) {
       // Honour the unmask — decrypt the blob. A decrypt failure (tampered
@@ -238,8 +262,13 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
 
 /** The actor value a rule compares against, or undefined when we have none. */
 function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
+  // THE RULE SAYS WHICH USERS COLUMN IS THE WORKSPACE. `actorColumn` names it
+  // (homePropertyId, organisationId); the session carries the user's row, so
+  // the value is read off it. A rule without one falls back to the session's
+  // `workspaceId`, which a session may still not carry — the safe direction.
+  const user = ctx.user as Record<string, unknown> | undefined;
   const v = rule.scope === "workspace"
-    ? (ctx.user as any)?.workspaceId
+    ? (rule.actorColumn ? user?.[rule.actorColumn] : user?.workspaceId)
     : ctx.user?.id;
   return v === undefined || v === null || v === "" ? undefined : v;
 }

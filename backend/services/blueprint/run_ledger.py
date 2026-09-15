@@ -111,6 +111,14 @@ class RunLedger:
         self._write({"event": "plan", "nodes": nodes, "total": len(nodes),
                      "alreadyComplete": already or [], "at": _now()})
 
+    def heartbeat(self) -> None:
+        """A pulse while a long step runs. A page-layout compose or an observer
+        repair can go minutes between events, and the ledger is silent the whole
+        time — so a live run looks dead to a status poll and to the restart
+        guard, and a build that was still composing got killed as if it had
+        crashed. This keeps the ledger's mtime fresh while the run is alive."""
+        self._write({"event": "run:heartbeat", "at": _now()})
+
     def node_start(self, key: str, subjects: int = 1) -> None:
         self._write({"event": "node:start", "node": key, "subjects": subjects,
                      "at": _now()})
@@ -144,6 +152,28 @@ class RunLedger:
                      "attempt": attempt, "of": of,
                      "reason": str(reason)[:600], "at": _now()})
 
+    def observed(self, key: str, subject: str, ok: bool, findings: int,
+                 critic: str) -> None:
+        """The observer's verdict on a node's outcome (§73). One line per
+        subject, so a build can be read for which page the observer sent
+        back and why."""
+        self._write({"event": "observer:verdict", "node": key,
+                     "subject": subject, "ok": ok, "findings": findings,
+                     "critic": str(critic)[:200], "at": _now()})
+
+    def repair(self, key: str, subject: str, round_: int, of: int,
+               reason: str) -> None:
+        """A subject going back to its author with the observer's brief."""
+        self._write({"event": "observer:repair", "node": key,
+                     "subject": subject, "round": round_, "of": of,
+                     "reason": str(reason)[:600], "at": _now()})
+
+    def unrepaired(self, key: str, subject: str, reason: str) -> None:
+        """Every round spent and the subject still wrong: flagged, not fixed."""
+        self._write({"event": "observer:unrepaired", "node": key,
+                     "subject": subject, "reason": str(reason)[:600],
+                     "at": _now()})
+
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
                      "reason": str(reason)[:600], "at": _now()})
@@ -171,6 +201,8 @@ class RunLedger:
             # that outlives the process.
             "blockedBecause": dict(getattr(report, "blocked_because", {}) or {}),
             "skippedBecause": dict(getattr(report, "skipped_because", {}) or {}),
+            "repaired": list(getattr(report, "repaired", []) or []),
+            "unrepaired": dict(getattr(report, "unrepaired", {}) or {}),
         })
 
     def crashed(self, exc: BaseException) -> None:

@@ -4,11 +4,21 @@ The same object :mod:`services.figma.gateway` is for Figma: every call goes
 through here, and here is where authentication, the allowed operations,
 request logging, rate limits and error classification live.
 
-Read-only, deliberately
------------------------
+Read-only by default, generation by consent
+------------------------------------------
 UX Pilot's server can generate, import, review and publish — every one of
 those spends the user's credits. None is in :data:`ALLOWED_TOOLS`; the tools
-here read a page and its designs and cost nothing.
+there read a page and its designs and cost nothing, and that is all a gateway
+can do unless it was opened with ``may_generate=True``.
+
+``may_generate`` is set by exactly one caller: the page-layouts node, for a
+run whose application says ``uiDesigner: uxpilot`` — the user picked UX Pilot
+at the approval gate knowing it spends their credits. It admits
+:data:`GENERATION_TOOLS`, which is ``generate_design`` and nothing else:
+importing, publishing, prototyping and multi-screen flows spend credits for
+things this pipeline never asked for. A gateway opened for reading a page a
+person drew is never opened with it, so importing stays read-only exactly as
+before.
 
 Argument names come from the server
 -----------------------------------
@@ -47,12 +57,18 @@ ALLOWED_TOOLS = frozenset({
     "list_diagrams",
 })
 
+#: The one credit-spending tool a run may use, and only when the gateway was
+#: opened with ``may_generate``. One screen from one prompt: the unit the
+#: page-layouts node works in.
+GENERATION_TOOLS = frozenset({"generate_design"})
+
 #: Semantic argument → the property names a tool schema might use for it.
 _ARG_ALIASES: dict[str, tuple[str, ...]] = {
     "page": ("pageid", "page_id", "page", "pageuuid"),
     "design": ("designid", "design_id", "design", "designuuid", "id"),
     "theme": ("themeid", "theme_id", "theme", "id"),
     "include_html": ("includehtml", "include_html", "withhtml", "with_html", "html"),
+    "prompt": ("prompt", "description", "text", "brief"),
 }
 
 UxPilotErrorKind = Literal[
@@ -86,6 +102,10 @@ class UxPilotGateway:
     timeout_s: float = 60.0
     max_attempts: int = 3
     min_interval_s: float = 0.2
+    #: Whether :data:`GENERATION_TOOLS` may be called. False for every reader;
+    #: True only for the page-layouts node of a run the user pointed at UX
+    #: Pilot. See the module docstring.
+    may_generate: bool = False
 
     calls: list[CallRecord] = field(default_factory=list)
     _last_call_at: float = field(default=0.0, repr=False)
@@ -103,12 +123,17 @@ class UxPilotGateway:
     # -- the call -------------------------------------------------------------
 
     async def call(self, tool: str, **semantic: Any) -> list[dict[str, Any]]:
-        """Invoke one read tool and return its content blocks."""
-        if tool not in ALLOWED_TOOLS:
+        """Invoke one allowed tool and return its content blocks."""
+        if tool not in self.allowed_tools():
+            spends = tool in GENERATION_TOOLS
             raise UxPilotGatewayError(
                 "not_allowed",
-                f"{tool!r} is not an allowed UX Pilot operation; "
-                f"allowed: {', '.join(sorted(ALLOWED_TOOLS))}",
+                (f"{tool!r} spends UX Pilot credits and this gateway was not "
+                 f"opened for generation; only a run whose application chose "
+                 f"UX Pilot as its UI designer may call it")
+                if spends else
+                (f"{tool!r} is not an allowed UX Pilot operation; "
+                 f"allowed: {', '.join(sorted(self.allowed_tools()))}"),
             )
         last: UxPilotGatewayError | None = None
         for attempt in range(1, self.max_attempts + 1):
@@ -130,6 +155,10 @@ class UxPilotGateway:
         assert last is not None
         raise last
 
+    def allowed_tools(self) -> frozenset[str]:
+        """What this gateway may call: the readers, plus generation by consent."""
+        return ALLOWED_TOOLS | GENERATION_TOOLS if self.may_generate else ALLOWED_TOOLS
+
     async def _arguments(self, tool: str, semantic: dict[str, Any]) -> dict[str, Any]:
         schemas = await self._tool_schemas()
         schema = schemas.get(tool)
@@ -146,7 +175,7 @@ class UxPilotGateway:
                     break
             else:
                 required = [r for r in (schema.get("required") or []) if r in props]
-                if sem in ("page", "design", "theme") and required and required[0] not in out:
+                if sem in ("page", "design", "theme", "prompt") and required and required[0] not in out:
                     out[required[0]] = value
         return out
 

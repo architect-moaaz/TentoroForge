@@ -159,10 +159,35 @@ const ICON_MAP: Record<string, LucideIcon> = {
   bookmark:           Bookmark,
 };
 
+// A NAME THE MAP DOES NOT HAVE IS NOT A NAME TO DRAW NOTHING FOR. The icon a
+// nav item or tile carries is chosen upstream — by an agent composing the
+// navigation, by A2UI naming a surface — from a vocabulary far larger and more
+// granular than the set imported here: `plus-circle` where the map has `plus`,
+// `table` for what this set draws as a grid. Left unresolved they rendered a
+// blank spacer, so the sidebar came up as a strip of empty circles beside real
+// routes. Fold the common shape suffixes and a few structural synonyms onto a
+// glyph that IS imported, so a reasonable-but-unlisted name still draws
+// something rather than nothing. Only names that map to an imported icon are
+// added — no new weight, and a genuinely unknown name still returns null.
+const ICON_SYNONYMS: Record<string, LucideIcon> = {
+  table: LayoutGrid, grid: LayoutGrid, spreadsheet: LayoutGrid,
+  list: ClipboardList, "list-view": ClipboardList, rows: ClipboardList,
+  add: Plus, create: Plus, new: Plus,
+  dashboard: LayoutDashboard, overview: LayoutDashboard,
+  config: Settings, preferences: Settings,
+};
+
 /** Resolve an icon key to a Lucide component. Unknown keys → null. */
 export function resolveIcon(key: string | undefined | null): LucideIcon | null {
   if (!key || typeof key !== "string") return null;
-  return ICON_MAP[key.toLowerCase()] ?? null;
+  const k = key.toLowerCase().trim();
+  if (ICON_MAP[k]) return ICON_MAP[k];
+  if (ICON_SYNONYMS[k]) return ICON_SYNONYMS[k];
+  // `plus-circle` -> `plus`, `check-square` -> `check`: the shape wrapper is a
+  // style the map does not distinguish, so drop it and resolve the root.
+  const root = k.replace(/-(circle|square|outline|filled|fill|round|2|o)$/, "");
+  if (root !== k) return ICON_MAP[root] ?? ICON_SYNONYMS[root] ?? null;
+  return null;
 }
 
 /**

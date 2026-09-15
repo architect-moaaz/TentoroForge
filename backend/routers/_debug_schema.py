@@ -940,6 +940,23 @@ async def write_project_file(short_id: str, file_path: str, request: Request):
     full = (base_dir / file_path).resolve()
     if not str(full).startswith(str(base)):
         raise HTTPException(403, "path traversal blocked")
+    # WRITE WHERE THE READ RESOLVES. The GET above falls through into `app/` —
+    # the Blueprint projects the generated app into `<output_dir>/app/src/...` —
+    # but this write did not, so the editor READ `app/src/schemas/add-data.json`
+    # and WROTE `src/schemas/add-data.json` at the output root: a file nothing
+    # serves. Every editor save landed there, the green "Saved" was honest about
+    # the bytes and wrong about the place, and the page came back on refresh.
+    # Mirror the read: an existing file is written where the read finds it, and
+    # a NEW `src/…` file goes into the app when the app subdirectory exists
+    # (the output root's own `src` is never the generated application).
+    app_root = (base_dir / "app").resolve()
+    nested = (base_dir / "app" / file_path).resolve()
+    inside_app = str(nested).startswith(str(app_root))
+    if not full.exists() and inside_app and (
+        nested.exists()
+        or (app_root.is_dir() and file_path.replace("\\", "/").startswith("src/"))
+    ):
+        full = nested
     try:
         body = await request.json()
     except Exception:

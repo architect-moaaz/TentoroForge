@@ -7,16 +7,19 @@ import type { ALERT_VARIANTS } from "./Alert.schema";
 
 type Variant = (typeof ALERT_VARIANTS)[number];
 
-// Colors read the app's --color-* scale (emitted into every generated app's
-// globals.css from its palette) with the old hexes as fallbacks. Hardcoded
-// Tailwind-blue callouts were identical in every generated app forever —
-// one of the audited "same generator" tells.
+// Colors read the ONE token contract's status tints — `<status>-subtle` for
+// the callout surface, `<status>-subtle-foreground` for its text — filled from
+// the Blueprint's palette by the projector, so a callout wears the design's
+// colours and matches the status Badge. (Alert's `danger` maps to the
+// contract's `destructive`; `neutral` uses the muted surface.) The hex
+// fallbacks stand only when a token is unset. Same status semantics as
+// components/Badge/Badge.tsx — the two must not drift.
 const VARIANT_STYLES: Record<Variant, { background: string; color: string; border: string }> = {
-  neutral: { background: "var(--color-secondary-100, #f5f5f5)", color: "var(--color-secondary-800, #333)", border: "var(--color-secondary-200, #ddd)" },
-  info:    { background: "var(--color-info-100, #eff6ff)", color: "var(--color-info-800, #1e40af)", border: "var(--color-info-200, #bfdbfe)" },
-  success: { background: "var(--color-success-100, #f0fdf4)", color: "var(--color-success-800, #166534)", border: "var(--color-success-200, #bbf7d0)" },
-  danger:  { background: "var(--color-error-100, #fef2f2)", color: "var(--color-error-800, #991b1b)", border: "var(--color-error-200, #fecaca)" },
-  warning: { background: "var(--color-warning-100, #fffbeb)", color: "var(--color-warning-800, #92400e)", border: "var(--color-warning-200, #fde68a)" },
+  neutral: { background: "hsl(var(--muted, 210 40% 96%))",             color: "hsl(var(--foreground, 221 39% 11%))",                   border: "hsl(var(--border, 220 13% 91%))" },
+  info:    { background: "hsl(var(--info-subtle, 204 94% 94%))",       color: "hsl(var(--info-subtle-foreground, 201 96% 26%))",       border: "hsl(var(--info-subtle-foreground, 201 96% 26%) / 0.2)" },
+  success: { background: "hsl(var(--success-subtle, 141 79% 93%))",    color: "hsl(var(--success-subtle-foreground, 142 71% 22%))",    border: "hsl(var(--success-subtle-foreground, 142 71% 22%) / 0.2)" },
+  danger:  { background: "hsl(var(--destructive-subtle, 0 86% 97%))",  color: "hsl(var(--destructive-subtle-foreground, 0 74% 32%))",  border: "hsl(var(--destructive-subtle-foreground, 0 74% 32%) / 0.2)" },
+  warning: { background: "hsl(var(--warning-subtle, 48 96% 89%))",     color: "hsl(var(--warning-subtle-foreground, 31 92% 30%))",     border: "hsl(var(--warning-subtle-foreground, 31 92% 30%) / 0.2)" },
 };
 
 // Radius in rem, matching Tailwind equivalents (sharp≈sm, soft≈md, round≈lg)
@@ -30,10 +33,11 @@ type Props = {
   message: string;
   variant?: Variant;
   title?: string;
+  ariaLive?: "off" | "polite" | "assertive";
   style?: StyleSlotT;
 };
 
-export function Alert({ message, variant = "neutral", title, style }: Props) {
+export function Alert({ message, variant = "neutral", title, ariaLive, style }: Props) {
   const styles = VARIANT_STYLES[variant];
   const radiusScale = useRadiusScale();
   const elevation = useElevation();
@@ -50,6 +54,7 @@ export function Alert({ message, variant = "neutral", title, style }: Props) {
   return (
     <div
       role="alert"
+      aria-live={ariaLive}
       data-alert=""
       data-variant={variant}
       style={{

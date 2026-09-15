@@ -83,6 +83,29 @@ export interface RunMessage {
   diffSummary?: string;
 }
 
+/**
+ * Smith's post-build render review, live. The screenshots it took, the vision
+ * critic's analysis, and which pages it is re-composing — the utility window
+ * that comes up while Smith looks at what it built and narrates in chat.
+ * `null` until a review starts; carries no history (it means something only
+ * while it is happening), so it is never rebuilt from the run registry.
+ */
+export interface ReviewShot { route: string; image: string }
+export interface ReviewFinding {
+  route: string; kind: string; severity: string; note: string;
+}
+export interface ReviewState {
+  phase: "start" | "shots" | "analysis" | "fixing" | "done";
+  active: boolean;
+  round: number;
+  shots: ReviewShot[];
+  findings: ReviewFinding[];
+  fixing: string[];
+  converged?: boolean;
+  recomposed?: string[];
+  remaining?: string[];
+}
+
 export interface BlueprintRun {
   /** Smith's own words — it decides what to do, and says so. */
   messages: RunMessage[];
@@ -121,6 +144,8 @@ export interface BlueprintRun {
   usage: RunUsage | null;
   status: "idle" | "running" | "complete" | "error";
   error: string | null;
+  /** Smith's live render review, or null when none is happening. */
+  review: ReviewState | null;
   /**
    * The stage name a REATTACHED run is on, when this client did not watch the
    * stream that produced it and so has no `nodes` to read a label from.
@@ -145,6 +170,7 @@ const EMPTY: BlueprintRun = {
   usage: null,
   status: "idle",
   error: null,
+  review: null,
 };
 
 export interface StartOptions {
@@ -167,79 +193,142 @@ export function useBlueprintRun(projectId: string | null) {
   // True while this hook is driving its own stream. A reattached run must not
   // be overwritten by polling, and polling must stop the moment we start one.
   const ownStreamRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollCancelRef = useRef(false);
 
-  // REATTACH. The run's progress arrives over SSE and lives nowhere else, so a
-  // reload — or a session that expired and was signed back in — left the panel
-  // idle while the DAG carried on. The server now says whether a run is in
-  // flight; ask on mount, and keep asking until it is not.
+  // REATTACH BY POLLING. The run's progress arrives over SSE, but that stream
+  // is not the only way it reaches the panel: a reload, an expired-then-restored
+  // session, OR a stream that simply dropped mid-run (a proxy idle-timeout, a
+  // sleep, a flaky network) all leave the DAG running server-side with nobody
+  // listening. The registry keeps every node's state from the same events this
+  // reducer folds, so polling `/run` rebuilds the true state and keeps it
+  // current until the run is no longer active — this is what makes the status
+  // reliable when the stream is not.
+  const pollOnce = useCallback(async () => {
+    if (!projectId || pollCancelRef.current || ownStreamRef.current) return;
+    try {
+      const snap = await api.get<{
+        active?: boolean;
+        phase?: string;
+        stage?: string | null;
+        nodesDone?: number;
+        nodesTotal?: number;
+        callsDone?: number;
+        nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
+        elapsedMs?: number;
+        awaitingApproval?: boolean;
+        status?: string;
+        error?: string | null;
+      }>(`/api/projects/${projectId}/run`);
+      if (pollCancelRef.current || ownStreamRef.current) return;
+
+      if (snap.active) {
+        setRun((prev) => ({
+          ...prev,
+          nodesDone: snap.nodesDone ?? 0,
+          nodesTotal: snap.nodesTotal ?? 0,
+          callsDone: snap.callsDone ?? prev.callsDone,
+          nodes:
+            Array.isArray(snap.nodes) && snap.nodes.length > 0
+              ? snap.nodes.map((n) => ({
+                  key: n.key,
+                  state: n.state,
+                  subject: n.subject,
+                  calls: n.calls ?? 0,
+                }))
+              : prev.nodes,
+          awaitingApproval: Boolean(snap.awaitingApproval),
+          reattachedStage: snap.stage ?? null,
+          reattachedElapsedMs: snap.elapsedMs ?? null,
+          status: "running",
+          // Polling took over — a stream that dropped is no longer an error.
+          error: null,
+        }));
+        pollTimerRef.current = setTimeout(pollOnce, 4000);
+      } else if (snap.status === "error") {
+        setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
+      } else if (snap.status === "complete") {
+        // Apply the FINAL node states the snapshot carries — every node done,
+        // preview included. Flipping only `status` left the last active poll's
+        // nodes frozen, and that poll caught the run on its last node
+        // (`preview`) still running, so the panel stayed stuck at preview after
+        // the run had actually ended.
+        setRun((prev) =>
+          prev.status === "running"
+            ? {
+                ...prev,
+                nodes:
+                  Array.isArray(snap.nodes) && snap.nodes.length > 0
+                    ? snap.nodes.map((n) => ({
+                        key: n.key,
+                        state: n.state,
+                        subject: n.subject,
+                        calls: n.calls ?? 0,
+                      }))
+                    : prev.nodes,
+                nodesDone: snap.nodesDone ?? prev.nodesDone,
+                nodesTotal: snap.nodesTotal ?? prev.nodesTotal,
+                callsDone: snap.callsDone ?? prev.callsDone,
+                awaitingApproval: Boolean(snap.awaitingApproval),
+                status: "complete",
+                // The `review` events never reach a polling client (the run
+                // registry does not carry them), so a review window caught
+                // mid-phase would spin forever after the run ended. Settle it.
+                review: finalizeReview(prev.review),
+              }
+            : prev,
+        );
+      }
+    } catch {
+      // A project with no run answers plainly; a transient failure is retried
+      // rather than surfaced — the panel must not flicker to an error because
+      // one poll missed.
+      if (!pollCancelRef.current && !ownStreamRef.current) {
+        pollTimerRef.current = setTimeout(pollOnce, 4000);
+      }
+    }
+  }, [projectId]);
+
+  // Hand control back to polling — the stream dropped or detached, but the run
+  // is (or may be) still going. Clears any pending poll and starts a fresh one.
+  const resumePolling = useCallback(() => {
+    ownStreamRef.current = false;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    void pollOnce();
+  }, [pollOnce]);
+
   useEffect(() => {
     if (!projectId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      if (cancelled || ownStreamRef.current) return;
-      try {
-        const snap = await api.get<{
-          active?: boolean;
-          phase?: string;
-          stage?: string | null;
-          nodesDone?: number;
-          nodesTotal?: number;
-          callsDone?: number;
-          nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
-          elapsedMs?: number;
-          awaitingApproval?: boolean;
-          status?: string;
-          error?: string | null;
-        }>(`/api/projects/${projectId}/run`);
-        if (cancelled || ownStreamRef.current) return;
-
-        if (snap.active) {
-          setRun((prev) => ({
-            ...prev,
-            // Nodes are not replayed — only how many. The panel counts, and a
-            // fabricated node list would claim names we were not told.
-            nodesDone: snap.nodesDone ?? 0,
-            nodesTotal: snap.nodesTotal ?? 0,
-            callsDone: snap.callsDone ?? prev.callsDone,
-            // The rows come back with the count: the registry keeps each node's
-            // state from the same events this reducer folds, so a reload no longer
-            // shows a bare counter for the rest of the run.
-            nodes:
-              Array.isArray(snap.nodes) && snap.nodes.length > 0
-                ? snap.nodes.map((n) => ({
-                    key: n.key,
-                    state: n.state,
-                    subject: n.subject,
-                    calls: n.calls ?? 0,
-                  }))
-                : prev.nodes,
-            awaitingApproval: Boolean(snap.awaitingApproval),
-            reattachedStage: snap.stage ?? null,
-            reattachedElapsedMs: snap.elapsedMs ?? null,
-            status: "running",
-          }));
-          timer = setTimeout(poll, 4000);
-        } else if (snap.status === "error") {
-          setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
-        } else if (snap.status === "complete") {
-          setRun((prev) =>
-            prev.status === "running" ? { ...prev, status: "complete" } : prev,
-          );
-        }
-      } catch {
-        // A project with no run answers plainly; anything else is not worth
-        // interrupting the page for.
-      }
-    };
-
-    void poll();
+    pollCancelRef.current = false;
+    void pollOnce();
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      pollCancelRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [projectId]);
+  }, [projectId, pollOnce]);
+
+  // CATCH UP WHEN THE TAB WAKES. `smith/chat` streams the build over one
+  // connection; Chrome suspends a backgrounded/asleep tab's network I/O
+  // (net::ERR_NETWORK_IO_SUSPENDED), dropping the stream — and a suspended tab
+  // also throttles/pauses the 4s poll timer, so after a wake the run can sit
+  // stale for seconds (or look stuck) before the poll catches it up. On the tab
+  // becoming visible or the browser reporting `online`, poll once immediately.
+  // Safe: `pollOnce` no-ops while a live stream is still owned (its own guard),
+  // and only advances state once polling has taken over from a dropped stream.
+  useEffect(() => {
+    if (!projectId) return;
+    const onWake = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      void pollOnce();
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("online", onWake);
+    return () => {
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("online", onWake);
+    };
+  }, [projectId, pollOnce]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -317,8 +406,20 @@ export function useBlueprintRun(projectId: string | null) {
       const decoder = new TextDecoder();
       let buffer = "";
       let currentEvent = "";
+      // A terminal `done` means the turn is genuinely over; anything else that
+      // ends the stream is a drop, and the run may still be going.
+      let gotTerminal = false;
 
       const apply = (event: string, data: Record<string, unknown>) => {
+        if (event === "done" && data.status === "timeout") {
+          // The turn was released because it ran long — but the DAG is STILL
+          // running server-side. Do not mark it complete; hand back to polling,
+          // which tracks it to the real end and updates the panel the whole way.
+          gotTerminal = true;
+          resumePolling();
+          return;
+        }
+        if (event === "done") gotTerminal = true;
         setRun((prev) => reduce(prev, event, data));
       };
 
@@ -350,18 +451,30 @@ export function useBlueprintRun(projectId: string | null) {
         return;
       }
 
-      // The stream ended without a terminal event: the connection dropped
-      // mid-run. Say so rather than leaving a spinner that never resolves.
-      setRun((r) =>
-        r.status === "running"
-          ? { ...r, status: "error", error: "The run ended unexpectedly." }
-          : r,
-      );
+      // The stream ended without a terminal `done`: the connection dropped
+      // mid-run (proxy idle-timeout, sleep, flaky network). The DAG is almost
+      // certainly still running, so DO NOT call it an error and DO NOT leave the
+      // panel frozen at the last event — hand back to polling, which reads the
+      // registry and tracks the run to its real end. This is the fix for a
+      // status that used to stop updating whenever the stream blinked.
+      if (!gotTerminal) resumePolling();
     },
-    [projectId, stop],
+    [projectId, stop, resumePolling],
   );
 
   return { run, start, stop };
+}
+
+/** Close out a review left mid-phase. The render review streams its phases —
+ *  shots, analysis, fixing, done — over the same connection as everything else;
+ *  a long re-compose drops the stream, the panel falls back to polling the run
+ *  registry (which carries node state but NOT `review` events), and the window
+ *  never receives its terminal `review:done`, so it spins on "fixing… round 2"
+ *  forever even though the turn ended. When the run itself completes, settle the
+ *  window: stop the spinner, mark it done, keep it up only if it did work. */
+export function finalizeReview(review: ReviewState | null): ReviewState | null {
+  if (!review || review.phase === "done") return review;
+  return { ...review, phase: "done", fixing: [], active: review.round > 0 };
 }
 
 /** One event → the next run state. Pure, so the reducer is testable alone. */
@@ -415,6 +528,49 @@ export function reduce(
           diffSummary: (data.diffSummary as string) || undefined,
         }].filter((m) => m.text),
       };
+
+    case "review": {
+      // The live render review. Each phase folds into one running ReviewState
+      // so the window is a single evolving view, not a stack of events.
+      const phase = String(data.phase ?? "");
+      const cur: ReviewState = prev.review ?? {
+        phase: "start", active: true, round: 0,
+        shots: [], findings: [], fixing: [],
+      };
+      if (phase === "start") {
+        return { ...prev, review: {
+          phase: "start", active: true, round: 0,
+          shots: [], findings: [], fixing: [] } };
+      }
+      if (phase === "shots") {
+        return { ...prev, review: {
+          ...cur, phase: "shots", active: true, fixing: [],
+          shots: (data.pages as ReviewShot[]) ?? [] } };
+      }
+      if (phase === "analysis") {
+        return { ...prev, review: {
+          ...cur, phase: "analysis", active: true,
+          findings: (data.findings as ReviewFinding[]) ?? [] } };
+      }
+      if (phase === "fixing") {
+        return { ...prev, review: {
+          ...cur, phase: "fixing", active: true,
+          round: cur.round + 1,
+          fixing: (data.pages as string[]) ?? [] } };
+      }
+      if (phase === "done") {
+        return { ...prev, review: {
+          ...cur, phase: "done",
+          // A review that found nothing, or could not run, closes itself; one
+          // that did work stays up so the user can see what changed.
+          active: !data.skipped && (cur.round > 0),
+          fixing: [],
+          converged: Boolean(data.converged),
+          recomposed: (data.recomposed as string[]) ?? [],
+          remaining: (data.remaining as string[]) ?? [] } };
+      }
+      return prev;
+    }
 
     case "plan": {
       const keys = (data.nodes as string[]) ?? [];
@@ -490,11 +646,24 @@ export function reduce(
 
     case "done": {
       const rep = (data.report ?? {}) as Record<string, unknown>;
+      const awaiting = Boolean(data.awaitingApproval);
       return {
         ...prev,
         status: "complete",
-        awaitingApproval: Boolean(data.awaitingApproval),
+        awaitingApproval: awaiting,
         unbuilt: (rep.unbuilt as BlueprintRun["unbuilt"]) ?? [],
+        // A completed run (not a pause at the approval gate) has no node still
+        // running. Mark any lingering one done so the panel never freezes on
+        // the last node — `preview` — if its `node:done` was missed on a stream
+        // that blinked just before the terminal event.
+        nodes: awaiting
+          ? prev.nodes
+          : prev.nodes.map((n) =>
+              n.state === "running" ? { ...n, state: "done", subject: undefined } : n,
+            ),
+        // The turn ended; a review still mid-phase never got its own terminal
+        // event — settle it so its window stops spinning.
+        review: awaiting ? prev.review : finalizeReview(prev.review),
       };
     }
 

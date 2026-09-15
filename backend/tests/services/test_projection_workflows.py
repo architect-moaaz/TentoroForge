@@ -71,10 +71,10 @@ def test_a_step_is_its_catalog_node_with_defaults_under_the_declared_config(tmp_
 def test_condition_rule_lands_on_the_key_the_engine_evaluates(tmp_path):
     project_workflows(_doc([
         {"key": "urgent", "name": "Is it urgent?", "type": "condition",
-         "config": {"condition": "priority == 'high'"}},
+         "config": {"condition": "priority = 'high'"}},
     ]), tmp_path)
     cond = _load(tmp_path)["definition"]["nodes"][1]
-    assert cond["data"]["config"]["expression"] == "priority == 'high'"
+    assert cond["data"]["config"]["expression"] == "priority = 'high'"
     assert "condition" not in cond["data"]["config"]
 
 
@@ -117,3 +117,110 @@ def test_trigger_kind_is_a_catalog_trigger_type(tmp_path):
     wf = _load(tmp_path)["definition"]
     assert wf["trigger"] == {"type": "api_event", "event": "ticket.created"}
     assert wf["nodes"][0]["data"]["config"]["type"] == "api_event"
+
+
+# --- who a human step waits on --------------------------------------------------
+
+
+def test_a_role_assigned_task_names_its_roles_for_the_runtime():
+    """The Blueprint states `assignType: role, assignTarget: [...]`; the runtime
+    reads `assigneeRole`. Untranslated, a guest's refund request created a task
+    filed under "admin" that no inbox showed."""
+    from services.blueprint.projection import _name_the_assignee
+
+    config = {"assignType": "role", "assignTarget": ["Reception", "Front Office Manager"]}
+    _name_the_assignee(config, "FLOW-002", {"key": "triage_case"})
+    assert config["assigneeRole"] == "Reception,Front Office Manager"
+    assert "assignee" not in config
+
+    single = {"assignType": "role", "assignTarget": "Finance"}
+    _name_the_assignee(single, "FLOW-003", {"key": "post"})
+    assert single["assigneeRole"] == "Finance"
+
+    person = {"assignType": "user", "assignTarget": ["ceo@criterion.test"]}
+    _name_the_assignee(person, "FLOW-004", {"key": "sign"})
+    assert person["assignee"] == "ceo@criterion.test"
+
+    authored = {"assigneeRole": "CEO", "assignType": "role", "assignTarget": ["Finance"]}
+    _name_the_assignee(authored, "FLOW-005", {"key": "x"})
+    assert authored["assigneeRole"] == "CEO"
+
+
+
+
+# --- what a human step asks, what a set-variable computes, what a gateway counts
+
+
+def test_a_task_asks_for_what_later_steps_read_off_it():
+    """Later steps read `{{triage.overrideReason}}`; the generic task page
+    collected a decision and a comment, the placeholder stayed text, and the
+    insert failed on a uuid column. What the workflow reads off a task that
+    the runtime does not provide is the task's form."""
+    from services.blueprint.projection import task_form_fields
+
+    steps = [
+        {"key": "triage", "type": "user_task", "config": {"assignType": "role", "assignTarget": ["Reception"]}},
+        {"key": "record", "type": "action", "config": {"actionType": "set_variable",
+                                                        "value": "{{triage.overrideReason}}"}},
+        {"key": "raiser", "type": "action", "config": {"actionType": "set_variable",
+                                                        "value": "{{triage.userId}}"}},
+        {"key": "insert", "type": "action", "config": {"actionType": "db_insert",
+                                                        "values": {"note": "{{triage.overrideReason}}",
+                                                                   "who": "{{ triage.completedBy }}"}}},
+    ]
+    fields = task_form_fields("triage", steps)
+    assert fields == [{"name": "overrideReason", "label": "Override reason", "kind": "textarea", "required": True}]
+
+
+def test_a_set_variable_that_computes_is_an_expression():
+    from services.blueprint.projection import _reads_as_expression
+
+    assert _reads_as_expression('refundType in ["Gesture (SR)", "Early Departure"]')
+    assert _reads_as_expression("amountRequested > 100 and isServiceRecovery")
+    assert not _reads_as_expression("Pending approval")
+    assert not _reads_as_expression("{{triage.overrideReason}}")
+    assert not _reads_as_expression(12)
+
+
+def test_a_gateway_counts_a_query_s_rows_not_its_keys():
+    """A db_query answers `{rows, count}`; `count(check_duplicates)` counted
+    the object's two keys, so "Duplicate case found?" was always yes."""
+    from services.blueprint.projection import _step_config
+    from services.catalog import workflow_nodes
+
+    catalog = workflow_nodes()
+    steps = [
+        {"key": "check_duplicates", "type": "action",
+         "config": {"actionType": "db_query", "table": "refund_cases", "where": {"confirmationNumber": "{{confirmationNumber}}"}}},
+        {"key": "duplicate_gateway", "type": "condition", "config": {"expression": "count(check_duplicates) > 0"}},
+        {"key": "flag", "type": "action",
+         "config": {"actionType": "set_variable", "variableName": "isServiceRecovery",
+                    "value": 'refundType in ["Gesture (SR)"]'}},
+        {"key": "triage", "type": "user_task", "config": {"assignType": "role", "assignTarget": ["Reception"]}},
+        {"key": "record", "type": "action", "config": {"actionType": "set_variable", "variableName": "reason",
+                                                        "value": "{{triage.overrideReason}}"}},
+    ]
+    gate = _step_config(steps[1], {}, catalog, wf_id="FLOW-002", steps=steps)
+    assert gate["expression"] == "check_duplicates.count > 0"
+    flag = _step_config(steps[2], {}, catalog, wf_id="FLOW-002", steps=steps)
+    assert flag["expression"] == 'refundType in ["Gesture (SR)"]' and "value" not in flag
+    record = _step_config(steps[4], {}, catalog, wf_id="FLOW-002", steps=steps)
+    assert record["value"] == "{{triage.overrideReason}}" and "expression" not in record
+    triage = _step_config(steps[3], {}, catalog, wf_id="FLOW-002", steps=steps)
+    assert triage["assigneeRole"] == "Reception"
+    assert triage["formBinding"] == {"fields": [
+        {"name": "overrideReason", "label": "Override reason", "kind": "textarea", "required": True}]}
+
+
+def test_a_workflow_condition_written_in_javascript_speaks_feel():
+    """The engine folds nothing: `caseRow == null` failed to parse and the gate
+    meant to bar a poster failed the whole run instead."""
+    from services.blueprint.projection import feel_condition, _step_config
+    from services.catalog import workflow_nodes
+
+    assert feel_condition('user.role != "Finance" or caseRow == null') == 'user.role != "Finance" or caseRow = null'
+    assert feel_condition("a === 1 && b !== 2 || c") == "a = 1 and b != 2 or c"
+    assert feel_condition('note = "a == b"') == 'note = "a == b"'
+    gate = _step_config({"key": "g", "type": "condition", "config": {"expression": "x == null"}}, {}, workflow_nodes(), wf_id="F", steps=[])
+    assert gate["expression"] == "x = null"
+

@@ -59,6 +59,11 @@ logger = logging.getLogger(__name__)
 
 from services.section_layout import shape_sections
 
+# A route addresses one existing record when it carries a dynamic id segment
+# (`/records/[id]`, `/records/[id]/edit`). A Next.js catch-all (`[...slug]`) is
+# NOT one — it is the dev editor route — so a leading dot after `[` is excluded.
+_ROUTE_HAS_ID = re.compile(r"/\[[^.\]/][^\]/]*\]")
+
 # A2UI container props that carry child references.
 _CHILD_KEYS = ("children", "child")
 
@@ -187,6 +192,86 @@ def _humanize(name: str) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in spaced.split()) or "Value"
 
 
+#: A KPI LABEL NAMES ITS MEASURE. "Amount requested outstanding" is a SUM of
+#: `amountRequested` over the cases that are outstanding; the converter bound
+#: every tile to `count` of a guessed entity, so a dashboard whose contract
+#: asked for issued value, denied value and pending value showed counts —
+#: of Approvals. The label's words against the entities' numeric columns say
+#: which measure, and which entity carries it.
+_MEASURE_WORDS = frozenset({"amount", "value", "total", "sum", "revenue", "spend",
+                            "cost", "balance", "price", "fee", "worth", "refunded"})
+_COUNT_WORDS = frozenset({"count", "number", "cases", "requests", "items", "open"})
+_NUMERIC_TYPES = frozenset({"decimal", "numeric", "integer", "int", "float", "money",
+                            "currency", "double", "bigint", "real", "number", "smallint"})
+
+
+def _words(text: str) -> list[str]:
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(text or "").replace("_", " "))
+    return [w for w in re.split(r"[^a-z0-9]+", spaced.lower()) if w]
+
+
+def _measure_for_label(label: str, entity: str | None, registry: dict) -> tuple[str | None, dict]:
+    """(entity, metric): a sum/avg over the numeric column the label names,
+    on the entity that carries it; otherwise a count on `entity`."""
+    words = set(_words(label))
+    if not (words & _MEASURE_WORDS) or (words & {"count", "number"}):
+        return entity, {"fn": "count"}
+    ents = registry.get("entities") or {}
+    order = ([entity] if entity in ents else []) + [e for e in ents if e != entity]
+    best: tuple[int, str, str] | None = None
+    for ename in order:
+        for col in (ents.get(ename) or {}).get("columns") or []:
+            if str(col.get("type") or "").lower() not in _NUMERIC_TYPES:
+                continue
+            score = len(set(_words(col["name"])) & words)
+            if score and (best is None or score > best[0]):
+                best = (score, ename, col["name"])
+    fn = "avg" if words & {"average", "avg", "mean"} else "sum"
+    if best is None:
+        # "Issued value" names no column by word; the entity's own amount
+        # column is the measure a value of it means.
+        for col in (ents.get(entity or "") or {}).get("columns") or []:
+            if (str(col.get("type") or "").lower() in _NUMERIC_TYPES
+                    and set(_words(col["name"])) & _MEASURE_WORDS):
+                return entity, {"fn": fn, "field": col["name"]}
+        return entity, {"fn": "count"}
+    return best[1], {"fn": fn, "field": best[2]}
+
+
+def _filter_owner(label: str, entity: str | None, registry: dict, first: str = "") -> tuple[str | None, dict | None]:
+    """(entity, filter): the entity whose enum the label names — the current
+    one first, then the page's, then any. "Awaiting posting" names a status
+    of RefundCase, whatever pointer the composer hung the tile on."""
+    ents = registry.get("entities") or {}
+    order = [e for e in (entity, first) if e in ents]
+    order += [e for e in ents if e not in order]
+    for ename in order:
+        filt = _enum_filter(label, ename, registry)
+        if filt:
+            return ename, filt
+    return entity, None
+
+
+def _entity_owning_columns(keys: list[str], entity: str | None, registry: dict) -> str | None:
+    """The entity whose columns the table's own column keys name best.
+
+    "Cases needing attention" was bound to the approvals list and drew
+    refund-case columns — every cell a dash. The columns the composer chose
+    are the strongest statement of what the rows are."""
+    ents = registry.get("entities") or {}
+    want = {_slugify(k) for k in keys if k}
+    if not want:
+        return None
+    def score(ename: str) -> int:
+        cols = {_slugify(c.get("name", "")) for c in (ents.get(ename) or {}).get("columns") or []}
+        return len(want & cols)
+    current = score(entity) if entity in ents else 0
+    best = max(ents, key=score, default=None)
+    if best and score(best) > current:
+        return best
+    return None
+
+
 def _entity_index(registry: dict) -> dict[str, str]:
     """Every reasonable alias for an entity → its canonical name."""
     idx: dict[str, str] = {}
@@ -221,6 +306,73 @@ def _slug_for(entity: str, registry: dict) -> str:
     return ent.get("slug") or ent.get("camel") or entity.lower()
 
 
+def _source_name_for(entity: str, registry: dict) -> str:
+    """The list source a page reads an entity's rows from, as an identifier:
+    `properties`, `refundCases` — the slug with its dashes folded."""
+    ent = (registry.get("entities") or {}).get(entity) or {}
+    slug = str(ent.get("slug") or ent.get("plural") or "")
+    if not slug or slug.lower() == entity.lower():
+        # No table name to read the plural off: say it the plain English way.
+        base = ent.get("camel") or (entity[:1].lower() + entity[1:])
+        slug = base[:-1] + "ies" if base.endswith("y") and base[-2:-1] not in "aeiou" else base + "s"
+    parts = [p for p in slug.replace("_", "-").split("-") if p]
+    return parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:]) if parts else entity.lower()
+
+
+def _label_column(entity: str, registry: dict, preferred: str = "") -> str:
+    """What to show for a row of `entity` in a dropdown."""
+    cols = [str(c.get("name") or "") for c in
+            ((registry.get("entities") or {}).get(entity) or {}).get("columns") or []]
+    if preferred and preferred in cols:
+        return preferred
+    for candidate in ("name", "title", "label", "fullName", "displayName", "code", "email"):
+        if candidate in cols:
+            return candidate
+    return preferred or "name"
+
+
+def option_source(binder: Any, registry: dict, spoken: Any, *,
+                  references: str = "") -> dict | None:
+    """A2UI's way of saying where a dropdown's options come from → Forge's.
+
+    THE COMPOSER THINKS ENTITY-FIRST AND THE CONTRACT READS SOURCE-FIRST. The
+    composer writes `optionsFrom: {entity, labelField, valueField}` — the
+    entity whose rows are the options, named by id or by name. `Select` and a
+    Form field's `interaction.optionsFrom` read `{source, value, label}`,
+    where `source` is a name in the page's `dataSources`. Same meaning, and
+    every intake form on one real build was refused over the difference
+    ("'source' is a required property; 'entity' … were unexpected") while
+    the page's data model held nothing that listed the entity. Translation
+    registers the list the source names, exactly as a bound pointer would.
+
+    `references` is the column's own foreign key, for a field the composer
+    named after one without saying where its options come from.
+    """
+    hint = ""
+    label_pref = ""
+    value = "id"
+    if isinstance(spoken, dict):
+        if spoken.get("source"):
+            return None  # already the contract's shape
+        hint = str(spoken.get("entity") or spoken.get("table") or "")
+        label_pref = str(spoken.get("labelField") or spoken.get("label") or "")
+        value = str(spoken.get("valueField") or spoken.get("value") or "id")
+    entity = None
+    for candidate in (hint, references):
+        if not candidate:
+            continue
+        entity = (registry.get("entityNames") or {}).get(candidate) or candidate
+        entity = entity if entity in (registry.get("entities") or {}) else _resolve_entity(entity, binder.idx)
+        if entity:
+            break
+    if not entity:
+        return None
+    name = binder._add_source({"name": _source_name_for(entity, registry),
+                               "entity": entity, "op": "list"})
+    return {"source": name, "value": value or "id",
+            "label": _label_column(entity, registry, label_pref)}
+
+
 # Words that describe a boolean flag, not an enum member. Checked before enums
 # because "Active Users" against role[admin|user] otherwise matches the literal
 # substring "user" and emits {"role": "user"} — a filter that is plausible,
@@ -242,6 +394,7 @@ _ENUM_LABEL_SYNONYMS: dict[str, tuple[str, ...]] = {
     "cancelled": ("canceled", "voided"),
     "approved": ("accepted",),
     "rejected": ("declined", "denied"),
+    "pendingapproval": ("outstanding", "awaitingapproval"),
 }
 
 
@@ -282,6 +435,10 @@ def _enum_filter(label: str, entity: str, registry: dict) -> dict | None:
             if not v:
                 continue
             if v in want:
+                return {col["name"]: value}
+            # "Awaiting posting" names the value "Approved awaiting posting"
+            # by its distinctive tail; the whole value need not be spelled.
+            if len(want) >= 6 and want in v:
                 return {col["name"]: value}
             if any(syn in want for syn in _ENUM_LABEL_SYNONYMS.get(v, ())):
                 return {col["name"]: value}
@@ -444,19 +601,44 @@ class _Binder:
             )
             return None
 
-        self.entity_of[str(comp.get("id"))] = entity
-        slug = _slug_for(entity, self.registry)
         kind = comp.get("component")
 
+        if kind == "Table" and prop == "rows":
+            raw_cols = comp.get("columns")
+            if isinstance(raw_cols, dict) and raw_cols.get("path"):
+                raw_cols = self._at(str(raw_cols["path"]))
+            keys = [str(c.get("key") or c.get("field") or "")
+                    for c in (raw_cols if isinstance(raw_cols, list) else []) if isinstance(c, dict)]
+            owner = _entity_owning_columns(keys, entity, self.registry)
+            if owner and owner != entity:
+                self.assumptions.append(
+                    f'{comp.get("id")}.rows: "{path}" resolved to {entity}, but the '
+                    f"table's columns are {owner}'s — bound to {owner}.")
+                entity = owner
+
         if kind == "MetricTile" or prop == "value":
-            filt = _enum_filter(label, entity, self.registry)
+            owner, filt = _filter_owner(label, entity, self.registry,
+                                        str(getattr(self, "page_entity", "") or ""))
+            measured, metric = _measure_for_label(label, owner, self.registry)
+            if measured and measured != owner:
+                owner = measured
+                filt = _enum_filter(label, owner, self.registry)
+            if owner and owner != entity:
+                self.assumptions.append(
+                    f'{comp.get("id")}.{prop}: label {label!r} names {owner}\'s '
+                    f"{'measure' if metric.get('field') else 'status'}, not {entity}'s — bound to {owner}.")
+                entity = owner
+
+        self.entity_of[str(comp.get("id"))] = entity
+        slug = _slug_for(entity, self.registry)
+
+        if kind == "MetricTile" or prop == "value":
             base = _slugify(label) or f"{slug}Count"
             name = self._unique(base)
             # The filter belongs INSIDE the metric. `AggregateSource` has no
             # source-level `filter` field, so putting it there is silently
             # dropped and every KPI reports the unfiltered total — which is how
             # "In Progress" first rendered 10 against 3 real rows.
-            metric: dict[str, Any] = {"fn": "count"}
             if filt:
                 metric["filter"] = filt
             src: dict[str, Any] = {
@@ -535,9 +717,22 @@ class _Binder:
         nothing about `record_workspace` and answers None, and the authority's
         map is the one covering every declared kind.
         """
+        # A ROUTE WITH A RECORD ID ADDRESSES ONE EXISTING INSTANCE, whatever
+        # A2UI named the page. `/records/[id]/edit` and `/records/[id]` classify
+        # as `form`/unclassified, not `record` — but both show and act on the
+        # single record the `[id]` segment names, so their `/entity/*` pointers
+        # ARE record-scoped and must bind through a `get`-by-id source. Without
+        # this an edit page dropped every such pointer: a KeyValueList lost the
+        # `value` its contract requires, and the Save form had no record for its
+        # Update workflow to name. Route-driven, the same rule `_family_of`
+        # already applies (the route outranks the declared pattern); the `[...]`
+        # catch-all is excluded — it is the dev editor route, not a record.
+        if _ROUTE_HAS_ID.search(str(getattr(self, "route", "") or "")):
+            return True
         try:
             from services.a2ui_authority import _family_of
-            return _family_of(getattr(self, "page_kind", "")) == "record"
+            return _family_of(getattr(self, "page_kind", ""),
+                              getattr(self, "route", "")) == "record"
         except Exception:  # noqa: BLE001 — a lookup must not fail a binding
             return False
 
@@ -618,9 +813,17 @@ class _Binder:
                 f"binding a raw count, which would render 40 rows as \"40%\".")
             return None
 
+        owner, filt = _filter_owner(label, entity, self.registry,
+                                    str(getattr(self, "page_entity", "") or ""))
+        measured, metric = _measure_for_label(label, owner, self.registry)
+        if measured and measured != owner:
+            owner = measured
+            filt = _enum_filter(label, owner, self.registry)
+        entity = owner or entity
         slug = _slug_for(entity, self.registry)
         name = self._unique(_slugify(label) or f"{slug}Measure")
-        metric: dict[str, Any] = {"fn": "ratio" if pct else "count"}
+        if pct:
+            metric = {"fn": "ratio"}
         if filt:
             metric["filter"] = filt
         self.sources.append({"name": name, "entity": entity, "op": "aggregate",
@@ -701,10 +904,18 @@ class _Binder:
 
         if node_type:
             props.update(extra or {})
-            return node_type, props
-        # `_decide` returns None for foreign keys and for anything it has no
-        # opinion about — the composer's own choice stands there.
-        return str(comp.get("component")), props
+        kind = node_type or str(comp.get("component"))
+        # A SELECT OVER A FOREIGN KEY SAYS WHERE ITS ROWS COME FROM. Rebuilding
+        # the props from the column dropped the composer's `optionsFrom`, and a
+        # column that references another entity said nothing either; the
+        # dropdown shipped with no options and no source. Both are the same
+        # list, registered here so the page fetches it.
+        if kind in ("Select", "Combobox", "MultiSelect") and not props.get("options"):
+            translated = option_source(self, self.registry, comp.get("optionsFrom"),
+                                       references=str(col.get("references") or ""))
+            if translated:
+                props["optionsFrom"] = translated
+        return kind, props
 
     def resolve_breakdown(self, comp: dict, rows: list) -> list[dict] | None:
         """A KPI's breakdown rows → one filtered aggregate each.
@@ -839,6 +1050,83 @@ def _enum_members(kind: str, prop: str) -> set[str]:
         return set()
     members = spec.get("enum")
     return {str(m) for m in members} if isinstance(members, list) else set()
+
+
+def _contract_prop(kind: str, prop: str) -> dict:
+    """`kind.prop`'s contract entry as `{"type": ..., "optional": ...}`, or {}.
+
+    Read from the SAME catalogue `page_planner.validate_props` judges the
+    finished page by — the tracked `contracts/component-catalog.json` — so
+    what is coerced here and what is checked there cannot disagree. The
+    registry's generated Zod contracts are the fallback: they are richer, but
+    they are a build artefact a checkout may not have, and a coercion that
+    silently did nothing on such a checkout is what this first shipped as.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        entry = load_catalog().get(kind) or {}
+        schema = entry.get("props") or {}
+        spec = (schema.get("properties") or {}).get(prop)
+        if isinstance(spec, dict):
+            return {"type": spec.get("type"),
+                    "optional": prop not in (schema.get("required") or [])}
+    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+        pass
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+        return dict(props_for(kind, load_contracts()).get(prop) or {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _is_required(kind: str, prop: str) -> bool:
+    """The contract knows the prop and does not mark it optional."""
+    spec = _contract_prop(kind, prop)
+    return bool(spec) and not spec.get("optional")
+
+
+def _coerce_copy(kind: str, prop: str, value: Any) -> Any:
+    """A literal read out of the sample model, in the type the contract asks
+    for.
+
+    A2UI types a caption as DynamicString, which admits a binding; the
+    composer bound `Table.caption` to a count and the sample model answered
+    `6`. The contract wants a string, so the page was refused for a value that
+    was right in everything but its type. The same value, typed as declared:
+    a number becomes its text, a numeric string becomes its number, "true"
+    becomes true. Nothing is invented; only the spelling changes.
+    """
+    if isinstance(value, bool):
+        scalar_kind = "boolean"
+    elif isinstance(value, (int, float)):
+        scalar_kind = "number"
+    elif isinstance(value, str):
+        scalar_kind = "string"
+    else:
+        return value
+    declared = str(_contract_prop(kind, prop).get("type") or "")
+    if declared == "string" and scalar_kind != "string":
+        return "true" if value is True else "false" if value is False else str(value)
+    if declared in ("number", "integer") and scalar_kind == "string":
+        try:
+            num = float(value)
+            return int(num) if declared == "integer" or num.is_integer() else num
+        except ValueError:
+            return value
+    if declared == "boolean" and scalar_kind == "string":
+        low = value.strip().lower()
+        if low in ("true", "false"):
+            return low == "true"
+    return value
+
+
+def _has_pointer(value: Any) -> bool:
+    """Whether a literal carries `{"path": ...}` anywhere inside it."""
+    if isinstance(value, dict):
+        return "path" in value or any(_has_pointer(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_pointer(v) for v in value)
+    return False
 
 
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
@@ -1046,6 +1334,134 @@ def dangling_bindings(schema: dict) -> list[str]:
     return sorted(n for n in found if n and n not in declared)
 
 
+def _enum_options_for_field(registry: dict, field_name: str,
+                            prefer_entity: str | None) -> list[dict] | None:
+    """Declared ``options`` for a Form field that names a schema enum column.
+
+    A workflow field like ``mediaType`` is written to a column the form's route
+    entity does not own — ``ConditionEvidence`` reached through the workflow's
+    insert step, on a ``/rentals/[id]/return`` form whose entity is ``Rental`` —
+    so the composer ships it as a bare ``select`` with neither ``options`` nor a
+    source, and the Form-field contract refuses a select with neither. The enum
+    is still knowable from the schema: resolve the column by the field's name —
+    the form entity first, then a UNIQUE match across entities so an ambiguous
+    name (a ``status`` on Rental AND Dispute, different vocabularies) is left
+    alone rather than guessed. Reads the enum key tolerantly, since the registry
+    has carried it as ``enum``/``enum_values``/``enumValues`` at different times.
+    """
+    ents = (registry or {}).get("entities") or {}
+    want = _slugify(field_name)
+    if not want:
+        return None
+
+    def col_enum(entity: str | None) -> list[str] | None:
+        for c in (ents.get(entity or "") or {}).get("columns") or []:
+            if _slugify(str(c.get("name") or "")) != want:
+                continue
+            vals = c.get("enum") or c.get("enum_values") or c.get("enumValues")
+            return [str(v) for v in vals] if isinstance(vals, list) and vals else None
+        return None
+
+    vals = col_enum(prefer_entity)
+    if not vals:
+        hits = [v for ent in ents if (v := col_enum(ent))]
+        vals = hits[0] if len(hits) == 1 else None
+    return [{"value": v, "label": v} for v in vals] if vals else None
+
+
+def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
+    """Every place the tree says where options come from, in the contract's words.
+
+    Three shapes, one meaning. A declarative Form field carries `optionsFrom`
+    at the top level or under `interaction`; a Select-like node carries it in
+    `props`; and a list of `items` may name each choice by label alone. The
+    Form field schema reads `interaction.optionsFrom` and allows an empty
+    `options` beside it — the shape a runtime-sourced dropdown ships in; the
+    Select contract still wants a declared option; and an item needs a
+    `value` — which, unsaid, is its label. Mutates in place; runs
+    before `dataSources` is sealed so the lists it registers ship with the
+    page.
+    """
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for n in node:
+                walk(n)
+            return
+        if not isinstance(node, dict):
+            return
+        props = node.get("props")
+        if isinstance(props, dict):
+            kind = str(node.get("type") or "")
+            if kind in ("Select", "Combobox", "MultiSelect", "RadioGroup"):
+                # The source is translated, and an empty `options` beside it
+                # goes: declared options number at least one, and a dropdown
+                # whose rows come from a list at render time declares none.
+                translated = option_source(binder, registry, props.get("optionsFrom"))
+                if translated:
+                    props["optionsFrom"] = translated
+                if props.get("optionsFrom") and props.get("options") == []:
+                    props.pop("options")
+            if kind == "Form":
+                form_entity = getattr(binder, "form_entity", None)
+                for field in props.get("fields") or []:
+                    if not isinstance(field, dict):
+                        continue
+                    spoken = field.pop("optionsFrom", None)
+                    interaction = field.get("interaction") if isinstance(field.get("interaction"), dict) else None
+                    if spoken is None and interaction:
+                        spoken = interaction.get("optionsFrom")
+                    if spoken is not None:
+                        translated = option_source(binder, registry, spoken)
+                        final = translated or (spoken if isinstance(spoken, dict) and spoken.get("source") else None)
+                        if final:
+                            field.setdefault("interaction", {})["optionsFrom"] = final
+                            field.setdefault("options", [])
+                        continue
+                    # No source named. A select over a schema enum still needs
+                    # its options declared — the composer omits them for a column
+                    # the route entity does not own (a workflow field written to
+                    # a secondary entity), and the contract refuses a select with
+                    # neither options nor a source. Recover them from the schema.
+                    fkind = str(field.get("kind") or field.get("component") or "").lower()
+                    if (fkind in ("select", "multiselect", "radiogroup", "combobox")
+                            and not field.get("options")):
+                        opts = _enum_options_for_field(
+                            registry, str(field.get("name") or ""), form_entity)
+                        if opts:
+                            field["options"] = opts
+            items = props.get("items")
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and "value" not in item and item.get("label") is not None:
+                        item["value"] = str(item["label"])
+            # A PLACEHOLDER IS NOT AN OPTION. "Select a category" with value ""
+            # is how a composer says what an empty select shows; the contract
+            # says it with `placeholder` and refuses an option with no value.
+            _placeholder_out_of_options(props)
+            if kind == "Form":
+                for field in props.get("fields") or []:
+                    if isinstance(field, dict):
+                        _placeholder_out_of_options(field)
+        for child in node.get("children") or []:
+            walk(child)
+    walk(root)
+
+
+def _placeholder_out_of_options(holder: dict) -> None:
+    options = holder.get("options")
+    if not isinstance(options, list):
+        return
+    kept = []
+    for opt in options:
+        if isinstance(opt, dict) and str(opt.get("value") or "") == "":
+            if opt.get("label") and not holder.get("placeholder"):
+                holder["placeholder"] = str(opt["label"])
+            continue
+        kept.append(opt)
+    if len(kept) != len(options):
+        holder["options"] = kept
+
+
 def translate(payload: dict, registry: dict, route: str = "/",
               page_id: str = "home", kind: str = "",
               entity_hints: dict | None = None) -> dict:
@@ -1060,6 +1476,9 @@ def translate(payload: dict, registry: dict, route: str = "/",
 
     binder = _Binder(registry, data_model)
     binder.page_kind = str(kind or "").strip().lower()
+    # The route drives `is_record_page()`: a `[id]` segment means one existing
+    # record is in scope, whatever the declared pattern.
+    binder.route = str(route or "")
     # The entity this page's own contract says it is about — the last thing
     # tried before a pointer is left unbound.
     binder.page_entity = str(
@@ -1090,6 +1509,16 @@ def translate(payload: dict, registry: dict, route: str = "/",
         _resolve_entity(" ".join(s2 for s2 in route.split("/") if s2), binder.idx)
         or binder.dominant
     )
+
+    # A record page needs a record entity for `record_source` to mint the
+    # `get`-by-id source its `/entity/*` pointers and workflow bind through. The
+    # tally sets `dominant` when the surface's paths name the entity, but a
+    # composer that used a generic `/record` key names none — so an edit page
+    # over an existing record could still find nothing. The route names it
+    # (`/records/[id]/edit` -> Record) and the contract names it (`page_entity`);
+    # fall back to those rather than leave a record page with no record.
+    if binder.is_record_page() and not binder.dominant:
+        binder.dominant = binder.form_entity or (binder.page_entity or None)
 
     def resolve(v: Any, comp: dict, prop: str) -> Any:
         if isinstance(v, dict) and "path" in v:
@@ -1245,6 +1674,24 @@ def translate(payload: dict, registry: dict, route: str = "/",
         aliases = _PROP_ALIASES.get(kind, {})
         unsupported = _UNSUPPORTED.get(kind, frozenset())
         props: dict[str, Any] = {}
+
+        def pointer_binding(raw2: str, where: str) -> str | None:
+            """A pointer nested inside a prop → a `{{binding}}`, or None with
+            the reason recorded. Same rule as the dict-of-pointers branch:
+            the record this page shows, the row in scope, or nothing."""
+            segs2 = [x for x in raw2.strip("/").split("/") if x]
+            if (binder.is_record_page() and len(segs2) >= 2
+                    and binder.dominant
+                    and isinstance(at_path("/" + segs2[0]), dict)):
+                src2 = binder.record_source(binder.dominant)
+                return f"{{{{{src2}.{segs2[-1]}}}}}"
+            if scope and segs2 and not raw2.startswith("/"):
+                return f"{{{{{scope}.{segs2[-1]}}}}}"
+            binder.warnings.append(
+                f'{c.get("id")}.{where}: "{raw2}" resolves to no source on '
+                f"this page — dropped rather than sent as a pointer the "
+                f"renderer cannot read.")
+            return None
         items = [(k, v) for k, v in c.items()
                  if k not in _DROP_PROPS and k not in _CHILD_KEYS
                  and k not in unsupported]
@@ -1286,6 +1733,31 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"renders exactly like one that was.")
                 continue
             if k in _DATA_PROPS:
+                if isinstance(val, list) and k not in _CONFIG_DATA_PROPS \
+                        and _has_pointer(val):
+                    # A LIST OF COPY WITH BOUND VALUES IS NOT FICTION. A
+                    # record page's metadata block — KeyValueList items of
+                    # `{label: "Created", value: {path: "/note/createdAt"}}` —
+                    # is labels the composer wrote and values the record
+                    # supplies. The literal check below saw a list, called it
+                    # invented rows and dropped it, and the contract then
+                    # refused the component for the `items` it requires.
+                    # Each pointer inside is bound the way a pointer prop is;
+                    # the labels ride along as the copy they are.
+                    resolved = [
+                        {k2: (pointer_binding(str(v["path"]), f"{k}[{i}].{k2}")
+                              if isinstance(v, dict) and "path" in v else v)
+                         for k2, v in el.items()}
+                        if isinstance(el, dict) else el
+                        for i, el in enumerate(val)
+                    ]
+                    resolved = [
+                        {k2: v for k2, v in el.items() if v is not None}
+                        if isinstance(el, dict) else el
+                        for el in resolved
+                    ]
+                    props[k] = resolved
+                    continue
                 if not isinstance(val, dict) and k not in _CONFIG_DATA_PROPS:
                     # A scalar `value` on a measuring component is recoverable:
                     # the number is invented but the label names a real subset,
@@ -1300,6 +1772,18 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     # Not a pointer at all — a literal rows/data array is the
                     # same fiction wearing a different prop name, and `resolve`
                     # would hand it straight through.
+                    if _is_required(kind, k):
+                        # A component without the prop its contract requires
+                        # is not a component. Shipping it failed the page on
+                        # a `required` check far from here; the composer
+                        # wrote content nothing fetches, so the honest
+                        # outcome is no component — said so, not silently.
+                        binder.warnings.append(
+                            f'{c.get("id")}.{k}: {kind} requires {k!r} and the '
+                            f"composer wrote a literal nothing on this page "
+                            f"reads — the component is left out rather than "
+                            f"shipped invalid or with invented rows.")
+                        return None
                     binder.warnings.append(
                         f'{c.get("id")}.{k}: dropped a literal on a data prop '
                         f"— rows the page did not read from anywhere.")
@@ -1388,7 +1872,7 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"record this page shows — bound to {resolved!r} "
                         f"rather than read out of the sample.")
                 else:
-                    resolved = at_path(raw)
+                    resolved = _coerce_copy(kind, k, at_path(raw))
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
@@ -1537,6 +2021,14 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     f"this app does not define. Cleared for the "
                     f"submit-authority pass to resolve.")
 
+        if kind == "Dialog" and c.get("id"):
+            # A DIALOG IS NAMED BY ITS OWN `id` PROP. `opensDialog` on a
+            # Button points at it, and `functional_completeness` resolves the
+            # target against Dialog `props.id` — node ids are composition-time
+            # and stripped before commit. A2UI names the dialog with the node
+            # id and nothing else, so dropping that with the other node ids
+            # left every dialog anonymous and every button opening nothing.
+            props.setdefault("id", str(c["id"]))
         node: dict[str, Any] = {"type": kind, "props": props}
         # `style` is a sibling of `type` in NodeV2, alongside `id` and `bind` —
         # not a prop. A2UI emits it inside props, its own catalog accepts that,
@@ -1551,6 +2043,22 @@ def translate(payload: dict, registry: dict, route: str = "/",
         style = props.pop("style", None)
         if style is not None:
             node["style"] = style
+        # `visibleIf` is a sibling of `type` too, and the composer writes it
+        # as the pointer path it binds fields from — `/note/id`, or `!/note/id`
+        # for "no record". The renderer evaluates it with FEEL-lite in data
+        # scope, so the pointer becomes the binding's path and the negation a
+        # null test: `notes.id != null` / `notes.id = null`. A pointer that
+        # resolves to no source is dropped, with the reason; the node then
+        # always shows, which is the failure that is visible.
+        cond = props.pop("visibleIf", None)
+        if isinstance(cond, str) and cond.strip():
+            raw_cond = cond.strip()
+            negated = raw_cond.startswith("!")
+            pointer = raw_cond.lstrip("!").strip()
+            bound = pointer_binding(pointer, "visibleIf") if pointer else None
+            if bound:
+                path = bound.strip("{}").strip()
+                node["visibleIf"] = f"{path} = null" if negated else f"{path} != null"
         if c.get("id"):
             node["id"] = c["id"]
 
@@ -1574,6 +2082,56 @@ def translate(payload: dict, registry: dict, route: str = "/",
     # already well-shaped when the floor judges it.
     root = shape_sections(root)
 
+    # A DIALOG IS OPENED BY ID, NOT PLACED. The composer writes it as a second
+    # top-level component — a surface root of its own, referenced by a
+    # button's `opensDialog` and by nothing's `children` — and this built
+    # only what `root` reaches, so the dialog vanished and the contract then
+    # refused the page for opening a dialog it "does not contain". Measured
+    # on two builds running: the detail page was composed correctly twice
+    # and lost twice. The runtime mounts a Dialog wherever it sits in the
+    # tree and shows it on `openDialog(id)`, so an unreached one is attached
+    # under the root, after sectioning, which is layout and none of its.
+    def _ids(n: Any) -> set[str]:
+        out: set[str] = set()
+        if isinstance(n, dict):
+            if n.get("id"):
+                out.add(str(n["id"]))
+            for child in n.get("children") or []:
+                out |= _ids(child)
+        return out
+
+    placed = _ids(root)
+    for cid, c in list(comps.items()):
+        if c.get("component") == "Dialog" and str(cid) not in placed:
+            dialog = build(str(cid))
+            if dialog:
+                root.setdefault("children", []).append(dialog)
+                placed |= _ids(dialog)
+
+    # ONE SEARCH PER LIST. A data-bound Table renders its own search toolbar,
+    # and a composer that also places a FilterBar above it hands the page two
+    # search boxes for one list — the duplication that reads as a broken,
+    # low-density layout (measured on the Master Data page: a FilterBar search
+    # over a Records table that already searched). When both are present the
+    # FilterBar keeps its filter chips (they drive the query) and drops its
+    # search; the Table's search stays. A Table whose own search is off leaves
+    # the FilterBar's alone, so a page with no other search still has one.
+    def _walk_nodes(n: Any):
+        if isinstance(n, dict):
+            yield n
+            for ch in n.get("children") or []:
+                yield from _walk_nodes(ch)
+
+    _table_searches = any(
+        (t.get("props") or {}).get("searchable") is not False
+        and any((t.get("props") or {}).get(p) for p in ("data", "rows"))
+        for t in _walk_nodes(root) if t.get("type") == "Table")
+    if _table_searches:
+        for n in _walk_nodes(root):
+            if n.get("type") == "FilterBar":
+                n.setdefault("props", {})["showSearch"] = False
+
+    _translate_option_sources(root, binder, registry)
     schema: dict[str, Any] = {
         "schemaVersion": "2",
         "id": page_id,

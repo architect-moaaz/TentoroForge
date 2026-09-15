@@ -15,6 +15,7 @@ const EMPTY = {
   nodesTotal: 0, callsDone: 0, alreadyComplete: [], awaitingApproval: false,
   unbuilt: [], forecast: null, usage: null, status: "idle" as const,
   error: null,
+  review: null,
 };
 
 describe("thought events", () => {

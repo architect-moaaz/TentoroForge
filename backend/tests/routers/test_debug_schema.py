@@ -164,3 +164,101 @@ def test_recompile_tokens_invalid_json(client):
     assert r.status_code == 400
     detail = r.json().get("detail", "")
     assert "json" in detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# project-file write resolves into app/ the way the read does
+#
+# The Blueprint projects the generated app under <output>/app/src/...; the GET
+# falls through into app/ when the root miss. The POST used to write at the
+# root, so an editor save landed in a file nothing serves and the page came
+# back on refresh (DC5 "delete the Save Changes section" bug).
+# ---------------------------------------------------------------------------
+
+def _mk(tmp: Path, short_id: str, rel: str, text: str) -> Path:
+    p = tmp / short_id / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    return p
+
+
+def test_write_lands_where_the_read_resolves(client):
+    """An existing app/src file is overwritten in place; no root copy appears."""
+    tc, tmp = client
+    sid = "proj-app-existing"
+    schema = _mk(tmp, sid, "app/src/schemas/add-data.json", '{"id":"PAGE-002","old":1}')
+
+    # The read finds it via the app/ fallback …
+    r = tc.get(f"/api/_debug/project-file/{sid}/src/schemas/add-data.json")
+    assert r.status_code == 200
+    assert r.json()["old"] == 1
+
+    # … so the write must land on the same file.
+    r = tc.post(
+        f"/api/_debug/project-file/{sid}/src/schemas/add-data.json",
+        json={"content": '{"id":"PAGE-002","new":2}'},
+    )
+    assert r.status_code == 200, r.text
+    assert json.loads(schema.read_text()) == {"id": "PAGE-002", "new": 2}
+    assert not (tmp / sid / "src").exists(), "a root-level src/ copy was created"
+
+    # And the read now sees the edit — the refresh round-trip.
+    r = tc.get(f"/api/_debug/project-file/{sid}/src/schemas/add-data.json")
+    assert r.json() == {"id": "PAGE-002", "new": 2}
+
+
+def test_a_new_src_file_goes_into_the_app_when_one_exists(client):
+    """A brand-new src/… file is created inside app/ — the output root's own
+    src is never the generated application."""
+    tc, tmp = client
+    sid = "proj-app-new"
+    _mk(tmp, sid, "app/package.json", "{}")
+
+    r = tc.post(
+        f"/api/_debug/project-file/{sid}/src/schemas/brand-new.json",
+        json={"content": '{"id":"PAGE-009"}'},
+    )
+    assert r.status_code == 200, r.text
+    assert (tmp / sid / "app/src/schemas/brand-new.json").read_text() == '{"id":"PAGE-009"}'
+    assert not (tmp / sid / "src").exists()
+
+
+def test_a_root_level_file_stays_at_the_root(client):
+    """Files that already live at the output root (and non-src paths when no
+    app/ exists) keep writing where they are — the fallback is not a redirect."""
+    tc, tmp = client
+    sid = "proj-root"
+    root_file = _mk(tmp, sid, "src/schemas/at-root.json", '{"v":1}')
+    _mk(tmp, sid, "app/package.json", "{}")  # app exists, but the root file wins
+
+    r = tc.post(
+        f"/api/_debug/project-file/{sid}/src/schemas/at-root.json",
+        json={"content": '{"v":2}'},
+    )
+    assert r.status_code == 200, r.text
+    assert root_file.read_text() == '{"v":2}'
+    assert not (tmp / sid / "app/src").exists()
+
+    # No app/ at all → a new file is created at the root, as before.
+    sid2 = "proj-no-app"
+    (tmp / sid2).mkdir()
+    r = tc.post(
+        f"/api/_debug/project-file/{sid2}/notes.txt",
+        json={"content": "hello"},
+    )
+    assert r.status_code == 200, r.text
+    assert (tmp / sid2 / "notes.txt").read_text() == "hello"
+
+
+def test_write_still_blocks_traversal(client):
+    tc, tmp = client
+    sid = "proj-trav"
+    (tmp / sid).mkdir()
+    # httpx collapses a literal `..` client-side; percent-encode it so the
+    # segment reaches the router's path parameter intact.
+    r = tc.post(
+        f"/api/_debug/project-file/{sid}/%2E%2E/escape.txt",
+        json={"content": "x"},
+    )
+    assert r.status_code == 403, r.text
+    assert not (tmp / "escape.txt").exists()

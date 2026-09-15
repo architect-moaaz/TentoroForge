@@ -88,7 +88,12 @@ def _model(dry_run: bool, model_name: str) -> Any:
         )
     from services.blueprint.executors import AnthropicModel
 
-    return AnthropicModel(model=model_name)
+    # A TURN PLAN IS A PROPOSAL PER ARTIFACT, and adaptive thinking shares the
+    # same cap. At the default budget a request for a dozen workflows came
+    # back cut off mid-JSON. The large budget is free when unused (see the
+    # executors' max_tokens table) and a whole change in one plan is what
+    # keeps the proposals consistent with each other.
+    return AnthropicModel(model=model_name, max_tokens=64000)
 
 
 def _open(
@@ -408,7 +413,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Blueprint to adopt on first run.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT,
                         help="Working directory. Resumed if it already exists.")
-    parser.add_argument("--model", default="claude-opus-5")
+    parser.add_argument("--model", default=None,
+                        help="Smith's model. Default: FORGE_SMITH_MODEL or "
+                             "claude-opus-5.")
+    parser.add_argument("--agent-model", default=None,
+                        help="The specialists' and the observer's model. "
+                             "Default: FORGE_AGENT_MODEL or claude-sonnet-5.")
     parser.add_argument("--app-root", type=Path, default=None,
                         help="Where the generated application is written. "
                              "Defaults to <output-dir>/app, beside the "
@@ -442,14 +452,21 @@ def main(argv: list[str] | None = None) -> int:
     # the application by default rather than only the definition of it.
     app_root = str(args.app_root or (args.output_dir / "app"))
 
-    model = _model(args.dry_run, args.model)
+    from services.blueprint.executors import AGENT_MODEL, SMITH_MODEL
+
+    model = _model(args.dry_run, args.model or SMITH_MODEL)
     executor = None
     if args.run_agents and not args.dry_run:
-        from services.blueprint.executors import make_executor
+        from services.blueprint.executors import make_executor, tiered_router
+        from services.blueprint.observer import anthropic_observer
 
         smith = _open(args.blueprint, args.output_dir, model=model,
                       new=args.new, domain=args.domain, app_root=app_root)
-        smith.executor = make_executor(smith.blueprint, model)
+        # Smith interprets on one model; the specialists and the observer
+        # fill constrained shapes on another, tiered by node.
+        router = tiered_router(model=args.agent_model or AGENT_MODEL)
+        smith.executor = make_executor(smith.blueprint, router)
+        smith.observer_agent = anthropic_observer(router)
     else:
         smith = _open(args.blueprint, args.output_dir, model=model,
                       executor=executor, new=args.new, domain=args.domain,

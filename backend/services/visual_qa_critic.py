@@ -32,8 +32,16 @@ logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 6
 _VALID_KINDS = {
+    # Broken — a user sees it as unfinished.
     "empty_area", "raw_label", "overflow", "contrast",
     "misalignment", "off_brief", "broken_render",
+    # Quality — the page renders, but is composed poorly. Each is a concrete,
+    # observable problem, not a matter of taste, so the render critic can drive
+    # a re-compose without inventing nitpicks.
+    "sparse", "weak_hierarchy", "duplicate_control",
+    "inconsistent_sizing", "missing_content",
+    # Domain — does the page look like THIS application and do what it said.
+    "off_domain", "unmet_requirement",
 }
 _VALID_SEVERITIES = {"error", "warn", "info"}
 
@@ -98,11 +106,16 @@ def _validate_finding(raw) -> dict | None:
 
 _PROMPT = """\
 You are a design QA reviewer for a generated business web app.
-Design brief identity (judge against this, not personal taste):
+
+WHAT THIS APPLICATION IS — judge the pages against this, honestly, not against
+personal taste. Its purpose, its real entities and their fields, and the
+requirements the pages are meant to satisfy:
 {identity}
 
 For each screenshot (labeled by route), report ONLY concrete visible
-defects — things a user would notice as unfinished or broken:
+problems — never matters of taste. Two groups:
+
+BROKEN — a user notices it as unfinished:
 - empty_area: a large region that renders blank or a container with no content
 - raw_label: machine text shown to the user (snake_case, camelCase, ids, "{{{{...}}}}")
 - overflow: clipped/overlapping/overflowing content
@@ -111,15 +124,96 @@ defects — things a user would notice as unfinished or broken:
 - off_brief: styling that contradicts the brief identity above
 - broken_render: error text, stack traces, missing images
 
+POORLY COMPOSED — it renders, but the composition is wrong. Report these
+ONLY when the problem is unmistakable, not because a different choice was
+possible:
+- sparse: the page is mostly empty space — a handful of elements stranded on a
+  tall blank page, the main content not taking the width it should
+- weak_hierarchy: no primary focus — every block reads at equal weight, so the
+  thing the screen is FOR does not stand out
+- duplicate_control: two controls that do the same job (e.g. two search boxes
+  for one list, two primary buttons)
+- inconsistent_sizing: peers that should match render at different sizes (one
+  oversized tile beside small ones, ragged cards in a row)
+- missing_content: an obviously incomplete surface — a form with fewer fields
+  than the record plainly needs, a list missing columns it clearly should show,
+  a summary area a data-heavy screen should have and does not
+
+DOES IT LOOK LIKE THIS APPLICATION — judge the page against the identity above
+(its purpose, its entities and their real fields, the requirements). Answer
+honestly, and say nothing when it does look right:
+- off_domain: the page does not read as belonging to THIS app — generic or
+  placeholder content, the wrong entity, fields that are not this domain's,
+  labels that name nothing in the identity above
+- unmet_requirement: a requirement above that this page is plainly meant to
+  satisfy is not visible on it — a field, column, action, filter or state the
+  requirement calls for and the page does not show. Name the requirement.
+
+A STATIC SCREENSHOT DOES NOT SHOW EVERYTHING, so do not fault a page for what a
+still image cannot reveal. A closed dropdown / select shows only its current or
+placeholder value (often "—", "Select…", or blank); its options appear on click,
+which this screenshot did not do. Do NOT report a dropdown as empty, unpopulated,
+missing its choices, or non-functional from the screenshot — whether its options
+are correct is checked separately by driving the control, not judged here. The
+same holds for anything that only appears on hover, focus, open or scroll (menus,
+tooltips, validation messages, expanded rows).
+
 Return STRICT JSON: {{"findings": [{{"route": "...", "kind": "...",
-"severity": "error|warn|info", "note": "..."}}]}}. An empty findings
-list is a valid and common answer — do NOT invent issues.
+"severity": "error|warn|info", "note": "..."}}]}}. Each note must say WHAT is
+wrong and WHERE, concretely enough to fix. An empty findings list is a valid
+and common answer — do NOT invent issues, and do not report a choice merely
+because you would have made a different one.
 """
 
 
+async def critique_images(
+    images: list[dict],
+    *,
+    identity: dict | None = None,
+) -> list[dict]:
+    """The vision call itself: ``[{route, png: bytes}]`` -> validated findings.
+
+    The one place the model sees the pages, shared by the sweep-based critic and
+    Smith's render loop, so the two judge by exactly the same rubric. Raises on a
+    provider/parse failure — the caller decides whether that is a skipped review
+    or an error; here it must not silently become "no findings", which reads as
+    a clean page.
+    """
+    from services import llm_client  # ChatAnthropic-backed shim
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("no ANTHROPIC_API_KEY")
+    client = llm_client.AsyncAnthropic(api_key=api_key)
+
+    content: list[dict] = []
+    for im in images:
+        png = im.get("png")
+        if not png:
+            continue
+        data = base64.standard_b64encode(png).decode()
+        content.append({"type": "text", "text": f"Route: {im.get('route')}"})
+        content.append({"type": "image", "source": {
+            "type": "base64", "media_type": "image/png", "data": data}})
+    if not content:
+        return []
+
+    ident = json.dumps(identity or {}, ensure_ascii=False)[:2000]
+    resp = await client.messages.create(
+        model=os.getenv("FORGE_VISUAL_QA_MODEL", "claude-haiku-4-5-20251001"),
+        max_tokens=2048,
+        system=_PROMPT.format(identity=ident or "{}"),
+        messages=[{"role": "user", "content": content}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    raw = json.loads(m.group(0)) if m else {}
+    return [f for f in map(_validate_finding, raw.get("findings") or [])
+            if f is not None]
+
+
 async def critique_screenshots(output_dir: str | Path) -> dict:
-    """Run the critic. Returns the report dict (also written to
-    contracts/visual-qa.json). Never raises."""
+    """Run the critic over the sweep's screenshots. Returns the report dict
+    (also written to contracts/visual-qa.json). Never raises."""
     root = Path(output_dir)
     pages = _sweep_pages(root)
     report: dict = {"pages_reviewed": [p["route"] for p in pages],
@@ -128,35 +222,10 @@ async def critique_screenshots(output_dir: str | Path) -> dict:
         return report
 
     try:
-        from services import llm_client  # LangGraph migration (LG-1): ChatAnthropic-backed shim
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            # Still fall through to the report write below — an empty
-            # report with `skipped` beats a silently absent file.
-            raise RuntimeError("no ANTHROPIC_API_KEY")
-        client = llm_client.AsyncAnthropic(api_key=api_key)
-
-        content: list[dict] = []
-        for p in pages:
-            data = base64.standard_b64encode(
-                Path(p["screenshot"]).read_bytes()).decode()
-            content.append({"type": "text", "text": f"Route: {p['route']}"})
-            content.append({"type": "image", "source": {
-                "type": "base64", "media_type": "image/png", "data": data}})
-
-        identity = json.dumps(_brief_identity(root), ensure_ascii=False)[:2000]
-        resp = await client.messages.create(
-            model=os.getenv("FORGE_VISUAL_QA_MODEL", "claude-haiku-4-5-20251001"),
-            max_tokens=2048,
-            system=_PROMPT.format(identity=identity or "{}"),
-            messages=[{"role": "user", "content": content}],
-        )
-        text = "".join(b.text for b in resp.content if b.type == "text")
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        raw = json.loads(m.group(0)) if m else {}
-        findings = [f for f in map(_validate_finding, raw.get("findings") or [])
-                    if f is not None]
-        report["findings"] = findings
+        images = [{"route": p["route"],
+                   "png": Path(p["screenshot"]).read_bytes()} for p in pages]
+        report["findings"] = await critique_images(
+            images, identity=_brief_identity(root))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[visual-qa] critic failed: %s", exc)
         report["error"] = str(exc)[:300]
@@ -173,4 +242,4 @@ async def critique_screenshots(output_dir: str | Path) -> dict:
     return report
 
 
-__all__ = ["critique_screenshots", "is_visual_qa_enabled"]
+__all__ = ["critique_screenshots", "critique_images", "is_visual_qa_enabled"]

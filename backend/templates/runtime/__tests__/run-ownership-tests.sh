@@ -26,3 +26,5 @@ print(project_ownership_rules(doc, '$OUT'), file=sys.stderr)
 # than erased. Transform mode is a superset, so both tests run under it.
 node --experimental-transform-types "$DIR/ownership-scope.test.mts" "$OUT/src/lib/ownership-rules.ts"
 node --experimental-transform-types "$DIR/row-access-sql.test.mts"
+# The bridge fills `{{user.<column>}}` in a source filter from the session user.
+node --experimental-transform-types "$DIR/bridge-user-filter.test.mts"

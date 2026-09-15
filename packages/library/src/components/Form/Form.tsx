@@ -475,19 +475,36 @@ function useConditionalFields(
     walk(fields);
     return out;
   }, [fields]);
+  // `values` is a fresh object from useWatch on every render. Keyed on the
+  // object, the state map was recomputed each render, the effect below ran
+  // each render, and `unregister` — which notifies the form and re-renders
+  // it — ran for every hidden field every time: "Maximum update depth
+  // exceeded" on any form with one predicate-hidden field (the new-user
+  // form's home property, hidden until a property role is chosen). Keyed
+  // on the values' content, the map changes only when a value does.
+  const valuesKey = React.useMemo(() => {
+    try { return JSON.stringify(values); } catch { return ""; }
+  }, [values]);
   const stateMap = React.useMemo(
     () => computeFieldConditionalStates(specs, values),
-    [specs, values],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [specs, valuesKey],
   );
 
-  // Unregister any field that turned invisible this render so it
-  // doesn't ride along in the submit payload. Re-registration is
-  // automatic when the field mounts again.
+  // Unregister a field the moment it turns invisible so it doesn't ride
+  // along in the submit payload — once per transition, not once per
+  // render. Re-registration is automatic when the field mounts again.
+  const hiddenRef = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
     for (const f of fields) {
       const s = stateMap[f.name];
-      if (s && !s.visible) {
+      const hidden = !!s && !s.visible;
+      const was = hiddenRef.current.has(f.name);
+      if (hidden && !was) {
+        hiddenRef.current.add(f.name);
         try { unregister(f.name, { keepValue: false }); } catch { /* noop */ }
+      } else if (!hidden && was) {
+        hiddenRef.current.delete(f.name);
       }
     }
   }, [fields, stateMap, unregister]);
@@ -787,6 +804,7 @@ function FormFieldImpl({
         <input
           id={id}
           type={field.kind === "number" ? "number" : "text"}
+          step={field.kind === "number" ? "any" : undefined}
           className={FIELD_CONTROL + " bg-muted text-muted-foreground"}
           readOnly
           aria-readonly="true"
@@ -808,6 +826,10 @@ function FormFieldImpl({
           <input
             id={id}
             type={field.kind}
+            // A number field takes any number. Without a step the browser's
+            // default is 1, and a decimal amount — 88.50 requested by a guest
+            // — is refused by native validation before submit ever runs.
+            step={field.kind === "number" ? "any" : undefined}
             placeholder={field.placeholder}
             className={FIELD_CONTROL}
             {...register(name, {

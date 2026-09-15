@@ -333,3 +333,43 @@ def test_the_builder_offers_the_new_type():
     assert '| "row_access"' in types
     assert '{ value: "row_access", label: "Row Access" }' in types
     assert "whenFeel" in types
+
+
+# ---------------------------------------------------------------------------
+# WHERE THE ACTOR'S VALUE COMES FROM. A workspace scope compared the row's
+# column to "the workspace id the session carries", and nothing said which
+# users column that was; on a hotel group whose GMs are scoped to a home
+# property every property-scoped read returned nothing. `actorColumn` names
+# the users column; it rides through the manifest to the engine.
+
+def test_the_actor_column_rides_through_the_manifest():
+    rules = ownership_rules(doc([{"entity": "Invoice", "column": "propertyId", "kind": "scope",
+                                  "scope": "workspace", "actorColumn": "homePropertyId",
+                                  "unscopedRoles": ["Finance"]}]))
+    rule = rules["invoices"][0]
+    assert rule["actorColumn"] == "homePropertyId" and rule["scope"] == "workspace"
+    module = render_ownership_rules_module(rules)
+    assert '"actorColumn": "homePropertyId"' in module
+    assert "actorColumn?: string" in module
+
+
+def test_a_user_scope_carries_no_actor_column():
+    rules = ownership_rules(doc([{"entity": "Invoice", "column": "ownerId", "kind": "scope", "scope": "user"}]))
+    assert "actorColumn" not in rules["invoices"][0]
+
+
+def test_the_contract_accepts_an_actor_column():
+    import jsonschema
+    contract = json.loads(
+        (Path(__file__).resolve().parents[2]
+         / "contracts" / "blueprint.schema.json").read_text())
+    item = (contract["properties"]["security"]["properties"]
+            ["ownershipRules"]["items"])
+    variants = item.get("oneOf") or item.get("anyOf") or []
+    obj = next(o for o in variants if o.get("type") == "object")
+    assert "actorColumn" in obj["properties"]
+    rule = {"entity": "Invoice", "column": "propertyId", "kind": "scope",
+            "scope": "workspace", "actorColumn": "homePropertyId",
+            "unscopedRoles": [], "note": "home property"}
+    jsonschema.validate(rule, {**item, "$defs": contract.get("$defs", {}),
+                               "definitions": contract.get("definitions", {})})

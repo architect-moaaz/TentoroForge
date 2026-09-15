@@ -87,9 +87,7 @@ PROJECTED_PATHS: tuple[str, ...] = (
 #:
 #: Directory-level ownership cannot express "these 28 files are generated and
 #: this one is not", so the exception is stated by name.
-SCAFFOLD_OWNED: tuple[str, ...] = (
-    "src/db/schema/user.ts",
-)
+SCAFFOLD_OWNED: tuple[str, ...] = ()
 
 #: Scaffold files that are a DEFAULT for something a projection writes: copied
 #: only when the projection did not write one.
@@ -110,6 +108,15 @@ SCAFFOLD_OWNED: tuple[str, ...] = (
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
+    # projection emits `user.ts` for a Blueprint entity that maps to `users`
+    # — the platform's columns as the platform declares them, then whatever
+    # the Blueprint adds (`role`, `homePropertyId`). Listed as scaffold-OWNED,
+    # this file was copied over that projection on every assembly, so an
+    # application with eight approval roles shipped a users table with no
+    # role column and every queue read as empty. A default fills the hole
+    # when no entity claimed the table; it never replaces one that did.
+    "src/db/schema/user.ts",
 )
 
 DRIZZLE_CONFIG = '''import { defineConfig } from "drizzle-kit";
@@ -460,10 +467,9 @@ def assemble(doc: dict, app_root: str | Path, *,
 
     out = Path(app_root)
     scaffold = copy_scaffold(out, project_short_id=project_short_id)
-    edge = interpolate_edge_pages(out, doc)
-    # Before the runtime layer substitutes its own auth-page tokens: this only
-    # rewrites the ACCOUNT_TYPES default and leaves those tokens untouched.
-    signup_types = interpolate_signup_account_types(out, doc)
+    filled = interpolate_scaffold(out, doc)
+    edge = [f for f in filled if f.startswith("src/") and "signup" not in f]
+    signup_types = [f for f in filled if "signup" in f]
     runtime = inject_runtime_layer(out, doc)
     vendored = vendor_engines(out)
     loose = copy_loose_libs(out)
@@ -538,6 +544,10 @@ def assemble(doc: dict, app_root: str | Path, *,
     )
 
     placeholders = apply_residual_placeholder_guard(out)
+    # THE SHIPPED-FILE CONTRACT. The guard above reports; this refuses. A
+    # token the templates carry and nothing filled is named, file and token,
+    # and the assembly does not report success over it.
+    refuse_unfilled_scaffold(out)
 
     return {
         "scaffold": len(scaffold),
@@ -714,16 +724,113 @@ def _fallback_routes(schemas: Path) -> set[str]:
     return out
 
 
-def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge") -> list[str]:
+_TOKEN_SHAPES = (re.compile(r"__[A-Z][A-Z_]+__"), re.compile(r"\{\{[a-z_]+\}\}"))
+_TEXT_SUFFIXES = (".ts", ".tsx", ".jsx", ".js", ".json", ".css", ".mdx", ".md", ".html")
+
+
+def scaffold_tokens() -> frozenset[str]:
+    """Every placeholder the scaffold templates carry — read off the templates
+    themselves, so a new token is in the contract the moment a template uses
+    it, and a hand-kept list cannot fall behind."""
+    found: set[str] = set()
+    for layer in _template_dirs():
+        if not layer.is_dir():
+            continue
+        for f in layer.rglob("*"):
+            if f.is_dir() or any(part in _SKIP_DIRS for part in f.parts):
+                continue
+            if f.suffix not in _TEXT_SUFFIXES and f.suffix != ".tmpl":
+                continue
+            try:
+                text = f.read_text("utf-8")
+            except Exception:  # noqa: BLE001
+                continue
+            for shape in _TOKEN_SHAPES:
+                found.update(shape.findall(text))
+    return frozenset(found)
+
+
+def unfilled_scaffold_tokens(app_root: str | Path) -> list[str]:
+    """``file:token`` for every scaffold placeholder still in a shipped file.
+    A placeholder in a shipped file is a defect, not a cosmetic one:
+    `{{app_name}}` inside JSX throws on every request, `__APP_NAME__` is
+    the app's name on its own sign-in page."""
+    tokens = scaffold_tokens()
+    out: list[str] = []
+    src = Path(app_root) / "src"
+    if not tokens or not src.is_dir():
+        return out
+    for f in sorted(src.rglob("*")):
+        if f.is_dir() or "node_modules" in f.parts or f.suffix not in _TEXT_SUFFIXES:
+            continue
+        try:
+            text = f.read_text("utf-8")
+        except Exception:  # noqa: BLE001
+            continue
+        for t in sorted(tokens):
+            if t in text:
+                out.append(f"{f.relative_to(app_root)}:{t}")
+    return out
+
+
+def refuse_unfilled_scaffold(app_root: str | Path) -> None:
+    """Raise :class:`BuildFailed` naming every placeholder still shipped."""
+    left = unfilled_scaffold_tokens(app_root)
+    if left:
+        raise BuildFailed(
+            "the scaffold shipped with placeholders unfilled — "
+            + "; ".join(left[:12]) + (" …" if len(left) > 12 else ""))
+
+
+def interpolate_scaffold(app_root: str | Path, doc: dict) -> list[str]:
+    """Every placeholder the scaffold ships, filled from the Blueprint — the
+    edge pages' `{{app_name}}`/`{{home_route}}`, the chrome's `__APP_NAME__`,
+    the sign-in panel's copy and image. Idempotent: a file with nothing left
+    to fill is left alone.
+
+    Called wherever the scaffold is laid down, because a scaffold file with a
+    placeholder in it is not a scaffold file — `{{app_name}}` inside JSX is a
+    ReferenceError on every request, and `__APP_NAME__` is the app's name on
+    its own sign-in page. The install node copied the scaffold raw at second
+    zero and only the preview node's assemble filled it; a run that failed
+    between the two (a refused page) left the app that way.
+    """
+    from services.runtime_injector import (
+        _substitute_app_name, _substitute_auth_copy, _substitute_auth_image,
+    )
+    out = Path(app_root)
+    application = doc.get("application") or {}
+    touched = interpolate_edge_pages(out, doc)
+    # Before the auth-page tokens are substituted: this only rewrites the
+    # ACCOUNT_TYPES default and leaves those tokens untouched.
+    touched += interpolate_signup_account_types(out, doc)
+    name, domain = application.get("name"), application.get("domain")
+    if _substitute_app_name(out, name, domain):
+        touched.append("__APP_NAME__")
+    if _substitute_auth_image(out, domain):
+        touched.append("__AUTH_IMAGE_URL__")
+    if _substitute_auth_copy(out, name, domain):
+        touched.append("__AUTH_COPY__")
+    return touched
+
+
+def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge",
+                     doc: dict | None = None) -> list[str]:
     """Everything `npm install` needs and nothing the Blueprint decides.
 
     The scaffold's package.json and the vendored engine packages are the same
     for every application, so they can be laid down — and the dependencies
     installed against them — before a single agent has replied. `assemble`
     lays the same files again later, idempotently, around the projected app.
+
+    ``doc`` fills the scaffold's placeholders in the same step, so no run —
+    however it ends — leaves the app introducing itself as `__APP_NAME__`.
     """
     out = Path(app_root)
     written = copy_scaffold(out, project_short_id=project_short_id)
+    if doc is not None:
+        written += interpolate_scaffold(out, doc)
+        refuse_unfilled_scaffold(out)
     written += vendor_engines(out)
     return written
 
@@ -780,7 +887,74 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
+    if build:
+        out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
+
+
+#: The build-time dry run of every control→workflow wire (see
+#: `templates/runtime/workflows/verify-dispatches.ts`).
+DISPATCH_VERIFIER = "src/lib/workflows/verify-dispatches.ts"
+DISPATCH_MANIFEST = "src/contracts/dispatches.json"
+
+
+def _env_file(root: Path) -> dict[str, str]:
+    """`.env.local` as a dict — the DATABASE_URL the app itself reads, so the
+    engine's db module can be imported (it never connects for a dry run)."""
+    env: dict[str, str] = {}
+    try:
+        for line in (root / ".env.local").read_text("utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:  # noqa: BLE001
+        pass
+    return env
+
+
+def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
+    """Dry-run every wire the app ships through its own engine. Raises
+    :class:`BuildFailed` naming the control, the workflow and the step for
+    each wire that would refuse at first click. Returns the number checked.
+
+    Compiling proved the app builds; this proves its buttons resolve. The
+    Blueprint checks reason about scope, the engine about the POST body, and
+    only the engine is the truth a person meets."""
+    import os
+    import subprocess
+    root = Path(app_root)
+    if not (root / DISPATCH_VERIFIER).is_file() or not (root / DISPATCH_MANIFEST).is_file():
+        return 0
+    env = {**os.environ, **_env_file(root)}
+    env.setdefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/dry_run")
+    proc = subprocess.run(["npx", "tsx", DISPATCH_VERIFIER], cwd=root, capture_output=True,
+                          text=True, timeout=timeout, env=env)
+    report: dict[str, Any] = {}
+    for line in reversed((proc.stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                report = json.loads(line)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+    if proc.returncode == 0 and report.get("ok", True):
+        return int(report.get("checked") or 0)
+    if not report:
+        raise BuildFailed(f"the dispatch dry run could not run ({proc.returncode}):\n"
+                          + build_message(proc.stdout, proc.stderr))
+    lines = []
+    for r in report.get("results") or []:
+        if r.get("ok"):
+            continue
+        for pr in r.get("problems") or []:
+            lines.append(f"{r.get('route')}: {r.get('control')} {r.get('label')!r} runs "
+                         f"{r.get('workflow')} — step {pr.get('node')!r} ({pr.get('actionType')}): "
+                         f"{pr.get('problem')}")
+    raise BuildFailed("a control the app ships would refuse at first click:\n"
+                      + "\n".join(lines[:12]))
 
 
 #: Where a verification build writes, beside — never inside — the served app.

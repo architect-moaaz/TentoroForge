@@ -137,6 +137,7 @@ def build_impact_summary(
     dependents: Optional[list[str]] = None,
     cascade: bool = False,
     removes: Optional[list[str]] = None,
+    action: str = "remove",
 ) -> str:
     """Build a plain-language impact summary the LLM can relay to the user.
 
@@ -154,15 +155,19 @@ def build_impact_summary(
         that will do the deleting. Names what goes, rather than inferring
         it from nav edges that only point AT the named route.
     """
-    scope = " and everything nested under it" if cascade else ""
-    lines = [f"About to remove **{kind}: {target}**{scope}."]
-    if cascade:
+    # `action` is the verb the user reads — "remove" for a delete, "rename" for
+    # an in-place edit. The cascade / "delete N files" wording is removal-specific
+    # and shown only for a remove; a rename moves things, it does not delete data.
+    is_remove = action == "remove"
+    scope = " and everything nested under it" if (cascade and is_remove) else ""
+    lines = [f"About to {action} **{kind}: {target}**{scope}."]
+    if cascade and is_remove:
         lines.append("")
         lines.append(
             "⚠️ This is a **cascade** removal — it deletes the whole slice, "
             "not just the one page."
         )
-    if removes:
+    if removes and is_remove:
         n = len(removes)
         lines.append("")
         lines.append(f"It will delete {n} file{'s' if n != 1 else ''}:")
@@ -191,6 +196,7 @@ def build_impact_summary(
 def needs_confirmation_result(
     kind: str, target: str, dependents: Optional[list[str]] = None,
     *, cascade: bool = False, removes: Optional[list[str]] = None,
+    action: str = "remove",
 ) -> dict:
     """Standard shape returned by a destructive tool when `_confirmed` is
     absent. Smith's system prompt tells the LLM to relay ``.summary`` to
@@ -207,6 +213,6 @@ def needs_confirmation_result(
         "dependents":   list(dependents or []),
         "summary":      build_impact_summary(
             kind, target, dependents=dependents,
-            cascade=cascade, removes=removes,
+            cascade=cascade, removes=removes, action=action,
         ),
     }

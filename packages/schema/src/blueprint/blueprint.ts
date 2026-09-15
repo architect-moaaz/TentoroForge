@@ -39,11 +39,35 @@ import {
 // §11 · application — identity
 // ===========================================================================
 
+/**
+ * Who designs the screens: Forge's own composer (A2UI against the component
+ * catalog) or UX Pilot, generating each page from its brief.
+ *
+ * A closed pair rather than a free string so the page-layouts node can
+ * dispatch on it without interpretation, and so a value nobody produces
+ * cannot be written. `forge` is what every application built before the
+ * choice existed was, and is what an unset value means.
+ */
+export const UiDesigner = z.enum(["forge", "uxpilot"]);
+
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
   domain: z.string().describe("CRM | HRMS | ATS | Banking | … (§96)"),
   description: z.string().default(""),
+  /**
+   * The application-wide answer to "who designs the screens", recorded when
+   * the user picks at the approval gate. Lives here rather than in a
+   * `decisions` row because it is read by code, not cited by people: the
+   * page-layouts node dispatches on it per page, and a decision's free text
+   * would have to be parsed to do that. The decision row is still written,
+   * so the choice is citable; this is the fact it decided.
+   *
+   * On `application` because nothing in the agent registry may write this
+   * section — the value a person chose cannot be overwritten by a model that
+   * merges its own proposal over the singleton. Absent means `forge`.
+   */
+  uiDesigner: UiDesigner.optional(),
 });
 
 // ===========================================================================
@@ -390,6 +414,17 @@ export const PageContract = z.object({
    *  frame's node id, or a UX Pilot design id. Resolved against
    *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
+  /**
+   * Per-page override of `application.uiDesigner`. Absent means "follow the
+   * application". Set when the user asks for one page to be drawn by the
+   * other designer — "redraw the dashboard with UX Pilot" — so the choice is
+   * on the page it concerns and a rebuild honours it without re-asking.
+   *
+   * Intent, not provenance: `pageLayouts[].composedBy` records who actually
+   * produced the tree. The two differ exactly when a designer was asked for
+   * and could not deliver, and that difference is the visible fallback.
+   */
+  designedBy: UiDesigner.optional(),
 
   components: z.array(ComponentId).default([]),
   ...artifactBase,
@@ -724,6 +759,68 @@ export const PageLayout = z.object({
     })
     .optional(),
   ...artifactBase,
+});
+
+// ===========================================================================
+// §34 · app-level composition — the one call that sees every page at once
+// ===========================================================================
+
+/**
+ * One section of a page, as the whole-app composer sketches it.
+ *
+ * Names and intent only. `components` lists catalog component *names* the
+ * section is expected to use — no props, no bindings — so the sketch stays
+ * small enough to author for every page in one call and can still be checked
+ * against the catalog before anything is composed from it.
+ */
+export const SectionSketch = z.object({
+  name: z.string().describe("e.g. Pipeline summary"),
+  purpose: z.string().describe("What the user does in this section"),
+  /** Catalog component names this section is expected to use. */
+  components: z.array(z.string()).default([]),
+  emphasis: z.enum(["primary", "secondary"]).default("secondary"),
+  region: z.enum(["main", "aside", "full"]).default("main"),
+});
+
+/** The skeleton of one page: its layout and its sections, in order. */
+export const PageSketch = z.object({
+  /** Natural key — the page this sketch is for. */
+  page: PageId,
+  layout: z.enum(["single_column", "main_aside", "two_pane", "full_bleed"]),
+  sections: z.array(SectionSketch).min(1),
+  rationale: z.string().default(""),
+});
+
+/**
+ * The application composed once, as a whole.
+ *
+ * `patternTemplates` gives every page of one kind the same structure and
+ * `pageLayouts` lets a page be authored on its own; neither ever sees the app
+ * entire. A page authored bespoke can drift from the page next to it — a
+ * different header rhythm, filters in a different place — and nothing checks,
+ * because nothing has looked at both. Authoring the whole app in one reply is
+ * the old platform's answer and it does not scale: tens of thousands of
+ * tokens a call, one bad prop rejecting the whole surface, output truncating
+ * at eighteen trees.
+ *
+ * So the whole-app call produces a *skeleton* rather than a rendering: per
+ * page a layout and an ordered list of sections, plus the conventions every
+ * page inherits. It is cheap because it carries no props. Per-page authoring
+ * then realises each sketch against the catalog, with validation and retries
+ * still per page. The sketch is the instruction a page author is given, not a
+ * gate a page is rejected against — coherence is judged, not measured.
+ */
+export const Composition = z.object({
+  /** One paragraph: what the whole application should feel like to use. */
+  vision: z.string().default(""),
+  /**
+   * App-wide rules every page inherits — header rhythm, where filters sit,
+   * how empty states read, where the primary action lives.
+   */
+  conventions: z
+    .array(z.object({ topic: z.string(), rule: z.string() }))
+    .default([]),
+  pages: z.array(PageSketch).default([]),
 });
 
 // ===========================================================================
@@ -1113,6 +1210,24 @@ export const RecordScopeRule = z.object({
       "where the product genuinely grants it every row.",
     )
     .default([]),
+  /**
+   * WHERE THE ACTOR'S VALUE COMES FROM. A `scope: "workspace"` rule compares
+   * the row's column to "the workspace id the session carries", and nothing
+   * said which users column that is. On a hotel group whose GMs are scoped
+   * to a home property the rule was written, the session carried no
+   * workspace id, and every property-scoped read returned nothing. The
+   * column on the users table names it; the session carries it; the engine
+   * compares to it.
+   */
+  actorColumn: z
+    .string()
+    .describe(
+      "For scope \"workspace\": the column on the users table whose value is " +
+      "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
+      "session carries that column and the engine compares `column` to it. " +
+      "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
   note: z.string().describe("Why this rule exists, in one sentence.").default(""),
 }).describe(
   "An enforceable rule about one column and the acting user. A `scope` rule " +
@@ -1337,6 +1452,18 @@ export const Requirement = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   /** Recorded when confidence sat in the 0.70–0.90 band (§17). */
   assumption: z.string().optional(),
+  /**
+   * The Blueprint section that SATISFIES this requirement — a `SECTION_OWNER`
+   * key (`designSystem`, `security`, `pageLayouts`, `workflows`, …). A global
+   * requirement (an app-wide colour palette, a security posture) is satisfied
+   * by the one section that implements it, not by every page that merely runs
+   * under it. The observer grades each requirement against the node that owns
+   * it: a `designSystem`-owned palette requirement is judged against the
+   * design tokens, never demanded inside a page's component tree — which never
+   * carries colour and so could never satisfy it. Omitted means page-scoped
+   * (the historical default): judged by whichever artifact cites it.
+   */
+  owner: z.string().optional(),
 });
 
 /** §15 — per-area completeness, 0..1. Drives which questions Smith asks. */
@@ -1624,6 +1751,9 @@ export const Blueprint = z.object({
   /** §34 — pages authored individually. Takes precedence over the
    *  pattern template when both exist for a page. */
   pageLayouts: z.array(PageLayout).default([]),
+  /** §34 — the whole app sketched once: per-page skeletons and the
+   *  conventions every page inherits. Authored by A2UI before any page is. */
+  composition: Composition.default({}),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
@@ -1643,6 +1773,7 @@ export const Blueprint = z.object({
 
 export type Blueprint = z.infer<typeof Blueprint>;
 export type PageContract = z.infer<typeof PageContract>;
+export type UiDesigner = z.infer<typeof UiDesigner>;
 export type Requirement = z.infer<typeof Requirement>;
 export type Decision = z.infer<typeof Decision>;
 export type Entity = z.infer<typeof Entity>;
@@ -1651,3 +1782,6 @@ export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
+export type SectionSketch = z.infer<typeof SectionSketch>;
+export type PageSketch = z.infer<typeof PageSketch>;
+export type Composition = z.infer<typeof Composition>;

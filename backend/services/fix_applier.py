@@ -67,10 +67,22 @@ def apply_fix(output_dir: str, diagnosis: dict, *, git: bool = True) -> dict:
         return _apply_add_page(output_dir, diagnosis, git=git)
     if seam == "add_workflow":
         return _apply_add_workflow(output_dir, diagnosis, git=git)
+    if seam == "edit_workflow":
+        return _apply_edit_workflow(output_dir, diagnosis, git=git)
     if seam == "add_entity":
         return _apply_add_entity(output_dir, diagnosis, git=git)
+    if seam == "remove_entity":
+        return _apply_remove_entity(output_dir, diagnosis, git=git)
+    if seam == "edit_entity":
+        return _apply_edit_entity(output_dir, diagnosis, git=git)
+    if seam == "remove_workflow":
+        return _apply_remove_workflow(output_dir, diagnosis, git=git)
     if seam == "add_field":
         return _apply_add_field(output_dir, diagnosis, git=git)
+    if seam == "remove_field":
+        return _apply_remove_field(output_dir, diagnosis, git=git)
+    if seam == "edit_field":
+        return _apply_edit_field(output_dir, diagnosis, git=git)
     if seam == "code_edit":
         return {
             "applied": False,
@@ -687,6 +699,78 @@ def _apply_add_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# edit_workflow seam — CHANGE an existing workflow (not just add one). The add_*
+# seams create; this is how Smith updates a workflow's logic in place: retune a
+# step's config, add/remove/rewire a step, add a trigger input. The
+# `edit_workflow` seam validates and persists on green itself (staleness-checked,
+# never a half-write), so this wraps it into the fix_applier contract: pre-image
+# for transactional safety, the same functional re-verify the node-config seam
+# runs, and a commit.
+# --------------------------------------------------------------------------- #
+
+def _apply_edit_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_workflow`` proposal.
+
+    Diagnosis shape::
+
+        proposedFix: {
+          seam: "edit_workflow",
+          patch: {
+            workflow_id: "UpdateRecord",     # id, name, or file stem — resolved
+            changes: {                       # {operation: args}, applied in order
+              set_step_config: {step_id, path, value},
+              # add_step | remove_step | rewire | rename |
+              # add_trigger_input | remove_trigger_input
+            }
+          }
+        }
+    """
+    from services.edit_workflow_seam import edit_workflow, _resolve_workflow_path
+
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    patch = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    workflow_id = str(patch.get("workflow_id") or patch.get("workflow") or "").strip()
+    changes = patch.get("changes") if isinstance(patch.get("changes"), dict) else {}
+    if not workflow_id:
+        return _noop("no patch.workflow_id for edit_workflow", seam="edit_workflow")
+    if not changes:
+        return _noop("no patch.changes for edit_workflow", seam="edit_workflow")
+
+    root = Path(output_dir)
+    # Pre-image so a failure in the post-edit verify never leaves a half-fixed
+    # file — the seam itself only persists on green, but the broader re-verify
+    # below is ours to make transactional.
+    wf_path = _resolve_workflow_path(output_dir, workflow_id)
+    pre_image = Path(wf_path).read_text() if wf_path and os.path.exists(wf_path) else None
+
+    result = edit_workflow(output_dir, workflow_id, changes)
+    if not result.success:
+        # The seam refused (unknown op, stale file, step not found, would not
+        # validate) and wrote nothing — a clean no-op, message passed through.
+        return _noop(result.error or "edit_workflow refused the change", seam="edit_workflow")
+
+    wf_file = (root / result.path) if result.path else (Path(wf_path) if wf_path else None)
+    try:
+        remaining = _verify_workflow(output_dir, wf_file) if wf_file else []
+    except Exception:
+        if pre_image is not None and wf_file is not None:
+            wf_file.write_text(pre_image)
+        raise
+
+    committed = _commit(
+        output_dir, f"fix(workflow): edit {workflow_id} ({', '.join(result.applied)})",
+        git=git, paths=[result.path] if result.path else None,
+    )
+    return {
+        "applied": True,
+        "seam": "edit_workflow",
+        "changes": [{"path": result.path, "kind": "edit", "operations": result.applied}],
+        "verify": {"resolved": not remaining, "remaining": remaining},
+        "committed": committed,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # add_entity seam (S5-T5) — new entity via registry + Drizzle + barrel,
 # atomic-applied.
 # --------------------------------------------------------------------------- #
@@ -822,6 +906,180 @@ def _apply_add_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
             "remaining": [] if result.applied else [
                 {"reason": result.reason or "add_field rolled back"}
             ],
+        },
+        "committed": bool(result.commit_hash),
+        "commit_hash": result.commit_hash,
+        "reason": result.reason,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# remove_field / edit_field seams — the destructive/renaming siblings of
+# add_field. A column drop or rename is data-affecting and reference-breaking;
+# the field-ripple checks (workflow-column-unknown, form-field-unknown) surface
+# whatever still names the old column for follow-up repair.
+# --------------------------------------------------------------------------- #
+
+def _apply_field_bundle(output_dir: str, ops, *, seam: str, entity: str,
+                        label: str, git: bool) -> dict:
+    """Apply a registry+drizzle bundle for a field change and report in the
+    fix_applier contract, sharing the add_field verify (the registry re-reads)."""
+    from services.atomic_apply import apply_bundle
+
+    def _verify(root: Path) -> dict:
+        try:
+            json.loads((root / "contracts/resource-registry.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return {"ok": False, "reason": f"registry re-read failed: {e}"}
+        return {"ok": True}
+
+    result = apply_bundle(output_dir, ops, verify=_verify,
+                          commit_message=f"smith: {seam} — {label}", git=git)
+    return {
+        "applied": bool(result.applied),
+        "seam": seam,
+        "changes": [{"path": p, "kind": "edit"} for p in (result.ops_written or [])],
+        "verify": {
+            "resolved": bool(result.applied),
+            "remaining": [] if result.applied else [
+                {"reason": result.reason or f"{seam} rolled back"}],
+        },
+        "committed": bool(result.commit_hash),
+        "commit_hash": result.commit_hash,
+        "reason": result.reason,
+    }
+
+
+def _apply_remove_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply a ``remove_field`` proposal — drop one column from an entity.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "remove_field", patch: {entity: "Record", field: "gender"}}
+    """
+    from services.edit_field_seam import build_remove_field_bundle, EditFieldError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    field = str(params.get("field") or params.get("field_name") or "").strip()
+    try:
+        ops = build_remove_field_bundle(output_dir, entity=entity, field_name=field)
+    except EditFieldError as exc:
+        return _noop(str(exc), seam="remove_field")
+    return _apply_field_bundle(output_dir, ops, seam="remove_field", entity=entity,
+                               label=f"{entity}.{field}", git=git)
+
+
+def _apply_edit_field(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_field`` proposal — rename and/or retype one column.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "edit_field", patch: {
+          entity: "Record", field: "fullName",
+          new_name: "displayName",   # optional
+          new_type: "text"           # optional
+        }}
+    """
+    from services.edit_field_seam import build_edit_field_bundle, EditFieldError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    field = str(params.get("field") or params.get("field_name") or "").strip()
+    try:
+        ops = build_edit_field_bundle(
+            output_dir, entity=entity, field_name=field,
+            new_name=params.get("new_name"), new_type=params.get("new_type"))
+    except EditFieldError as exc:
+        return _noop(str(exc), seam="edit_field")
+    return _apply_field_bundle(output_dir, ops, seam="edit_field", entity=entity,
+                               label=f"{entity}.{field}", git=git)
+
+
+# --------------------------------------------------------------------------- #
+# remove_entity / remove_workflow seams — the removal siblings of add_entity /
+# add_workflow. Highest blast radius: a table drop or a workflow delete orphans
+# whatever named it, which the completeness checks (Page↔Workflow, API↔Database,
+# workflow-not-defined) then surface for repair.
+# --------------------------------------------------------------------------- #
+
+def _apply_remove_entity(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply a ``remove_entity`` proposal — drop a table, its module and barrel.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "remove_entity", patch: {entity: "Draft"}}
+    """
+    from services.remove_entity_seam import build_remove_entity_bundle, RemoveEntityError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    try:
+        ops = build_remove_entity_bundle(output_dir, entity=entity)
+    except RemoveEntityError as exc:
+        return _noop(str(exc), seam="remove_entity")
+    return _apply_field_bundle(output_dir, ops, seam="remove_entity", entity=entity,
+                               label=entity, git=git)
+
+
+def _apply_edit_entity(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_entity`` proposal — rename an entity and/or its table.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "edit_entity", patch: {
+          entity: "Draft", new_name: "Post",   # optional
+          new_table: "posts"                    # optional
+        }}
+    """
+    from services.edit_entity_seam import build_edit_entity_bundle, EditEntityError
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    entity = str(params.get("entity") or "").strip()
+    try:
+        ops = build_edit_entity_bundle(
+            output_dir, entity=entity,
+            new_name=params.get("new_name"), new_table=params.get("new_table"))
+    except EditEntityError as exc:
+        return _noop(str(exc), seam="edit_entity")
+    return _apply_field_bundle(output_dir, ops, seam="edit_entity", entity=entity,
+                               label=f"{entity}→{params.get('new_name') or params.get('new_table')}",
+                               git=git)
+
+
+def _apply_remove_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply a ``remove_workflow`` proposal — delete one workflow file.
+
+    Diagnosis shape::
+
+        proposedFix: {seam: "remove_workflow", patch: {workflow_id: "DeleteRecord"}}
+    """
+    from services.remove_workflow_seam import build_remove_workflow_bundle, RemoveWorkflowError
+    from services.atomic_apply import apply_bundle
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    params = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    wid = str(params.get("workflow_id") or params.get("workflow") or "").strip()
+    try:
+        ops = build_remove_workflow_bundle(output_dir, workflow_id=wid)
+    except RemoveWorkflowError as exc:
+        return _noop(str(exc), seam="remove_workflow")
+
+    def _verify(root: Path) -> dict:
+        for op in ops:
+            if (root / op.path).exists():
+                return {"ok": False, "reason": f"{op.path} still present after delete"}
+        return {"ok": True}
+
+    result = apply_bundle(output_dir, ops, verify=_verify,
+                          commit_message=f"smith: remove workflow — {wid}", git=git)
+    return {
+        "applied": bool(result.applied),
+        "seam": "remove_workflow",
+        "changes": [{"path": p, "kind": "delete"} for p in (result.ops_written or [])],
+        "verify": {
+            "resolved": bool(result.applied),
+            "remaining": [] if result.applied else [
+                {"reason": result.reason or "remove_workflow rolled back"}],
         },
         "committed": bool(result.commit_hash),
         "commit_hash": result.commit_hash,
