@@ -46,6 +46,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
+    ArtifactProposal,
     InvalidComposition,
     InvalidPatternTemplate,
     InvalidWorkflowStep, InvalidBusinessRule,
@@ -1044,6 +1045,9 @@ class RunReport:
     #: not a failure of the run, because nothing was lost — it is a divergence
     #: the report names rather than a repair the platform hid.
     unrepaired: dict[str, str] = field(default_factory=dict)
+    #: Subjects composed by the node's fallback after every model attempt was
+    #: refused (`FALLBACK_BY_NODE`) — served plain rather than not at all.
+    fallbacks: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -1486,7 +1490,7 @@ def _execute(
         if not w.open:
             complete(key)
             return
-        if w.round >= rounds:
+        if w.round >= OBSERVER_ROUNDS_BY_NODE.get(key, rounds):
             for subject, task in list(w.open.items()):
                 _flag(key, subject, task)
             complete(key)
@@ -1909,7 +1913,78 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
+    # A page refusal names one specific fault and the composer answers it, so
+    # retries converge: across 1,132 compositions, 66 pages were accepted on
+    # the retry and 69 more were still converging when the two-attempt cap
+    # cut them off. Four attempts rescue those; a page that passes first time
+    # costs nothing extra.
+    "page_layouts": 4,
 }
+
+#: Observer repair rounds per node, where the default (the observer's own
+#: `rounds`) is wrong. `page_layouts`: 0 — the critic has judged 149 composed
+#: pages and 78 repaired ones and passed none; two repair rounds per page were
+#: minutes spent to reach the verdict the first look gave. The verdict is still
+#: taken and recorded as the page's note; nothing is re-composed for it.
+OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
+    "page_layouts": 0,
+}
+
+
+def _template_page_result(svc: "BlueprintService", subject: str, task_id: str) -> Any:
+    """The composer of last resort for one page — the deterministic template
+    from the page's own contract (see ``template_page``). ``None`` when the
+    page's family has none."""
+    from services.blueprint.template_page import template_layout
+    with svc.lock:
+        page = next((p for p in svc.doc.get("pages") or [] if p.get("id") == subject), None)
+        body = template_layout(svc.doc, page) if page else None
+    if not body:
+        return None
+    return AgentResult(task_id=task_id, agent=DAG["page_layouts"].agent,
+                       proposals=[ArtifactProposal(section="pageLayouts",
+                                                   natural_key=subject, body=body)],
+                       confidence=0.5)
+
+
+#: What composes a subject when every model attempt has been refused — the
+#: last resort a node has before its subject is lost.
+FALLBACK_BY_NODE: dict[str, Any] = {
+    "page_layouts": _template_page_result,
+}
+
+
+def _fallback_compose(svc: "BlueprintService", key: str, subject: str, *,
+                      attempt: int, reason: str, commit: bool, user_request: str,
+                      report: "RunReport", ledger: Any = None,
+                      authored: dict | None = None) -> bool:
+    """The node's composer of last resort, once every model attempt was
+    refused. Held to the same contract as an authored result; ``True`` when
+    its subject landed, in which case the report counts it under
+    ``fallbacks`` and the ledger says what it replaced."""
+    make = FALLBACK_BY_NODE.get(key)
+    if make is None or not subject:
+        return False
+    label = f"{key}:{subject}"
+    try:
+        result = make(svc, subject, f"TASK-{label}-fallback")
+        if result is None:
+            return False
+        application = apply_agent_result(svc, result, commit=commit, user_request=user_request)
+    except Exception as exc:  # noqa: BLE001 — a fallback that fails is a failure, not a crash
+        logger.warning("[fallback] %s: %s", label, exc)
+        return False
+    if not application.applied:
+        return False
+    report.artifacts.extend(application.artifacts)
+    report.fallbacks.append(label)
+    if authored is not None:
+        authored.setdefault(subject, set()).update(_proposed_identities(result, application))
+    logger.info("[fallback] %s composed from its template after %d refused attempt(s): %s",
+                label, attempt, reason[:160])
+    _note(ledger, "node_retry", key, subject, attempt, attempt,
+          f"composed from the template instead: {reason[:200]}")
+    return True
 
 
 #: How many model calls one fanning-out node keeps in flight. Pages are
@@ -2017,10 +2092,16 @@ def _apply_subject(
             return 0
 
     def _rejected(reason: str) -> str:
-        """The proposal was refused. Either it goes round again (§103) or
-        this was the last attempt and the subject is lost."""
+        """The proposal was refused. Either it goes round again (§103), or
+        this was the last attempt: the node's fallback composes the subject,
+        or the subject is lost."""
         state.feedback[subject] = reason
         if attempt >= max_attempts:
+            if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
+                                 commit=commit, user_request=user_request, report=report,
+                                 ledger=ledger, authored=state.authored):
+                _note(ledger, "node_subject", key, subject, _at(), total, True)
+                return "applied"
             report.failed.append(label)
             report.failed_because[label] = reason
             state.failed.append(subject)
@@ -2164,6 +2245,9 @@ def _run_agent_subject(
             # the same request again.
             feedback = str(exc)
             if attempt == max_attempts:
+                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
+                                     commit=commit, user_request=user_request, report=report):
+                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -2182,6 +2266,9 @@ def _run_agent_subject(
             # traceback surfaced instead of a report. Nothing was written —
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
+                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
+                                     commit=commit, user_request=user_request, report=report):
+                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None

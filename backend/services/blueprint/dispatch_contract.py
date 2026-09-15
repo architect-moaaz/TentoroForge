@@ -162,7 +162,10 @@ def workflow_ref_findings(doc: Mapping[str, Any]) -> list[dict]:
             if head in supplied or head in seen:
                 continue
             seen.add(head)
-            out.append({"rule": "workflow-ref-unsupplied", "workflow": wf.get("id"),
+            # `page` holds the artifact id for every finding (the verification
+            # edge reads it as the artifact) — here the workflow's.
+            out.append({"rule": "workflow-ref-unsupplied", "page": str(wf.get("id")),
+                        "workflow": wf.get("id"),
                         "detail": f"{wf.get('name') or wf.get('id')} ({wf.get('id')}) step "
                                   f"{step_key!r} reads {{{{{path}}}}}, but no input declares "
                                   f"{head!r} and no earlier step produces it — the engine will "

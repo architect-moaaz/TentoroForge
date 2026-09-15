@@ -343,6 +343,40 @@ def _bindings(node: Any) -> set[str]:
 #: to the record's own page, or a row click.
 _VIEW_VERBS = frozenset({"view", "open", "show", "details", "detail"})
 
+_COLLECTION_PATTERNS = frozenset({"entity_list", "list", "table", "collection", "master_detail", "index"})
+_FORM_PATTERNS = frozenset({"form", "create", "edit", "new", "wizard", "configuration", "settings"})
+_RECORD_PATTERNS = frozenset({"record_workspace", "record", "detail", "show"})
+
+
+def page_family(page: dict) -> str | None:
+    """`collection`, `form`, `record`, or None — from the page's pattern, with
+    an id-bearing route read as a record page. The families the deterministic
+    template composes, and the ones an `edit` can be hosted on."""
+    pattern = str(page.get("pattern") or "").strip().lower()
+    route = str(page.get("route") or "")
+    if pattern in _COLLECTION_PATTERNS:
+        return "collection"
+    if pattern in _FORM_PATTERNS or re.search(r"/(new|create|add(-[a-z]+)?|edit)(/|$)", route):
+        return "form"                         # `/records/new`, `/add-data`, `/x/[id]/edit`
+    if pattern in _RECORD_PATTERNS or (re.search(r"\[[^\]]+\]", route) and pattern not in _FORM_PATTERNS):
+        return "record"
+    return None
+
+
+def _somewhere_to_go(doc: dict, page: dict, entity: str, by_name: dict,
+                     families: tuple[str, ...]) -> bool:
+    """A `create` or `edit` on a list is a navigation to the page that collects
+    the fields — a form page (or, for edit, the record's own page) for this
+    entity. A button or row action cannot run Create/Update itself (nothing
+    around it collects the fields), so with no such page the verb has nowhere
+    to go and demanding a control would be unsatisfiable."""
+    wanted = {entity, by_name.get(entity, "")} - {""}
+    if page_family(page) in families:
+        return True
+    return any(page_family(p) in families
+               and str((p.get("data") or {}).get("primaryEntity") or "") in wanted
+               for p in _live(doc.get("pages")))
+
 
 def _intents(props: Any, actions: set[str]) -> Iterator[dict]:
     """Every dict inside a node's props that carries an action — the node's own
@@ -462,6 +496,10 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
                 continue                      # nothing to bind yet — Page↔Workflow's
             if op != "db_insert" and not names_a_record():
                 continue                      # no record here to act on — the contract's
+            if op == "db_update" and not _somewhere_to_go(doc, page, entity, by_name, ("form", "record")):
+                continue                      # an Edit needs a form or record page to go to
+            if op == "db_insert" and not _somewhere_to_go(doc, page, entity, by_name, ("form",)):
+                continue                      # a Create needs a form page to go to
             seen.add(op)
             wf_id = next((str(w.get("id")) for w in _live(doc.get("workflows"))
                           if str(w.get("name") or w.get("id")) == wf_name), wf_name)

@@ -697,10 +697,13 @@ def test_one_failed_subject_does_not_take_the_whole_node(svc):
         return _layout_result(spec)
 
     report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
-    # every subject was attempted, not abandoned at the first failure
-    assert seen == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    # every subject was attempted, not abandoned at the first failure — and a
+    # page gets its four attempts (ATTEMPTS_BY_NODE) whatever the run's default
+    assert seen[:3] == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    assert seen.count("PAGE-002") == 4 and set(seen) == {"PAGE-001", "PAGE-002", "PAGE-003"}
     assert "page_layouts" in report.completed
-    assert any("PAGE-002" in f for f in report.failed)
+    # these pages carry no entity or pattern, so no template can stand in
+    assert any("PAGE-002" in f for f in report.failed) and report.fallbacks == []
 
 
 def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):

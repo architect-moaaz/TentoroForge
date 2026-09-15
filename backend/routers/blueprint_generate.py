@@ -619,6 +619,7 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
         # §73 closed at the node: what the observer sent back and got right,
         # and what it flagged because no round brought it round.
         "repaired": list(getattr(report, "repaired", []) or []),
+        "fallbacks": list(getattr(report, "fallbacks", []) or []),
         "unrepaired": [
             {"node": n, "why": why}
             for n, why in (getattr(report, "unrepaired", {}) or {}).items()

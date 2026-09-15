@@ -75,6 +75,7 @@ def test_a_step_reading_what_nothing_declares_is_the_authors_refusal():
     doc["workflows"][0]["steps"][1]["config"]["values"]["age"] = "{{age}}"
     (f,) = workflow_ref_findings(doc)
     assert f["rule"] == "workflow-ref-unsupplied" and f["workflow"] == "FLOW-C"
+    assert f["page"] == "FLOW-C"        # every finding carries its artifact under `page` — the edge reads it
     assert "{{age}}" in f["detail"] and "no input declares 'age'" in f["detail"]
     assert "workflow-ref-unsupplied" in {x["rule"] for x in authoring_findings(doc)}
 
