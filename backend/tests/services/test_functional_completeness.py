@@ -571,6 +571,22 @@ def test_view_is_satisfied_by_a_row_click_or_a_link_to_the_record_page():
     assert _declared(doc) == []
 
 
+def test_a_create_form_page_is_not_asked_to_update_what_it_cannot_name():
+    """/add-data declares `update` as well (the contract imagines one form that
+    creates or edits). A Form runs one workflow and nothing on that route names
+    a record, so a control there would be refused for its inputs; the
+    declaration is the planner's to reshape, not a hole the composer left."""
+    doc = _list_page_doc(_FULL_ROW_ACTIONS)
+    doc["pages"][2]["actions"] = ["create", "update"]
+    assert _declared(doc, "PAGE-ADD") == []
+    # The same declaration on the record's own page IS the composer's: the
+    # route names the record and nothing updates or deletes it.
+    doc["pages"][1]["actions"] = ["view", "edit", "delete"]
+    details = _declared(doc, "PAGE-DET")
+    assert [d.split(" on ")[0] for d in details] == [
+        "/master-data/[id] declares `edit`", "/master-data/[id] declares `delete`"]
+
+
 def test_a_form_page_satisfies_create_with_its_own_form():
     doc = _list_page_doc(_FULL_ROW_ACTIONS)
     assert _declared(doc, "PAGE-ADD") == []

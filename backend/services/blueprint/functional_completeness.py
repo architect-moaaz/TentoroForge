@@ -423,6 +423,27 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
                 return True
         return False
 
+    def names_a_record() -> bool:
+        # An update or a delete acts on a record the page can name: the route's
+        # own `[id]`, or a row of a Table / an item of a Repeat over the entity.
+        # /add-data declares `update` too (the contract imagines one form that
+        # creates or edits), but a Form runs ONE workflow and nothing on that
+        # route names a record — a control there would be refused for its
+        # inputs, so demanding it would only burn the composer's attempts.
+        # That contract is the planner's to reshape, not the composer's.
+        if _record_in_scope(doc, page, entity) or _reaches(doc, page, entity):
+            return True
+        wanted = {entity, by_name.get(entity, "")} - {""}
+        for n in _walk(layout.get("root")):
+            if _row_scoped(n, layout, doc) in wanted:
+                return True
+            props = n.get("props") or {}
+            if n.get("type") == "Table":
+                data = next((str(props[k]) for k in ("data", "rows", "items") if props.get(k)), "")
+                if _entity_of_source(doc, layout, data.strip("{} ").split(".")[0]) in wanted:
+                    return True
+        return False
+
     _does = {"db_insert": "creates", "db_update": "updates", "db_delete": "deletes"}
     out: list[str] = []
     seen: set[str] = set()
@@ -439,6 +460,8 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
             wf_name = _workflow_for_op(doc, page, op)
             if not wf_name:
                 continue                      # nothing to bind yet — Page↔Workflow's
+            if op != "db_insert" and not names_a_record():
+                continue                      # no record here to act on — the contract's
             seen.add(op)
             wf_id = next((str(w.get("id")) for w in _live(doc.get("workflows"))
                           if str(w.get("name") or w.get("id")) == wf_name), wf_name)
