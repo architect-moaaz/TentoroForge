@@ -403,3 +403,47 @@ def test_a_workflow_naming_a_removed_column_is_caught():
 def test_system_columns_and_real_fields_are_not_flagged():
     doc = _write_doc(["fullName", "age", "updatedAt"], where_keys=["id"])
     assert not [f for f in functional_findings(doc) if f["rule"] == "workflow-column-unknown"]
+
+
+# ---------------------------------------------------------------------------
+# The form side of the field-dependency ripple: a Form collects fields the
+# entity it writes still has. A field renamed/removed leaves the form collecting
+# a value that goes nowhere. Mirror of unsatisfied_inputs.
+# ---------------------------------------------------------------------------
+
+def _form_doc(field_names):
+    inputs = [{"type": "Input", "props": {"name": n}} for n in field_names]
+    return {
+        "pages": [{"id": "PG", "route": "/records/new", "data": {"primaryEntity": "E"}}],
+        "data": {"entities": [{"id": "E", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName"}, {"name": "age"}]}]},
+        "workflows": [{"id": "FLOW-C", "name": "Create Record",
+                       "inputs": [{"name": "fullName", "kind": "field"},
+                                  {"name": "age", "kind": "field"}],
+                       "steps": [{"key": "c", "config": {"actionType": "db_insert",
+                                                          "table": "records"}}]}],
+        "pageLayouts": [{"page": "PG",
+                         "root": {"type": "Form", "props": {"workflow": "FLOW-C"},
+                                  "children": [{"type": "Stack", "props": {}, "children": inputs}]}}],
+    }
+
+
+def test_a_form_field_that_is_no_longer_a_column_is_caught():
+    doc = _form_doc(["fullName", "age", "nickname"])   # nickname removed from entity
+    hits = [f for f in functional_findings(doc) if f["rule"] == "form-field-unknown"]
+    assert hits and "nickname" in hits[0]["detail"]
+
+
+def test_a_form_collecting_only_real_columns_is_accepted():
+    doc = _form_doc(["fullName", "age"])
+    assert not [f for f in functional_findings(doc) if f["rule"] == "form-field-unknown"]
+
+
+def test_a_form_field_matching_a_workflow_input_is_accepted():
+    # a field that is a declared input of the workflow (even if the column check
+    # spelled it differently) is not orphaned.
+    doc = _form_doc(["fullName", "age"])
+    doc["workflows"][0]["inputs"].append({"name": "note", "kind": "field"})
+    doc["pageLayouts"][0]["root"]["children"][0]["children"].append(
+        {"type": "Input", "props": {"name": "note"}})
+    assert not [f for f in functional_findings(doc) if f["rule"] == "form-field-unknown"]

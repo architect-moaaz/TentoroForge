@@ -259,6 +259,57 @@ def _workflow_for_op(doc: dict, page: dict, op: str) -> str | None:
     return None
 
 
+def _columns_of_workflow_tables(doc: dict, wf: dict) -> set[str]:
+    """Column names of every entity a workflow's db steps write. Empty when the
+    workflow has no db step whose table resolves — the signal that we cannot
+    judge which fields a form dispatching it should collect."""
+    cols: set[str] = set()
+    for step in (wf or {}).get("steps") or []:
+        cfg = step.get("config") or {}
+        if not str(cfg.get("actionType") or "").startswith("db_"):
+            continue
+        ent = _entity_for_table(doc, cfg.get("table"))
+        if ent is not None:
+            cols |= {str(f.get("name")) for f in ent.get("fields") or [] if f.get("name")}
+    return cols
+
+
+def form_field_findings(doc: dict, page: dict, layout: dict) -> list[str]:
+    """A Form collects fields the entity it writes still has. A field is
+    accepted when it is a declared input of the Form's workflow, a column of the
+    table that workflow writes, or a session-filled column. A field that is none
+    of these is one the entity no longer has — renamed or removed — so the form
+    collects a value that goes nowhere; the write drops it or fails. The
+    form-side mirror of `unsatisfied_inputs` (which catches the reverse: a
+    workflow input no form collects)."""
+    session_filled = _session_filled_fields(doc)
+    out: list[str] = []
+    for form in _walk(layout.get("root")):
+        if form.get("type") != "Form":
+            continue
+        wid = (form.get("props") or {}).get("workflow")
+        wf = _workflow_by_id(doc, str(wid)) if wid else None
+        if wf is None:
+            continue                      # a form with no workflow: nothing to judge against
+        columns = _columns_of_workflow_tables(doc, wf)
+        if not columns:
+            continue                      # cannot judge without the target's columns
+        inputs = {str(i.get("name")) for i in wf.get("inputs") or [] if i.get("name")}
+        accepted = inputs | columns | session_filled
+        for name in sorted(_form_fields_of(form)):
+            # accept a FK spelled either `owner` or `ownerId`.
+            variants = {name, f"{name}Id", f"{name}_id",
+                        re.sub(r"(Id|_id)$", "", name)}
+            if variants & accepted:
+                continue
+            out.append(f"Form collects {name!r}, which is neither an input of "
+                       f"{wf.get('name') or wid} nor a column of the entity it writes "
+                       f"(columns: {', '.join(sorted(columns))}) — a field renamed or removed "
+                       f"leaves the form collecting a value that goes nowhere. Drop the field, "
+                       f"or point it at a column the entity has.")
+    return out
+
+
 def _bindings(node: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(node, list):
@@ -390,6 +441,8 @@ def page_findings(doc: dict) -> list[dict]:
             out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
         for detail in dependent_option_findings(doc, page, layout):
             out.append({"rule": "dependent-options-unsatisfied", "page": pid, "detail": f"{route}: {detail}"})
+        for detail in form_field_findings(doc, page, layout):
+            out.append({"rule": "form-field-unknown", "page": pid, "detail": f"{route}: {detail}"})
         unresolved = set(_dangling(
             {"dataSources": layout.get("dataSources") or [],
              "root": layout.get("root")})) - _planner_placeholders()
