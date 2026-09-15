@@ -33,6 +33,19 @@ from typing import Any, Iterator
 #: content; a `Button` that does nothing is a defect.
 _ACTIONABLE = ("Button", "Form")
 
+#: Page findings whose remedy is NOT the page composer's to make: the cause is
+#: upstream (a missing text column, a form field whose column the data model
+#: lacks) or the condition degrades gracefully at runtime (a search that matches
+#: nothing returns nothing, it does not break the page). Re-composing cannot fix
+#: them, so REFUSING a composition over them only burns the bounded repair rounds
+#: and ships the page degraded anyway — the "smith cannot fail" trap. They are
+#: still RETURNED (surfaced for the report and for a run that can route them to
+#: the owning agent), just not treated as a composition blocker.
+ADVISORY_PAGE_RULES = frozenset({
+    "search-without-columns",   # entity has no text column — the composer can't add one
+    "form-field-unknown",       # a form field whose column the data model lacks upstream
+})
+
 #: `{{plants}}` and `{{plants.count}}` both name `plants`.
 _BINDING = re.compile(r"\{\{([^}]+)\}\}")
 

@@ -447,3 +447,29 @@ def test_a_form_field_matching_a_workflow_input_is_accepted():
     doc["pageLayouts"][0]["root"]["children"][0]["children"].append(
         {"type": "Input", "props": {"name": "note"}})
     assert not [f for f in functional_findings(doc) if f["rule"] == "form-field-unknown"]
+
+
+def test_search_without_columns_is_advisory_not_a_composition_blocker():
+    """The trap: an entity with no text column can't get one from the page
+    composer, so refusing /members' search box just loops. The finding is still
+    surfaced, but ADVISORY_PAGE_RULES keeps it out of the block set the composer
+    is re-asked over (agent_contract.check_pattern_templates uses the same
+    predicate)."""
+    from services.blueprint.functional_completeness import (
+        page_findings, ADVISORY_PAGE_RULES,
+    )
+    doc = {
+        "pages": [{"id": "P", "route": "/lookups", "data": {"primaryEntity": "E"}}],
+        "workflows": [],
+        "data": {"entities": [{"id": "E", "name": "Lookup", "table": "lookups", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "count", "type": "integer"}]}]},
+        "pageLayouts": [{"page": "P",
+                         "dataSources": [{"name": "lk", "entity": "Lookup", "op": "list"}],
+                         "root": {"type": "Stack", "children": [
+                             {"type": "Input", "props": {"type": "search"}}]}}],
+    }
+    findings = page_findings(doc)
+    assert "search-without-columns" in {f["rule"] for f in findings}   # still surfaced
+    blocking = [f for f in findings if f["rule"] not in ADVISORY_PAGE_RULES]
+    assert not any(f["rule"] == "search-without-columns" for f in blocking)  # not a blocker

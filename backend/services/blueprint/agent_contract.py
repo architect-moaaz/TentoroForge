@@ -536,7 +536,9 @@ def check_pattern_templates(result: AgentResult,
     # caller that cannot say which workflows exist would otherwise reject every
     # real binding as invented.
     if doc is not None:
-        from services.blueprint.functional_completeness import page_findings
+        from services.blueprint.functional_completeness import (
+            page_findings, ADVISORY_PAGE_RULES,
+        )
 
         pages = {p.get("id"): p for p in (doc.get("pages") or [])}
         for proposal in proposals:
@@ -554,7 +556,11 @@ def check_pattern_templates(result: AgentResult,
                 "businessRules": [],
                 "pageLayouts": [proposal.body],
             })
-            problems.extend(f["detail"] for f in findings)
+            # Advisory findings are surfaced but never REFUSE a composition — the
+            # composer cannot fix an upstream/degradable cause, so blocking on
+            # them only loops (see ADVISORY_PAGE_RULES).
+            problems.extend(f["detail"] for f in findings
+                            if f.get("rule") not in ADVISORY_PAGE_RULES)
 
     if problems:
         raise InvalidPatternTemplate("; ".join(problems[:6]))
