@@ -85,3 +85,82 @@ def test_info_only_findings_are_not_worth_a_round():
             AssertionError("advisory notes must not trigger a re-compose")),
     )
     assert out.converged and out.rounds == 0
+
+
+# --- the Blueprint's own gaps come first; a refusal is reported, not respun ---
+
+def test_a_settled_gap_forces_the_round_even_when_the_critic_is_clean():
+    settled = {"n": 0}
+    def settle(_only):
+        settled["n"] += 1
+        return {"PAGE-001": "Before re-composing, I fixed the Blueprint: bind Delete to FLOW-003"}
+    recomposed = []
+    out = run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: {"findings": []},            # nothing visible is wrong
+        recompose_and_rebuild=lambda briefs: recomposed.append(dict(briefs)),
+        settle=settle,
+    )
+    assert settled["n"] == 1                          # once, on the first round
+    assert out.rounds == 1 and out.converged
+    assert recomposed == [{"PAGE-001": "Before re-composing, I fixed the Blueprint: bind Delete to FLOW-003"}]
+
+
+def test_a_settled_note_rides_with_the_critics_brief_for_the_same_page():
+    reports = iter([{"findings": [_finding("/master-data")]}, {"findings": []}])
+    recomposed = []
+    run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: next(reports),
+        recompose_and_rebuild=lambda briefs: recomposed.append(dict(briefs)),
+        settle=lambda _o: {"PAGE-001": "NOTE: bind Delete to FLOW-003"},
+    )
+    (briefs,) = recomposed
+    assert set(briefs) == {"PAGE-001"}
+    assert "mostly empty" in briefs["PAGE-001"]       # the visual finding
+    assert briefs["PAGE-001"].endswith("NOTE: bind Delete to FLOW-003")
+
+
+def test_a_gap_needs_no_screenshot_to_settle():
+    recomposed = []
+    out = run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: None,                        # the app could not be rendered
+        recompose_and_rebuild=lambda briefs: recomposed.append(sorted(briefs)),
+        settle=lambda _o: {"PAGE-001": "bind Delete to FLOW-003"},
+    )
+    assert recomposed == [["PAGE-001"]]
+    assert out.rounds == 1
+    assert out.skipped == "the rebuilt app could not be rendered to check it"
+    assert not out.converged                          # unseen is not "looks good"
+
+
+def test_a_refused_re_compose_is_reported_once_and_not_sent_round_again():
+    # The critic keeps flagging /master-data; the composer refuses it.
+    calls = {"n": 0}
+    def critique():
+        calls["n"] += 1
+        return {"findings": [_finding("/master-data"), _finding("/add-data")]}
+    recomposed = []
+    def recompose(briefs):
+        recomposed.append(sorted(briefs))
+        return {"PAGE-001": "InvalidPatternTemplate: Table runs Update Record"} if "PAGE-001" in briefs else {}
+    out = run_review_loop(read_doc=lambda: DOC, critique=critique,
+                          recompose_and_rebuild=recompose, max_rounds=3)
+    assert recomposed == [["PAGE-001", "PAGE-002"], ["PAGE-002"], ["PAGE-002"]]
+    assert out.refused == {"PAGE-001": "InvalidPatternTemplate: Table runs Update Record"}
+    assert set(out.remaining) == {"PAGE-002"}         # refused is not "remaining"
+    assert not out.converged
+    assert out.summary()["refused"] == ["PAGE-001"]
+
+
+def test_once_everything_left_is_refused_the_loop_stops_early():
+    recomposed = []
+    out = run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: {"findings": [_finding("/master-data")]},
+        recompose_and_rebuild=lambda briefs: (recomposed.append(sorted(briefs)) or {"PAGE-001": "refused"}),
+        max_rounds=2,
+    )
+    assert recomposed == [["PAGE-001"]]               # not a second round for the same refusal
+    assert out.rounds == 1 and out.refused == {"PAGE-001": "refused"} and not out.converged

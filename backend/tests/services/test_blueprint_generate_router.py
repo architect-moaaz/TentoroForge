@@ -349,3 +349,26 @@ def test_the_offered_option_is_the_consent_the_next_turn_accepts():
     from routers import blueprint_generate as bg
     assert bg._is_verify_consent(bg._VERIFY_OFFER_OPTIONS[0]) is True
     assert bg._is_verify_consent(bg._VERIFY_OFFER_OPTIONS[1]) is False
+
+
+# --- the Verify & Fix chip's own sentences are consent; questions are not -----
+
+def test_the_chips_sentences_are_taken_as_consent():
+    import routers.blueprint_generate as bg
+    for m in ("Verify the app and fix anything that's broken.",
+              "Verify only the current page: /master-data",
+              "Verify only the critical journeys.",
+              "verify and fix", "Verify & fix"):
+        assert bg._is_verify_consent(m) is True, m
+    for m in ("did you verify it?", "have you verified the login page",
+              "can you verify my email format is right", "no, not now",
+              "I want to add a verify step to the workflow", ""):
+        assert bg._is_verify_consent(m) is False, m
+
+
+def test_the_current_page_scope_is_a_route_list():
+    import routers.blueprint_generate as bg
+    assert bg._verify_scope("Verify only the current page: /master-data") == ["/master-data"]
+    assert bg._verify_scope("verify only the current page /admin/foo.") == ["/admin/foo"]
+    assert bg._verify_scope("Verify the app and fix anything that's broken.") is None
+    assert bg._verify_scope("Verify only the critical journeys.") is None

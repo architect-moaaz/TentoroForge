@@ -66,3 +66,44 @@ def test_slug_derivation_matches_route():
     assert _slug_for("/master-data", doc) == "master-data"
     assert _slug_for("/records/[id]/edit", doc) == "records-edit"  # dynamic seg dropped
     assert _slug_for("/", doc) == "index"
+
+
+# --- a refused re-compose restores the page's previous tree ---
+
+from services.smith.review_wiring import (
+    layouts_of, restore_refused_layouts, refused_pages, _capture_pages,
+)
+
+
+def test_the_pre_image_is_restored_only_for_the_refused_pages():
+    doc = _doc()
+    before = layouts_of(doc, ["PAGE-001", "PAGE-002"])
+    assert set(before) == {"PAGE-001", "PAGE-002"}
+    invalidate_for_recompose(doc, {"PAGE-001": "b", "PAGE-002": "b"})
+    # PAGE-002 was re-composed (a new tree landed); PAGE-001 was refused.
+    doc["pageLayouts"].append({"page": "PAGE-002", "root": {"type": "Container"}})
+    assert restore_refused_layouts(doc, before, ["PAGE-001"]) == ["PAGE-001"]
+    by = {l["page"]: l["root"] for l in doc["pageLayouts"]}
+    assert by == {"PAGE-002": {"type": "Container"}, "PAGE-001": {"type": "Stack"}}
+    # Restoring again, or a page that has a tree, changes nothing.
+    assert restore_refused_layouts(doc, before, ["PAGE-001", "PAGE-002"]) == []
+
+
+def test_refused_pages_are_read_from_the_build_report():
+    built = {"report": {"failed": [
+        {"node": "page_layouts:PAGE-001", "why": "InvalidPatternTemplate: Table runs Update Record"},
+        {"node": "frontend", "why": "skipped"},
+    ]}}
+    assert refused_pages(built) == {"PAGE-001": "InvalidPatternTemplate: Table runs Update Record"}
+    assert refused_pages({}) == {} and refused_pages(None) == {}
+
+
+def test_the_review_can_be_narrowed_to_named_routes(monkeypatch):
+    import services.smith.review_wiring as rw
+    asked = []
+    monkeypatch.setattr(rw, "_screenshot", lambda url: asked.append(url) or b"png")
+    monkeypatch.setattr(rw, "_preview_url", lambda out, route, doc: route)
+    doc = _doc()
+    assert [s["route"] for s in _capture_pages("out", doc)] == ["/master-data", "/add-data"]
+    assert [s["route"] for s in _capture_pages("out", doc, ["/add-data"])] == ["/add-data"]
+    assert _capture_pages("out", doc, ["/nowhere"]) == []

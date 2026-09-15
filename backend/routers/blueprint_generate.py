@@ -1506,7 +1506,8 @@ async def smith_chat(
             if svc is not None and _is_built(output_dir) \
                     and _is_verify_consent(req.message):
                 _run_smith_review(str(output_dir), app_root, emit=emit,
-                                  app_name=getattr(project, "name", "") or "")
+                                  app_name=getattr(project, "name", "") or "",
+                                  routes=_verify_scope(req.message))
                 return {"status": "verified"}
 
             if not defined:
@@ -1953,20 +1954,45 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 
 def _is_verify_consent(message: str) -> bool:
     """Whether a message is the user taking the verify-and-fix offer. Precise on
-    purpose — the offer's own option, and a few unambiguous phrasings — so a
-    message that merely mentions verifying does not silently launch a run."""
+    purpose — the offer's own option, the Verify & Fix chip's own sentences,
+    and a few unambiguous phrasings — so a message that merely mentions
+    verifying ("did you verify the login page?") does not silently launch a run.
+
+    The chip sends "Verify the app and fix anything that's broken.", "Verify
+    only the current page: /route" and "Verify only the critical journeys." —
+    none of which the exact list held, so the click fell through to the chat
+    turn and nothing verified. A message that OPENS with the verb is the ask;
+    a question about a past run is not."""
     m = " ".join((message or "").strip().lower().split())
     if not m or "not now" in m or m.startswith("no") or m.startswith("don"):
         return False
-    return m in {
+    if m in {
         "verify & fix", "verify and fix", "verify", "auto-verify and fix",
         "auto verify and fix", "yes verify", "verify it", "verify the app",
         "check and fix", "verify & fix it",
-    }
+    }:
+        return True
+    if m.startswith(("did you", "have you", "were you", "did it", "can you verify",
+                     "could you verify", "how do")):
+        return False
+    return m.startswith(("verify ", "verify.", "verify!", "auto-verify ",
+                         "auto verify ", "check and fix "))
+
+
+def _verify_scope(message: str) -> list[str] | None:
+    """The routes a verify ask narrows to — "verify only the current page:
+    /admin/foo" — or ``None`` for the whole app. The chip's "critical journeys"
+    scope has no journey notion in the review; it reviews the app."""
+    m = re.search(r"only\s+the\s+current\s+page[:\s]+([/\w\-\[\]\.]+)",
+                  message or "", re.IGNORECASE)
+    if not m:
+        return None
+    route = m.group(1).rstrip(".,")
+    return [route if route.startswith("/") else "/" + route]
 
 
 def _run_smith_review(output_dir: str, app_root: str, *, emit,
-                      app_name: str = "") -> None:
+                      app_name: str = "", routes: list[str] | None = None) -> None:
     """Smith's OUTER render loop: review the built app, re-compose the pages a
     visual review flags, rebuild, review again — bounded. Best-effort and a
     clean no-op when the app cannot be screenshotted; it must never fail a build
@@ -1985,7 +2011,9 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
         from services.smith.review_wiring import (
             make_critique, invalidate_for_recompose,
             write_review_briefs, clear_review_briefs,
+            layouts_of, restore_refused_layouts, refused_pages,
         )
+        from services.smith.review_gaps import settle_crud_gaps
     except Exception as exc:  # noqa: BLE001
         logger.info("[review] unavailable: %s", exc)
         return
@@ -1999,27 +2027,47 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
                  for p in (read_doc().get("pages") or []) if isinstance(p, dict)}
         return [by_id.get(pid, pid) for pid in page_ids]
 
-    def recompose_and_rebuild(briefs: dict) -> None:
+    def settle(_only: set[str] | None) -> dict[str, str]:
+        # What the Blueprint itself lacks for a page to be composable — a
+        # declared Delete with no delete workflow — declared before any page
+        # is re-composed, so the composer has the target and not a guess.
         svc = BlueprintService.load(output_dir=output_dir)
+        return settle_crud_gaps(svc, emit=emit)
+
+    def recompose_and_rebuild(briefs: dict) -> dict[str, str]:
+        svc = BlueprintService.load(output_dir=output_dir)
+        before = layouts_of(svc.doc, briefs)
         hit = invalidate_for_recompose(svc.doc, briefs)
         if not hit:
-            return
+            return {}
         svc.save()
         write_review_briefs(output_dir, {pid: briefs[pid] for pid in hit})
         emit("review", {"phase": "fixing", "pages": _routes_for(hit)})
         try:
-            _run_dag(output_dir, app_root, "", approved=True, emit=emit,
-                     app_name=app_name, announce_completion=False)
+            built = _run_dag(output_dir, app_root, "", approved=True, emit=emit,
+                             app_name=app_name, announce_completion=False)
         finally:
             clear_review_briefs(output_dir)
+        # A REFUSED RE-COMPOSE LEAVES THE PAGE AS IT WAS, NOT AS NOTHING. The
+        # layout was dropped so the resume would re-compose it; when the
+        # composer produced no tree the contract accepts, the Blueprint held
+        # no tree at all for a route it serves. Restore the pre-image and
+        # report the refusal so the loop does not spend a round repeating it.
+        refused = refused_pages(built)
+        if refused:
+            svc = BlueprintService.load(output_dir=output_dir)
+            if restore_refused_layouts(svc.doc, before, refused):
+                svc.save()
+        return refused
 
     emit("review", {"phase": "start"})
     try:
         outcome = run_review_loop(
             read_doc=read_doc,
-            critique=make_critique(output_dir, read_doc, emit),
+            critique=make_critique(output_dir, read_doc, emit, routes=routes),
             recompose_and_rebuild=recompose_and_rebuild,
             emit=emit,
+            settle=settle,
         )
     except Exception as exc:  # noqa: BLE001 — a review never breaks a build
         logger.warning("[review] loop failed for %s: %s",
@@ -2032,18 +2080,31 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
                     "skipped": bool(outcome.skipped),
                     "converged": outcome.converged,
                     "recomposed": _routes_for(outcome.recomposed),
-                    "remaining": _routes_for(sorted(outcome.remaining))})
-    if outcome.skipped or not outcome.rounds:
+                    "remaining": _routes_for(sorted(outcome.remaining)),
+                    "refused": _routes_for(sorted(outcome.refused))})
+    if not outcome.rounds:
         return  # nothing reviewed, or nothing needed fixing — say nothing
     n = len(outcome.recomposed)
     page_word = "page" if n == 1 else "pages"
+    if outcome.skipped:
+        emit("message", {"text":
+            f"I re-composed {n} {page_word}, but {outcome.skipped} — open it and "
+            f"have a look."})
+        return
     if outcome.converged:
         emit("message", {"text":
             f"I reviewed the built app and re-composed {n} {page_word} that "
             f"weren't right — it looks good now."})
-    else:
-        r = len(outcome.remaining)
-        emit("message", {"text":
-            f"I reviewed the build and re-composed {n} {page_word}. {r} still "
-            f"had issues I couldn't fully resolve in {outcome.rounds} rounds — "
-            f"worth a look."})
+        return
+    parts = [f"I reviewed the build and re-composed {n} {page_word}."]
+    if outcome.refused:
+        # Say WHICH page could not be redone and WHY — the refusal names the
+        # contract problem — instead of counting it among "still had issues".
+        for pid, why in sorted(outcome.refused.items()):
+            route = _routes_for([pid])[0]
+            parts.append(f"I couldn't re-compose {route}: {why.split(';')[0].strip()}")
+    r = len(outcome.remaining)
+    if r:
+        parts.append(f"{r} still had issues I couldn't fully resolve in "
+                     f"{outcome.rounds} rounds — worth a look.")
+    emit("message", {"text": " ".join(parts)})

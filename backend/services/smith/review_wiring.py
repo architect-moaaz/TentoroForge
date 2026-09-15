@@ -23,7 +23,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,44 @@ def invalidate_for_recompose(doc: dict, briefs: Mapping[str, str]) -> list[str]:
     return hit
 
 
+def layouts_of(doc: Mapping[str, Any], page_ids: Iterable[str]) -> dict[str, dict]:
+    """``{page_id: layout}`` for the pages about to be invalidated — the
+    pre-image a refused re-compose is restored from."""
+    want = {str(p) for p in page_ids}
+    return {str(l.get("page")): l for l in (doc.get("pageLayouts") or [])
+            if isinstance(l, dict) and str(l.get("page")) in want}
+
+
+def restore_refused_layouts(doc: dict, before: Mapping[str, dict],
+                            refused: Iterable[str]) -> list[str]:
+    """Put the previous layout back for every page whose re-compose was
+    refused. ``invalidate_for_recompose`` drops a layout so the resume
+    re-composes it; when the composer then produces nothing the contract
+    accepts, the page is left with NO tree — a route that cannot render, in
+    the source of truth, from a verify meant to fix it. The old tree was at
+    least a page. In place; returns the page ids restored."""
+    have = {str(l.get("page")) for l in (doc.get("pageLayouts") or [])
+            if isinstance(l, dict)}
+    put: list[str] = []
+    for pid in refused:
+        pid = str(pid)
+        if pid in before and pid not in have:
+            doc.setdefault("pageLayouts", []).append(dict(before[pid]))
+            put.append(pid)
+    return put
+
+
+def refused_pages(built: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{page_id: why}`` for the page_layouts subjects a build report says
+    failed — what ``_run_dag`` returns, read the same way the panel reads it."""
+    out: dict[str, str] = {}
+    for f in ((built or {}).get("report") or {}).get("failed") or []:
+        node = str((f or {}).get("node") or "")
+        if node.startswith("page_layouts:"):
+            out[node.split(":", 1)[1]] = str((f or {}).get("why") or "refused")
+    return out
+
+
 def write_review_briefs(output_dir: str, briefs: Mapping[str, str]) -> None:
     """Write ``{page_id: brief}`` to the transient file the composer reads."""
     path = Path(output_dir).joinpath(*_BRIEFS_FILE)
@@ -162,16 +200,21 @@ def _slug_for(route: str, doc: Mapping[str, Any]) -> str:
     return "-".join(seg) or "index"
 
 
-def _capture_pages(output_dir: str, doc: Mapping[str, Any]) -> list[dict]:
+def _capture_pages(output_dir: str, doc: Mapping[str, Any],
+                   routes: Iterable[str] | None = None) -> list[dict]:
     """``[{route, png}]`` for the pages the sidecar could screenshot. Empty when
     nothing rendered — the loop then degrades to a clean no-op. Dynamic routes
-    (``/x/[id]``) are skipped: they need a concrete id to serve."""
+    (``/x/[id]``) are skipped: they need a concrete id to serve. ``routes``
+    narrows the review to those pages — "verify only the current page"."""
+    only = {str(r).rstrip("/") or "/" for r in routes} if routes else None
     shots: list[dict] = []
     for p in doc.get("pages") or []:
         if not isinstance(p, dict):
             continue
         route = str(p.get("route") or "").strip()
         if not route or "[" in route:
+            continue
+        if only is not None and (route.rstrip("/") or "/") not in only:
             continue
         png = _screenshot(_preview_url(output_dir, route, doc))
         if png:
@@ -240,6 +283,7 @@ def make_critique(
     output_dir: str,
     read_doc: Callable[[], Mapping[str, Any]],
     emit: Callable[[str, dict], None] | None = None,
+    routes: Iterable[str] | None = None,
 ) -> Callable[[], dict | None]:
     """A ``critique()`` for the loop: screenshot the built pages, show them in the
     review panel, run the vision critic, show its analysis, and return the report
@@ -251,7 +295,7 @@ def make_critique(
     """
     def critique() -> dict | None:
         doc = read_doc()
-        shots = _capture_pages(output_dir, doc)
+        shots = _capture_pages(output_dir, doc, routes)
         if not shots:
             return None
         if emit is not None:
@@ -283,5 +327,5 @@ def make_critique(
 
 __all__ = [
     "invalidate_for_recompose", "write_review_briefs", "clear_review_briefs",
-    "make_critique",
+    "make_critique", "layouts_of", "restore_refused_layouts", "refused_pages",
 ]

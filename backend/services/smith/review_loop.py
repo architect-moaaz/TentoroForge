@@ -40,17 +40,24 @@ class ReviewOutcome:
     recomposed: list[str] = field(default_factory=list)
     #: Page id -> the brief still open when the loop stopped (cap reached).
     remaining: dict[str, str] = field(default_factory=dict)
+    #: Pages a re-compose REFUSED (the composer could not produce a tree the
+    #: contract accepts) — ``{page_id: reason}``. Not retried: a second round
+    #: against the same brief is the same refusal, so the loop reports why
+    #: instead of spending it. A refused page is not "remaining" — remaining
+    #: is what the last review still saw; refused is what could not be redone.
+    refused: dict[str, str] = field(default_factory=dict)
     #: Set when the loop could not run at all (no screenshots) — not a failure,
     #: a degradation: the build still shipped.
     skipped: str | None = None
 
     @property
     def converged(self) -> bool:
-        return self.skipped is None and not self.remaining
+        return self.skipped is None and not self.remaining and not self.refused
 
     def summary(self) -> dict[str, Any]:
         return {"rounds": self.rounds, "recomposed": list(self.recomposed),
-                "remaining": sorted(self.remaining), "skipped": self.skipped,
+                "remaining": sorted(self.remaining), "refused": sorted(self.refused),
+                "skipped": self.skipped,
                 "converged": self.converged}
 
 
@@ -72,9 +79,10 @@ def run_review_loop(
     *,
     read_doc: Callable[[], Mapping[str, Any]],
     critique: Callable[[], Mapping[str, Any] | None],
-    recompose_and_rebuild: Callable[[dict[str, str]], None],
+    recompose_and_rebuild: Callable[[dict[str, str]], Mapping[str, str] | None],
     emit: Callable[[str, dict], None] | None = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
+    settle: Callable[[set[str] | None], Mapping[str, str]] | None = None,
 ) -> ReviewOutcome:
     """Run the review→fix→rebuild loop and return what it did.
 
@@ -82,19 +90,43 @@ def run_review_loop(
     when the app could not be rendered/reviewed — in which case the loop stops
     cleanly having done nothing. ``recompose_and_rebuild`` takes ``{page_id:
     brief}`` and must re-compose exactly those pages against their briefs and
-    rebuild the app; the next ``critique`` then sees the result.
+    rebuild the app; the next ``critique`` then sees the result. It may return
+    ``{page_id: reason}`` for pages whose re-compose was REFUSED — those are
+    reported and not sent round again (see ``ReviewOutcome.refused``).
+
+    ``settle`` is what the review fixes in the Blueprint itself before any page
+    is re-composed — a page's declared action with no workflow to run — and
+    returns ``{page_id: note}`` for the pages that must now be re-composed
+    because of it, whether or not the critique flagged them. Called once, on
+    the first round: what it settles stays settled.
     """
     outcome = ReviewOutcome()
     seen: set[str] = set()
 
     report = critique()                       # look at the app as first built
+    # THE BLUEPRINT'S OWN GAPS COME FIRST. A page whose Delete has no delete
+    # workflow cannot be composed right however many times the composer tries;
+    # the review declares the workflow, then re-composes the page against it.
+    # Settled on the first round only, and even when the app could not be
+    # screenshotted — a gap in the Blueprint needs no screenshot to see.
+    settled: dict[str, str] = dict(settle(None) or {}) if settle is not None else {}
     while outcome.rounds < max_rounds:
-        if report is None:
-            outcome.skipped = "the app could not be rendered for review"
+        if report is None and not settled:
+            # Nothing to look at. Before any round that is a review that could
+            # not happen; after one it is a rebuild that could not be checked
+            # — said differently, because one did nothing and one did work.
+            outcome.skipped = ("the app could not be rendered for review"
+                               if outcome.rounds == 0 else
+                               "the rebuilt app could not be rendered to check it")
             return outcome
-        briefs = repair_briefs_from_visual_qa(report, read_doc())
+        briefs = dict(repair_briefs_from_visual_qa(report, read_doc())) if report else {}
+        for pid, note in settled.items():
+            briefs[pid] = f"{briefs[pid]}\n\n{note}" if briefs.get(pid) else note
+        settled = {}
+        for pid in outcome.refused:
+            briefs.pop(pid, None)             # refused once is refused; say so, don't spin
         if not briefs:
-            return outcome                    # nothing worth fixing — done
+            break                             # nothing worth fixing — done
         if emit is not None:
             emit("message", {"text": _narrate(briefs, read_doc(),
                                               outcome.rounds + 1, max_rounds)})
@@ -102,13 +134,17 @@ def run_review_loop(
             if pid not in seen:
                 seen.add(pid)
                 outcome.recomposed.append(pid)
-        recompose_and_rebuild(dict(briefs))
+        refused = recompose_and_rebuild(dict(briefs)) or {}
+        outcome.refused.update({str(k): str(v) for k, v in refused.items()})
         outcome.rounds += 1
         report = critique()                   # re-review the rebuilt app
 
-    # Cap reached: report what the last review still flags, if anything.
+    # Done or capped: report what the last review still flags, if anything —
+    # a refused page is reported as refused, not as still-flagged.
     if report is not None:
-        outcome.remaining = dict(repair_briefs_from_visual_qa(report, read_doc()))
+        outcome.remaining = {
+            pid: brief for pid, brief in repair_briefs_from_visual_qa(report, read_doc()).items()
+            if pid not in outcome.refused}
     return outcome
 
 
