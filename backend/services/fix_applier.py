@@ -67,6 +67,8 @@ def apply_fix(output_dir: str, diagnosis: dict, *, git: bool = True) -> dict:
         return _apply_add_page(output_dir, diagnosis, git=git)
     if seam == "add_workflow":
         return _apply_add_workflow(output_dir, diagnosis, git=git)
+    if seam == "edit_workflow":
+        return _apply_edit_workflow(output_dir, diagnosis, git=git)
     if seam == "add_entity":
         return _apply_add_entity(output_dir, diagnosis, git=git)
     if seam == "add_field":
@@ -683,6 +685,78 @@ def _apply_add_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
         "committed": bool(result.commit_hash),
         "commit_hash": result.commit_hash,
         "reason": result.reason,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# edit_workflow seam — CHANGE an existing workflow (not just add one). The add_*
+# seams create; this is how Smith updates a workflow's logic in place: retune a
+# step's config, add/remove/rewire a step, add a trigger input. The
+# `edit_workflow` seam validates and persists on green itself (staleness-checked,
+# never a half-write), so this wraps it into the fix_applier contract: pre-image
+# for transactional safety, the same functional re-verify the node-config seam
+# runs, and a commit.
+# --------------------------------------------------------------------------- #
+
+def _apply_edit_workflow(output_dir: str, diagnosis: dict, *, git: bool) -> dict:
+    """Apply an ``edit_workflow`` proposal.
+
+    Diagnosis shape::
+
+        proposedFix: {
+          seam: "edit_workflow",
+          patch: {
+            workflow_id: "UpdateRecord",     # id, name, or file stem — resolved
+            changes: {                       # {operation: args}, applied in order
+              set_step_config: {step_id, path, value},
+              # add_step | remove_step | rewire | rename |
+              # add_trigger_input | remove_trigger_input
+            }
+          }
+        }
+    """
+    from services.edit_workflow_seam import edit_workflow, _resolve_workflow_path
+
+    proposed = (diagnosis or {}).get("proposedFix") or {}
+    patch = proposed.get("patch") if isinstance(proposed.get("patch"), dict) else {}
+    workflow_id = str(patch.get("workflow_id") or patch.get("workflow") or "").strip()
+    changes = patch.get("changes") if isinstance(patch.get("changes"), dict) else {}
+    if not workflow_id:
+        return _noop("no patch.workflow_id for edit_workflow", seam="edit_workflow")
+    if not changes:
+        return _noop("no patch.changes for edit_workflow", seam="edit_workflow")
+
+    root = Path(output_dir)
+    # Pre-image so a failure in the post-edit verify never leaves a half-fixed
+    # file — the seam itself only persists on green, but the broader re-verify
+    # below is ours to make transactional.
+    wf_path = _resolve_workflow_path(output_dir, workflow_id)
+    pre_image = Path(wf_path).read_text() if wf_path and os.path.exists(wf_path) else None
+
+    result = edit_workflow(output_dir, workflow_id, changes)
+    if not result.success:
+        # The seam refused (unknown op, stale file, step not found, would not
+        # validate) and wrote nothing — a clean no-op, message passed through.
+        return _noop(result.error or "edit_workflow refused the change", seam="edit_workflow")
+
+    wf_file = (root / result.path) if result.path else (Path(wf_path) if wf_path else None)
+    try:
+        remaining = _verify_workflow(output_dir, wf_file) if wf_file else []
+    except Exception:
+        if pre_image is not None and wf_file is not None:
+            wf_file.write_text(pre_image)
+        raise
+
+    committed = _commit(
+        output_dir, f"fix(workflow): edit {workflow_id} ({', '.join(result.applied)})",
+        git=git, paths=[result.path] if result.path else None,
+    )
+    return {
+        "applied": True,
+        "seam": "edit_workflow",
+        "changes": [{"path": result.path, "kind": "edit", "operations": result.applied}],
+        "verify": {"resolved": not remaining, "remaining": remaining},
+        "committed": committed,
     }
 
 

@@ -337,3 +337,69 @@ def test_page_schema_patch_applies(tmp_path, spy_post_generate):
     assert patched["root"]["props"]["title"] == "All Candidates"
     assert result["verify"]["resolved"] is True
     assert spy_post_generate == [str(out)]
+
+
+# --------------------------------------------------------------------------- #
+# edit_workflow seam — CHANGE an existing workflow in place (not just add one).
+# --------------------------------------------------------------------------- #
+
+def _write_update_workflow(root: Path) -> None:
+    from services.crud_workflow_generator import build_crud_workflow
+    (root / "workflows").mkdir(parents=True, exist_ok=True)
+    wf = build_crud_workflow(
+        "Record", "records",
+        [{"name": "fullName", "type": "string", "not_null": True}],
+        "update", pk="id")
+    (root / "workflows" / "UpdateRecord.json").write_text(json.dumps(wf, indent=2))
+
+
+def test_edit_workflow_set_step_config_applies_and_verifies(tmp_path):
+    _write_update_workflow(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_workflow",
+        "patch": {"workflow_id": "UpdateRecord",
+                  "changes": {"set_step_config": {
+                      "step_id": "db_update", "path": ["where", "id"],
+                      "value": "{{record.id}}"}}}}}, git=False)
+    assert res["applied"] and res["verify"]["resolved"]
+    assert res["seam"] == "edit_workflow"
+    after = json.loads((tmp_path / "workflows" / "UpdateRecord.json").read_text())
+    node = next(n for n in after["definition"]["nodes"] if n["id"] == "db_update")
+    assert node["data"]["config"]["where"] == {"id": "{{record.id}}"}
+
+
+def test_edit_workflow_rename_moves_the_file(tmp_path):
+    _write_update_workflow(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_workflow",
+        "patch": {"workflow_id": "UpdateRecord", "changes": {"rename": "RecordUpdate"}}}},
+        git=False)
+    assert res["applied"]
+    assert (tmp_path / "workflows" / "RecordUpdate.json").exists()
+    assert not (tmp_path / "workflows" / "UpdateRecord.json").exists()
+
+
+def test_edit_workflow_missing_id_is_a_clean_noop(tmp_path):
+    _write_update_workflow(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path),
+                                {"proposedFix": {"seam": "edit_workflow", "patch": {}}}, git=False)
+    assert res["applied"] is False and "workflow_id" in res["reason"]
+
+
+def test_edit_workflow_unknown_workflow_is_a_clean_noop(tmp_path):
+    _write_update_workflow(tmp_path)
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_workflow",
+        "patch": {"workflow_id": "DoesNotExist", "changes": {"rename": "X"}}}}, git=False)
+    assert res["applied"] is False and "not found" in res["reason"]
+
+
+def test_edit_workflow_refusal_leaves_the_file_untouched(tmp_path):
+    # a bad-shape op (rename wants a string) is refused by the seam; nothing writes.
+    _write_update_workflow(tmp_path)
+    before = (tmp_path / "workflows" / "UpdateRecord.json").read_text()
+    res = fix_applier.apply_fix(str(tmp_path), {"proposedFix": {
+        "seam": "edit_workflow",
+        "patch": {"workflow_id": "UpdateRecord", "changes": {"rename": {"to": "X"}}}}}, git=False)
+    assert res["applied"] is False
+    assert (tmp_path / "workflows" / "UpdateRecord.json").read_text() == before
