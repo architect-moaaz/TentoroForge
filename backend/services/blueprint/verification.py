@@ -81,6 +81,8 @@ SECTION_OWNER: dict[str, str] = {
     # finding's `section` through the Page↔Layout edge and had no owner, so
     # every one of those repair tasks was addressed to "unassigned".
     "pageLayouts": "a2ui_pages",
+    # §34 — the whole-app sketch has the same authority behind it.
+    "composition": "a2ui_composition",
     "components": "frontend",
     "widgets": "page_design",
     "designSystem": "accessibility",

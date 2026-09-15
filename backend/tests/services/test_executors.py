@@ -1922,3 +1922,41 @@ def test_the_field_authors_reply_updates_the_named_entity_whatever_it_called_it(
     assert len(detailed["fields"]) == 3 and detailed["labelField"] == "quantity"
     assert svc.doc["data"]["constraints"][0]["entity"] == part, (
         "a constraint naming an entity the document already holds resolves")
+
+
+# --- §34: the app composed once ---------------------------------------------
+
+def _page(pid="PAGE-001", route="/candidates"):
+    return {"id": pid, "name": "Candidates", "route": route, "purpose": "Scan",
+            "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-001"}}
+
+
+def test_the_composition_prompt_is_the_whole_app_with_names_only(svc):
+    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
+    system, user = build_prompt(svc.doc, "composition")
+    assert "Name components from this list only" in system
+    assert "props:" not in system, "the index carries names, not signatures"
+    assert '"PAGE-001"' in user and '"PAGE-002"' in user
+    assert 'natural_key "composition"' in user
+
+
+def test_the_page_composer_inherits_the_apps_conventions(svc):
+    """A page authored bespoke used to re-decide the header, the filters, the
+    empty state. Now the app decided them once, and the composer is told —
+    in the cached prefix, since the decisions are the app's, not the page's."""
+    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
+    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    svc.doc["composition"] = {
+        "vision": "Calm and dense",
+        "conventions": [{"topic": "header", "rule": "Title left, action right"}],
+        "pages": [{"page": "PAGE-001", "layout": "single_column",
+                   "sections": [{"name": "List", "purpose": "scan"}]},
+                  {"page": "PAGE-002", "layout": "single_column",
+                   "sections": [{"name": "List", "purpose": "scan"}]}],
+    }
+    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    assert "Calm and dense" not in before
+    assert "Calm and dense" in system and "Title left, action right" in system
+    assert "composition.sketch" in user and "composition.sketch" not in plain_user
+    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002")
+    assert other == system, "the prefix must stay identical across the fan-out"

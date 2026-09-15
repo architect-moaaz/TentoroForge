@@ -1353,8 +1353,14 @@ def test_pages_compose_against_declared_workflows_not_their_steps():
     assert "workflow_steps" in DAG["integration"].depends_on
     assert DAG["workflow_steps"].fanout == "workflows"
     assert DAG["workflow_steps"].depends_on == frozenset({"workflows"})
+    # The scheduler is readiness-driven, so what matters is that no path
+    # leads from the step authoring to the page composer. The wave index is
+    # one behind since the whole-app `composition` call sits between the
+    # contracts and the pages: one short call, not the longest node of a build.
+    assert "page_layouts" not in descendants("workflow_steps")
     at = {k: i for i, level in enumerate(levels()) for k in level}
-    assert at["page_layouts"] == at["workflow_steps"]
+    assert at["composition"] == at["workflow_steps"]
+    assert at["page_layouts"] == at["workflow_steps"] + 1
 
 
 def test_workflow_steps_fan_out_over_the_declared_workflows(svc):
@@ -1554,7 +1560,10 @@ def test_workflows_are_declared_against_the_page_set_and_contracts_run_beside_th
     assert "page_details" in DAG["apis"].depends_on
     at = {k: i for i, level in enumerate(levels()) for k in level}
     assert at["page_details"] == at["workflows"]
-    assert at["page_layouts"] == at["workflow_steps"]
+    # `composition` reads the finished contracts and runs beside the step
+    # authoring; the pages follow it and never wait on the steps.
+    assert at["composition"] == at["workflow_steps"]
+    assert "page_layouts" not in descendants("workflow_steps")
 
 
 def test_a_feature_is_an_entitys_pages_and_an_orphan_page_is_its_own(svc):
@@ -1682,3 +1691,24 @@ def test_each_entity_is_detailed_by_its_own_call_onto_the_named_row(svc):
     assert sorted(seen) == sorted(ids)
     assert len(svc.doc["data"]["entities"]) == 2, "detailing created a second entity"
     assert all(len(e["fields"]) == 2 for e in svc.doc["data"]["entities"])
+
+
+# --- §34: the app composed once, before any page -----------------------------
+
+def test_the_app_is_composed_once_before_any_page():
+    node = DAG["composition"]
+    assert {"page_details", "design_system", "figma_design_system"} <= node.depends_on
+    assert not node.fanout, "one call for the whole app, not one per page"
+    assert "composition" in DAG["page_layouts"].depends_on
+
+
+def test_a_page_change_recomposes_the_app(ats):
+    """Adding a page must give that page a sketch, so the composition follows
+    the pages rather than the frame — the same reasoning that keeps
+    pageLayouts incremental."""
+    from services.blueprint.orchestrator import is_foundational
+
+    assert not is_foundational(DAG["composition"])
+    plan = incremental_plan(ats, [ats["pages"][0]["id"]])
+    assert "composition" in plan
+    assert plan.index("composition") < plan.index("page_layouts")

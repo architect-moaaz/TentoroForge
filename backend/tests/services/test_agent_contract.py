@@ -94,8 +94,11 @@ def test_figma_intelligence_is_registered_from_section_101():
     # The observer (§73) is the fifth: registered flag-only, like verification,
     # so the check that stops it authoring is the same check that stops
     # everyone else — see test_observer.py.
-    assert extra == {"figma_intelligence", "a2ui_pages", "memory", "smith",
-                     "observer"}
+    #
+    # a2ui_composition (§34) sketches the whole app once before a2ui_pages
+    # composes each page: same authority, one level up.
+    assert extra == {"figma_intelligence", "a2ui_composition", "a2ui_pages",
+                     "memory", "smith", "observer"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
@@ -688,3 +691,75 @@ def test_a_batch_citation_by_the_models_own_key_still_resolves(svc):
     apply_agent_result(svc, result)
     perm = svc.doc["permissions"][0]["id"]
     assert svc.doc["roles"][0]["permissions"] == [perm]
+
+
+# --- §34: the whole-app sketch is checked against the app it is for --------
+
+def _composition_result(pages: list[dict]) -> AgentResult:
+    return AgentResult(
+        task_id="t", agent="a2ui_composition", confidence=0.9,
+        proposals=[ArtifactProposal(
+            section="composition", natural_key="composition",
+            body={"vision": "calm", "conventions": [], "pages": pages})],
+    )
+
+
+_TWO_PAGES = {"pages": [{"id": "PAGE-001"}, {"id": "PAGE-002"},
+                        {"id": "PAGE-009", "status": "DEPRECATED"}]}
+
+
+def _sketch(pid: str, components=("Table",)) -> dict:
+    return {"page": pid, "layout": "single_column",
+            "sections": [{"name": "Main", "purpose": "x",
+                          "components": list(components)}]}
+
+
+def test_a_sketch_for_a_page_that_does_not_exist_is_refused():
+    from services.blueprint.agent_contract import InvalidComposition, check_composition
+
+    with pytest.raises(InvalidComposition, match="PAGE-404: not a page"):
+        check_composition(
+            _composition_result([_sketch("PAGE-001"), _sketch("PAGE-002"),
+                                 _sketch("PAGE-404")]),
+            _TWO_PAGES,
+        )
+
+
+def test_a_page_left_unsketched_is_refused():
+    """A page without a sketch would be authored blind — exactly the state the
+    pass exists to end."""
+    from services.blueprint.agent_contract import InvalidComposition, check_composition
+
+    with pytest.raises(InvalidComposition, match="PAGE-002: no sketch"):
+        check_composition(_composition_result([_sketch("PAGE-001")]), _TWO_PAGES)
+
+
+def test_a_section_naming_an_unregistered_component_is_refused():
+    """The name would otherwise reach the page prompt as an instruction."""
+    from services.blueprint.agent_contract import InvalidComposition, check_composition
+
+    with pytest.raises(InvalidComposition, match="'MagicGrid' is not a registered"):
+        check_composition(
+            _composition_result([_sketch("PAGE-001", ("MagicGrid",)),
+                                 _sketch("PAGE-002")]),
+            _TWO_PAGES,
+        )
+
+
+def test_a_full_cover_passes_and_deprecated_pages_are_not_owed_one():
+    from services.blueprint.agent_contract import check_composition
+
+    check_composition(
+        _composition_result([_sketch("PAGE-001"), _sketch("PAGE-002")]), _TWO_PAGES,
+    )
+
+
+def test_a_composition_is_applied_as_one_object_per_app(svc):
+    """Singleton, like designSystem: re-authoring replaces the sketch rather
+    than accumulating a second one."""
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "A", "route": "/a", "purpose": "x"}]
+    apply_agent_result(svc, _composition_result([_sketch("PAGE-001")]))
+    assert [s["page"] for s in svc.doc["composition"]["pages"]] == ["PAGE-001"]
+    again = _composition_result([_sketch("PAGE-001", ("Card",))])
+    apply_agent_result(svc, again)
+    assert svc.doc["composition"]["pages"][0]["sections"][0]["components"] == ["Card"]

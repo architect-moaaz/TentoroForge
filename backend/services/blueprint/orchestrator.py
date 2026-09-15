@@ -46,6 +46,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
+    InvalidComposition,
     InvalidPatternTemplate,
     InvalidWorkflowStep, InvalidBusinessRule,
     apply_agent_result,
@@ -303,8 +304,21 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Dropping the two nodes that used to sit in front of this one moved it two
     # waves earlier, into the same wave as `workflows` — concurrent with the
     # thing it reads.
+    # §34 — THE WHOLE APP SKETCHED ONCE, BEFORE ANY PAGE IS. One call, no
+    # props: per page a layout and ordered sections, plus the conventions
+    # every page inherits. Per-page composition never sees the page next
+    # door, so a bespoke page could re-decide the header, the filters and the
+    # empty state and nothing had looked at both. This is the only call that
+    # sees every page at once, and it is what gives the fan-out below a
+    # shared rhythm — the one thing per-page authoring cannot give itself.
+    # After the page set is complete and the design language is final, so
+    # the sketch is made of real pages under the design the user chose.
+    _n("composition", "a2ui_composition",
+       ("page_details", "design_system", "figma_design_system"), ("composition",),
+       note="§34; whole-app skeleton and conventions, no props, one call"),
     _n("page_layouts", "a2ui_pages",
-       ("page_details", "design_system", "figma_design_system", "workflows"),
+       ("composition", "page_details", "design_system", "figma_design_system",
+        "workflows"),
        ("pageLayouts",),
        fanout="pages",
        note="§34; one composed tree per page, gated on the component catalog"),
@@ -631,6 +645,9 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 #: any of them.
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
+    # A sketch is a composition of components, and adding a page has to give
+    # that page a sketch — so the composition follows the pages, not the frame.
+    "composition",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
@@ -1698,8 +1715,8 @@ def _repair_apply(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep,
-            InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+            InvalidWorkflowStep, InvalidBusinessRule) as exc:
         return _reason(exc), None
     if application.applied:
         return None, application
@@ -2019,7 +2036,8 @@ def _apply_subject(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+                InvalidWorkflowStep, InvalidBusinessRule) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
         # no end event written.
@@ -2155,7 +2173,8 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep, InvalidBusinessRule) as exc:
+        except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+                InvalidWorkflowStep, InvalidBusinessRule) as exc:
             feedback = str(exc)
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed

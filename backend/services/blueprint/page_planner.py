@@ -1735,6 +1735,99 @@ def catalog_digest(catalog: dict[str, dict], *, categories: tuple[str, ...] = ()
     return "\n".join(lines)
 
 
+def catalog_index(catalog: dict[str, dict]) -> str:
+    """Names only — the catalog as the whole-app composer sees it.
+
+    The composition pass sketches every page in one call, so it cannot afford
+    the prop signatures ``catalog_digest`` carries; it names the components a
+    section will use and leaves their props to the per-page author, who is
+    shown the full digest. Roughly a tenth of the digest.
+    """
+    by_cat: dict[str, list[dict]] = {}
+    for entry in catalog.values():
+        by_cat.setdefault(entry["category"], []).append(entry)
+    lines: list[str] = []
+    for cat in sorted(by_cat):
+        lines.append(f"\n## {cat}")
+        for entry in sorted(by_cat[cat], key=lambda e: e["name"]):
+            head = entry["name"] + (" (children)" if entry.get("acceptsChildren") else "")
+            doc = (entry.get("doc") or "").strip().split("\n")[0]
+            if doc and not doc.startswith("Renderer primitive"):
+                head += f" — {doc[:100]}"
+            lines.append(f"- {head}")
+    return "\n".join(lines)
+
+
+def app_brief(doc: dict) -> dict:
+    """The whole application at a glance — what the composition pass is shown.
+
+    Every page, compressed to what a composer needs to place it next to its
+    neighbours: the job, the pattern, the entity, the actions, who uses it.
+    No entity fields, no endpoints, no component props; those belong to the
+    per-page call. Around 150 tokens a page, so an app of twenty pages costs
+    less than one page's full brief.
+    """
+    entities = _entities(doc)
+    modules = {m.get("id"): m.get("name") for m in _live(doc.get("modules"))}
+    roles = {r.get("id"): r.get("name") for r in _live(doc.get("roles"))}
+    design = doc.get("designSystem") or {}
+    pages: list[dict] = []
+    for page in _live(doc.get("pages")):
+        eid = (page.get("data") or {}).get("primaryEntity")
+        entity = entities.get(eid)
+        pages.append({
+            "id": page.get("id"),
+            "name": page.get("name"),
+            "route": page.get("route"),
+            "purpose": page.get("purpose"),
+            "pattern": page.get("pattern"),
+            "module": modules.get(page.get("module"), page.get("module")),
+            "users": [roles.get(r, r) for r in (page.get("users") or [])],
+            "primaryTasks": page.get("primaryTasks") or [],
+            "actions": page.get("actions") or [],
+            "entity": entity.get("name") if entity else None,
+            "widgets": [w.get("label") for w in page_widgets(doc, page.get("id"))],
+            "states": page.get("states") or [],
+        })
+    return {
+        "product": doc.get("product") or {},
+        "requirements": [
+            {"id": r.get("id"), "description": r.get("description")}
+            for r in _live(doc.get("requirements"))
+        ],
+        "roles": [{"id": k, "name": v} for k, v in roles.items()],
+        "navigation": doc.get("navigation") or {},
+        "designSystem": {
+            k: design.get(k) for k in (
+                "visualPersonality", "navigationApproach", "informationDensity",
+                "interactionConventions",
+            ) if design.get(k)
+        },
+        "pages": pages,
+    }
+
+
+def composition_for_page(doc: dict, page_id: str) -> dict:
+    """This page's slice of the app-level composition, plus its neighbours.
+
+    The sketch is the instruction a page author is given; the siblings are one
+    line each — layout and section names — so the author can see what the
+    page next to this one looks like without being handed its tree.
+    """
+    comp = doc.get("composition") or {}
+    sketches = comp.get("pages") or []
+    return {
+        "vision": comp.get("vision") or "",
+        "conventions": comp.get("conventions") or [],
+        "sketch": next((s for s in sketches if s.get("page") == page_id), None),
+        "siblings": [
+            {"page": s.get("page"), "layout": s.get("layout"),
+             "sections": [x.get("name") for x in (s.get("sections") or [])]}
+            for s in sketches if s.get("page") != page_id
+        ],
+    }
+
+
 def pattern_page_facts(doc: dict) -> str:
     """Which pages each pattern must serve, and what each one actually has.
 
@@ -1814,6 +1907,9 @@ def page_brief(doc: dict, page_id: str) -> dict:
         "widgets": [w for w in _live(doc.get("widgets"))
                     if w.get("page") == page_id],
         "designSystem": doc.get("designSystem") or {},
+        # The whole-app sketch for this page and a one-line view of the pages
+        # next to it — the part no per-page author ever had.
+        "composition": composition_for_page(doc, page_id),
         # THE WORKFLOWS A CONTROL MAY DISPATCH, BY ID. The author is asked to
         # write `{label, workflow}` and was never told which workflows exist,
         # so it wrote names it inferred from the page — `exportCaseActivity`,

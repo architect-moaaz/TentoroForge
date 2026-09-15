@@ -762,6 +762,68 @@ export const PageLayout = z.object({
 });
 
 // ===========================================================================
+// §34 · app-level composition — the one call that sees every page at once
+// ===========================================================================
+
+/**
+ * One section of a page, as the whole-app composer sketches it.
+ *
+ * Names and intent only. `components` lists catalog component *names* the
+ * section is expected to use — no props, no bindings — so the sketch stays
+ * small enough to author for every page in one call and can still be checked
+ * against the catalog before anything is composed from it.
+ */
+export const SectionSketch = z.object({
+  name: z.string().describe("e.g. Pipeline summary"),
+  purpose: z.string().describe("What the user does in this section"),
+  /** Catalog component names this section is expected to use. */
+  components: z.array(z.string()).default([]),
+  emphasis: z.enum(["primary", "secondary"]).default("secondary"),
+  region: z.enum(["main", "aside", "full"]).default("main"),
+});
+
+/** The skeleton of one page: its layout and its sections, in order. */
+export const PageSketch = z.object({
+  /** Natural key — the page this sketch is for. */
+  page: PageId,
+  layout: z.enum(["single_column", "main_aside", "two_pane", "full_bleed"]),
+  sections: z.array(SectionSketch).min(1),
+  rationale: z.string().default(""),
+});
+
+/**
+ * The application composed once, as a whole.
+ *
+ * `patternTemplates` gives every page of one kind the same structure and
+ * `pageLayouts` lets a page be authored on its own; neither ever sees the app
+ * entire. A page authored bespoke can drift from the page next to it — a
+ * different header rhythm, filters in a different place — and nothing checks,
+ * because nothing has looked at both. Authoring the whole app in one reply is
+ * the old platform's answer and it does not scale: tens of thousands of
+ * tokens a call, one bad prop rejecting the whole surface, output truncating
+ * at eighteen trees.
+ *
+ * So the whole-app call produces a *skeleton* rather than a rendering: per
+ * page a layout and an ordered list of sections, plus the conventions every
+ * page inherits. It is cheap because it carries no props. Per-page authoring
+ * then realises each sketch against the catalog, with validation and retries
+ * still per page. The sketch is the instruction a page author is given, not a
+ * gate a page is rejected against — coherence is judged, not measured.
+ */
+export const Composition = z.object({
+  /** One paragraph: what the whole application should feel like to use. */
+  vision: z.string().default(""),
+  /**
+   * App-wide rules every page inherits — header rhythm, where filters sit,
+   * how empty states read, where the primary action lives.
+   */
+  conventions: z
+    .array(z.object({ topic: z.string(), rule: z.string() }))
+    .default([]),
+  pages: z.array(PageSketch).default([]),
+});
+
+// ===========================================================================
 // §35 · widgets — the data contract behind a displayed number
 // ===========================================================================
 
@@ -1689,6 +1751,9 @@ export const Blueprint = z.object({
   /** §34 — pages authored individually. Takes precedence over the
    *  pattern template when both exist for a page. */
   pageLayouts: z.array(PageLayout).default([]),
+  /** §34 — the whole app sketched once: per-page skeletons and the
+   *  conventions every page inherits. Authored by A2UI before any page is. */
+  composition: Composition.default({}),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
@@ -1717,3 +1782,6 @@ export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
+export type SectionSketch = z.infer<typeof SectionSketch>;
+export type PageSketch = z.infer<typeof PageSketch>;
+export type Composition = z.infer<typeof Composition>;

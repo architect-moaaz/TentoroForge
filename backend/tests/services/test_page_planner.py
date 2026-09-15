@@ -1289,3 +1289,69 @@ def test_a_carried_source_already_naming_the_entity_is_left_alone(
     }]
     planned = pp.plan_pages(doc, catalog)["planned"]["PAGE-001"]
     assert planned["dataSources"][0]["entity"] == "JobRole"
+
+
+# --- §34: the app composed once, and what each page is shown of it ---------
+
+def _composition() -> dict:
+    return {
+        "vision": "Calm and dense; a recruiter lives here all day.",
+        "conventions": [
+            {"topic": "header", "rule": "Title left, primary action right"},
+        ],
+        "pages": [
+            {"page": "PAGE-001", "layout": "single_column",
+             "sections": [{"name": "Roles table", "purpose": "Scan open roles",
+                           "components": ["Table"]}]},
+            {"page": "PAGE-002", "layout": "main_aside",
+             "sections": [{"name": "Detail", "purpose": "Read one role"},
+                          {"name": "Activity", "purpose": "See what changed",
+                           "region": "aside"}]},
+        ],
+    }
+
+
+def test_the_brief_carries_this_pages_sketch_and_a_line_per_neighbour(doc, page):
+    """Per-page authoring never saw the page next door. It now sees the app's
+    sketch of this page in full and its siblings as one line each — enough to
+    match their rhythm, not enough to be handed their trees."""
+    doc["pages"] = [page, dict(page, id="PAGE-002", name="Other", route="/o")]
+    doc["composition"] = _composition()
+    comp = pp.page_brief(doc, "PAGE-001")["composition"]
+    assert comp["sketch"]["page"] == "PAGE-001"
+    assert comp["sketch"]["sections"][0]["components"] == ["Table"]
+    assert comp["conventions"][0]["topic"] == "header"
+    assert comp["siblings"] == [
+        {"page": "PAGE-002", "layout": "main_aside",
+         "sections": ["Detail", "Activity"]},
+    ]
+
+
+def test_a_brief_without_a_composition_still_stands(doc, page):
+    doc["pages"] = [page]
+    comp = pp.page_brief(doc, "PAGE-001")["composition"]
+    assert comp == {"vision": "", "conventions": [], "sketch": None, "siblings": []}
+
+
+def test_the_index_names_every_component_and_not_one_prop(catalog):
+    """The whole-app call cannot afford prop signatures for 165 components; it
+    gets the names and leaves the props to the per-page author."""
+    index = pp.catalog_index(catalog)
+    for name in catalog:
+        assert f"- {name}" in index, name
+    assert "props:" not in index
+    assert len(index) < len(pp.catalog_digest(catalog)) / 3
+
+
+def test_the_app_brief_is_every_page_and_no_field(doc, page, entity):
+    doc["pages"] = [page, dict(page, id="PAGE-002", name="Other", route="/o",
+                               data={})]
+    doc["requirements"] = [{"id": "REQ-001", "description": "Scan open roles"}]
+    brief = pp.app_brief(doc)
+    assert [p["id"] for p in brief["pages"]] == ["PAGE-001", "PAGE-002"]
+    assert brief["pages"][0]["entity"] == "JobRole"
+    assert brief["pages"][1]["entity"] is None
+    assert brief["pages"][0]["widgets"] == ["Open Roles"]
+    assert brief["requirements"][0]["id"] == "REQ-001"
+    # Entity fields belong to the per-page call, where they become columns.
+    assert "headcount" not in json.dumps(brief)

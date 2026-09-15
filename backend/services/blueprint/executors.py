@@ -910,6 +910,19 @@ two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
+    "composition": (
+        "Compose the whole application once. For every page, choose a layout "
+        "and an ordered list of sections, naming the purpose of each section "
+        "and the catalog components it is expected to use. Then state the "
+        "conventions every page will follow: how a page header reads, where "
+        "filters and the primary action sit, how empty and error states are "
+        "treated, how dense the information is.\n\n"
+        "Structure and intent only — no props, no data bindings. You are the "
+        "only call that sees every page at once, so the job is coherence: the "
+        "list page and the dashboard should read as one product, and a user "
+        "moving between them should never have to re-learn where things are. "
+        "Decide from the domain and who uses it; say why in each rationale."
+    ),
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
         "You are not designing the application and you are not authoring "
@@ -1327,6 +1340,36 @@ that leaves a required group empty is refused with the group named.
 """
 
 
+COMPOSITION_ADDENDUM = """
+
+## The components that exist
+
+Name components from this list only — a section that names one that is not \
+here is rejected. Names are all you give; the per-page author is shown the \
+props and composes against them.
+
+Sketch **every** page listed below, each exactly once. A page with NO PRIMARY \
+ENTITY still gets a sketch — an entry redirect or a sign-in page has a layout \
+too, however small.
+
+{page_facts}
+{catalog}
+"""
+
+CONVENTIONS_ADDENDUM = """
+
+## The application as a whole
+
+The app was composed once before any page was, and these are its decisions. \
+Follow them; a page that re-decides them breaks the coherence the pass exists \
+to give.
+
+Vision: {vision}
+
+Conventions:
+{conventions}
+"""
+
 SHAPE_ADDENDUM = """
 
 Artifacts you write must match these shapes exactly — the Blueprint validates \
@@ -1347,6 +1390,23 @@ prose, no markdown fence, no commentary — the object and nothing else:
 ```json
 {schema}
 ```"""
+
+
+def _conventions_addendum(doc: dict) -> str:
+    """The app-level composition's decisions, for the composer that works under
+    them. Doc-level only — never the subject — so it sits in the cached prefix
+    and stays byte-identical across a fan-out. Empty when no composition pass
+    has run, so a Blueprint from before the node exists composes as it did."""
+    comp = doc.get("composition") or {}
+    if not comp.get("vision") and not comp.get("conventions"):
+        return ""
+    conventions = "\n".join(
+        f"- {c.get('topic', '')}: {c.get('rule', '')}"
+        for c in comp.get("conventions") or []
+    ) or "(none stated)"
+    return CONVENTIONS_ADDENDUM.format(
+        vision=comp.get("vision") or "(none stated)", conventions=conventions,
+    )
 
 
 def build_prompt(
@@ -1383,6 +1443,36 @@ def build_prompt(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
     system += reference_addendum(references, node)
+    if spec.agent == "a2ui_composition":
+        from services.blueprint.page_planner import (
+            app_brief, catalog_index, load_catalog, pattern_page_facts,
+        )
+
+        system += COMPOSITION_ADDENDUM.format(
+            catalog=catalog_index(load_catalog()),
+            page_facts=pattern_page_facts(doc) or "(no pages declare a pattern)",
+        )
+        if inline_schema:
+            system += SCHEMA_ADDENDUM.format(
+                schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
+            )
+        user = (
+            "Compose this application as a whole. You are given the product, "
+            "its requirements, its navigation, its roles and every page's "
+            "contract. Return one `composition` artifact with natural_key "
+            "\"composition\" whose `pages` holds one sketch per page, keyed by "
+            "the page's id.\n\n```json\n"
+            + json.dumps(app_brief(doc), indent=2, sort_keys=True)
+            + "\n```"
+        )
+        if feedback:
+            user += (
+                "\n\nYour previous attempt was rejected:\n\n" + feedback +
+                "\n\nFix exactly those. Every page must be sketched once and "
+                "every component name must be one from the list above."
+            )
+        return system, user
+
     if spec.agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
@@ -1395,7 +1485,18 @@ def build_prompt(
             placeholders=", ".join(PLACEHOLDER_VOCABULARY),
             repeats=", ".join(REPEAT_SOURCES),
         )
+        system += _conventions_addendum(doc)
         brief = page_brief(doc, subject) if subject else {}
+        # THIS PAGE'S PLACE IN THE WHOLE. Subject-specific, so it belongs in
+        # the user turn, not the cached prefix.
+        sketch_note = (
+            "`composition.sketch` is this page's place in the whole-app "
+            "composition: realise those sections, in that order, from the "
+            "catalog. `composition.siblings` shows what the pages next to "
+            "this one look like — match their rhythm rather than inventing "
+            "your own.\n\n"
+            if (brief.get("composition") or {}).get("sketch") else ""
+        )
         # THE DESIGN LANGUAGE GOES IN THE CACHED PREFIX, NOT THE PAGE BRIEF.
         #
         # `designSystem` is 15,923 characters — 66% of a brief — and byte-
@@ -1462,6 +1563,7 @@ def build_prompt(
             "the control needs, the control navigates instead or is left "
             "out; there is no workflow this application runs that is not in "
             "that list.\n\n"
+            + sketch_note +
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
             + json.dumps(brief, indent=2, sort_keys=True)
