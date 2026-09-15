@@ -171,6 +171,7 @@ def test_the_executor_edits_on_a_repair_and_composes_on_a_first_pass(monkeypatch
     svc = Svc(_doc())
     calls = []
     def fake_patch(svc_, spec, client, **kw):
+        kw["tell"]("Repaired /master-data in place")   # the callback must work — live it raised NameError
         calls.append(("patch", spec.subject)); return "PATCHED"
     monkeypatch.setattr("services.blueprint.page_patch.patch_page_layout", fake_patch)
     run = ex.make_executor(svc, lambda **kw: "{}", usage=None)

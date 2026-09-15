@@ -2909,6 +2909,7 @@ def make_executor(
         """A repair of a page that already has an accepted tree is an edit
         of that tree (see ``page_patch``); ``None`` means compose in full."""
         from services.blueprint.page_patch import patch_page_layout
+        from services.llm_client import tell
         client = (model.for_task(spec.node, spec.agent)
                   if isinstance(model, ModelRouter) else model)
         try:
