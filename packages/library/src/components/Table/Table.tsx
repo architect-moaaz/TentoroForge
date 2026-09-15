@@ -504,6 +504,12 @@ export function Table(props: TableProps) {
   async function runAction(a: RowActionDef, r: Record<string, unknown>, key: string) {
     if (a.navigate) { const url = applyTemplate(a.navigate, r); if (typeof window !== "undefined") window.location.assign(url); return; }
     if (a.workflow) {
+      // A row with no id has nothing to act on — the engine would refuse the
+      // empty WHERE; refuse here, before a request is made.
+      if (r?.id === undefined || r?.id === null || r?.id === "") {
+        console.warn(`[Table] row action "${a.label}" skipped: the row has no id`);
+        return;
+      }
       // Re-entrancy guard: ignore clicks while this row-action is mid-flight
       // (belt-and-suspenders with the button's disabled attr).
       if (busyKeys.has(key)) return;

@@ -15,8 +15,10 @@ export interface WorkflowDispatchOptions {
   apiBase?: string;
   /** Called synchronously before the request is sent. */
   onStart?: (name: string) => void;
-  /** Called with the parsed result on a 2xx response with no `error`. */
-  onSuccess?: (name: string, result: unknown) => void;
+  /** Called with the parsed result on a 2xx response with no `error`, and
+   *  the args the control dispatched — so the host can tell what the
+   *  workflow acted on (the record page it is standing on, say). */
+  onSuccess?: (name: string, result: unknown, args?: Record<string, unknown>) => void;
   /** Called with a human-readable message on any failure. */
   onError?: (name: string, message: string) => void;
   /**
@@ -71,6 +73,45 @@ function _humanizeWorkflowName(name: string): string {
  * are routed to `onError`, so awaiting callers can rely on `finally` to clear
  * pending state.
  */
+/**
+ * Where to go after a workflow that deleted the record the page is standing on.
+ *
+ * The dispatcher answered every success the same way — refresh in place — so
+ * a Delete on `/records/<id>` re-rendered a page for a record that no longer
+ * existed: empty bindings, a 200, and a Delete button that then posted an
+ * empty id. A delete of THIS page's record is a departure, not a refresh.
+ *
+ * Deterministic, from what the dispatch already knows: the args carried the
+ * record's id (`id` or the workflow's record input), the result's log shows a
+ * delete happened (`output.deleted.count`), and the current path ends in that
+ * id. Then the destination is the path one level up — the entity's list.
+ * Anything else (a child row deleted from a parent's page, a delete elsewhere)
+ * is `null`: refresh as before.
+ */
+export function destinationAfterDelete(
+  args: Record<string, unknown> | undefined,
+  result: unknown,
+  pathname: string,
+): string | null {
+  const log = ((result as { log?: unknown[] })?.log ?? []) as Array<{ output?: unknown }>;
+  const deleted = log.some((e) => {
+    const out = e?.output as { deleted?: { count?: number }; count?: number } | undefined;
+    return Boolean(out && out.deleted && Number(out.deleted.count) > 0);
+  });
+  if (!deleted) return null;
+  const ids = new Set(
+    Object.values(args ?? {})
+      .filter((v): v is string | number => typeof v === "string" || typeof v === "number")
+      .map(String)
+      .filter((v) => v.length > 0),
+  );
+  const segments = pathname.split("?")[0].split("/").filter(Boolean);
+  const last = segments[segments.length - 1];
+  if (!last || !ids.has(last)) return null;
+  const parent = "/" + segments.slice(0, -1).join("/");
+  return parent === "//" ? "/" : parent || "/";
+}
+
 export function createWorkflowDispatch(
   opts: WorkflowDispatchOptions = {},
 ): WorkflowDispatch {
@@ -108,7 +149,7 @@ export function createWorkflowDispatch(
         announce?.(`${_human} failed: ${message}`, "assertive");
         return;
       }
-      onSuccess?.(name, result);
+      onSuccess?.(name, result, args);
       announce?.(`${_human} completed`, "polite");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

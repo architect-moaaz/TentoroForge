@@ -161,10 +161,21 @@ export function Button({
     (onClickProp as ComputeAction).kind === "compute";
   const computeAction = isComputeAction ? (onClickProp as ComputeAction) : null;
 
+  // A CONTROL WHOSE RECORD RESOLVED EMPTY IS INERT. `args: {record: "{{rec.id}}"}`
+  // on a page whose record is gone resolves to "" — and posted, the engine
+  // refuses with "WHERE id is empty". Nothing to act on means no action:
+  // disabled, with the reason on the title, rather than a 422 after a click.
+  const emptyArgs = workflow
+    ? Object.entries((args as Record<string, unknown> | undefined) ?? {})
+        .filter(([, v]) => v === "" || v == null)
+        .map(([k]) => k)
+    : [];
+  const inert = emptyArgs.length > 0;
+
   const onClick = isNavAction
     ? undefined
     : async (e?: { currentTarget?: unknown }) => {
-        if (disabled || loading || running) return;
+        if (disabled || loading || running || inert) return;
         // Reset-all-filters: drop the whole query string, then tell the host to
         // re-resolve. `replaceState` alone never re-runs the server component
         // that resolved this page's dataSources — which is why a reset chip
@@ -294,7 +305,9 @@ export function Button({
       data-variant={variant ?? "primary"}
       data-size={size ?? "md"}
       className={className}
-      disabled={disabled || running}
+      disabled={disabled || running || inert}
+      aria-disabled={inert ? "true" : undefined}
+      title={inert ? `Nothing to act on: ${emptyArgs.join(", ")} is empty` : undefined}
       aria-busy={isBusy ? "true" : undefined}
       aria-label={ariaLabel}
       onClick={onClick}

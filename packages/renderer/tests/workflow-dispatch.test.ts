@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createWorkflowDispatch } from "../src/client/WorkflowDispatcher";
+import { createWorkflowDispatch, destinationAfterDelete } from "../src/client/WorkflowDispatcher";
 
 function okResponse(body: unknown = {}): Response {
   return { ok: true, status: 200, json: async () => body } as unknown as Response;
@@ -46,7 +46,7 @@ describe("createWorkflowDispatch", () => {
       onError,
     });
     await dispatch("wf");
-    expect(onSuccess).toHaveBeenCalledWith("wf", { status: "completed", id: 7 });
+    expect(onSuccess).toHaveBeenCalledWith("wf", { status: "completed", id: 7 }, undefined);
     expect(onError).not.toHaveBeenCalled();
   });
 
@@ -221,5 +221,30 @@ describe("createWorkflowDispatch — a11y announce seam", () => {
     });
     await dispatch("");
     expect(announce).not.toHaveBeenCalled();
+  });
+});
+
+describe("destinationAfterDelete", () => {
+  const deleted = { log: [{ output: { deleted: { count: 1 }, count: 1 } }] };
+
+  it("leaves the record page whose record the workflow deleted", () => {
+    expect(destinationAfterDelete({ record: "abc-1", id: "abc-1" }, deleted, "/master-data/abc-1"))
+      .toBe("/master-data");
+    expect(destinationAfterDelete({ id: "abc-1" }, deleted, "/a/b/abc-1?tab=x")).toBe("/a/b");
+  });
+
+  it("stays put when the deleted record is not the page's own, or nothing was deleted", () => {
+    expect(destinationAfterDelete({ id: "child-9" }, deleted, "/cases/case-1")).toBeNull();
+    expect(destinationAfterDelete({ id: "abc-1" }, { log: [{ output: { count: 1 } }] }, "/master-data/abc-1")).toBeNull();
+    expect(destinationAfterDelete({ id: "abc-1" }, { log: [{ output: { deleted: { count: 0 } } }] }, "/master-data/abc-1")).toBeNull();
+    expect(destinationAfterDelete(undefined, deleted, "/master-data/abc-1")).toBeNull();
+  });
+
+  it("hands the host the args beside the result on success", async () => {
+    const onSuccess = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse({ status: "completed", log: [] }));
+    const dispatch = createWorkflowDispatch({ fetchImpl, onSuccess });
+    await dispatch("FLOW-003", { id: "abc-1" });
+    expect(onSuccess).toHaveBeenCalledWith("FLOW-003", { status: "completed", log: [] }, { id: "abc-1" });
   });
 });
