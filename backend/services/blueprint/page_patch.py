@@ -28,8 +28,10 @@ from typing import Any, Callable, Mapping
 
 logger = logging.getLogger(__name__)
 
-#: What the model returns. Structured-outputs safe: no free-form objects
-#: except `value`, which is whatever the path holds.
+#: What the model returns. Structured-outputs safe: the API refuses an empty
+#: schema ("accepts any JSON value"), so `value` travels as a STRING holding
+#: JSON — the same convention the agent envelope uses for bodies — and is
+#: decoded before the patch is applied.
 PATCH_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -40,7 +42,9 @@ PATCH_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "op": {"type": "string", "enum": ["add", "replace", "remove"]},
                     "path": {"type": "string"},
-                    "value": {},
+                    "value": {"type": "string",
+                              "description": "JSON text of the value for add/replace "
+                                             "(e.g. \"Female\", 3, {\"key\":\"n\"}); omit for remove"},
                 },
                 "required": ["op", "path"],
                 "additionalProperties": False,
@@ -118,6 +122,9 @@ def build_patch_prompt(doc: Mapping[str, Any], page: Mapping[str, Any],
         "- Paths are JSON Pointers into the document {root, dataSources}: e.g. "
         "/dataSources/2/filter/gender, /root/children/1/props/columns/0, "
         "/root/children/1/props/rowActions/- (append).\n"
+        "- `value` is the JSON TEXT of the value: \"\\\"Female\\\"\" for a string, "
+        "\"3\" for a number, \"{\\\"key\\\":\\\"rowNumber\\\",\\\"label\\\":\\\"#\\\"}\" "
+        "for an object. Omit it for remove.\n"
         "- Edit the smallest thing that fixes each finding. Keep every control, data "
         "source, route and workflow binding that is not named by a finding; a page that "
         "loses a control it had is refused.\n"
@@ -161,10 +168,24 @@ def apply_edits(layout: Mapping[str, Any], edits: list[dict]) -> dict:
 
 
 def parse_edits(text: str) -> tuple[list[dict], str]:
+    """The model's edits, with each `value` decoded from its JSON text. A
+    value that is not valid JSON is taken as the literal string — a model
+    that answers `Female` where `"Female"` was asked still means Female."""
     data = json.loads(text)
     if not isinstance(data, dict) or not isinstance(data.get("edits"), list):
         raise ValueError("reply is not {edits: [...]}")
-    return [e for e in data["edits"] if isinstance(e, dict)], str(data.get("note") or "")
+    edits: list[dict] = []
+    for e in data["edits"]:
+        if not isinstance(e, dict):
+            continue
+        e = dict(e)
+        if isinstance(e.get("value"), str):
+            try:
+                e["value"] = json.loads(e["value"])
+            except ValueError:
+                pass
+        edits.append(e)
+    return edits, str(data.get("note") or "")
 
 
 def patch_page_layout(svc: Any, spec: Any, client: Callable[..., Any], *,

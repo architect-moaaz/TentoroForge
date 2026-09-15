@@ -64,10 +64,38 @@ FEEDBACK = ("The observer reviewed your output ... Author it again ...\n\n"
 
 
 def _client(reply):
+    """A model that answers the schema: `value` travels as JSON text."""
     def call(*, system, user, schema):
         call.seen = (system, user, schema)
-        return reply if isinstance(reply, str) else json.dumps(reply)
+        if isinstance(reply, str):
+            return reply
+        wire = {**reply, "edits": [
+            {**e, "value": json.dumps(e["value"])} if "value" in e else e for e in reply["edits"]]}
+        return json.dumps(wire)
     return call
+
+
+def test_the_schema_is_structured_outputs_safe_and_values_are_decoded():
+    """The API refuses an empty schema ("accepts any JSON value") — the first
+    live patch call was a 400 and fell back to a full compose. `value` is JSON
+    text, decoded on the way in; a bare word is taken as that string."""
+    from services.blueprint.page_patch import PATCH_SCHEMA
+    def no_empty(node):
+        if isinstance(node, dict):
+            assert node != {}, "an empty schema accepts any JSON value"
+            for v in node.values():
+                no_empty(v)
+        elif isinstance(node, list):
+            for v in node:
+                no_empty(v)
+    no_empty(PATCH_SCHEMA)
+    edits, note = parse_edits(json.dumps({"edits": [
+        {"op": "replace", "path": "/a", "value": "\"Female\""},
+        {"op": "add", "path": "/b/-", "value": "{\"key\": \"rowNumber\", \"label\": \"#\"}"},
+        {"op": "replace", "path": "/c", "value": "3"},
+        {"op": "replace", "path": "/d", "value": "Female"},
+        {"op": "remove", "path": "/e"}], "note": "n"}))
+    assert [e.get("value") for e in edits] == ["Female", {"key": "rowNumber", "label": "#"}, 3, "Female", None]
 
 
 def test_only_the_findings_reach_the_prompt_not_the_replace_everything_framing():
