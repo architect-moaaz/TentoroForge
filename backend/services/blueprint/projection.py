@@ -908,16 +908,40 @@ def _as_triplet(value: str) -> str | None:
     return _hsl_triplet(v)
 
 
+def triplet_luminance(triplet: str) -> float | None:
+    """WCAG relative luminance of an `H S% L%` triplet, or None if unparseable.
+    The one place HSL→sRGB→luminance is computed; verification imports it so the
+    projector's chosen foreground and the contrast check agree."""
+    try:
+        h, s, l = triplet.split()
+        h = float(h) % 360
+        s = float(s.rstrip("%")) / 100
+        l = float(l.rstrip("%")) / 100
+    except (ValueError, AttributeError):
+        return None
+    c = (1 - abs(2 * l - 1)) * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = l - c / 2
+    r, g, b = {0: (c, x, 0), 1: (x, c, 0), 2: (0, c, x),
+               3: (0, x, c), 4: (x, 0, c), 5: (c, 0, x)}[int(h // 60) % 6]
+
+    def _lin(v: float) -> float:
+        v += m
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
 def _readable_on(triplet: str) -> str:
     """A near-black or near-white foreground for a background triplet, chosen by
-    its lightness. Used to fill a `contrastOf` token whose Blueprint role does
-    not state a text colour, so a tinted or dark surface never renders unreadable
-    default text."""
-    try:
-        lightness = float(triplet.split()[2].rstrip("%"))
-    except (IndexError, ValueError):
+    WCAG luminance (not HSL lightness — a saturated amber reads bright at L=50%
+    and needs DARK text, which a lightness threshold gets wrong). 0.179 is the
+    crossover where black and white contrast equally. Fills a `contrastOf` token
+    whose Blueprint role states no text colour, so a tint or a dark fill never
+    renders unreadable default text."""
+    lum = triplet_luminance(triplet)
+    if lum is None:
         return "0 0% 100%"
-    return "222 84% 5%" if lightness >= 60 else "0 0% 100%"
+    return "222 84% 5%" if lum > 0.179 else "0 0% 100%"
 
 
 def _resolve_role(colors: dict, roles: list[str]) -> str | None:
@@ -933,6 +957,34 @@ def _resolve_role(colors: dict, roles: list[str]) -> str | None:
         if isinstance(v, str) and v:
             return v
     return None
+
+
+def resolved_palette(doc: dict, theme: str = "light") -> dict[str, str]:
+    """Every contract colour token as the HSL triplet that WILL render — the
+    Blueprint-fed value where the design states the role (and computed
+    foregrounds), the contract's own default otherwise. Verification judges
+    contrast on this, the palette that actually ships, so a palette the user
+    chooses is refused before it renders unreadable text rather than after."""
+    colors = (doc.get("designSystem") or {}).get("colors") or {}
+    contract = _token_contract().get("colorTokens") or []
+    # 1. Role tokens: the Blueprint value where it states the role, else the
+    #    contract default for this theme.
+    out: dict[str, str] = {}
+    for spec in contract:
+        tok = str(spec["token"])
+        if spec.get("contrastOf"):
+            continue
+        raw = _resolve_role(colors, spec.get("role") or [])
+        trip = _as_triplet(raw) if raw is not None else None
+        out[tok] = trip or spec.get(theme) or spec.get("light") or ""
+    # 2. Foregrounds: ALWAYS computed for readability against the RESOLVED base,
+    #    never a hand-set default that could disagree with a base the design
+    #    changed (a white default over an amber accent is the bug this avoids).
+    for spec in contract:
+        base = spec.get("contrastOf")
+        if base and out.get(base):
+            out[str(spec["token"])] = _readable_on(out[base])
+    return {k: v for k, v in out.items() if v}
 
 
 def _project_contract_colors(colors: dict) -> list[str]:

@@ -449,7 +449,7 @@ def check_design_system(doc: dict) -> list[Finding]:
 
     # The groups `project_design_tokens` reads. A group that is missing does
     # not fail the projection; it silently emits fewer variables.
-    return [
+    out = [
         Finding("Design↔DesignSystem", section="designSystem",
                 artifact_id=group,
                 detail=f"{group!r} is missing, so nothing projects into "
@@ -457,6 +457,83 @@ def check_design_system(doc: dict) -> list[Finding]:
         for group in ("colors", "spacing", "typography", "radius")
         if not (design.get(group) or {})
     ]
+    out.extend(check_palette_contrast(doc))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# THE PALETTE THAT SHIPS IS READABLE. A design (or a palette the user asks Smith
+# to change to) states colours; the token contract turns them into the tokens
+# every component reads. If a chosen colour renders its own text below the WCAG
+# AA ratio — danger text on the danger tint, foreground on the background — the
+# page is legible-looking in the design tool and unreadable in the build. Judged
+# on the resolved palette (Blueprint values + contract defaults + computed
+# foregrounds), so the finding routes to the designSystem owner before it ships,
+# never after. This is the colour-layer twin of §73: a token pair that does not
+# meet is a promise the palette cannot keep.
+# ---------------------------------------------------------------------------
+
+#: WCAG AA: 4.5:1 for body text, 3:1 for large/UI text. Body text on a surface
+#: and small chip text on a tint need 4.5; a solid button/badge fill carries
+#: large/UI text and needs 3. The pair's kind decides which applies.
+_AA_TEXT = 4.5
+_AA_LARGE = 3.0
+
+_STATUS_ROLES = ("destructive", "success", "warning", "info")
+
+
+def _contrast_ratio(a: str, b: str) -> float | None:
+    from services.blueprint.projection import triplet_luminance
+    la, lb = triplet_luminance(a), triplet_luminance(b)
+    if la is None or lb is None:
+        return None
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def check_palette_contrast(doc: dict) -> list[Finding]:
+    """Every text/surface token pair the contract defines meets WCAG AA on the
+    palette that will render. A `contrastOf` token is checked against its base;
+    each status `-subtle-foreground` against its `-subtle` tint."""
+    try:
+        from services.blueprint.projection import resolved_palette, _token_contract
+    except Exception:  # noqa: BLE001 — a check that cannot run stays silent
+        return []
+    palette = resolved_palette(doc)
+    if not palette:
+        return []
+    # (foreground, background, kind, threshold). Surface body text and small
+    # chip text need 4.5; a solid button/badge fill is large/UI text at 3.
+    # `muted-foreground`/`muted` is deliberately low-emphasis — WCAG exempts such
+    # secondary text and holding it to 4.5 fires on nearly every standard palette,
+    # so it is not among the pairs a palette must clear.
+    pairs: list[tuple[str, str, str, float]] = [
+        ("foreground", "background", "body text on the page", _AA_TEXT),
+        ("card-foreground", "card", "text on a card", _AA_TEXT),
+        ("popover-foreground", "popover", "text in a popover", _AA_TEXT),
+    ]
+    for role in _STATUS_ROLES:
+        pairs.append((f"{role}-subtle-foreground", f"{role}-subtle",
+                      "chip text on its tint", _AA_TEXT))
+    for role in ("primary", "secondary", "accent", *_STATUS_ROLES):
+        pairs.append((f"{role}-foreground", role,
+                      f"label on a {role} fill", _AA_LARGE))
+
+    out: list[Finding] = []
+    for fg, bg, what, threshold in pairs:
+        if fg not in palette or bg not in palette:
+            continue
+        ratio = _contrast_ratio(palette[fg], palette[bg])
+        if ratio is not None and ratio < threshold:
+            out.append(Finding(
+                "Design↔DesignSystem", section="designSystem", artifact_id=fg,
+                detail=(f"{fg} on {bg} is {ratio:.1f}:1 ({what}), below the "
+                        f"{threshold:.1f}:1 it needs to be readable — the colour the "
+                        f"palette gives {bg} cannot carry {fg}'s text. Darken or lighten "
+                        f"one until they meet, or restate the role so the projector "
+                        f"derives a foreground that does."),
+            ))
+    return out
 
 
 def check_requirement_code(doc: dict) -> list[Finding]:

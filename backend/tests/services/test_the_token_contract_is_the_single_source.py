@@ -89,3 +89,39 @@ def test_an_app_specific_role_still_passes_through(tmp_path):
     bp = {"designSystem": {"colors": {"sidebarBackground": "#0B1120"}}}
     css = _css(tmp_path, bp)
     assert "--sidebar-background: #0B1120;" in css
+
+
+# ---------------------------------------------------------------------------
+# The palette that ships is readable — the "never half-baked" guard for a
+# palette change. Judged on the resolved palette (Blueprint + defaults +
+# computed foregrounds), so a colour the user asks Smith to change to is refused
+# before it renders unreadable text, and the finding routes to designSystem.
+# ---------------------------------------------------------------------------
+
+def test_a_readable_palette_raises_no_contrast_finding():
+    from services.blueprint.verification import check_palette_contrast
+    assert check_palette_contrast(_BP) == []
+
+
+def test_unreadable_body_text_is_caught():
+    from services.blueprint.verification import check_palette_contrast
+    bad = {"designSystem": {"colors": {"background": "#222222", "textPrimary": "#333333"}}}
+    hits = check_palette_contrast(bad)
+    assert any("foreground on background" in h.detail for h in hits)
+    assert all(h.section == "designSystem" for h in hits)
+
+
+def test_an_unreadable_status_tint_is_caught():
+    from services.blueprint.verification import check_palette_contrast
+    # a pale danger on a pale tint — the chip's own text vanishes
+    bad = {"designSystem": {"colors": {"danger": "#FCA5A5", "dangerSubtle": "#FEE2E2"}}}
+    hits = check_palette_contrast(bad)
+    assert any("destructive-subtle" in h.artifact_id for h in hits)
+
+
+def test_an_amber_accent_gets_dark_not_white_text():
+    # the bug the luminance fix closed: HSL lightness put white on amber (2:1);
+    # WCAG luminance correctly puts dark text on it.
+    from services.blueprint.projection import resolved_palette
+    pal = resolved_palette({"designSystem": {"colors": {"accent": "#F59E0B"}}})
+    assert pal["accent-foreground"] == "222 84% 5%"
