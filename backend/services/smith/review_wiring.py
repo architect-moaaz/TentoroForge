@@ -23,6 +23,7 @@ import base64
 import logging
 import os
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,30 @@ def restore_refused_layouts(doc: dict, before: Mapping[str, dict],
             doc.setdefault("pageLayouts", []).append(dict(before[pid]))
             put.append(pid)
     return put
+
+
+@dataclass
+class Rebuilt:
+    """What a re-compose round could not bring round. ``refused``: the
+    contract accepted no tree (the page keeps its previous one).
+    ``unrepaired``: a tree landed, but the observer spent its rounds and the
+    page still fails a requirement — the composer's best answer stands.
+    Neither is sent round again: the next review round would pay the same
+    chain of compose and verdict for the same verdict."""
+    refused: dict[str, str] = field(default_factory=dict)
+    unrepaired: dict[str, str] = field(default_factory=dict)
+
+
+def unrepaired_pages(built: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{page_id: why}`` for the page_layouts subjects the observer flagged
+    unrepaired in a build — read off the report, the same way the panel
+    reads it."""
+    out: dict[str, str] = {}
+    for f in ((built or {}).get("report") or {}).get("unrepaired") or []:
+        node = str((f or {}).get("node") or "")
+        if node.startswith("page_layouts:"):
+            out[node.split(":", 1)[1]] = str((f or {}).get("why") or "unrepaired")
+    return out
 
 
 def refused_pages(built: Mapping[str, Any] | None) -> dict[str, str]:
@@ -334,4 +359,5 @@ def make_critique(
 __all__ = [
     "invalidate_for_recompose", "write_review_briefs", "clear_review_briefs",
     "make_critique", "layouts_of", "restore_refused_layouts", "refused_pages",
+    "unrepaired_pages", "Rebuilt",
 ]

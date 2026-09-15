@@ -107,3 +107,13 @@ def test_the_review_can_be_narrowed_to_named_routes(monkeypatch):
     assert [s["route"] for s in _capture_pages("out", doc)] == ["/master-data", "/add-data"]
     assert [s["route"] for s in _capture_pages("out", doc, ["/add-data"])] == ["/add-data"]
     assert _capture_pages("out", doc, ["/nowhere"]) == []
+
+
+def test_unrepaired_pages_are_read_from_the_build_report():
+    from services.smith.review_wiring import unrepaired_pages
+    built = {"report": {"unrepaired": [
+        {"node": "page_layouts:PAGE-001", "why": "Observer↔Requirement: REQ-012: Female filters on Male"},
+        {"node": "composition", "why": "not a page"},
+    ]}}
+    assert unrepaired_pages(built) == {"PAGE-001": "Observer↔Requirement: REQ-012: Female filters on Male"}
+    assert unrepaired_pages({}) == {} and unrepaired_pages(None) == {}

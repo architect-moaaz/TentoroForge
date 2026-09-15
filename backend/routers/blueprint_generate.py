@@ -2012,6 +2012,7 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
             make_critique, invalidate_for_recompose,
             write_review_briefs, clear_review_briefs,
             layouts_of, restore_refused_layouts, refused_pages,
+            unrepaired_pages, Rebuilt,
         )
         from services.smith.review_gaps import settle_crud_gaps
     except Exception as exc:  # noqa: BLE001
@@ -2034,12 +2035,12 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
         svc = BlueprintService.load(output_dir=output_dir)
         return settle_crud_gaps(svc, emit=emit)
 
-    def recompose_and_rebuild(briefs: dict) -> dict[str, str]:
+    def recompose_and_rebuild(briefs: dict) -> Rebuilt:
         svc = BlueprintService.load(output_dir=output_dir)
         before = layouts_of(svc.doc, briefs)
         hit = invalidate_for_recompose(svc.doc, briefs)
         if not hit:
-            return {}
+            return Rebuilt()
         svc.save()
         write_review_briefs(output_dir, {pid: briefs[pid] for pid in hit})
         emit("review", {"phase": "fixing", "pages": _routes_for(hit)})
@@ -2058,7 +2059,10 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
             svc = BlueprintService.load(output_dir=output_dir)
             if restore_refused_layouts(svc.doc, before, refused):
                 svc.save()
-        return refused
+        # THE OBSERVER'S VERDICT IS THE ROUND'S VERDICT. A page it flagged
+        # unrepaired has had its repairs; the next round would pay the same
+        # chain — compose, judge, repair, judge — to reach the same line.
+        return Rebuilt(refused=refused, unrepaired=unrepaired_pages(built))
 
     emit("review", {"phase": "start"})
     try:
@@ -2081,7 +2085,8 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
                     "converged": outcome.converged,
                     "recomposed": _routes_for(outcome.recomposed),
                     "remaining": _routes_for(sorted(outcome.remaining)),
-                    "refused": _routes_for(sorted(outcome.refused))})
+                    "refused": _routes_for(sorted(outcome.refused)),
+                    "unrepaired": _routes_for(sorted(outcome.unrepaired))})
     if not outcome.rounds:
         return  # nothing reviewed, or nothing needed fixing — say nothing
     n = len(outcome.recomposed)
@@ -2103,6 +2108,14 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
         for pid, why in sorted(outcome.refused.items()):
             route = _routes_for([pid])[0]
             parts.append(f"I couldn't re-compose {route}: {why.split(';')[0].strip()}")
+    if outcome.unrepaired:
+        # The composer's best answer stands; say what it still misses and
+        # that a further round would not change the verdict.
+        for pid, why in sorted(outcome.unrepaired.items()):
+            route = _routes_for([pid])[0]
+            parts.append(f"{route} is composed but still misses: "
+                         f"{why.split(';')[0].strip()} — left as is rather than "
+                         f"spending another round on the same verdict.")
     r = len(outcome.remaining)
     if r:
         parts.append(f"{r} still had issues I couldn't fully resolve in "

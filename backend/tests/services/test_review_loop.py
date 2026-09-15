@@ -164,3 +164,41 @@ def test_once_everything_left_is_refused_the_loop_stops_early():
     )
     assert recomposed == [["PAGE-001"]]               # not a second round for the same refusal
     assert out.rounds == 1 and out.refused == {"PAGE-001": "refused"} and not out.converged
+
+
+def test_a_page_the_observer_flagged_unrepaired_is_not_sent_round_again():
+    """DC5, 22:51: round 2 re-composed /master-data over the Female-count
+    filter the observer had just failed to get fixed — seven minutes to reach
+    the verdict round 1 had already reached."""
+    from services.smith.review_wiring import Rebuilt
+    calls = {"n": 0}
+    def critique():
+        calls["n"] += 1
+        return {"findings": [_finding("/master-data", note=f"still off {calls['n']}"),
+                             _finding("/add-data", note="sparse")]}
+    recomposed = []
+    def recompose(briefs):
+        recomposed.append(sorted(briefs))
+        return Rebuilt(unrepaired={"PAGE-001": "REQ-012: the Female metric filters on Male"}
+                       if "PAGE-001" in briefs else {})
+    out = run_review_loop(read_doc=lambda: DOC, critique=critique,
+                          recompose_and_rebuild=recompose, max_rounds=3)
+    assert recomposed == [["PAGE-001", "PAGE-002"], ["PAGE-002"], ["PAGE-002"]]
+    assert out.unrepaired == {"PAGE-001": "REQ-012: the Female metric filters on Male"}
+    assert set(out.remaining) == {"PAGE-002"}         # unrepaired is not "remaining"
+    assert not out.converged
+    assert out.summary()["unrepaired"] == ["PAGE-001"]
+
+
+def test_a_plain_dict_return_still_means_refused():
+    from services.smith.review_wiring import Rebuilt
+    out = run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: {"findings": [_finding("/master-data")]},
+        recompose_and_rebuild=lambda briefs: {"PAGE-001": "refused"}, max_rounds=2)
+    assert out.refused == {"PAGE-001": "refused"} and out.unrepaired == {}
+    out = run_review_loop(
+        read_doc=lambda: DOC,
+        critique=lambda: {"findings": [_finding("/master-data")]},
+        recompose_and_rebuild=lambda briefs: Rebuilt(refused={"PAGE-001": "refused"}), max_rounds=2)
+    assert out.refused == {"PAGE-001": "refused"} and out.rounds == 1
