@@ -1161,3 +1161,62 @@ def test_a_custom_create_route_still_gets_the_one_form_brief(tmp_path):
     req = build_requirement(root, kind="form", route="/add-data")
     assert "CREATE screen" in req and "EDIT screen" not in req
     assert "exactly ONE form" in req
+
+
+# --- the action model, resolved per screen ----------------------------------
+
+def test_the_brief_names_what_each_declared_action_must_become():
+    """Four refused attempts on /master-data each fixed the verb named and
+    mis-bound another — Delete to Update, Edit dropped, a Table running
+    Create. The brief now resolves every declared action up front: the route
+    an Edit navigates to, the id of the workflow a Delete runs, and what it
+    must NOT be bound to."""
+    from services.a2ui_authority import _contract_guidance, registry_from_blueprint
+    doc = {
+        "data": {"entities": [{"id": "ENTITY-001", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName", "type": "string"}]}]},
+        "pages": [
+            {"id": "PAGE-001", "route": "/master-data", "pattern": "entity_list",
+             "actions": ["view", "edit", "delete", "create"], "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-002", "route": "/add-data", "pattern": "form", "actions": ["create", "update"],
+             "data": {"primaryEntity": "ENTITY-001"}},
+            {"id": "PAGE-003", "route": "/master-data/[id]", "pattern": "record_workspace",
+             "actions": ["edit", "delete"], "data": {"primaryEntity": "ENTITY-001"}},
+        ],
+        "workflows": [
+            {"id": "FLOW-001", "name": "Create Record", "inputs": [], "launchedFrom": ["PAGE-002"],
+             "steps": [{"key": "i", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_insert", "table": "records"}}]},
+            {"id": "FLOW-002", "name": "Update Record", "inputs": [], "launchedFrom": ["PAGE-002"],
+             "steps": [{"key": "u", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_update", "table": "records"}}]},
+            {"id": "FLOW-003", "name": "Delete Record", "inputs": [], "launchedFrom": ["PAGE-001"],
+             "steps": [{"key": "d", "type": "action", "entity": "ENTITY-001",
+                        "config": {"actionType": "db_delete", "table": "records"}}]},
+        ],
+    }
+    reg = registry_from_blueprint(doc)
+    assert [(w["id"], w["op"], w["entity"]) for w in reg["workflows"]] == [
+        ("FLOW-001", "db_insert", "Record"), ("FLOW-002", "db_update", "Record"), ("FLOW-003", "db_delete", "Record")]
+    assert reg["pageFamily"] == {"PAGE-001": "collection", "PAGE-002": "form", "PAGE-003": "record"}
+
+    lst = "\n".join(_contract_guidance(doc["pages"][0], reg, "PAGE-001"))
+    assert "THE ACTION MODEL" in lst and "THE CONTROLS THIS SCREEN OWES" in lst
+    assert "`view`: a row action (or link) that navigates to `/master-data/{{id}}`" in lst
+    assert "`edit`: a row action that navigates to `/add-data?id=`{{id}} — it does NOT run FLOW-002" in lst
+    assert '`delete`: a row action with `workflow: "FLOW-003"` (Delete Record)' in lst and "Not FLOW-002, not FLOW-001" in lst
+    assert "`create`: a Button that navigates to `/add-data` — it does NOT run a workflow" in lst
+
+    rec = "\n".join(_contract_guidance(doc["pages"][2], reg, "PAGE-003"))
+    assert '`delete`: a Button with `workflow: "FLOW-003"`' in rec
+    assert "bound from this screen's record source" in rec
+
+    # The form screen's own Form is described by the creates-here guidance,
+    # not repeated (and not contradicted) here.
+    frm = "\n".join(_contract_guidance(doc["pages"][1], reg, "PAGE-002"))
+    assert "THE CONTROLS THIS SCREEN OWES" not in frm
+
+    # No delete workflow: say so rather than point at Update.
+    doc["workflows"].pop()
+    lst = "\n".join(_contract_guidance(doc["pages"][0], reg_no := registry_from_blueprint(doc), "PAGE-001"))
+    assert "no workflow deletes a Record yet — leave it out" in lst

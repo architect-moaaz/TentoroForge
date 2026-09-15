@@ -312,6 +312,11 @@ def registry_from_blueprint(doc: dict) -> dict:
              "purpose": w.get("purpose") or "",
              "trigger": (w.get("trigger") or {}).get("kind") or "",
              "launchedFrom": list(w.get("launchedFrom") or []),
+             # What the workflow DOES and to what — read off its db steps, so
+             # the brief can say "Delete runs FLOW-003" rather than leave the
+             # composer to guess from names (it bound Delete to Update).
+             "op": _db_op_of(w),
+             "entity": _entity_name_of(doc, w, by_id),
              # What the workflow needs, so the brief can say how each is
              # satisfied on THIS screen rather than the contract refusing
              # the page afterwards for an input nothing supplied.
@@ -333,7 +338,39 @@ def registry_from_blueprint(doc: dict) -> dict:
             for p in doc.get("pages") or []
             if isinstance(p, dict) and p.get("id") and p.get("status") != "DEPRECATED"
         },
+        "pageFamily": {str(p.get("id")): _page_family(p)
+                       for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("id")},
+        "pageActions": {str(p.get("id")): [str(a) for a in (p.get("actions") or []) if isinstance(a, str)]
+                        for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("id")},
     }
+
+
+def _db_op_of(w: dict) -> str:
+    for st in w.get("steps") or []:
+        at = ((st or {}).get("config") or {}).get("actionType")
+        if isinstance(at, str) and at in ("db_insert", "db_update", "db_delete"):
+            return at
+    return ""
+
+
+def _entity_name_of(doc: dict, w: dict, by_id: dict) -> str:
+    for st in w.get("steps") or []:
+        if not isinstance(st, dict):
+            continue
+        at = (st.get("config") or {}).get("actionType")
+        if isinstance(at, str) and at.startswith("db_"):
+            if st.get("entity") and by_id.get(st["entity"]):
+                return str(by_id[st["entity"]])
+            table = str((st.get("config") or {}).get("table") or "").lower()
+            for e in (doc.get("data") or {}).get("entities") or []:
+                if str(e.get("table") or "").lower() == table:
+                    return str(e.get("name") or e.get("id"))
+    return ""
+
+
+def _page_family(page: dict) -> str:
+    from services.blueprint.functional_completeness import page_family
+    return page_family(page) or ""
 
 
 def launchable(registry: dict, page_id: str) -> list[dict]:
@@ -681,6 +718,85 @@ _DESIGN_DIRECTION = (
 )
 
 
+_ACTION_MODEL = (
+    "\nTHE ACTION MODEL — how a control does what its verb says, and the only "
+    "ways the contract accepts:\n"
+    "- A row action on a Table either NAVIGATES (`navigate` to a route, `{{id}}` "
+    "for the row's id) or runs a workflow that acts on ONE existing record and "
+    "needs nothing else (a delete). A Table collects no fields, so a row action "
+    "NEVER runs a workflow that creates or updates — those need a form.\n"
+    "- Create and Edit are navigations to the form screen (`navigate`); on the "
+    "form screen itself the Form runs the workflow. Never bind a Button or row "
+    "action on a list to the create or update workflow.\n"
+    "- Delete runs the workflow that DELETES this entity, by its id — never the "
+    "update workflow, never the create workflow.\n"
+    "- Every action the contract declares needs exactly such a bound control. A "
+    "page that drops a control it had — to fix something else — is refused.\n"
+    "- Bind every workflow by its id exactly as listed below; do not invent one."
+)
+
+
+def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[str]:
+    """What this screen's declared actions must become — resolved, not
+    described: the route the Edit navigates to, the id of the workflow the
+    Delete runs. Four refused attempts on /master-data each fixed the verb
+    named and mis-bound another; told all of them up front, with their
+    targets, the first attempt can be right."""
+    actions = (registry.get("pageActions") or {}).get(page_id) or []
+    if not actions or not contract:
+        return []
+    routes = registry.get("routes") or {}
+    families = registry.get("pageFamily") or {}
+    entity = (registry.get("pageEntity") or {}).get(page_id) or ""
+    if not entity:
+        return []
+    my_family = families.get(page_id) or ""
+    def sibling(family: str) -> str:
+        for pid, fam in families.items():
+            if pid != page_id and fam == family and (registry.get("pageEntity") or {}).get(pid) == entity:
+                return routes.get(pid) or ""
+        return ""
+    def workflow(op: str) -> dict | None:
+        return next((w for w in registry.get("workflows") or []
+                     if w.get("op") == op and w.get("entity") == entity), None)
+    form_route, record_route = sibling("form"), sibling("record")
+    lines: list[str] = []
+    on_list = my_family == "collection"
+    for a in actions:
+        verb = a.strip().lower().split()[0] if a.strip() else ""
+        if verb in ("view", "open", "show", "details", "detail") and my_family != "record" and record_route:
+            lines.append(f"- `{a}`: a row action (or link) that navigates to "
+                         f"`{record_route.replace('[id]', '{{id}}')}`.")
+        elif verb in ("create", "add", "new", "register"):
+            # On the form screen itself the creating Form is described by the
+            # "THIS SCREEN ALSO CREATES ITS RECORD" guidance below; here only
+            # the way TO it.
+            if my_family != "form" and form_route:
+                lines.append(f"- `{a}`: a Button that navigates to `{form_route}` — it does NOT run a workflow.")
+        elif verb in ("edit", "update"):
+            wf = workflow("db_update")
+            if my_family != "form" and form_route:
+                rid = "{{id}}" if on_list else "the record's id, bound from this screen's record source"
+                lines.append(f"- `{a}`: a {'row action' if on_list else 'Button'} that navigates to "
+                             f"`{form_route}?id=`{rid} — it does NOT run "
+                             f"{wf['id'] if wf else 'the update workflow'}.")
+        elif verb in ("delete", "remove", "archive", "destroy"):
+            wf = workflow("db_delete")
+            if wf:
+                lines.append(f"- `{a}`: a {'row action' if on_list else 'Button'} with "
+                             f"`workflow: \"{wf['id']}\"` ({wf.get('name')}) — the one workflow that deletes "
+                             f"this {entity}. Not {workflow('db_update')['id'] if workflow('db_update') else 'Update'}, "
+                             f"not {workflow('db_insert')['id'] if workflow('db_insert') else 'Create'}.")
+            else:
+                lines.append(f"- `{a}`: no workflow deletes a {entity} yet — leave it out rather than "
+                             f"binding it to a workflow that does something else.")
+    if not lines:
+        return []
+    return [_ACTION_MODEL,
+            "\nTHE CONTROLS THIS SCREEN OWES — one bound control for each, kept across "
+            "every attempt:\n" + "\n".join(lines)]
+
+
 def _contract_guidance(contract: dict | None, registry: dict,
                        page_id: str) -> list[str]:
     """What the page contract asks of this screen that the family text does
@@ -705,6 +821,7 @@ def _contract_guidance(contract: dict | None, registry: dict,
             "a new one — navigate to its route with `new` in the `[id]` slot, "
             "for example `/notes/new`."
         )
+    parts.extend(_owed_controls(contract, registry, page_id))
     creator = creates_here(registry, page_id) if page_id else None
     if creator:
         others = [w for w in launchable(registry, page_id) if w is not creator]
