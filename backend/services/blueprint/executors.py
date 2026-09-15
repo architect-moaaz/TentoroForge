@@ -2905,8 +2905,30 @@ def make_executor(
             confidence=0.95,
         )
 
+    def _patch_page(spec: TaskSpec) -> AgentResult | None:
+        """A repair of a page that already has an accepted tree is an edit
+        of that tree (see ``page_patch``); ``None`` means compose in full."""
+        from services.blueprint.page_patch import patch_page_layout
+        client = (model.for_task(spec.node, spec.agent)
+                  if isinstance(model, ModelRouter) else model)
+        try:
+            return patch_page_layout(
+                svc, spec, client, usage=usage,
+                tell=lambda msg: tell(reasoning, msg, "step", spec.node))
+        except Exception as exc:  # noqa: BLE001 — a patch that breaks is a compose
+            logger.warning("[patch] %s: %s", spec.subject, exc)
+            return None
+
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent == "a2ui_pages" and spec.subject:
+            # A REPAIR EDITS; A FIRST PASS COMPOSES. `feedback` is set only on
+            # a retry or an observer repair, and only a page with an accepted
+            # tree can be edited — a fresh page, or one whose layout the review
+            # invalidated, has nothing to patch and composes in full.
+            if spec.feedback:
+                patched = _patch_page(spec)
+                if patched is not None:
+                    return patched
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
