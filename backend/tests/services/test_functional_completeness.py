@@ -329,3 +329,77 @@ def test_a_delete_button_wired_to_the_delete_workflow_is_accepted():
     doc["pageLayouts"][0]["root"]["children"][0]["props"]["workflow"] = "FLOW-DEL"
     rules = {f["rule"] for f in functional_findings(doc)}
     assert "workflow-verb-mismatch" not in rules
+
+
+# ---------------------------------------------------------------------------
+# The verb/op check is not delete-only: an Edit wired to Create, a Create wired
+# to Update — any CRUD control that runs a workflow doing something other than
+# what it says is caught (when a correctly-typed workflow exists to name).
+# ---------------------------------------------------------------------------
+
+def _crud_binding_doc(button_label: str, bound_wf: str):
+    def _wf(wid, name, op):
+        return {"id": wid, "name": name,
+                "steps": [{"key": "s", "type": "action", "entity": "E",
+                           "config": {"actionType": op, "table": "records"}}],
+                "inputs": [{"name": "record", "kind": "record", "entity": "E", "required": True}]}
+    layout = {"page": "PG", "dataSources": [{"name": "rec", "entity": "E", "op": "get"}],
+              "root": {"type": "Stack", "props": {}, "children": [
+                  {"type": "Button", "props": {"label": button_label, "workflow": bound_wf,
+                                               "args": {"id": "{{rec.id}}"}}, "children": []}]}}
+    return {
+        "pages": [{"id": "PG", "route": "/records/[id]", "data": {"primaryEntity": "E"}}],
+        "data": {"entities": [{"id": "E", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName"}, {"name": "age"}]}]},
+        "workflows": [_wf("FLOW-C", "Create Record", "db_insert"),
+                      _wf("FLOW-U", "Update Record", "db_update"),
+                      _wf("FLOW-D", "Delete Record", "db_delete")],
+        "pageLayouts": [layout],
+    }
+
+
+def test_an_edit_button_wired_to_the_create_workflow_is_caught():
+    doc = _crud_binding_doc("Edit Record", "FLOW-C")
+    hits = [f for f in functional_findings(doc) if f["rule"] == "workflow-verb-mismatch"]
+    assert hits and "Update Record" in hits[0]["detail"]  # names the correct target
+
+
+def test_a_create_button_wired_to_the_update_workflow_is_caught():
+    doc = _crud_binding_doc("Add Record", "FLOW-U")
+    hits = [f for f in functional_findings(doc) if f["rule"] == "workflow-verb-mismatch"]
+    assert hits and "Create Record" in hits[0]["detail"]
+
+
+def test_a_correctly_wired_crud_control_is_accepted():
+    doc = _crud_binding_doc("Edit Record", "FLOW-U")   # Edit -> Update, correct
+    assert not [f for f in functional_findings(doc) if f["rule"] == "workflow-verb-mismatch"]
+
+
+# ---------------------------------------------------------------------------
+# A field change that leaves a workflow naming a column that is gone is caught —
+# the dependency a rename/removal must not silently break.
+# ---------------------------------------------------------------------------
+
+def _write_doc(values_keys, where_keys=None):
+    cfg = {"actionType": "db_update", "table": "records",
+           "values": {k: "x" for k in values_keys}}
+    if where_keys:
+        cfg["where"] = {k: "x" for k in where_keys}
+    return {
+        "data": {"entities": [{"id": "E", "name": "Record", "table": "records",
+                               "fields": [{"name": "fullName"}, {"name": "age"}]}]},
+        "workflows": [{"id": "W", "name": "Update Record",
+                       "steps": [{"key": "u", "config": cfg}]}],
+        "businessRules": [], "pages": [], "pageLayouts": [],
+    }
+
+
+def test_a_workflow_naming_a_removed_column_is_caught():
+    doc = _write_doc(["fullName", "gender"])   # gender was removed from the entity
+    hits = [f for f in functional_findings(doc) if f["rule"] == "workflow-column-unknown"]
+    assert hits and "gender" in hits[0]["detail"]
+
+
+def test_system_columns_and_real_fields_are_not_flagged():
+    doc = _write_doc(["fullName", "age", "updatedAt"], where_keys=["id"])
+    assert not [f for f in functional_findings(doc) if f["rule"] == "workflow-column-unknown"]

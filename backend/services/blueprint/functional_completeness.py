@@ -235,6 +235,30 @@ def _workflow_by_id(doc: dict, wid: str) -> dict | None:
     return next((w for w in _live(doc.get("workflows")) if str(w.get("id")) == str(wid)), None)
 
 
+#: Control/action verbs that name a CRUD operation, and the DB op each requires.
+#: UNAMBIGUOUS verbs only — `save`/`submit`/`apply`/`modify` name no single op
+#: (a Save can insert or update), so they are left out rather than guessed. This
+#: is the closed CRUD vocabulary, not a growing exception list: a control that
+#: says one of these must run a workflow that does the matching thing.
+_VERB_DB_OP: dict[str, str] = {
+    "create": "db_insert", "add": "db_insert", "new": "db_insert", "register": "db_insert",
+    "edit": "db_update", "update": "db_update",
+    "delete": "db_delete", "remove": "db_delete", "archive": "db_delete", "destroy": "db_delete",
+}
+
+
+def _workflow_for_op(doc: dict, page: dict, op: str) -> str | None:
+    """The name of a workflow that performs `op` on THIS page's primary entity,
+    or None — the correct target to name when a control is mis-bound."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    for w in _live(doc.get("workflows")):
+        if op in _workflow_db_ops(w) and _workflow_targets_entity(doc, w, entity):
+            return str(w.get("name") or w.get("id") or "") or None
+    return None
+
+
 def _bindings(node: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(node, list):
@@ -321,28 +345,34 @@ def page_findings(doc: dict) -> list[dict]:
                                           f"which this application does not "
                                           f"define"})
                     continue
-                # A DESTRUCTIVE CONTROL MUST RUN A WORKFLOW THAT DELETES. A
-                # "Delete" button wired to an Update workflow changes the record
-                # instead of removing it — nothing visibly happens, which reads
-                # as a broken button. `workflow-not-defined` never catches it:
-                # the Update workflow exists, so the ref resolves. Flagged only
-                # when a delete workflow for this record EXISTS to name — when
-                # none does, the missing workflow is the workflow author's to
-                # add (Page↔Workflow), and demanding a rebind here would ask the
+                # A CONTROL MUST RUN A WORKFLOW THAT DOES WHAT IT SAYS. A
+                # "Delete" wired to an Update workflow changes the record instead
+                # of removing it; an "Edit" wired to the Create workflow adds a
+                # second record; nothing a person can see happens, which reads as
+                # a broken button. `workflow-not-defined` never catches it — the
+                # wrong workflow exists, so the ref resolves. Decided on the DB op
+                # the verb names (`db_insert`/`db_update`/`db_delete`), and flagged
+                # only when a correctly-typed workflow EXISTS to name: when none
+                # does, the missing workflow is the workflow author's to add
+                # (Page↔Workflow), and demanding a rebind here would ask the
                 # composer for a target that is not there yet.
-                if _verb_of(props.get("label") or props.get("submitLabel")
-                            or props.get("aria-label")) in _DESTRUCTIVE_VERBS:
+                _op_of = {"db_insert": "creates", "db_update": "updates", "db_delete": "deletes"}
+                expected = _VERB_DB_OP.get(_verb_of(
+                    props.get("label") or props.get("submitLabel") or props.get("aria-label")))
+                if expected:
                     target = _workflow_by_id(doc, ref)
-                    if target is not None and "db_delete" not in _workflow_db_ops(target):
-                        correct = _delete_workflow_for(doc, page)
+                    if target is not None and expected not in _workflow_db_ops(target):
+                        correct = _workflow_for_op(doc, page, expected)
                         if correct:
+                            did = next((_op_of[o] for o in _workflow_db_ops(target) if o in _op_of),
+                                       "does not")
                             out.append({"rule": "workflow-verb-mismatch", "page": pid,
                                         "detail": f"{route}: {kind} "
                                                   f"{props.get('label') or props.get('submitLabel') or kind!r} "
-                                                  f"deletes, but runs {target.get('name') or ref} ({ref}), "
-                                                  f"which does not delete — it changes the record rather than "
-                                                  f"removing it, so the control does nothing a person can see. "
-                                                  f"Bind it to {correct!r}, the workflow that deletes this record."})
+                                                  f"{_op_of[expected]}, but runs {target.get('name') or ref} "
+                                                  f"({ref}), which {did} — the control does something other than "
+                                                  f"what it says, so it looks broken. Bind it to {correct!r}, the "
+                                                  f"workflow that {_op_of[expected]} this record."})
                 for missing in unsatisfied_inputs(doc, page, layout, node, ref):
                     out.append({"rule": "workflow-inputs-unsatisfied", "page": pid,
                                 "detail": f"{route}: {missing}"})
@@ -381,6 +411,7 @@ def authoring_findings(doc: dict) -> list[dict]:
     out.extend(expression_findings(doc))
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
+    out.extend(column_findings(doc))
     return out
 
 
@@ -1012,5 +1043,55 @@ def insert_findings(doc: dict) -> list[dict]:
                                       f"the data model requires — supply each in `values`: an input by name, "
                                       f"`$now` for a time, `$user.id` for the actor, `$uuid` for a reference "
                                       f"nothing else supplies, a literal for a starting state"})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A WRITE NAMES COLUMNS THE ENTITY HAS. The mirror of insert-missing-required:
+# when a field is renamed or removed, a db step that still writes or filters it
+# names a column that is gone, and the action fails at the database — the exact
+# dependency a field change must not silently break. Judged only against an
+# entity with a declared field list, ignoring the system columns the engine
+# fills (`id`, `$now` timestamps), so it flags a genuinely absent column, not a
+# managed one.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_COLUMNS = {"id", "createdat", "updatedat", "deletedat",
+                   "created_at", "updated_at", "deleted_at",
+                   "createdbyid", "updatedbyid"}
+
+
+def column_findings(doc: dict) -> list[dict]:
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            if cfg.get("actionType") not in ("db_insert", "db_update", "db_delete"):
+                continue
+            entity = _entity_for_table(doc, cfg.get("table"))
+            if entity is None:
+                continue
+            fields = {str(f.get("name")) for f in entity.get("fields") or [] if f.get("name")}
+            if not fields:                       # cannot judge without a field list
+                continue
+            columns: set[str] = set()
+            for key in ("values", "where"):
+                block = cfg.get(key)
+                if isinstance(block, dict):
+                    columns |= {str(k) for k in block}
+            unknown = sorted(
+                c for c in columns
+                if c not in fields and c.lower().replace("_", "") not in _SYSTEM_COLUMNS
+            )
+            if unknown:
+                out.append({"rule": "workflow-column-unknown", "page": str(wf.get("id")),
+                            "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: writes or "
+                                      f"filters {', '.join(repr(c) for c in unknown)}, which {entity.get('name')} "
+                                      f"does not have (fields: {', '.join(sorted(fields))}) — a field that was "
+                                      f"renamed or removed leaves the step naming a column that is gone, and the "
+                                      f"action fails at the database. Point it at a column the entity has, or "
+                                      f"restore the field."})
     return out
 
