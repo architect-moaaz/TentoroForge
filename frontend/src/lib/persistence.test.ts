@@ -219,3 +219,40 @@ describe("buildPersister", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("route-based schema-file fallback (DEFECT-RENAME-NOOP editor half)", () => {
+  it("saves a page missing from nav-flow to src/schemas/<slugify(route)>.json, not <pageId>.json", async () => {
+    // The /offers list page: keyed by the Blueprint id (PAGE-002), NOT in
+    // nav-flow. It must save to offers.json (what the registry renders), never
+    // PAGE-002.json (a file nothing imports).
+    const arts: Artifacts = {
+      pageSchemas: {
+        "PAGE-002": {
+          schemaVersion: "2" as const,
+          id: "PAGE-002",
+          route: "/offers",
+          root: { id: "n1", type: "Stack", children: [] },
+        },
+      },
+      navFlow: { version: "1.0" as const, initialPage: "home", pages: [], transitions: [], guards: {} },
+      tokens: { color: {}, typography: {}, spacing: {}, radius: {}, shadow: {}, motion: {}, breakpoints: {} },
+    };
+    const p = buildPersister("proj1", 10);
+    p.save(arts);
+    await vi.advanceTimersByTimeAsync(20);
+    await p.flush();
+    const urls = (fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.endsWith("/src/schemas/offers.json"))).toBe(true);
+    expect(urls.some((u) => u.includes("PAGE-002.json"))).toBe(false);
+  });
+});
+
+describe("slugifyRoute", () => {
+  it("mirrors the backend route->file convention", async () => {
+    const { slugifyRoute } = await import("./persistence");
+    expect(slugifyRoute("/")).toBe("home");
+    expect(slugifyRoute("/offers")).toBe("offers");
+    expect(slugifyRoute("/offers/[id]")).toBe("offers/[id]");
+    expect(slugifyRoute("/notes/:id")).toBe("notes/[id]");
+  });
+});
