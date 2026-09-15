@@ -1855,9 +1855,8 @@ def _smith_edit_entity(output_dir: str, args: dict) -> dict:
             deps = []
         target = new_name or new_table or entity
         return needs_confirmation_result(
-            "entity", f"{entity} → {target}",
-            dependents=deps or [f"everything that names {entity!r} must move to {target!r}"],
-            cascade=True, removes=deps)
+            "entity", f"{entity} → {target}", action="rename",
+            dependents=deps or [f"everything that names {entity!r} must move to {target!r}"])
     diagnosis = {
         "artifact": {"kind": "entity", "path": entity},
         "explanation": "",
@@ -1951,7 +1950,7 @@ def _smith_edit_field(output_dir: str, args: dict) -> dict:
     new_type = args.get("new_type")
     if new_name and not args.get("_confirmed"):
         return needs_confirmation_result(
-            "field", f"{entity}.{field} → {new_name}",
+            "field", f"{entity}.{field} → {new_name}", action="rename",
             dependents=[
                 f"every workflow step, form field and binding that names "
                 f"{field!r} must move to {new_name!r} or it stops resolving",
