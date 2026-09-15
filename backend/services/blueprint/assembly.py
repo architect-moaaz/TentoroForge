@@ -544,6 +544,10 @@ def assemble(doc: dict, app_root: str | Path, *,
     )
 
     placeholders = apply_residual_placeholder_guard(out)
+    # THE SHIPPED-FILE CONTRACT. The guard above reports; this refuses. A
+    # token the templates carry and nothing filled is named, file and token,
+    # and the assembly does not report success over it.
+    refuse_unfilled_scaffold(out)
 
     return {
         "scaffold": len(scaffold),
@@ -720,6 +724,64 @@ def _fallback_routes(schemas: Path) -> set[str]:
     return out
 
 
+_TOKEN_SHAPES = (re.compile(r"__[A-Z][A-Z_]+__"), re.compile(r"\{\{[a-z_]+\}\}"))
+_TEXT_SUFFIXES = (".ts", ".tsx", ".jsx", ".js", ".json", ".css", ".mdx", ".md", ".html")
+
+
+def scaffold_tokens() -> frozenset[str]:
+    """Every placeholder the scaffold templates carry — read off the templates
+    themselves, so a new token is in the contract the moment a template uses
+    it, and a hand-kept list cannot fall behind."""
+    found: set[str] = set()
+    for layer in _template_dirs():
+        if not layer.is_dir():
+            continue
+        for f in layer.rglob("*"):
+            if f.is_dir() or any(part in _SKIP_DIRS for part in f.parts):
+                continue
+            if f.suffix not in _TEXT_SUFFIXES and f.suffix != ".tmpl":
+                continue
+            try:
+                text = f.read_text("utf-8")
+            except Exception:  # noqa: BLE001
+                continue
+            for shape in _TOKEN_SHAPES:
+                found.update(shape.findall(text))
+    return frozenset(found)
+
+
+def unfilled_scaffold_tokens(app_root: str | Path) -> list[str]:
+    """``file:token`` for every scaffold placeholder still in a shipped file.
+    A placeholder in a shipped file is a defect, not a cosmetic one:
+    `{{app_name}}` inside JSX throws on every request, `__APP_NAME__` is
+    the app's name on its own sign-in page."""
+    tokens = scaffold_tokens()
+    out: list[str] = []
+    src = Path(app_root) / "src"
+    if not tokens or not src.is_dir():
+        return out
+    for f in sorted(src.rglob("*")):
+        if f.is_dir() or "node_modules" in f.parts or f.suffix not in _TEXT_SUFFIXES:
+            continue
+        try:
+            text = f.read_text("utf-8")
+        except Exception:  # noqa: BLE001
+            continue
+        for t in sorted(tokens):
+            if t in text:
+                out.append(f"{f.relative_to(app_root)}:{t}")
+    return out
+
+
+def refuse_unfilled_scaffold(app_root: str | Path) -> None:
+    """Raise :class:`BuildFailed` naming every placeholder still shipped."""
+    left = unfilled_scaffold_tokens(app_root)
+    if left:
+        raise BuildFailed(
+            "the scaffold shipped with placeholders unfilled — "
+            + "; ".join(left[:12]) + (" …" if len(left) > 12 else ""))
+
+
 def interpolate_scaffold(app_root: str | Path, doc: dict) -> list[str]:
     """Every placeholder the scaffold ships, filled from the Blueprint — the
     edge pages' `{{app_name}}`/`{{home_route}}`, the chrome's `__APP_NAME__`,
@@ -768,6 +830,7 @@ def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge",
     written = copy_scaffold(out, project_short_id=project_short_id)
     if doc is not None:
         written += interpolate_scaffold(out, doc)
+        refuse_unfilled_scaffold(out)
     written += vendor_engines(out)
     return written
 
@@ -824,7 +887,74 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
+    if build:
+        out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
+
+
+#: The build-time dry run of every control→workflow wire (see
+#: `templates/runtime/workflows/verify-dispatches.ts`).
+DISPATCH_VERIFIER = "src/lib/workflows/verify-dispatches.ts"
+DISPATCH_MANIFEST = "src/contracts/dispatches.json"
+
+
+def _env_file(root: Path) -> dict[str, str]:
+    """`.env.local` as a dict — the DATABASE_URL the app itself reads, so the
+    engine's db module can be imported (it never connects for a dry run)."""
+    env: dict[str, str] = {}
+    try:
+        for line in (root / ".env.local").read_text("utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:  # noqa: BLE001
+        pass
+    return env
+
+
+def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
+    """Dry-run every wire the app ships through its own engine. Raises
+    :class:`BuildFailed` naming the control, the workflow and the step for
+    each wire that would refuse at first click. Returns the number checked.
+
+    Compiling proved the app builds; this proves its buttons resolve. The
+    Blueprint checks reason about scope, the engine about the POST body, and
+    only the engine is the truth a person meets."""
+    import os
+    import subprocess
+    root = Path(app_root)
+    if not (root / DISPATCH_VERIFIER).is_file() or not (root / DISPATCH_MANIFEST).is_file():
+        return 0
+    env = {**os.environ, **_env_file(root)}
+    env.setdefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/dry_run")
+    proc = subprocess.run(["npx", "tsx", DISPATCH_VERIFIER], cwd=root, capture_output=True,
+                          text=True, timeout=timeout, env=env)
+    report: dict[str, Any] = {}
+    for line in reversed((proc.stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                report = json.loads(line)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+    if proc.returncode == 0 and report.get("ok", True):
+        return int(report.get("checked") or 0)
+    if not report:
+        raise BuildFailed(f"the dispatch dry run could not run ({proc.returncode}):\n"
+                          + build_message(proc.stdout, proc.stderr))
+    lines = []
+    for r in report.get("results") or []:
+        if r.get("ok"):
+            continue
+        for pr in r.get("problems") or []:
+            lines.append(f"{r.get('route')}: {r.get('control')} {r.get('label')!r} runs "
+                         f"{r.get('workflow')} — step {pr.get('node')!r} ({pr.get('actionType')}): "
+                         f"{pr.get('problem')}")
+    raise BuildFailed("a control the app ships would refuse at first click:\n"
+                      + "\n".join(lines[:12]))
 
 
 #: Where a verification build writes, beside — never inside — the served app.

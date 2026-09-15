@@ -458,7 +458,7 @@ function _canonTable(s: string): string {
   return s.toLowerCase().replace(/[_-]/g, "");
 }
 
-function _resolveTable(name?: unknown): any {
+export function _resolveTable(name?: unknown): any {
   if (typeof name !== "string") return undefined;
   const tables = Object.values(schema as Record<string, unknown>).filter(
     (v) => is(v as any, Table),
@@ -744,7 +744,7 @@ function _isUnresolvedRef(ref: string, ctx: WorkflowExecutionContext): boolean {
   return false;
 }
 
-function _resolveValueMap(
+export function _resolveValueMap(
   map: unknown,
   ctx: WorkflowExecutionContext,
   table?: any,
@@ -858,7 +858,7 @@ export function _finalizeInsert(
   return out;
 }
 
-function _buildWhere(
+export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
 ): any {

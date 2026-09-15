@@ -610,6 +610,12 @@ def page_findings(doc: dict) -> list[dict]:
                         "detail": f"{route}: binds {{{{{name}}}}}, which no "
                                   f"data source provides"})
 
+    # WHAT THE CONTROL PUTS ON THE WIRE. The checks above reason about scope —
+    # "the row names the record"; this one about the POST body — "the row
+    # action sends {id}". Both must hold. After the page loop, since it reads
+    # the projected tree (the record carried onto the control).
+    from services.blueprint.dispatch_contract import dispatch_findings
+    out.extend(dispatch_findings(doc))
     return out
 
 
@@ -624,6 +630,11 @@ def authoring_findings(doc: dict) -> list[dict]:
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
     out.extend(column_findings(doc))
+    # A step reads what no input declares and no earlier step produces — the
+    # wire side of the contract (see dispatch_contract). Imported here: that
+    # module reads this one's helpers.
+    from services.blueprint.dispatch_contract import workflow_ref_findings
+    out.extend(workflow_ref_findings(doc))
     return out
 
 

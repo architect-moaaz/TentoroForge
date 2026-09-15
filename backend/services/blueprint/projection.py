@@ -1587,6 +1587,21 @@ def _workflow_slug(w: dict) -> str:
     return to_snake(w.get("name") or w.get("id") or "workflow").replace("_", "-")
 
 
+def project_dispatches(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/contracts/dispatches.json``: every control→workflow wire
+    with the payload the control sends (sampled per key). The build-time dry
+    run (`verify-dispatches.ts`) executes each through the real engine — the
+    same `_buildWhere`, the same Drizzle columns — without touching the
+    database, so "verified" covers the app that ships, not the document."""
+    from services.blueprint.dispatch_contract import dispatches
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    entries = dispatches(doc)
+    (out / "dispatches.json").write_text(
+        json.dumps({"dispatches": entries}, indent=2, sort_keys=True) + "\n", "utf-8")
+    return {"files": ["src/contracts/dispatches.json"], "dispatches": len(entries)}
+
+
 def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/launch-roles.ts`` - who may launch each workflow."""
     roles = launch_roles(doc)

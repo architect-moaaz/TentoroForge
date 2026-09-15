@@ -2344,11 +2344,14 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
     """Everything the server reads: workflow definitions and seed rows."""
-    from services.blueprint.projection import project_seed, project_workflows
+    from services.blueprint.projection import (
+        project_dispatches, project_seed, project_workflows,
+    )
 
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
+    project_dispatches(svc.doc, app_root)
     project_seed(svc.doc, app_root)
     svc.save()
 
