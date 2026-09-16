@@ -80,6 +80,21 @@ Return ONLY a JSON object with exactly these keys:
                         column on an existing entity is add_field).
       "remove_entity" — retire an entity and everything on it: "we don't
                         need the Department entity".
+      "rename_field"  — a field of an entity gets a new name: "rename
+                        yearsOfExperience to experienceYears".
+      "remove_field"  — a field goes: "drop the location field from nurses".
+      "add_requirement" / "edit_requirement" / "remove_requirement" — the
+                        stated requirements: "the app should also let a
+                        nurse mark herself unavailable" (add), "REQ-012
+                        should say…" (edit), "we no longer need…" (remove).
+      "edit_product"  — what the app is called or is for: "call the app
+                        Nurse Roster", "the objective is…", "it is for ward
+                        managers", "the interface should be in Arabic".
+      "add_api" / "remove_api" — an API endpoint: "an endpoint that lists
+                        wards", "remove the export endpoint".
+      "add_integration" / "remove_integration" — a third-party service:
+                        "send email through SendGrid", "drop the Stripe
+                        integration".
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
@@ -134,6 +149,26 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "element_label": the control's visible text AS IT IS NOW, exactly — a
       Table row action's label ("Delete") is a control as much as a Button's.
       Copy it from the Blueprint below; do not paraphrase it.
+
+  rename_field needs:
+  "entity": the entity's name as the Blueprint spells it; "field": the field's
+      current name; "new_value": the new name.
+
+  remove_field needs:
+  "entity" and "field", as above.
+
+  add_requirement needs "requirement": the requirement in the user's words.
+  edit_requirement needs "requirement": which one (its id or its wording) and
+      "change": what it should say instead.
+  remove_requirement needs "requirement": which one.
+
+  edit_product needs "change": what should be different, in the user's words.
+
+  add_api needs "api": the endpoint in the user's words; remove_api needs
+      "api": which one (method and path, or its id).
+
+  add_integration needs "integration": the service in the user's words;
+      remove_integration needs "integration": which one.
 
   edit_navigation needs:
   "change": what should be different about the menu, in the user's words.
@@ -420,6 +455,10 @@ def understand_ask(
         "workflow": str(data.get("workflow") or "").strip(),
         # rules: the rule in the user's words, or which existing one is meant.
         "rule": str(data.get("rule") or "").strip(),
+        # the definition after the build
+        "requirement": str(data.get("requirement") or "").strip(),
+        "api": str(data.get("api") or "").strip(),
+        "integration": str(data.get("integration") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
         # literal — "a clearer label" is a note to a person, not an edit — and
         # a removal or a question legitimately has none, so "" is a real value
@@ -429,7 +468,13 @@ def understand_ask(
         # string + a dict so `missing_fields` sees them and `run_iteration` can
         # hand them to the seam. Absent for every other verb.
         "entity": str(data.get("entity") or "").strip(),
-        "field": data.get("field") if isinstance(data.get("field"), dict) else {},
+        # add_field wants {name, type}; rename_field / remove_field name the
+        # field as a string. A string is kept as {"name": …} rather than
+        # dropped — dropped, "rename yearsOfExperience" reached the seam as
+        # "Nurse has no field ''".
+        "field": (data.get("field") if isinstance(data.get("field"), dict)
+                  else {"name": str(data.get("field")).strip()} if isinstance(data.get("field"), str) and str(data.get("field")).strip()
+                  else {}),
     }
 
 

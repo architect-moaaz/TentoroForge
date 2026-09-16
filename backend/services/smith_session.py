@@ -392,6 +392,31 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _definition(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Fields, requirements, product, APIs and integrations — the rest of
+        the definition, changeable after the build."""
+        u = {k: understanding.get(k) for k in ("entity", "field", "new_value", "requirement", "change", "api", "integration")}
+        field = u.get("field")
+        field = str(field.get("name") or "") if isinstance(field, dict) else str(field or "")
+        text = {"add_requirement": u.get("requirement"), "edit_requirement": u.get("requirement"),
+                "remove_requirement": u.get("requirement"), "add_api": u.get("api"), "remove_api": u.get("api"),
+                "add_integration": u.get("integration"), "remove_integration": u.get("integration"),
+                "edit_product": u.get("change")}.get(verb)
+        if verb in ("rename_field", "remove_field"):
+            from services.smith.field_change import run as go
+            out = go(str(self.output_dir), verb, entity=str(u.get("entity") or ""), field=field,
+                     new_value=str(u.get("new_value") or ""), reasoning=self._reasoning)
+        else:
+            from services.smith.definition_change import run as go
+            out = go(str(self.output_dir), verb, text=str(text or "").strip() or user_message.strip(),
+                     change=str(u.get("change") or "").strip(), reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched, diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _section(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
         """Access, rules and entities — three Blueprint sections, one dispatch.
         Each seam is also a tool; both reach the same `run`."""
@@ -690,6 +715,9 @@ class SmithSession:
             return self._navigation(understanding, user_message)
         if verb in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
             return self._section(verb, understanding, user_message)
+        if verb in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement",
+                    "edit_product", "add_api", "remove_api", "add_integration", "remove_integration"):
+            return self._definition(verb, understanding, user_message)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":

@@ -616,6 +616,40 @@ TOOL_CATALOG: list[dict] = [
              "out again from scratch. NOT for changing one label or one "
              "field \u2014 that is edit_page. The page must already exist "
              "in the definition; check list_pages first."},
+    {"name": "rename_field",
+     "signature": "rename_field(entity, field, new_value) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "RENAME A FIELD everywhere the Blueprint uses it \u2014 the entity, table columns, "
+             "form fields, bindings, workflow values and reads, rules, relationships. "
+             "Deterministic. On a Blueprint-built app edit_field(rename) routes here."},
+    {"name": "remove_field",
+     "signature": "remove_field(entity, field) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "REMOVE A FIELD and take it out of every screen, workflow and rule that used it; "
+             "what still reads it is named for Verify & Fix. On a Blueprint-built app the "
+             "legacy remove_field routes here."},
+    {"name": "add_requirement",
+     "signature": "add_requirement(requirement) -> {applied, diff_summary}",
+     "desc": "RECORD A NEW REQUIREMENT in the user's words. Nothing implements it until asked."},
+    {"name": "edit_requirement",
+     "signature": "edit_requirement(requirement, change) -> {applied, diff_summary}",
+     "desc": "RESTATE A REQUIREMENT; the screens, workflows and rules citing it are re-authored against the new wording."},
+    {"name": "remove_requirement",
+     "signature": "remove_requirement(requirement) -> {applied, diff_summary}",
+     "desc": "RETIRE A REQUIREMENT and take it off what cited it."},
+    {"name": "edit_product",
+     "signature": "edit_product(change) -> {applied, diff_summary}",
+     "desc": "CHANGE WHAT THE APP IS CALLED OR IS FOR: name, description, objectives, terminology, personas, locale."},
+    {"name": "add_api",
+     "signature": "add_api(api) -> {applied, diff_summary}",
+     "desc": "DECLARE AN ENDPOINT for an entity, guarded by a permission. Data routes are served by the data engine; anything else needs a handler."},
+    {"name": "remove_api",
+     "signature": "remove_api(api) -> {applied, diff_summary}",
+     "desc": "RETIRE AN ENDPOINT by method and path or id."},
+    {"name": "add_integration",
+     "signature": "add_integration(integration) -> {applied, diff_summary}",
+     "desc": "DECLARE AN INTEGRATION with the NAMES of its secrets (never values)."},
+    {"name": "remove_integration",
+     "signature": "remove_integration(integration) -> {applied, diff_summary}",
+     "desc": "RETIRE AN INTEGRATION by name."},
     {"name": "edit_access",
      "signature": "edit_access(change) -> {applied, edited_paths, diff_summary, reason?}",
      "desc": "CHANGE WHO CAN DO WHAT \u2014 roles, permissions, which roles open which "
@@ -1295,6 +1329,15 @@ READONLY_HANDLERS = {
     "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
     "edit_navigation":          lambda output_dir, args: _smith_edit_navigation(output_dir, args),
     "edit_access":              lambda output_dir, args: _smith_edit_access(output_dir, args),
+    "rename_field":             lambda output_dir, args: _smith_field_change(output_dir, "rename_field", args),
+    "add_requirement":          lambda output_dir, args: _smith_definition(output_dir, "add_requirement", args),
+    "edit_requirement":         lambda output_dir, args: _smith_definition(output_dir, "edit_requirement", args),
+    "remove_requirement":       lambda output_dir, args: _smith_definition(output_dir, "remove_requirement", args),
+    "edit_product":             lambda output_dir, args: _smith_definition(output_dir, "edit_product", args),
+    "add_api":                  lambda output_dir, args: _smith_definition(output_dir, "add_api", args),
+    "remove_api":               lambda output_dir, args: _smith_definition(output_dir, "remove_api", args),
+    "add_integration":          lambda output_dir, args: _smith_definition(output_dir, "add_integration", args),
+    "remove_integration":       lambda output_dir, args: _smith_definition(output_dir, "remove_integration", args),
     "add_rule":                 lambda output_dir, args: _smith_rule(output_dir, "add_rule", args),
     "edit_rule":                lambda output_dir, args: _smith_rule(output_dir, "edit_rule", args),
     "remove_rule":              lambda output_dir, args: _smith_rule(output_dir, "remove_rule", args),
@@ -1393,6 +1436,29 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
 def _is_blueprint_app(output_dir: str) -> bool:
     from pathlib import Path as _P
     return (_P(output_dir) / ".forge" / "blueprint" / "current.json").exists()
+
+
+def _smith_field_change(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.field_change import run as _field_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    field = args.get("field") or args.get("field_name") or ""
+    field = str(field.get("name") or "") if isinstance(field, dict) else str(field)
+    return _field_run(output_dir, verb, entity=str(args.get("entity") or ""), field=field,
+                      new_value=str(args.get("new_value") or args.get("new_name") or ""))
+
+
+def _smith_definition(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.definition_change import run as _def_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    key = {"add_requirement": "requirement", "edit_requirement": "requirement", "remove_requirement": "requirement",
+           "edit_product": "change", "add_api": "api", "remove_api": "api",
+           "add_integration": "integration", "remove_integration": "integration"}[verb]
+    text = str(args.get(key) or args.get("request") or "").strip()
+    if not text:
+        return {"applied": False, "edited_paths": [], "reason": f"nothing given. Pass {key}."}
+    return _def_run(output_dir, verb, text=text, change=str(args.get("change") or "").strip())
 
 
 def _smith_edit_access(output_dir: str, args: dict) -> dict:
@@ -2068,6 +2134,8 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
 
 
 def _smith_remove_field(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_field_change(output_dir, "remove_field", args)
     """Drop one column from an existing entity. Data-affecting and
     reference-breaking, so it confirms first (unless ``_confirmed``)."""
     from services.confirmation_gate import needs_confirmation_result
@@ -2093,6 +2161,10 @@ def _smith_remove_field(output_dir: str, args: dict) -> dict:
 
 
 def _smith_edit_field(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        if not (args.get("new_name") or args.get("new_value")):
+            return {"applied": False, "edited_paths": [], "reason": "on a Blueprint-built app a field is renamed with new_name; retyping is not supported yet"}
+        return _smith_field_change(output_dir, "rename_field", args)
     """Rename and/or retype one column. A rename is reference-breaking, so a
     rename confirms first; a pure retype applies directly."""
     from services.confirmation_gate import needs_confirmation_result

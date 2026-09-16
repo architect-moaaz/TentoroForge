@@ -62,6 +62,19 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # The data model — a new entity, or one retired with everything on it.
     "add_entity": {"entity"},
     "remove_entity": {"entity"},
+    # A field renamed or removed across the whole document (deterministic).
+    "rename_field": {"entity", "field", "new_value"},
+    "remove_field": {"entity", "field"},
+    # The definition after the build: requirements flow to what cites them;
+    # the product is what the app is called and for; APIs and integrations.
+    "add_requirement": {"requirement"},
+    "edit_requirement": {"requirement", "change"},
+    "remove_requirement": {"requirement"},
+    "edit_product": {"change"},
+    "add_api": {"api"},
+    "remove_api": {"api"},
+    "add_integration": {"integration"},
+    "remove_integration": {"integration"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -156,6 +169,34 @@ VERB_HELP: dict[str, str] = {
         "Retire an entity and everything standing on it — its screens, its "
         "workflows, its relationships. Needs which entity."
     ),
+    "rename_field": (
+        "Rename a field of an entity everywhere it is used — columns, forms, "
+        "bindings, workflows, rules. Needs the entity, the field and the new name."
+    ),
+    "remove_field": (
+        "Remove a field from an entity and from every screen, workflow and rule "
+        "that used it. Needs the entity and the field."
+    ),
+    "add_requirement": ("Record a new requirement in the user's words. Nothing implements it until asked."),
+    "edit_requirement": (
+        "Restate an existing requirement; the screens, workflows and rules that "
+        "cite it are re-authored against the new wording. Needs which "
+        "requirement and what it should say."
+    ),
+    "remove_requirement": ("Retire a requirement. Needs which one."),
+    "edit_product": (
+        "Change what the application is called or is for: its name, "
+        "description, objectives, terminology, personas, language. Needs the "
+        "change in the user's words."
+    ),
+    "add_api": ("Declare an API endpoint: \"an endpoint that lists wards\". Needs it in the user's words."),
+    "remove_api": ("Retire an endpoint. Needs which one (method and path, or id)."),
+    "add_integration": (
+        "Declare an integration: \"send email through SendGrid\". Records the "
+        "NAMES of the secrets it needs, never their values. Needs it in the "
+        "user's words."
+    ),
+    "remove_integration": ("Retire an integration. Needs which one."),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "
         "nothing, or the user wants it laid out again from scratch."

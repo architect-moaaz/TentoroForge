@@ -139,3 +139,12 @@ def test_a_removal_is_its_own_verb_needing_the_screen_and_the_controls_text():
     assert verb_of(u) == "remove" and is_known(u) and missing_fields(u) == []
     assert missing_fields({"verb": "remove", "target_file": "/master-data"}) == ["element_label"]
     assert '"remove"' in _PROMPT and "remove needs:" in _PROMPT
+
+
+def test_a_field_named_as_a_string_survives_normalisation():
+    """rename_field / remove_field name the field as a string; it used to be
+    dropped because only add_field's {name, type} object was kept."""
+    u = _ask({"verb": "rename_field", "entity": "Nurse", "field": "yearsOfExperience", "new_value": "experienceYears"},
+             message="rename yearsOfExperience to experienceYears")
+    assert u["field"] == {"name": "yearsOfExperience"} and missing_fields(u) == []
+    assert _ask({"verb": "add_field", "entity": "Nurse", "field": {"name": "x", "type": "text"}})["field"] == {"name": "x", "type": "text"}
