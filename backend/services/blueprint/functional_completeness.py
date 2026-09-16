@@ -642,6 +642,12 @@ def page_findings(doc: dict) -> list[dict]:
             out.append({"rule": "declared-action-without-control", "page": pid, "detail": detail})
         unresolved = set(_dangling(
             {"dataSources": layout.get("dataSources") or [],
+             # THE SCREEN'S OWN VALUES ARE A SOURCE. `dangling_bindings` reads
+             # `clientState` to decide whether `{{state.x}}` resolves, and a
+             # caller that hands it only the fetches makes every screen value
+             # look like a binding with nothing behind it — so a correctly
+             # composed calculator was refused for reading its own display.
+             "clientState": layout.get("clientState") or [],
              "root": layout.get("root")})) - _planner_placeholders()
         for name in sorted(unresolved):
             out.append({"rule": "binding-without-source", "page": pid,

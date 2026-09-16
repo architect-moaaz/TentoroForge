@@ -1606,6 +1606,38 @@ def build_prompt(
             "the control needs, the control navigates instead or is left "
             "out; there is no workflow this application runs that is not in "
             "that list.\n\n"
+            # THE SCREEN'S OWN VALUES. Every action this prompt described above
+            # reaches the server. Asked for a calculator that stores nothing,
+            # the composer had no word for a number that lives on the screen —
+            # so it made the display a column, every key a workflow, and
+            # shipped a page where no key did anything.
+            #
+            # Stated for every page, not only the tool-shaped ones: the hybrid
+            # is the common case (a form that totals as you type and then
+            # submits the total), and a page cannot be told after the fact that
+            # it was allowed to compute.
+            "A value that lives only on this screen — a running total, a "
+            "calculator's display, a unit conversion, a filter someone is "
+            "still typing — is declared in `clientState`: a `name`, a `type` "
+            "of string, number or boolean, and what it starts at. Read it "
+            "anywhere a binding goes, as `{{state.<name>}}`. A control "
+            "changes it with `clientAction`: `{\"kind\": \"set\", "
+            "\"target\": \"display\", \"value\": \"0\"}` writes a "
+            "literal, and `{\"kind\": \"compute\", \"target\": "
+            "\"display\", \"formula\": \"display + '7'\"}` evaluates "
+            "over the current values and writes the result. Nothing declared "
+            "here is stored, sent anywhere or kept after the page closes.\n\n"
+            "`clientState` and `dataSources` are independent. A screen with "
+            "only data sources is the ordinary server-backed page. A screen "
+            "with only client state is a self-contained tool, and it needs no "
+            "entity, no workflow and no table — do not invent one to hold a "
+            "value the brief says is not kept. A screen with both is the "
+            "hybrid: the same Button may carry a `clientAction` that works out "
+            "a total AND a `workflow` that submits it, and both run, the "
+            "client action first.\n\n"
+            "Declare every value a control writes to, bind every value you "
+            "declare somewhere a person can see it, and do not declare state "
+            "a page does not need — most pages need none.\n\n"
             + sketch_note +
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
@@ -2806,7 +2838,7 @@ def make_executor(
         per-subject tolerance exists.
         """
         from services.a2ui_authority import (
-            compose_page_via_a2ui, registry_from_blueprint,
+            compose_page_via_a2ui, is_standalone, registry_from_blueprint,
         )
         from services.a2ui_ui_composition import shared_context
 
@@ -2919,6 +2951,34 @@ def make_executor(
             fallback_note = (f"UX Pilot could not design this page ({outcome.reason}); "
                              f"composed by the Forge UI Designer instead")
             tell(reasoning, f"{fallback_note} for {page.get('route')}.", "step", spec.node)
+
+        # A TOOL GOES STRAIGHT TO THE COMPOSER THAT CAN EXPRESS ONE.
+        #
+        # A self-contained screen is made of `clientState` and `clientAction`,
+        # and the A2UI protocol has no word for either — it describes surfaces
+        # over a data model, which is exactly what a tool does not have. So
+        # A2UI cannot compose one, and the tool floor will refuse whatever it
+        # returns: a guaranteed decline at roughly 135 seconds, three times on
+        # the calculator build, before the page reached the author that could
+        # do it.
+        #
+        # Returning None here is the ordinary "A2UI did not take this page"
+        # answer the caller already handles — the LLM page author picks it up,
+        # and its prompt was taught the vocabulary.
+        if is_standalone(page.get("pattern") or "", page):
+            tell(reasoning,
+                 f"{page.get('route')} is a self-contained tool — composing it "
+                 f"directly, since its values live on the screen.",
+                 "step", spec.node)
+            spec.feedback = (
+                f"{spec.feedback}\n\n" if spec.feedback else ""
+            ) + (
+                "This screen is a self-contained tool: it is about no entity "
+                "and shows no stored records. Declare the values it keeps on "
+                "screen in `clientState` and change them with `clientAction`; "
+                "do not give it a data source, a workflow or a table."
+            )
+            return None
 
         # Read under the lock, compose outside it: the context is a slice of
         # the document, the composition is minutes of network.

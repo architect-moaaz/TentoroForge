@@ -269,8 +269,15 @@ _COMPOSE_ONE_OF: dict[str, tuple[str, ...]] = {
     # a page whose create form is a modal needs — was refused for declaring an
     # action that was not on the list. The constraint was right and the
     # enumeration was mine.
+    #
+    # `clientAction` is the seventh, and the first that does not involve the
+    # server. It changes one of the page's own `clientState` values — a
+    # calculator's display, a converter's result. Without it here, a key that
+    # correctly did the only thing a key can do would be refused as a label
+    # with a border, and the composer would be pushed back towards inventing a
+    # workflow and a table to hold a number nobody wants kept.
     "Button": ("workflow", "navigate", "submit", "onClick",
-               "opensDialog", "togglesSidebar"),
+               "opensDialog", "togglesSidebar", "clientAction"),
     # A form that submits nowhere is a page-shaped dead end, and
     # `functional_completeness._ACTIONABLE` has always been ("Button", "Form")
     # — so a Form with no action was already refused. It was never told:
@@ -332,8 +339,13 @@ def _zod_facts(name: str) -> dict[str, dict]:
     except Exception:  # noqa: BLE001
         return {}
     return {
+        # `anyOf` carries the only description a union has. The contract
+        # extractor writes `{"type": "discriminatedunion"}` — true, and
+        # unusable: every branch of `_prop_schema` below reads a scalar type,
+        # so a union fell through to DynamicString and `clientAction` was
+        # advertised to the composer as a piece of text.
         prop: {k: v for k, v in spec.items()
-               if k in ("type", "enum", "items", "format")}
+               if k in ("type", "enum", "items", "format", "anyOf")}
         for prop, spec in (entry.get("properties") or {}).items()
         if isinstance(spec, dict)
     }
@@ -423,6 +435,15 @@ def _prop_schema(name: str, spec: dict) -> dict:
         "number", "integer", "boolean",
     ):
         return {"description": f"{name} — data for this component."}
+    # A UNION IS ITS BRANCHES. Carried straight from the Zod-derived catalog,
+    # which is the same document our own validator judges the result against —
+    # so a composer authoring to what it was shown cannot be refused by it.
+    # Before this, `{"type": "discriminatedunion"}` matched no branch below and
+    # left as DynamicString: `clientAction` described as a string, and a
+    # composer writing one would have had the page rejected.
+    branches = spec.get("anyOf")
+    if isinstance(branches, list) and branches:
+        return {"anyOf": list(branches)}
     raw = str(spec.get("type") or "").lower()
     # Enum members come from the contract, never from a list maintained here.
     # Two conventions reach this: component-contracts.json writes

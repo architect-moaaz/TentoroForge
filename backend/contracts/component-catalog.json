@@ -1680,6 +1680,59 @@
             "type": "object",
             "additionalProperties": {}
           },
+          "clientAction": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "set"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "compute"
+                  },
+                  "target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "formula": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "formula"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "submit": {
             "type": "boolean"
           },

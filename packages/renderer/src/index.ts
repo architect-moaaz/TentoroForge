@@ -53,6 +53,19 @@ export {
   type WorkflowDispatchOptions,
 } from "./client/WorkflowDispatcher";
 export { ClientIsland } from "./client/ClientIsland";
+export {
+  ClientStateContext,
+  ClientStateProvider,
+  initialValues,
+  isClientAction,
+  nextValue,
+  useClientState,
+} from "./client/ClientState";
+export type {
+  ClientAction,
+  ClientStateController,
+  ClientStateValue,
+} from "./client/ClientState";
 // Shell composition — PageOutletContext lets the scaffold wrap a shell schema
 // around per-page content without duplicating the nav in every page schema.
 export { PageOutletContext } from "./runtime/page-outlet-context";

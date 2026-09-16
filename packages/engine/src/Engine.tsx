@@ -2,6 +2,9 @@
 import * as React from "react";
 import {
   renderNode,
+  ClientStateContext,
+  initialValues,
+  nextValue,
   DialogStateProvider,
   useDialogState,
   ShellStateProvider,
@@ -10,6 +13,7 @@ import {
   useNavigator,
   type WorkflowDispatch,
 } from "@tentoroforge/renderer";
+import type { ClientAction, ClientStateValue } from "@tentoroforge/renderer";
 import { buildDefaultRegistry } from "@tentoroforge/library";
 import type { EngineProps, SchemaNode } from "./types";
 import { fetchDataSources } from "./data/loader";
@@ -93,6 +97,30 @@ export function Engine(props: EngineProps) {
 
 function EngineInner({ schema, apiBaseUrl = "", previewData, live }: EngineProps) {
   const [data, setData] = React.useState<Record<string, unknown>>(previewData ?? {});
+  // THE SCREEN'S OWN VALUES ARE JUST ANOTHER BINDING SOURCE. A page declaring
+  // `clientState` binds them as `{{state.display}}`, so they belong in the
+  // same record every other binding resolves against — under `state`, which
+  // is one word rather than each value at the top level, so a declared value
+  // can never collide with a dataSource name.
+  //
+  // Held here rather than beside the tree because this record is what
+  // `renderNode` reads: a value that changed somewhere the render did not see
+  // would not repaint, which is the whole point of client state.
+  const declaredState = (schema as { clientState?: ClientStateValue[] } | undefined)?.clientState;
+  const [stateValues, setStateValues] = React.useState<Record<string, unknown>>(
+    () => initialValues(declaredState));
+  const runClientAction = React.useCallback((action: ClientAction) => {
+    setStateValues((prev) => {
+      const got = nextValue(action, prev);
+      return got ? { ...prev, [got.target]: got.value } : prev;
+    });
+  }, []);
+  const setClientValue = React.useCallback((name: string, value: unknown) => {
+    setStateValues((prev) => ({ ...prev, [name]: value }));
+  }, []);
+  const clientState = React.useMemo(
+    () => ({ values: stateValues, set: setClientValue, run: runClientAction }),
+    [stateValues, setClientValue, runClientAction]);
   // A standalone app is live even when it ships server-resolved previewData;
   // only the editor/preview canvas (no `live`, with previewData) stays inert.
   const isLive = live ?? (previewData === undefined);
@@ -232,12 +260,20 @@ function EngineInner({ schema, apiBaseUrl = "", previewData, live }: EngineProps
   }, [navigate, dialogState, nav]);
   // ──────────────────────────────────────────────────────────────────────────
 
+  // `state` is merged rather than stored in `data` so a dataSource refetch
+  // (which replaces `data` wholesale) cannot wipe what is on the screen.
+  const bound = React.useMemo(
+    () => (declaredState?.length ? { ...data, state: stateValues } : data),
+    [data, stateValues, declaredState]);
+
   return (
     <ViewportContext.Provider value={bp}>
       <WorkflowDispatcherProvider dispatch={dispatch}>
-        <div ref={rootRef}>
-          {renderNode(resolvedRoot as any, { data, user: data.user as any, registry } as any)}
-        </div>
+        <ClientStateContext.Provider value={clientState}>
+          <div ref={rootRef}>
+            {renderNode(resolvedRoot as any, { data: bound, user: bound.user as any, registry } as any)}
+          </div>
+        </ClientStateContext.Provider>
       </WorkflowDispatcherProvider>
     </ViewportContext.Provider>
   );

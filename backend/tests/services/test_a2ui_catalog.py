@@ -278,13 +278,16 @@ def test_a_button_must_declare_how_it_acts():
     from services.a2ui_catalog import build_a2ui_catalog
 
     body = build_a2ui_catalog()["components"]["Button"]["allOf"][2]
-    # All six the catalog offers. The first version of this list held four,
+    # All seven the catalog offers. The first version of this list held four,
     # and a Button written with `opensDialog` — which a modal page needs — was
-    # refused for declaring an action that was not on it.
+    # refused for declaring an action that was not on it. `clientAction` is
+    # the seventh and the first that does not involve the server: it changes
+    # one of the page's own `clientState` values, which is the only thing a
+    # calculator's keys can do.
     assert {tuple(a["required"]) for a in body["anyOf"]} == {
         ("workflow",), ("navigate",), ("submit",), ("onClick",),
-        ("opensDialog",), ("togglesSidebar",)}
-    # Still not required outright — which of the four is the composer's call.
+        ("opensDialog",), ("togglesSidebar",), ("clientAction",)}
+    # Still not required outright — which of the seven is the composer's call.
     assert "workflow" not in (body.get("required") or [])
 
 

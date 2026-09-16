@@ -1400,6 +1400,9 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
     from services.page_kind_anatomy import page_kind_findings
 
     from services.a2ui_to_forge import dangling_bindings
+    from services.client_state_anatomy import (
+        client_state_findings, tool_findings,
+    )
 
     if _family_of(kind, route) == "dashboard" and _summarises_something(schema, contract):
         findings = dashboard_findings(route, schema, registry)
@@ -1433,6 +1436,21 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
     findings += [{"rule": f"binding '{name}' has no declared data source",
                   "ref": name}
                  for name in dangling_bindings(schema)]
+
+    # A SCREEN THAT IS NOT ABOUT RECORDS STILL HAS TO WORK. Every floor above
+    # counts, plots or lists records, so a tool page satisfied all of them by
+    # having none — which is how a calculator whose keys did nothing passed.
+    # The tool floor asks the only two questions that mean anything here: does
+    # it keep values of its own, and do its controls change them.
+    if is_standalone(kind, contract):
+        findings += tool_findings(route, schema)
+
+    # THE MIRROR OF A DANGLING BINDING, FOR EVERY PAGE. `{{state.total}}` with
+    # nothing declared is already refused above; a control WRITING to an
+    # undeclared `total` is the same fault authored from the other end, and it
+    # fails silently. Not scoped to tools: a server-backed form that computes
+    # a total before submitting it can get this wrong in exactly the same way.
+    findings += client_state_findings(route, schema)
     return findings
 
 
