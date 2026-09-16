@@ -24,6 +24,9 @@ divergence §115 refuses.
 
 from __future__ import annotations
 
+import json
+import re
+
 import logging
 from pathlib import Path
 from typing import Any, Sequence
@@ -493,6 +496,86 @@ def prepare_capabilities(svc: Any, route: str, request: str, *, app_root: str | 
 VERBS = ("compose_route", "add_widgets")
 
 
+#: Words that name a KIND of thing rather than the thing: "input field" is
+#: on every form, so it says nothing about whether THIS field is there.
+_GENERIC = frozenset({"input", "field", "fields", "button", "buttons", "section", "sections",
+                      "widget", "widgets", "card", "cards", "list", "table", "form", "column",
+                      "columns", "the", "and", "for", "with", "show", "display", "add", "page",
+                      "screen", "new", "item", "items", "control"})
+
+
+def _tokens(widget: str) -> list[str]:
+    """The distinctive words of a widget ask, longest first — an identifier
+    kept whole ("fathersname") and split ("fathers", "name")."""
+    out: set[str] = set()
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or ""):
+        if len(w) >= 4 and w.lower() not in _GENERIC:
+            out.add(w.lower())
+        for part in re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", w).lower().split():
+            if len(part) >= 3 and part not in _GENERIC:
+                out.add(part)
+    return sorted(out, key=len, reverse=True)
+
+
+def unshown(svc: Any, route: str, wanted: Sequence[str]) -> list[str]:
+    """The asked widgets the page's live layout does not contain.
+
+    The composer is TOLD what to add and is free to lay the page out without
+    it — it did exactly that with a "Father's Name (fathersName) input field",
+    and the reply said "added". A widget counts as shown when its most
+    specific word (the identifier, or the longest content word) appears
+    anywhere in the layout — a label, a binding, a column key.
+    """
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return []
+    layouts = [l for l in (svc.doc.get("pageLayouts") or [])
+               if isinstance(l, dict) and str(l.get("page")) == str(page.get("id"))
+               and l.get("status") not in ("SUPERSEDED", "DEPRECATED")]
+    if not layouts:
+        return [str(w) for w in wanted]
+    hay = json.dumps(layouts[-1].get("root") or {}).lower()
+    missing = []
+    for w in wanted:
+        toks = _tokens(str(w))
+        if toks and toks[0] not in hay:
+            missing.append(str(w))
+    return missing
+
+
+def _field_named(svc: Any, route: str, widget: str) -> tuple[dict, dict] | None:
+    """The page's primary entity and the field a widget ask names, or None.
+
+    "Father's Name (fathersName) input field" names `Nurse.fathersName`; a
+    "recent activity" section names nothing. Matched on the field's name as
+    an identifier, or on its name spelled out as words.
+    """
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return None
+    eid = str((page.get("data") or {}).get("primaryEntity") or "")
+    ent = next((e for e in ((svc.doc.get("data") or {}).get("entities") or [])
+                if isinstance(e, dict) and str(e.get("id")) == eid), None)
+    if ent is None:
+        return None
+    low = " " + re.sub(r"[^a-z0-9]+", " ", (widget or "").lower()) + " "
+    idents = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or "")}
+    # THE MOST SPECIFIC FIELD WINS. "Father's Name (fathersName) input field"
+    # names `fathersName`; it also contains the word "name", and `name` is a
+    # field too. Taking the first match put the wrong field on the form.
+    hits: list[dict] = []
+    for f in ent.get("fields") or []:
+        fname = str((f or {}).get("name") or "")
+        if not fname or (f or {}).get("primaryKey"):
+            continue
+        words = " " + " ".join(re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", fname).lower().split()) + " "
+        if fname.lower() in idents or (len(words.strip()) >= 4 and words in low):
+            hits.append(f)
+    if not hits:
+        return None
+    return ent, max(hits, key=lambda f: len(str(f.get("name") or "")))
+
+
 def run(output_dir: str, verb: str, *, route: str = "",
         widgets: Sequence[str] = (), request: str = "",
         reasoning: Any = None) -> dict:
@@ -534,6 +617,44 @@ def run(output_dir: str, verb: str, *, route: str = "",
     extra = "".join(
         ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
         + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
+    # A FIELD THE ENTITY ALREADY HAS NEEDS NO COMPOSER. "Show fathersName on
+    # the registration page" asks for a control on a form, and the form is in
+    # the layout; putting it there is deterministic. The composer, asked the
+    # same thing, re-laid the page out and left the field off it.
+    # Either verb: "I cannot see fathersName on the registration page" is
+    # read as a recompose as often as an add, and both mean the same thing
+    # when the words name a field the entity has.
+    if verb in ("add_widgets", "compose_route"):
+        from services.smith.field_change import show_field, summary_of
+        shown: list[dict] = []
+        rest: list[str] = []
+        asks = list(wanted) if verb == "add_widgets" else ([request] if _field_named(svc, route, request) else [])
+        for w in asks:
+            hit = _field_named(svc, route, w)
+            if hit is None:
+                rest.append(w)
+                continue
+            ent, fld = hit
+            page = _page_for_route(svc.doc, route) or {}
+            try:
+                out = show_field(svc, str(ent.get("name") or ""), str(fld.get("name") or ""),
+                                 page_id=str(page.get("id") or "") or None,
+                                 app_root=app_root, reasoning=reasoning)
+            except Exception as exc:  # noqa: BLE001 — falls through to the composer
+                logger.warning("[smith] could not surface %s on %s: %s", w, route, exc)
+                rest.append(w)
+                continue
+            if out.get("applied"):
+                shown.append(out)
+            else:
+                rest.append(w)
+        if shown and not rest:
+            paths = sorted({p for o in shown for p in (o.get("edited_paths") or [])})
+            return {"applied": True, "edited_paths": paths,
+                    "diff_summary": "\n\n".join(summary_of("show_field", o) for o in shown),
+                    "version": int(svc.doc.get("version") or 0), "reason": "", "missing": []}
+        if verb == "add_widgets":
+            wanted = rest
     try:
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
@@ -555,6 +676,10 @@ def run(output_dir: str, verb: str, *, route: str = "",
     # read `artifacts`, which ChangeResult does not have, so every successful
     # composition reported nothing changed.
     committed = sorted(getattr(result, "committed", None) or [])
+    missing = unshown(svc, route, wanted) if verb == "add_widgets" else []
+    if missing:
+        did = (f"re-composed {route}{extra}, but the new screen does not show "
+               f"{', '.join(missing)}")
     return {
         "applied": bool(getattr(result, "applied", False)),
         "edited_paths": committed,
@@ -562,4 +687,5 @@ def run(output_dir: str, verb: str, *, route: str = "",
                                if committed else ""),
         "version": getattr(result, "version", 0),
         "reason": str(getattr(result, "reason", "") or ""),
+        "missing": missing,
     }

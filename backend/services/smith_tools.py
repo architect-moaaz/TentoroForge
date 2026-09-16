@@ -2118,8 +2118,15 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
     field = args.get("field")
     if not isinstance(field, dict):
         # Flat shorthand: {entity, name, type, ...}
-        field = {k: args[k] for k in ("name", "type", "length", "precision", "scale", "default")
+        field = {k: args[k] for k in ("name", "type", "label", "length", "precision", "scale", "default")
                  if k in args}
+    if _is_blueprint_app(output_dir):
+        # The Blueprint seam: the column AND the control on every form that
+        # edits the entity and every table that lists it, committed and
+        # re-projected — the same path the verb takes in smith_session.
+        from services.smith.field_change import run as _field_run
+        return _field_run(output_dir, "add_field", entity=str(args.get("entity") or ""),
+                          field={k: field.get(k) for k in ("name", "type", "label") if field.get(k)})
     diagnosis = {
         "artifact": {"kind": "field", "path": f"{args.get('entity') or ''}.{field.get('name') or ''}"},
         "explanation": "",

@@ -97,6 +97,90 @@ def test_a_field_is_removed_with_its_uses_and_what_still_reads_it_is_named(svc):
     assert "Still reading it" in fc.summary_of("remove_field", out)
 
 
+def test_a_new_field_is_added_and_shown_where_the_entity_is_edited_or_listed(svc):
+    """"Add father's name in the Nurse Registration" is one ask: the column AND
+    the control. The first cut added the column and told the person to ask
+    again; the second ask went to the composer, which left the field off."""
+    out = fc.add_field(svc, "nurse", {"name": "fathersName", "type": "string", "label": "Father's Name"})
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    ent = fresh.doc["data"]["entities"][0]
+    assert ent["fields"][-1] == {"name": "fathersName", "type": "string", "required": False}
+    layout = next(l for l in fresh.doc["pageLayouts"] if l["page"] == svc._t.lst["id"] and l.get("status") != "SUPERSEDED")
+    kids = layout["root"]["children"]
+    assert kids[1]["props"]["columns"][-1] == {"key": "fathersName", "label": "Father's Name"}
+    assert kids[2]["props"]["fields"][-1] == {"name": "fathersName", "kind": "text", "label": "Father's Name", "required": False}
+    assert out["surfaced"] == [{"page": "Master Data", "route": "/master-data", "where": "table column"},
+                               {"page": "Master Data", "route": "/master-data", "where": "form field"}]
+    assert fresh.doc["changeHistory"][-1]["userRequest"] == "add Nurse.fathersName"
+    said = fc.summary_of("add_field", out)
+    assert "**fathersName**" in said and "`/master-data`" in said and "form field" in said and "migration" in said
+    with pytest.raises(sc.SectionChangeError, match="already has a field named fathersName"):
+        fc.add_field(svc, "Nurse", {"name": "fathersname"})
+    with pytest.raises(sc.SectionChangeError, match="not a field name"):
+        fc.add_field(svc, "Nurse", {"name": "father's name"})
+    assert fc.label_of("experienceYears") == "Experience Years" and fc.label_of("x", " Given ") == "Given"
+
+
+def test_the_tool_entry_adds_a_field_the_same_way(svc):
+    out = fc.run(str(svc.output_dir), "add_field", entity="Nurse", field={"name": "phone", "type": "string", "label": "Phone"})
+    assert out["applied"] and out["surfaced"] and "**phone**" in out["diff_summary"]
+    assert not fc.run(str(svc.output_dir), "add_field", entity="Nurse", field={"name": "phone"})["applied"]
+
+
+def test_a_field_with_no_screen_to_show_it_says_so(svc):
+    out = fc.add_field(svc, "Ward", {"name": "capacity", "type": "integer"})
+    assert out["surfaced"] == []
+    assert "not on a page" in fc.summary_of("add_field", out)
+
+
+def test_an_existing_field_is_shown_without_the_composer(svc, monkeypatch):
+    """"I cannot see fathersName on the registration page": the field exists,
+    the form is in the layout — no composition, the control goes on."""
+    from services.smith import compose
+    composed = []
+    monkeypatch.setattr(compose, "add_widgets", lambda *a, **k: composed.append(a) or SimpleNamespace(applied=True, committed=[]))
+    out = compose.run(str(svc.output_dir), "add_widgets", route="/master-data",
+                      widgets=["Location (location) input field"], request="show location")
+    assert out["applied"] and composed == []
+    assert "Put **location** on:" in out["diff_summary"] and "form field" in out["diff_summary"]
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    layout = next(l for l in fresh.doc["pageLayouts"] if l["page"] == svc._t.lst["id"] and l.get("status") != "SUPERSEDED")
+    assert layout["root"]["children"][2]["props"]["fields"][-1]["name"] == "location"
+    # A widget that names no field still goes to the composer.
+    compose.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["a recent activity feed"], request="x")
+    assert len(composed) == 1
+    # Read as a recompose, the same words still mean the field — no composer.
+    recomposed = []
+    monkeypatch.setattr(compose, "compose_route", lambda *a, **k: recomposed.append(a) or SimpleNamespace(applied=True, committed=[]))
+    out = compose.run(str(svc.output_dir), "compose_route", route="/master-data",
+                      request="I cannot see fullName on the master data page")
+    assert out["applied"] and recomposed == [] and "**fullName** is already on:" in out["diff_summary"]
+
+
+def test_the_most_specific_field_named_by_an_ask_wins(svc):
+    """"Father's Name (fathersName) input field" contains the word "name" and
+    `fullName` is not it; with a `name` field it would have been picked first."""
+    from services.smith import compose
+    svc.doc["data"]["entities"][0]["fields"] += [{"name": "name", "type": "string"}, {"name": "fathersName", "type": "string"}]
+    svc.save()
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    ent, fld = compose._field_named(fresh, "/master-data", "Father's Name (fathersName) input field")
+    assert fld["name"] == "fathersName"
+    assert compose._field_named(fresh, "/master-data", "I cannot see fathersName on the page")[1]["name"] == "fathersName"
+    assert compose._field_named(fresh, "/master-data", "show years of experience")[1]["name"] == "yearsOfExperience"
+    assert compose._field_named(fresh, "/master-data", "a recent activity feed") is None
+
+
+def test_a_recomposed_screen_that_omits_the_asked_widget_is_named(svc):
+    """The composer is told what to add and may lay the page out without it;
+    the reply must not say "added" over a screen that does not show it."""
+    from services.smith import compose
+    assert compose.unshown(svc, "/master-data", ["Father's Name (fathersName) input field"]) == \
+        ["Father's Name (fathersName) input field"]
+    assert compose.unshown(svc, "/master-data", ["years of experience column", "a Name field"]) == []
+    assert compose.unshown(svc, "/nowhere", ["anything"]) == []
+
+
 def test_managed_and_unknown_fields_are_refused(svc):
     with pytest.raises(sc.SectionChangeError, match="managed column"):
         fc.remove_field(svc, "Nurse", "id")

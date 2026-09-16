@@ -106,6 +106,11 @@ Return ONLY a JSON object with exactly these keys:
       "add_widgets"   — add named sections to a screen that exists: "put
                         upcoming sessions and quorum status on the dashboard".
                         NOT for a new data-model field — that is add_field.
+                        A field the entity ALREADY HAS that a screen does not
+                        show ("I cannot see fathersName on the registration
+                        page", "show phone on the nurse form") is THIS verb,
+                        with the field as the widget — not compose_route,
+                        which lays the whole screen out again.
       "add_field"     — add ONE NEW field/attribute to an existing entity's
                         DATA MODEL: "add a discount field to offers", "give
                         tasks a due date", "customers need a phone number".
@@ -224,9 +229,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   add_field needs:
   "entity": the name of the existing entity gaining the field, as the Blueprint
       spells it ("Offer", "Task").
-  "field": a JSON object with "name" and "type" for the new column — name in the
-      app's style ("discountPercent"), type one of text / varchar / int /
-      decimal / boolean / date / timestamp. (Optional: length, precision, scale.)
+  "field": a JSON object with "name", "type" and "label" for the new column —
+      name in the app's style ("fathersName"), type one of text / varchar /
+      int / decimal / boolean / date / timestamp, label the words they used
+      ("Father's Name"), which is what the form will show.
+      (Optional: length, precision, scale.)
 
   connect_figma needs:
       "figma_url": the Figma link exactly as they gave it, whole.

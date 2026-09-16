@@ -546,10 +546,29 @@ class SmithSession:
                                          f"{route} and have changed nothing."))
 
         touched = list(out.get("edited_paths") or [])
+        missing = [str(m) for m in (out.get("missing") or [])]
+        if missing:
+            # THE SCREEN CHANGED, THE ASK IS NOT ON IT. The composer was told
+            # what to add and laid the page out without it; "added X to
+            # /route" here would be the claim that sent the person to look
+            # for a field that is not there.
+            return TurnResult(
+                status="needs_user",
+                answer=("I re-composed **" + route + "**, but the new screen does "
+                        "not show what you asked for:\n"
+                        + "\n".join(f"- {m}" for m in missing)
+                        + "\n\nIf it is a field of the record, ask me to add "
+                          "the field to the entity and I will put it on the "
+                          "form directly. Otherwise say what it should contain "
+                          "and I will compose the screen again."),
+                touched_paths=touched,
+            )
+        # A paragraph of its own: the summary may end in a list, and a
+        # sentence appended to a list's last line becomes part of the bullet.
         return TurnResult(
             status="resolved",
             answer=(str(out.get("diff_summary") or f"I updated {route}.")
-                    + (f" Updated: {', '.join(touched[:6])}." if touched
+                    + (f"\n\nUpdated: {', '.join(touched[:6])}." if touched
                        else "")),
             touched_paths=touched,
         )
@@ -595,39 +614,32 @@ class SmithSession:
             touched = [c["path"] for c in (out.get("changes") or []) if c.get("path")]
             return self._added_field_result(fname, bp_type, entity, touched)
 
+        # THE COLUMN AND THE CONTROL, IN ONE TURN. "Add father's name in the
+        # Nurse Registration" asks for a place to type it, not only a column;
+        # the seam puts the field on every form that edits the entity and
+        # every table that lists it, commits the Blueprint, and re-projects.
         try:
             from services.blueprint.service import BlueprintService
-            from services.blueprint.projection import project_data_layer
+            from services.smith import field_change as fc
+            from services.smith.section_change import SectionChangeError
             svc = BlueprintService.load(output_dir=str(self.output_dir))
-            entities = (svc.doc.get("data") or {}).get("entities") or []
-            target = next((e for e in entities
-                           if str(e.get("name") or "").lower() == entity.lower()), None)
-            if target is None:
-                known = ", ".join(str(e.get("name")) for e in entities) or "(none)"
-                return TurnResult(status="needs_user",
-                                  answer=f"There is no {entity!r} entity. I can see: {known}.")
-            fields = target.setdefault("fields", [])
-            if any(str(f.get("name") or "").lower() == fname.lower() for f in fields):
-                return TurnResult(status="no_op",
-                                  answer=f"{entity} already has a {fname!r} field, so I changed nothing.")
-            # A new field is NEVER required — an existing row has no value for it,
-            # so the column must be nullable for the migration to apply cleanly.
-            # The Blueprint field schema is closed (name/type/required only for a
-            # plain column); precision/scale are a projection concern, so they
-            # are not carried onto the Blueprint field.
-            fields.append({"name": fname, "type": bp_type, "required": False})
-            svc.validate()
-            svc.save()
             app_root = Path(self.output_dir) / "app"
-            if not (app_root / "src" / "db" / "schema").exists():
+            if not (app_root / "src").exists():
                 app_root = Path(self.output_dir)
-            res = project_data_layer(svc.doc, app_root)
-            touched = list(res.get("files") or res.get("written") or [])
+            try:
+                out = fc.add_field(
+                    svc, entity,
+                    {"name": fname, "type": bp_type,
+                     "label": str(field.get("label") or "")},
+                    app_root=str(app_root), reasoning=self._reasoning)
+            except SectionChangeError as exc:
+                return TurnResult(status="needs_user", answer=str(exc))
         except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
             logger.exception("add_field failed for %s.%s", entity, fname)
             return TurnResult(status="needs_user",
                               answer=f"I could not add {fname!r} to {entity}: {exc}")
-        return self._added_field_result(fname, bp_type, entity, touched)
+        return TurnResult(status="resolved", answer=fc.summary_of("add_field", out),
+                          touched_paths=list(out.get("edited_paths") or []))
 
     @staticmethod
     def _added_field_result(fname: str, ftype: str, entity: str,
@@ -638,7 +650,7 @@ class SmithSession:
                     "and applied as a migration, so existing rows keep their data "
                     "and nothing rebuilds"
                     + (f". Updated: {', '.join(touched[:6])}." if touched else ".")
-                    + f" Say “show {fname} on the offer detail page” and I will surface it."),
+                    + " Say which screen should show it and I will put it there."),
             touched_paths=touched,
         )
 
