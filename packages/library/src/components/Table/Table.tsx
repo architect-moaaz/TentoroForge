@@ -510,7 +510,13 @@ export function Table(props: TableProps) {
   }
 
   async function runAction(a: RowActionDef, r: Record<string, unknown>, key: string) {
-    if (a.navigate) { const url = applyTemplate(a.navigate, r); if (typeof window !== "undefined") window.location.assign(url); return; }
+    if (a.navigate) {
+      // Through the Navigator, like the empty-state action and the row link —
+      // a hard `location.assign` escaped the host's base path (the preview
+      // serves an app under `/p/<id>`), so a row's Edit reached a 404 there.
+      nav.push(applyTemplate(a.navigate, r));
+      return;
+    }
     if (a.workflow) {
       // A row with no id has nothing to act on — the engine would refuse the
       // empty WHERE; refuse here, before a request is made.
