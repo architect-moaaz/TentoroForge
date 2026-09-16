@@ -876,9 +876,8 @@ class SmithSession:
         # before the yes — starting on step one while showing the list is the
         # old behaviour with a receipt.
         from services.smith import plan as _plan
-        further = [str(a) for a in (understanding.get("further_asks") or []) if str(a).strip()]
-        if further and not _plan.wants_next(user_message):
-            steps = [user_message.strip()] + further
+        steps = [str(a).strip() for a in (understanding.get("asks") or []) if str(a).strip()]
+        if len(steps) > 1 and not _plan.wants_next(user_message):
             from services.smith import confirm as _confirm
             if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
                 _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))

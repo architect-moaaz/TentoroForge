@@ -28,10 +28,12 @@ def project(tmp_path):
     return s
 
 
-def _session(project, done: list[str], further=()) -> SmithSession:
+def _session(project, done: list[str], asks=()) -> SmithSession:
     def _understand(message, ctx, **kw):
+        # EVERY ask, first one included — the plan's first step was the raw
+        # message, so a four-step plan opened with the whole sentence.
         return {"verb": "add_field", "entity": "Nurse", "field": {"name": "phone"},
-                "further_asks": list(further) if message.strip() == STEPS[0] else []}
+                "asks": list(asks) if message.strip() == STEPS[0] else []}
 
     session = SmithSession(
         project_id="p1", output_dir=str(project.output_dir), guards_fn=lambda *a, **kw: [],
@@ -43,7 +45,9 @@ def _session(project, done: list[str], further=()) -> SmithSession:
 
 def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):
     done: list[str] = []
-    result = _session(project, done, STEPS[1:]).run_iteration(user_message=STEPS[0])
+    result = _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
+    # The first step is the first ASK, not the whole message.
+    assert "1. " + STEPS[0] in result.answer
     assert result.status == "asked" and done == []
     assert "That is more than one change" in result.answer
     for i, step in enumerate(STEPS, start=1):
@@ -54,7 +58,7 @@ def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):
 
 def test_agreeing_does_the_first_one_now_and_says_what_is_left(project):
     done: list[str] = []
-    _session(project, done, STEPS[1:]).run_iteration(user_message=STEPS[0])
+    _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     result = _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
     assert result.status == "resolved" and done == ["did it"]
     assert "Still to do:" in result.answer
@@ -64,7 +68,7 @@ def test_agreeing_does_the_first_one_now_and_says_what_is_left(project):
 
 def test_next_works_through_the_rest_one_at_a_time(project):
     done: list[str] = []
-    _session(project, done, STEPS[1:]).run_iteration(user_message=STEPS[0])
+    _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
     second = _session(project, done).run_iteration(user_message="next")
     assert len(done) == 2 and plan.peek(project.output_dir) == [STEPS[2]]
@@ -76,7 +80,7 @@ def test_next_works_through_the_rest_one_at_a_time(project):
 
 def test_just_the_first_one_drops_the_rest(project):
     done: list[str] = []
-    _session(project, done, STEPS[1:]).run_iteration(user_message=STEPS[0])
+    _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     result = _session(project, done).run_iteration(user_message=plan.FIRST_LABEL)
     assert done == ["did it"] and plan.peek(project.output_dir) == []
     assert "Still to do" not in result.answer
@@ -84,7 +88,7 @@ def test_just_the_first_one_drops_the_rest(project):
 
 def test_saying_it_differently_forgets_the_plan(project):
     done: list[str] = []
-    _session(project, done, STEPS[1:]).run_iteration(user_message=STEPS[0])
+    _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     result = _session(project, done).run_iteration(user_message=plan.REWORD_LABEL)
     assert result.status == "asked" and "tell me the one thing you want first" in result.answer
     assert plan.peek(project.output_dir) == [] and done == []
@@ -100,7 +104,7 @@ def test_one_ask_is_not_turned_into_a_plan(project):
 def test_two_asks_are_a_plan_as_much_as_three(project):
     """Nothing about this is about the number three."""
     done: list[str] = []
-    result = _session(project, done, ["make the phone number required"]).run_iteration(
+    result = _session(project, done, [STEPS[0], "make the phone number required"]).run_iteration(
         user_message=STEPS[0])
     assert result.status == "asked" and done == []
     assert "1. " + STEPS[0] in result.answer

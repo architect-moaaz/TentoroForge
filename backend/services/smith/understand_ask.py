@@ -45,14 +45,16 @@ Return ONLY a JSON object with exactly these keys:
       clear enough to act on. Ask when the request names no screen or element,
       when it could plausibly mean two different changes, or when acting on
       the wrong reading would be expensive to undo. Asking is not a failure.
-  "further_asks": when the message asks for MORE THAN ONE thing, the other
-      asks — each a sentence on its own, in their words, in the order they
-      should happen. "Add a phone number, show it on the form and make it
-      required" is three: the first stays in the fields above and the other
-      two go here, as ["show the phone number on the registration form",
-      "make the phone number required"]. [] when it is one thing. Do not
-      split one change into steps: "rename the delete button to archive" is
-      one ask, not two.
+  "asks": when the message asks for MORE THAN ONE thing, EVERY ask in it,
+      each a sentence on its own, in their words, in the order they should
+      happen — the first one included, even though its facts are also in the
+      fields above. "Add a phone number, show it on the form and make it
+      required" is ["add a phone number to nurses", "show the phone number on
+      the registration form", "make the phone number required"]. [] when the
+      message asks for one thing. Do not split one change into steps:
+      "rename the delete button to archive" is one ask, not two. Never put
+      the whole message in as the first item — that reads as a step that
+      does everything.
   "clarification_options": when the question offers CHOICES, the choices as
       short labels, 2 to 5, each a complete answer on its own that they can
       pick with one click — ["A new page of its own", "A panel on the screen
@@ -533,7 +535,11 @@ def understand_ask(
         # SEVERAL ASKS IN ONE MESSAGE. One verb comes back, so the rest used
         # to be dropped in silence — the biggest one happened and the person
         # found out later. `services.smith.plan` turns these into a plan.
-        "further_asks": _labels(data.get("further_asks")),
+        #
+        # EVERY ask, not the ones after the first: the first step was the raw
+        # message, so a four-step plan opened with the whole sentence and read
+        # as a step that did all of it.
+        "asks": _labels(data.get("asks") or data.get("further_asks")),
     }
 
 
@@ -543,7 +549,7 @@ SHAPE: frozenset[str] = frozenset({
     "answer", "clarification_needed", "clarification_options", "verb", "route",
     "widgets", "figma_url", "token_env", "uxpilot_ref", "key_env", "treat_as",
     "target_file", "element_label", "change", "workflow", "rule", "requirement",
-    "api", "integration", "new_value", "entity", "field", "further_asks",
+    "api", "integration", "new_value", "entity", "field", "asks",
 })
 
 
@@ -551,7 +557,7 @@ def _blank(**given: Any) -> dict[str, Any]:
     """An understanding with nothing in it but `given` — the full shape."""
     out: dict[str, Any] = {k: "" for k in SHAPE}
     out.update({"widgets": [], "field": {}, "clarification_options": [],
-                "further_asks": []})
+                "asks": []})
     out.update(given)
     return out
 
