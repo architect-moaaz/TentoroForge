@@ -640,7 +640,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
     if not doc:
         return None
     served_pages = [p for p in (doc.get("pages") or [])
-                    if str(p.get("status") or "").upper() != "REMOVED"]
+                    if str(p.get("status") or "").upper() not in ("REMOVED", "DEPRECATED")]
     unbuilt = _unbuilt_pages(doc)
     funnel = (doc.get("runtime") or {}).get("pages") or {}
     planned = funnel.get("planned")
