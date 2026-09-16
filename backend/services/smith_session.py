@@ -751,11 +751,14 @@ class SmithSession:
 
         verb = verb_of(understanding)
         if not is_known(understanding):
+            # THE WHOLE LIST, INCLUDING WHAT IS NOT A VERB. Built from
+            # `VERB_HELP` alone this named thirty changes and neither
+            # `verify & fix` nor any lifecycle command, so the one message
+            # whose entire job is "here is what I can do" was incomplete.
+            from services.smith.capabilities import summary as _capabilities
             return TurnResult(
                 status="needs_user",
-                answer=("I did not recognise that as something I can do. I can:\n"
-                        + "\n".join(f"- **{v}** — {h.split('.')[0].lower()}"
-                                     for v, h in VERB_HELP.items())),
+                answer="I did not recognise that as something I can do.\n\n" + _capabilities(),
             )
         # Only the new verbs are gated here. `rename` keeps the path it always
         # had — its fields are enforced by `understand_ask`, and re-checking

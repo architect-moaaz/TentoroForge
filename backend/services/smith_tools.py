@@ -320,6 +320,56 @@ def read_page(output_dir: str, path: str) -> dict:
 # Tool catalog — what Smith sees in his system prompt.
 # --------------------------------------------------------------------------- #
 
+#: Wording a defect taught us, kept where the generated line from `VERB_HELP`
+#: would lose it. Everything else is generated — this description advertised
+#: NINE of the thirty verbs, so every verb the coverage work added was
+#: invisible to the model reading it, and `restyle` or `edit_access` could not
+#: be chosen from a list that never mentioned them.
+_VERB_NOTES: dict[str, str] = {
+    'add_field':
+        "add ONE NEW field/attribute to an existing entity's DATA MODEL: 'add a discount field to offers', 'give tasks a due date'. This is the verb whenever the ask introduces a new field on an entity, EVEN IF it also says 'and show it on <page>' — the column must exist before any page can show it, and add_widgets/compose_route cannot create a column. Pick add_field now; displaying the field is a separate later edit_page turn.",
+    'add_widgets':
+        "add named sections to a screen: 'put upcoming sessions and quorum status on the dashboard'. NOT for a new data-model field (see add_field).",
+    'compose_route':
+        'build or rebuild the screen at a route. Use this when a route renders nothing.',
+    'connect_figma':
+        'attach a Figma design as evidence. `token_env` is the NAME of the environment variable holding the token (e.g. FIGMA_TOKEN); never the token itself, which must not reach the conversation log.',
+    'connect_uxpilot':
+        'attach a UX Pilot page as evidence. `key_env` is the NAME of the environment variable holding the UX Pilot API key; never the key itself.',
+    'disconnect_design':
+        "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
+    'rebuild':
+        'regenerate the whole application from its definition.',
+    'rename':
+        'change the wording of something that exists.',
+}
+
+
+def _understand_ask_desc() -> str:
+    """The tool's description, carrying every verb the dispatcher can run.
+
+    Generated from `REQUIRED_BY_VERB`, so it cannot fall behind it again: a
+    verb the model is never told about is a verb it never picks, and the ask
+    lands on whichever of the nine it had heard of instead.
+    """
+    from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
+
+    lines = ["REQUIRED first tool for any change ask (skip for greetings/meta "
+             "questions). CHOOSE THE VERB FIRST — each needs different facts, "
+             "and a request forced into the wrong one fails as 'nothing to "
+             "change':"]
+    for verb in sorted(REQUIRED_BY_VERB):
+        fields = "{" + ", ".join(sorted(REQUIRED_BY_VERB[verb])) + "}"
+        said = _VERB_NOTES.get(verb) or " ".join(str(VERB_HELP.get(verb, "")).split())
+        lines.append(f"  {verb} {fields} — {said}")
+    lines.append("Omitting `verb` means rename. If you can't confidently fill "
+                 "the verb's fields, use read_page / list_pages first; if the "
+                 "ask itself is ambiguous, set `clarification_needed` and "
+                 "follow up with ask_user. Only SKIP understand_ask for "
+                 "greeting/explain turns — every edit turn is gated on it.")
+    return "\n".join(lines)
+
+
 TOOL_CATALOG: list[dict] = [
     # Inspection ---------------------------------------------------------
     {"name": "recall",
@@ -536,43 +586,7 @@ TOOL_CATALOG: list[dict] = [
     {"name": "understand_ask",
      "signature": "understand_ask({verb, ...fields for that verb, "
                   "confidence?, clarification_needed?})",
-     "desc": "REQUIRED first tool for any change ask (skip for "
-             "greetings/meta questions). CHOOSE THE VERB FIRST — each "
-             "needs different facts, and a request forced into the "
-             "wrong one fails as 'nothing to change':\n"
-             "  rename        {screen, element_label, current_behavior, "
-             "desired_behavior, target_file} — change the wording of "
-             "something that exists.\n"
-             "  compose_route {route} — build or rebuild the screen at a "
-             "route. Use this when a route renders nothing.\n"
-             "  add_widgets   {route, widgets:[...]} — add named sections "
-             "to a screen: 'put upcoming sessions and quorum status on "
-             "the dashboard'. NOT for a new data-model field (see add_field).\n"
-             "  add_field     {entity, field} — add ONE NEW field/attribute "
-             "to an existing entity's DATA MODEL: 'add a discount field to "
-             "offers', 'give tasks a due date'. This is the verb whenever the "
-             "ask introduces a new field on an entity, EVEN IF it also says "
-             "'and show it on <page>' — the column must exist before any page "
-             "can show it, and add_widgets/compose_route cannot create a "
-             "column. Pick add_field now; displaying the field is a separate "
-             "later edit_page turn.\n"
-             "  connect_figma {figma_url, token_env} — attach a Figma "
-             "design as evidence. `token_env` is the NAME of the environment "
-             "variable holding the token (e.g. FIGMA_TOKEN); never the token "
-             "itself, which must not reach the conversation log.\n"
-             "  connect_uxpilot {uxpilot_ref, key_env} — attach a UX Pilot "
-             "page as evidence. `key_env` is the NAME of the environment "
-             "variable holding the UX Pilot API key; never the key itself.\n"
-             "  disconnect_design {} — remove the connected design and "
-             "compose every screen from the component library instead: "
-             "'disconnect the Figma design', 'drop the design'.\n"
-             "  rebuild       {} — regenerate the whole application from "
-             "its definition.\n"
-             "Omitting `verb` means rename. If you can't confidently fill "
-             "the verb's fields, use read_page / list_pages first; if the "
-             "ask itself is ambiguous, set `clarification_needed` and "
-             "follow up with ask_user. Only SKIP understand_ask for "
-             "greeting/explain turns — every edit turn is gated on it."},
+     "desc": _understand_ask_desc()},
     {"name": "think",
      "signature": "think(thought) -> {recorded, chars}",
      "desc": "Private reasoning step. No-op side-effects; the thought "

@@ -81,7 +81,7 @@ router = APIRouter(tags=["generation", "blueprint"])
 
 #: Words that are COMMANDS, not descriptions to reason about.
 _LIFECYCLE_VERBS = frozenset({"status", "define", "approve", "build", "preview",
-                              "export", "deploy"})
+                              "export", "deploy", "help"})
 
 
 def _lifecycle_verb(message: str) -> str | None:
@@ -1458,6 +1458,14 @@ async def smith_chat(
             if verb == "deploy":
                 emit("message", {"text": _deploy_refusal(), "status": "needs_user"})
                 return {"status": "needs_user"}
+            if verb == "help":
+                # ONE LIST, NOT THE MODEL'S RECOLLECTION OF ONE. See
+                # services.smith.capabilities: the answer built from the verb
+                # table alone left out `verify & fix` and every lifecycle
+                # command, which are not verbs.
+                from services.smith.capabilities import summary as _capabilities
+                emit("message", {"text": _capabilities(), "status": "reported"})
+                return {"status": "reported"}
 
             # DEFECT-I-05: 'Trace REQ-001' is a question with a determinate
             # answer — the requirement's text, verdict and the ids that cite it,
