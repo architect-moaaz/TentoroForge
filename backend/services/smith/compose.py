@@ -132,9 +132,11 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
     # Blueprint loaded without its ids.json — an import or a restore). bootstrap
     # binds the document's ids into the registry first; it is idempotent, so it
     # is free when the registry is already in step.
+    from services.blueprint.ids import page_key
     from services.smith.smith import bootstrap as _bind_ids
     _bind_ids(svc)
-    page = svc.upsert("pages", body, natural_key=want)
+    # THE REGISTRY'S OWN KEY — the one the definition allocates pages under.
+    page = svc.upsert("pages", body, natural_key=page_key(want))
     svc.save()
     logger.info("[smith] add_page %s -> %s", want, page.get("id"))
     return page
@@ -312,11 +314,18 @@ def add_widgets(
         # the contract still records what was asked for, and a retry composes
         # against it rather than starting from a page that never heard the
         # request.
+        from services.blueprint.ids import page_key
         body = {k: v for k, v in page.items() if k != "id"}
         body["primaryTasks"] = tasks + added
-        svc.upsert("pages", body, natural_key=str(page.get("route") or page["id"]))
+        # Under the registry's own key: keyed by the bare route, the allocator
+        # minted a SECOND page id for the same route (PAGE-003 beside PAGE-002).
+        svc.upsert("pages", body, natural_key=page_key(str(page.get("route") or route)))
         svc.save()
         logger.info("[smith] %s primaryTasks += %s", page.get("route"), added)
+    # A capability the request names is contract, not prose: the verb goes into
+    # `actions` and its workflow is declared, so the composition is HELD to it.
+    page = _page_for_route(svc.doc, page.get("route") or route) or page
+    declare_capabilities(svc, page, f"{request} {' '.join(wanted)}")
 
     return compose_route(
         svc, page.get("route") or route, app_root=app_root,
@@ -330,6 +339,58 @@ def add_widgets(
 #: Which verbs this module answers for. `run` is what the agent loop calls, so
 #: an unknown verb has to be named rather than silently doing the default —
 #: that silence is the whole failure this module exists to remove.
+#: What a change request can ask a screen to DO, by the words people use for
+#: it, in the page contract's own action vocabulary. Prefix-matched on word
+#: boundaries: "delete", "deletion", "deleting"; "remove", "removal".
+_CAPABILITY_WORDS: dict[str, tuple[str, ...]] = {
+    "delete": ("delet", "remov", "destroy", "archiv"),      # delete/deletion/deleting, remove/removal
+    "edit": ("edit", "updat"),
+    "create": ("creat", "register", "add new", "new record"),
+    "view": ("view record", "open record", "view details", "record details"),
+}
+
+
+def capabilities_named(request: str) -> list[str]:
+    import re as _re
+    text = (request or "").lower()
+    return [verb for verb, words in _CAPABILITY_WORDS.items()
+            if any(_re.search(r"\b" + _re.escape(w), text) for w in words)]
+
+
+def declare_capabilities(svc: Any, page: dict, request: str) -> list[str]:
+    """Record in the page contract what the request asks the screen to DO,
+    and declare the workflow it needs. Returns the actions added.
+
+    "Add a Delete Record button on each row" went into `primaryTasks` — free
+    text the composer reads as a wish — and the page was re-composed with no
+    `delete` in its `actions` and no workflow that deletes a Nurse. The
+    composer, correctly, left Delete out (the action model says: no delete
+    workflow, do not bind Delete to Update), and the turn still reported
+    "added Delete Record". A capability is contract, not prose: the verb goes
+    into `actions`, the missing CRUD workflow is declared the way the verify
+    declares it, and the composition is then held to it — a tree without the
+    control is refused, so the reply can only claim what landed.
+    """
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return []
+    have = {str(a).lower().split("_")[0] for a in (page.get("actions") or []) if isinstance(a, str)}
+    added = [v for v in capabilities_named(request) if v not in have]
+    if not added:
+        return []
+    from services.blueprint.ids import page_key
+    from services.smith.smith import bootstrap as _bind_ids
+    _bind_ids(svc)                        # the registry in step with the document before any allocation
+    body = {k: v for k, v in page.items() if k != "id"}
+    body["actions"] = list(page.get("actions") or []) + added
+    svc.upsert("pages", body, natural_key=page_key(str(page.get("route") or "")))
+    svc.save()
+    from services.smith.review_gaps import settle_crud_gaps
+    settle_crud_gaps(svc, only_pages={str(page.get("id"))})
+    logger.info("[smith] %s actions += %s", page.get("route"), added)
+    return added
+
+
 VERBS = ("compose_route", "add_widgets")
 
 
