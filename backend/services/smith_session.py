@@ -52,6 +52,8 @@ from services.ground_truth import (
     git_diff_lines,
     guard_delta,
     snapshot_baseline,
+    tree_changes,
+    tree_diff_lines,
 )
 from services.narrator_artifacts import (
     DiscoveryArtifact,
@@ -635,6 +637,11 @@ class SmithSession:
                         "\u2014 name the route and I will rebuild that."),
             )
 
+        if verb == "remove":
+            # The move reads an empty `new_value` as "take it off" — the one
+            # thing that separates a removal from a rename to it.
+            understanding = {**understanding, "new_value": ""}
+
         target_file = (understanding.get("target_file") or "").strip()
         element_label = (understanding.get("element_label") or "").strip()
         if not target_file:
@@ -661,12 +668,17 @@ class SmithSession:
                 ),
             )
 
-        # Ground truth: what did git actually see change?
+        # Ground truth: what did the working tree actually see change?
         modified_now = set(git_status_modified(self.output_dir))
         # Baseline may have had uncommitted changes; only NEW ones this
         # turn count as Smith's.
         baseline_status = set(baseline.get("status") or [])
-        actually_touched = sorted(modified_now - baseline_status)
+        # A generated project's repo has no commits, so to git all of
+        # `app/` is one untracked entry before and after — a rewritten page
+        # schema is invisible to it. The tree fingerprint sees the rewrite.
+        baseline_tree = baseline.get("tree") or {}
+        actually_touched = sorted((modified_now - baseline_status)
+                                  | set(tree_changes(self.output_dir, baseline_tree)))
 
         if not actually_touched:
             return TurnResult(
@@ -682,8 +694,10 @@ class SmithSession:
                          "leave it and I'll come back later"],
             )
 
-        # Diff-based checks.
-        diff = git_diff_lines(self.output_dir, actually_touched)
+        # Diff-based checks — git's diff for what it tracks, the tree's for
+        # what it cannot yet see.
+        diff = (git_diff_lines(self.output_dir, actually_touched)
+                + tree_diff_lines(self.output_dir, baseline_tree, actually_touched))
 
         # Target-file check: is target_file in the actual set?
         touched_lower = {p.lower() for p in actually_touched}

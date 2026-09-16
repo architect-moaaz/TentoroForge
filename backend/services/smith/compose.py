@@ -383,6 +383,21 @@ def declare_capabilities(svc: Any, page: dict, request: str) -> list[str]:
     svc.save()
     from services.smith.review_gaps import settle_crud_gaps
     settle_crud_gaps(svc, only_pages={str(page.get("id"))})
+    # A workflow that already exists for the verb is LAUNCHED FROM this page
+    # now — the composer binds only workflows declared to start from a
+    # screen, and a removal takes the page off that list, so a later "add it
+    # back" must put it on again or the control is composed against a
+    # workflow the brief never offered.
+    page_id = str(page.get("id") or "")
+    ops = {"delete": "db_delete", "edit": "db_update", "create": "db_insert"}
+    for w in svc.doc.get("workflows") or []:
+        if w.get("status") == "DEPRECATED":
+            continue
+        step_ops = {str((st.get("config") or {}).get("actionType") or "") for st in w.get("steps") or []}
+        on_entity = any(str(st.get("entity")) == entity for st in w.get("steps") or [])
+        if on_entity and any(ops.get(v) in step_ops for v in added) and page_id not in (w.get("launchedFrom") or []):
+            w["launchedFrom"] = list(w.get("launchedFrom") or []) + [page_id]
+    svc.save()
     logger.info("[smith] %s actions += %s", page.get("route"), added)
     return added
 

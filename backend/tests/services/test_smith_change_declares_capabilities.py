@@ -127,3 +127,23 @@ def test_no_edit_screen_is_invented_without_an_update_workflow(svc, monkeypatch)
     sc.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["Edit button"], request="implement the edit functionality")
     assert "/nurse-registration/[id]" not in [p["route"] for p in BlueprintService.load(output_dir=svc.output_dir).doc["pages"]]
     assert calls == ["/master-data"]
+
+
+def test_a_verb_added_back_launches_its_existing_workflow_from_the_page_again(svc, monkeypatch):
+    """A removal takes the page off the workflow's `launchedFrom`; the
+    composer binds only workflows declared to start from a screen. Adding the
+    capability back must put the page on the list again, or Delete is composed
+    against a workflow the brief never offered."""
+    master = next(p for p in svc.doc["pages"] if p["route"] == "/master-data")
+    master["actions"] = ["view_record"]                       # edit was removed earlier
+    flow = next(w for w in svc.doc["workflows"] if w["id"] == "FLOW-002")
+    flow["launchedFrom"] = ["PAGE-001"]
+    svc.save()
+    added = sc.declare_capabilities(svc, master, "add the edit functionality back")
+    assert added == ["edit"]
+    flow = next(w for w in svc.doc["workflows"] if w["id"] == "FLOW-002")
+    assert flow["launchedFrom"] == ["PAGE-001", master["id"]]
+    # and once is enough
+    master = next(p for p in svc.doc["pages"] if p["route"] == "/master-data")
+    assert sc.declare_capabilities(svc, master, "add the edit functionality back") == []
+    assert next(w for w in svc.doc["workflows"] if w["id"] == "FLOW-002")["launchedFrom"] == ["PAGE-001", master["id"]]

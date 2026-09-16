@@ -128,3 +128,14 @@ def test_a_policy_or_rule_ask_is_not_reduced_to_add_field():
     low = _PROMPT.lower()
     assert "only for an explicit" in low or "not a field-add" in low
     assert "impact analysis" in low
+
+
+def test_a_removal_is_its_own_verb_needing_the_screen_and_the_controls_text():
+    """"Remove the delete button" had to be expressed as a rename with nothing
+    to write, and the model as often chose compose_route — which laid the
+    screen out again with the control still declared on it."""
+    u = _ask({"verb": "remove", "target_file": "/master-data", "element_label": "Delete"},
+             message="remove the delete button")
+    assert verb_of(u) == "remove" and is_known(u) and missing_fields(u) == []
+    assert missing_fields({"verb": "remove", "target_file": "/master-data"}) == ["element_label"]
+    assert '"remove"' in _PROMPT and "remove needs:" in _PROMPT

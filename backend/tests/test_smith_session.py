@@ -384,3 +384,37 @@ def test_change_log_entry_records_ask_move_diff_and_verification(tmp_path):
     assert entry["smith_move"] == "edit_file(a.json)"
     assert "a.json" in entry["diff_summary"]
     assert any("git" in v.lower() for v in entry["verified_by"])
+
+
+def test_a_removal_lands_in_a_repo_with_no_commits(tmp_path):
+    """The shape every generated project has: `.git` and no commits, so to git
+    all of the tree is one untracked entry before and after the turn — a
+    rewritten page schema was reported as "nothing actually changed on disk".
+    The tree fingerprint sees the rewrite; the diff carries the removed label;
+    the `remove` verb reaches the move with an empty `new_value`."""
+    subprocess.check_call(["git", "init", "-q", str(tmp_path)])
+    schema = tmp_path / "app" / "src" / "schemas" / "master-data.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_text('{"rowActions": [{"label": "Edit"}, {"label": "Delete", "workflow": "FLOW-003"}]}\n')
+
+    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
+    bp.set_domain(name="Med", primary_actors=[], core_verbs=[], distinctive_shape="", why="")
+    bp.save()
+
+    seen = {}
+
+    def _move(understanding, output_dir):
+        seen.update(understanding)
+        schema.write_text('{"rowActions": [{"label": "Edit"}]}\n')
+        return IterationMove(move_name="remove 'Delete' from PAGE-002",
+                             touched_paths=["app/src/schemas/master-data.json"])
+
+    def _understand(user_message, ctx, history=None):
+        return {"verb": "remove", "target_file": "/master-data", "element_label": "Delete"}
+
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=_understand, iteration_move_fn=_move)
+    result = session.run_iteration(user_message="remove the delete button")
+    assert seen["new_value"] == ""                       # a removal, to the move
+    assert result.status == "resolved", result.answer
+    assert result.touched_paths == ["app/src/schemas/master-data.json"]

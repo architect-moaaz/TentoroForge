@@ -30,6 +30,12 @@ from __future__ import annotations
 REQUIRED_BY_VERB: dict[str, set[str]] = {
     "rename": {"screen", "element_label", "current_behavior",
                "desired_behavior", "target_file"},
+    # A control taken off a screen: the screen and the control's exact visible
+    # text. No `new_value` — that is what makes it a removal to the move.
+    # Without this verb the model had to express "remove the delete button"
+    # as a rename with nothing to write, and as often chose compose_route,
+    # which re-laid the screen out with the control still declared on it.
+    "remove": {"target_file", "element_label"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -62,6 +68,11 @@ VERB_HELP: dict[str, str] = {
     "rename": (
         "Change the wording of something that already exists. Needs the exact "
         "current text and what it should say instead."
+    ),
+    "remove": (
+        "Take a control off a screen that exists — a button, a row action, a "
+        "link: \"remove the delete button\". Needs the screen and the control's "
+        "exact visible text. The screen stops declaring what the control did."
     ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "

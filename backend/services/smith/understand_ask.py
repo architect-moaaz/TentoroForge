@@ -36,6 +36,12 @@ Return ONLY a JSON object with exactly these keys:
       the wrong reading would be expensive to undo. Asking is not a failure.
   "verb": WHICH KIND OF CHANGE this is. Exactly one of:
       "rename"        — change the wording of something that already exists.
+      "remove"        — take a control OFF a screen that exists: "remove the
+                        delete button", "get rid of the export link", "drop
+                        the Add Nurse button". The screen is not rebuilt;
+                        the one control goes, and the screen stops offering
+                        what it did. NOT compose_route — that lays the whole
+                        screen out again with the control still declared.
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
@@ -83,6 +89,13 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "new_value": what it should say or become instead, or "" if the request is
       a removal. Give the literal text to write, not a description of it: for
       "call it New plant" the value is "New plant", not "a clearer label".
+
+  remove needs:
+  "target_file": the route or schema path of the screen the control is on —
+      a value that appears in the Blueprint below.
+  "element_label": the control's visible text AS IT IS NOW, exactly — a
+      Table row action's label ("Delete") is a control as much as a Button's.
+      Copy it from the Blueprint below; do not paraphrase it.
 
   compose_route needs:
   "route": the path of the screen, as it appears in the Blueprint ("/",

@@ -110,6 +110,105 @@ def _is_git_dir(output_dir: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# The working tree itself — for the repo git cannot yet see into
+# --------------------------------------------------------------------------- #
+#
+# A generated project's repo starts with no commits. To `git status` the
+# whole of `app/` is then ONE untracked entry, before the turn and after it,
+# and `git diff HEAD` has no HEAD: a page schema the projection rewrote is
+# invisible, and a move that landed was reported as "nothing actually changed
+# on disk". The premise of this module is that the working tree is the truth
+# — so read the tree. The fingerprint is taken at turn start and compared
+# after; the text is kept so the relevance check has a real diff to grep.
+
+#: Trees no turn edits and every turn churns — fingerprinting them is noise
+#: (the run ledgers under .forge change on every turn; node_modules and
+#: .next are the toolchain's).
+_TREE_SKIP = frozenset({".git", "node_modules", ".next", ".forge", ".fixtures-cache",
+                        "dist", ".turbo", "coverage"})
+_TREE_MAX_BYTES = 512 * 1024
+
+
+def _tree_files(output_dir: str) -> list[str]:
+    """Every file git would consider part of the project — tracked or
+    untracked, never ignored — minus the churning trees. Without a repo, a
+    walk with the same exclusions."""
+    root = Path(output_dir)
+    paths: list[str] = []
+    if _is_git_dir(output_dir):
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", output_dir, "ls-files", "-co", "--exclude-standard", "-z"],
+                text=True, timeout=15, stderr=subprocess.DEVNULL,
+            )
+            paths = [p for p in out.split("\0") if p]
+        except Exception:  # noqa: BLE001
+            paths = []
+    if not paths:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _TREE_SKIP]
+            for f in filenames:
+                paths.append(os.path.relpath(os.path.join(dirpath, f), root))
+    return [p for p in paths if not (set(p.split("/")) & _TREE_SKIP)]
+
+
+def tree_fingerprint(output_dir: str) -> dict[str, dict[str, Any]]:
+    """{relpath: {hash, text}} for the project's files. `text` is kept for
+    files small enough to diff and decodable as UTF-8; None otherwise."""
+    import hashlib
+    root = Path(output_dir)
+    out: dict[str, dict[str, Any]] = {}
+    for rel in _tree_files(output_dir):
+        try:
+            data = (root / rel).read_bytes()
+        except OSError:
+            continue
+        text = None
+        if len(data) <= _TREE_MAX_BYTES:
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+        out[rel] = {"hash": hashlib.sha1(data).hexdigest(), "text": text}
+    return out
+
+
+def tree_changes(output_dir: str, baseline_tree: dict[str, dict[str, Any]] | None) -> list[str]:
+    """Paths whose content differs from the baseline fingerprint — rewritten,
+    new, or gone. Empty when there is no baseline to compare against."""
+    if not baseline_tree:
+        return []
+    now = tree_fingerprint(output_dir)
+    changed = [p for p, f in now.items()
+               if p not in baseline_tree or baseline_tree[p]["hash"] != f["hash"]]
+    changed += [p for p in baseline_tree if p not in now]
+    return sorted(changed)
+
+
+def tree_diff_lines(output_dir: str, baseline_tree: dict[str, dict[str, Any]] | None,
+                    paths: list[str]) -> str:
+    """A `-U1` unified diff of `paths` against their baseline text — what
+    `git diff HEAD` would show if the repo had a HEAD."""
+    import difflib
+    if not baseline_tree or not paths:
+        return ""
+    root = Path(output_dir)
+    chunks: list[str] = []
+    for rel in paths:
+        before = (baseline_tree.get(rel) or {}).get("text")
+        try:
+            after: str | None = (root / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            after = None
+        if before is None and after is None:
+            continue
+        chunks.append("".join(difflib.unified_diff(
+            (before or "").splitlines(keepends=True), (after or "").splitlines(keepends=True),
+            fromfile=f"a/{rel}", tofile=f"b/{rel}", n=1)))
+    return "".join(chunks)
+
+
+# --------------------------------------------------------------------------- #
 # Guard delta — regressions only
 # --------------------------------------------------------------------------- #
 
@@ -210,7 +309,10 @@ def snapshot_baseline(
             guards = list(guards_fn(output_dir) or [])
         except Exception:  # noqa: BLE001
             logger.warning("snapshot_baseline: guards_fn crashed", exc_info=True)
-    return {"status": status, "guards": guards}
+    # `tree` is what the turn is compared against when git cannot see the
+    # change — a repo with no commits shows all of `app/` as one untracked
+    # entry before and after.
+    return {"status": status, "guards": guards, "tree": tree_fingerprint(output_dir)}
 
 
 # --------------------------------------------------------------------------- #
