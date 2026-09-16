@@ -1242,3 +1242,16 @@ def test_the_composers_usage_leaves_with_the_result_not_the_surface(tmp_path):
     assert surfaces and all("_meta" not in json.loads(f.read_text()) for f in surfaces)
     # A provider that reports nothing leaves the field empty, not invented.
     assert compose_dashboard_via_a2ui(str(root), surface_provider=GOOD).get("usage") is None
+
+
+def test_the_domain_context_marks_a_list_column_and_says_how_to_collect_it():
+    """The listing showed names and enums only, so `specialities: string[]`
+    read as text and was composed as a textarea."""
+    from services.a2ui_authority import build_domain_context
+
+    reg = {"entities": {"Nurse": {"slug": "nurses", "columns": [
+        {"name": "name", "type": "varchar"},
+        {"name": "specialities", "type": "string[]"}]}}}
+    ctx = build_domain_context(None, reg)
+    assert "specialities (list)" in ctx and "name (list)" not in ctx
+    assert 'kind "tags"' in ctx

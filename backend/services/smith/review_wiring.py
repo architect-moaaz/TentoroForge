@@ -304,6 +304,37 @@ def _functional_findings(output_dir: str, doc: Mapping[str, Any]) -> list[dict]:
     return out
 
 
+def _contract_findings(doc: Mapping[str, Any],
+                       routes: Iterable[str] | None = None) -> list[dict]:
+    """The Blueprint's own verdict on each page — every control does what it
+    says, every field collects what its column holds — in the critique's
+    ``{route, kind, severity, note}`` shape.
+
+    The review used to see only what it could screenshot. A dynamic route
+    (``/x/[id]``) is never captured, so a fault the contract could see there
+    was never sent round: the edit page's list field stayed a textarea while
+    the create form beside it was re-composed with the right control. The
+    contract needs no screenshot; what it flags is a page the composer can fix
+    (and is held to — a re-composition that repeats the fault is refused, so
+    this cannot spin). Advisory rules are not findings a composer can act on.
+    """
+    from services.blueprint.functional_completeness import ADVISORY_PAGE_RULES, page_findings
+    only = {str(r).rstrip("/") or "/" for r in routes} if routes else None
+    route_of = {str(p.get("id")): str(p.get("route") or "").strip()
+                for p in doc.get("pages") or [] if isinstance(p, dict)}
+    out: list[dict] = []
+    for f in page_findings(dict(doc)):
+        rule = str(f.get("rule") or "")
+        route = route_of.get(str(f.get("page") or ""), "")
+        if not rule or rule in ADVISORY_PAGE_RULES or not route:
+            continue
+        if only is not None and (route.rstrip("/") or "/") not in only:
+            continue
+        out.append({"route": route, "kind": rule, "severity": "error",
+                    "note": str(f.get("detail") or "").strip()[:400]})
+    return out
+
+
 def make_critique(
     output_dir: str,
     read_doc: Callable[[], Mapping[str, Any]],
@@ -321,28 +352,28 @@ def make_critique(
     def critique() -> dict | None:
         doc = read_doc()
         shots = _capture_pages(output_dir, doc, routes)
-        if not shots:
+        # The contract's findings need no screenshot — they reach the pages
+        # the capture cannot (a dynamic route) and stand when nothing rendered.
+        contract = _contract_findings(doc, routes)
+        if not shots and not contract:
             return None
-        if emit is not None:
+        if shots and emit is not None:
             emit("review", {"phase": "shots", "pages": [
                 {"route": s["route"], "image": _data_uri(s["png"])}
                 for s in shots]})
         # Visual + domain: does it look right and match what was asked.
-        try:
-            from services.visual_qa_critic import critique_images
-            visual = _run_async(critique_images(
-                shots, identity=_domain_identity(doc)))
-        except Exception as exc:  # noqa: BLE001 — a failed review is a skipped one
-            logger.warning("[review] visual critic failed: %s", exc)
-            visual = []
+        visual: list = []
+        if shots:
+            try:
+                from services.visual_qa_critic import critique_images
+                visual = _run_async(critique_images(
+                    shots, identity=_domain_identity(doc)))
+            except Exception as exc:  # noqa: BLE001 — a failed review is a skipped one
+                logger.warning("[review] visual critic failed: %s", exc)
+                visual = []
         # Functional: do the buttons, forms, lists and links actually work.
-        functional = _functional_findings(output_dir, doc)
-        findings = list(visual) + list(functional)
-        if not visual and not functional:
-            # Nothing rendered a critique AND nothing functional ran — treat as
-            # a review that could not judge, not a clean page.
-            if not shots:
-                return None
+        functional = _functional_findings(output_dir, doc) if shots else []
+        findings = list(visual) + list(functional) + list(contract)
         # The ledger never sees the critique, so what sent a page round again
         # was unrecoverable afterwards. One line per finding, in the log.
         for f in findings:
@@ -351,13 +382,14 @@ def make_critique(
                         str(f.get("note") or "")[:300])
         if emit is not None:
             emit("review", {"phase": "analysis", "findings": findings})
-        return {"pages_reviewed": [s["route"] for s in shots],
-                "findings": findings}
+        reviewed = [s["route"] for s in shots]
+        reviewed += sorted({c["route"] for c in contract} - set(reviewed))
+        return {"pages_reviewed": reviewed, "findings": findings}
     return critique
 
 
 __all__ = [
-    "invalidate_for_recompose", "write_review_briefs", "clear_review_briefs",
+    "_contract_findings", "invalidate_for_recompose", "write_review_briefs", "clear_review_briefs",
     "make_critique", "layouts_of", "restore_refused_layouts", "refused_pages",
     "unrepaired_pages", "Rebuilt",
 ]

@@ -948,8 +948,14 @@ def build_domain_context(root: Path, registry: dict | None = None,
     reg = registry if registry is not None else registry_for_binder(root)
     lines = []
     for name, ent in (reg.get("entities") or {}).items():
+        # A LIST COLUMN SAYS SO. The listing showed names and enums only, so
+        # `specialities: string[]` read as text and was composed as a textarea
+        # with a "comma-separated" hint — the record's array then showed as
+        # its JSON. The type is the contract; the composer needs to see it.
         cols = ", ".join(
-            c["name"] + (f" [{'|'.join(map(str, c['enum']))}]" if c.get("enum") else "")
+            c["name"]
+            + (f" [{'|'.join(map(str, c['enum']))}]" if c.get("enum") else "")
+            + (" (list)" if str(c.get("type") or "").lower().endswith("[]") else "")
             for c in ent.get("columns") or []
         )
         lines.append(f"- {name}: {cols}")
@@ -979,6 +985,9 @@ def build_domain_context(root: Path, registry: dict | None = None,
             "The application's real entities and columns. Every number and "
             "every row on this screen comes from these — do not invent "
             "fields:\n" + "\n".join(lines)
+            + "\nA column marked (list) holds several values: a Form collects "
+              "it with a field of kind \"tags\" (never text or textarea), and "
+              "a Table column shows it as text."
         )
     if shared_context:
         # THE DESIGN SYSTEM IS CONTEXT, NOT A REQUEST. This used to ride in

@@ -230,3 +230,13 @@ def test_the_contract_judges_a_page_with_the_other_pages_in_view():
         check_pattern_templates(res, doc)
     assert "declares `edit`" in str(e.value)
     assert "PAGE-002" not in str(e.value) and "/add-data" not in str(e.value).split("declares")[0]   # only this page's findings
+
+
+def test_a_list_column_is_collected_as_tags():
+    doc = _doc()
+    doc["data"]["entities"][0]["fields"].append({"name": "specialities", "type": "string[]", "required": True})
+    doc["workflows"][0]["inputs"].append({"name": "specialities", "kind": "field", "required": True})
+    doc["workflows"][0]["steps"][0]["config"]["values"]["specialities"] = "{{specialities}}"
+    frm = _accepted(doc, "PAGE-002")
+    form = next(n for n in _walk(frm["root"]) if n["type"] == "Form")
+    assert next(f for f in form["props"]["fields"] if f["name"] == "specialities")["kind"] == "tags"

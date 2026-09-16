@@ -105,7 +105,9 @@ def _field_kind(f: Mapping[str, Any]) -> dict:
     opts = f.get("enumValues") or f.get("enum") or f.get("options")   # `enumValues` is the Blueprint's key
     spec: dict[str, Any] = {"name": str(f["name"]), "label": _humanise(str(f["name"])),
                             "required": bool(f.get("required", False))}
-    if isinstance(opts, list) and opts:
+    if t.endswith("[]") or t in ("array", "list"):
+        spec["kind"] = "tags"                   # several values, submitted as an array
+    elif isinstance(opts, list) and opts:
         spec["kind"] = "select"
         spec["options"] = [{"label": str(o), "value": str(o)} if not isinstance(o, dict) else
                            {"label": str(o.get("label") or o.get("value")), "value": str(o.get("value"))}

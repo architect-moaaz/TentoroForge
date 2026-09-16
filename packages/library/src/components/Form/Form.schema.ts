@@ -72,6 +72,16 @@ const Field = z.discriminatedUnion("kind", [
       rows: z.number().optional(),
     })
     .strict(),
+  // A LIST OF SHORT VALUES — a `string[]` column (specialities, tags, skills).
+  // Collected as several values and submitted as an array, so the column
+  // receives what it is typed to hold. A text field over a list column showed
+  // the record's array as its JSON text and would have written that text back.
+  z
+    .object({
+      kind: z.literal("tags"),
+      ...fieldBase,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("select"),

@@ -889,3 +889,10 @@ def test_entity_access_comes_from_the_pages_that_use_an_entity(tmp_path):
     project_entity_access(doc, tmp_path / "app")
     assert '"users"' in (tmp_path / "app" / "src" / "lib" / "entity-access.ts").read_text()
 
+
+
+def test_a_list_column_is_jsonb():
+    """`string[]` fell through to the text default, so the column held whatever
+    reached it — the fixture's JSON text, the create form's comma string."""
+    line, builder = drizzle_column({"name": "specialities", "type": "string[]", "required": True})
+    assert builder == "jsonb" and line.startswith('specialities: jsonb("specialities")')

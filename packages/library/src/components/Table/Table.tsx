@@ -295,7 +295,11 @@ function Cell({ value, fmt }: { value: unknown; fmt: NonNullable<ColumnDef["form
         className="h-10 w-10 rounded-md object-cover border border-border/60" />
     );
   }
-  const s = typeof value === "object" ? JSON.stringify(value) : String(value);
+  // A list of scalars (a `string[]` column) reads as its values, not as the
+  // JSON text of the array.
+  const s = Array.isArray(value) && value.every((v) => v === null || typeof v !== "object")
+    ? value.filter((v) => v != null && v !== "").map(String).join(", ")
+    : typeof value === "object" ? JSON.stringify(value) : String(value);
   return <span className="block max-w-[28rem] truncate" title={s}>{s}</span>;
 }
 
