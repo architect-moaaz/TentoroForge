@@ -1520,6 +1520,10 @@ def plan_page(doc: dict, page: dict, template: dict,
             "module": page.get("module"),
         },
         "dataSources": sources,
+        # THE SCREEN'S OWN VALUES REACH THE RENDERER. Without this the page
+        # ships with its bindings intact and nothing behind them: `clientState`
+        # is where `{{state.display}}` resolves, and it lives on the layout.
+        **({"clientState": template["clientState"]} if template.get("clientState") else {}),
         "root": root,
         # THE FRAME'S SIZE REACHES THE RENDERER. `FigmaCanvas` scales a page
         # by (available width / frame width) and reads it from here; without

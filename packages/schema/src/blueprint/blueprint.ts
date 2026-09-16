@@ -689,6 +689,78 @@ export const PageDataSource = z.object({
   sort: z.enum(["label", "value"]).optional(),
 });
 
+/**
+ * A value that lives on the SCREEN and nowhere else.
+ *
+ * Every action this platform could express was server-side and record-shaped:
+ * a control runs a workflow, or it navigates. So an application whose
+ * behaviour is arithmetic over what is on screen — a calculator, a converter,
+ * a tip splitter — had no way to be described at all, and the pipeline did
+ * the only thing the vocabulary allowed: it invented a `CalculatorSession`
+ * TABLE to hold the display value and the pending operator, turned every
+ * keypress into a server workflow against a row that was never created, and
+ * produced twenty-eight minutes of application that could not work.
+ *
+ * `clientState` is the missing word. A declared value with a starting point,
+ * changed by `ClientAction`s on the controls, read by bindings as
+ * `{{state.<name>}}`. It is never persisted and never sent anywhere: when the
+ * page closes, it is gone, which is exactly what "does not store anything"
+ * means.
+ *
+ * ORTHOGONAL TO `dataSources`, deliberately. A page declaring only
+ * `dataSources` is the server-backed screen this platform has always built. A
+ * page declaring only `clientState` is a tool. A page declaring BOTH is the
+ * hybrid — a form that computes a total as you type and then submits it to a
+ * workflow — and needs no third mode to say so, because the two lists already
+ * say it between them.
+ */
+export const ClientStateValue = z.object({
+  /** Bound as `{{state.<name>}}`. Unique within the page. */
+  name: z.string().min(1),
+  /**
+   * What kind of value it holds. The renderer starts it at a typed empty
+   * (`""`, `0`, `false`) when `initial` is absent, so a declared value is
+   * never `undefined` on the first paint — a display bound to `undefined`
+   * renders as nothing and reads as a broken screen.
+   */
+  type: z.enum(["string", "number", "boolean"]),
+  /** Where it starts. A calculator's display starts at `"0"`, not empty. */
+  initial: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  /** What this value is for, in the words the requirement used. */
+  description: z.string().default(""),
+});
+
+/**
+ * What a control does to the screen's own state when it is pressed.
+ *
+ * `set` writes a literal — the Clear key putting the display back to "0".
+ * `compute` evaluates a formula over the current state and writes the result
+ * — the digit keys appending, the equals key doing the arithmetic. The
+ * formula language is the one `evaluateComputed` already runs in the browser
+ * for a form's computed fields; nothing new is interpreted, and there is no
+ * arbitrary code here by construction.
+ *
+ * A control may carry a client action AND a workflow. They are not
+ * alternatives: "work out the total, then submit it" is one press.
+ */
+export const ClientAction = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("set"),
+    /** The `clientState` name being written. */
+    target: z.string().min(1),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+  }),
+  z.object({
+    kind: z.literal("compute"),
+    target: z.string().min(1),
+    /**
+     * Read over the page's client state by name — `display + digit`,
+     * `number(display) * 2`. The same expressions a computed form field uses.
+     */
+    formula: z.string().min(1),
+  }),
+]);
+
 export const PageLayout = z.object({
   /** Natural key — the page this tree renders. */
   page: PageId,
@@ -697,6 +769,12 @@ export const PageLayout = z.object({
   root: TemplateNode,
   /** The fetches `root` binds to, as the composer's binder resolved them. */
   dataSources: z.array(PageDataSource).default([]),
+  /**
+   * Values that live on this screen and nowhere else — see
+   * :data:`ClientStateValue`. Empty for every server-backed page, which is
+   * every page this platform could describe before it existed.
+   */
+  clientState: z.array(ClientStateValue).default([]),
   /**
    * Which composer produced this tree.
    *
@@ -1782,6 +1860,8 @@ export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
+export type ClientStateValue = z.infer<typeof ClientStateValue>;
+export type ClientAction = z.infer<typeof ClientAction>;
 export type SectionSketch = z.infer<typeof SectionSketch>;
 export type PageSketch = z.infer<typeof PageSketch>;
 export type Composition = z.infer<typeof Composition>;

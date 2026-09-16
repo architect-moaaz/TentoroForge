@@ -209,6 +209,22 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
         "issues": {"type": "array", "items": {"type": "string"}},
         "change_requests": {
             "type": "array",
+            "description": (
+                "§30 — what you return INSTEAD of reaching outside your own "
+                "section. `section` names the section at fault "
+                "(\"data.entities\", \"workflows\"), `reason` says why in "
+                "one sentence.\n\n"
+                "TO ASK FOR SOMETHING TO BE RETIRED, set `retire` to its id. "
+                "That is acted on: the run retires it and every stage after "
+                "you sees it gone. Asked to author the fields of a "
+                "CalculatorSession on an application whose requirements say "
+                "nothing is stored, this is how you say so — "
+                "{section: \"data.entities\", reason: \"REQ-003 says nothing "
+                "is stored; this models screen state as a table\", retire: "
+                "\"ENTITY-001\"} — instead of authoring columns for a table "
+                "that should not exist. Without the id it is recorded and "
+                "read by a person, which is slower and often too late."
+            ),
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -216,6 +232,11 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "section": {"type": "string"},
                     "reason": {"type": "string"},
+                    "retire": {
+                        "type": "string",
+                        "description": ("The id of the artifact that should not "
+                                        "exist — ENTITY-001, FLOW-002, PAGE-003."),
+                    },
                 },
             },
         },
@@ -2001,12 +2022,21 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
         "issues": {"type": "array", "items": {"type": "string"}},
         "change_requests": {
             "type": "array",
+            "description": (
+                "§30 — what you return instead of reaching outside your own "
+                "section. TO ASK FOR AN ARTIFACT TO BE RETIRED, set `retire` "
+                "to its id: that is acted on, and every stage after you sees "
+                "it gone. `entity_fields` runs against ONE entity and is the "
+                "stage that discovers a table should not exist — say so here "
+                "rather than authoring its columns."
+            ),
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["section", "reason"],
                 "properties": {"section": {"type": "string"},
-                               "reason": {"type": "string"}},
+                               "reason": {"type": "string"},
+                               "retire": {"type": "string"}},
             },
         },
     },

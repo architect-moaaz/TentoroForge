@@ -1034,6 +1034,10 @@ class RunReport:
     #: behaved correctly and said nothing.
     blocked_because: dict[str, str] = field(default_factory=dict)
     change_requests: list = field(default_factory=list)
+    #: What the run corrected about itself, as {node, retired}. A change
+    #: request that was ACTED ON rather than filed — see
+    #: `services.blueprint.corrections`.
+    corrections: list = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     #: Optional node -> why it failed, having been allowed through. The app
     #: SHIPPED WITHOUT IT: `testing` is verification, not the running app, so a
@@ -2183,10 +2187,17 @@ def _apply_subject(
     if application.applied:
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
+        _act_on(svc, key, application.change_requests, report, commit=commit)
         state.authored.setdefault(subject, set()).update(
             _proposed_identities(outcome, application))
         _note(ledger, "node_subject", key, subject, _at(), total, True)
         return "applied"
+    # A STAGE THAT REFUSES ITS OWN WORK IS THE ONE WORTH LISTENING TO. The
+    # calculator's `entity_fields` came back at confidence 0.35 saying the
+    # entity should not exist — the correction belongs here, before the retry
+    # asks the same impossible question again.
+    _act_on(svc, key, getattr(outcome, "change_requests", None), report, commit=commit)
+
     if application.needs_clarification or outcome.status == "blocked":
         if attempt < max_attempts:
             return _rejected(_asked(application))
@@ -2234,6 +2245,29 @@ def _apply_round(
         if verdict == "retry":
             retry.append(subject)
     return retry
+
+
+def _act_on(svc: "BlueprintService", key: str, change_requests: Any,
+            report: "RunReport", *, commit: bool) -> None:
+    """Carry out the corrections this node asked for (§30).
+
+    Every agent could already say "the fault is in that section", and the run
+    collected those and read none of them. Three agents on one build said a
+    table should not exist; the run authored its columns anyway.
+
+    Only on a committing run: a dry run must not change the document it is
+    reporting on.
+    """
+    if not commit or not change_requests:
+        return
+    try:
+        from services.blueprint.corrections import apply_corrections
+        retired = apply_corrections(svc, change_requests, asked_by=key)
+    except Exception as exc:  # noqa: BLE001 — a correction never fails a run
+        logger.warning("[corrections] %s: %s", key, exc)
+        return
+    for artifact in retired:
+        report.corrections.append({"node": key, "retired": artifact})
 
 
 def _asked(application: Any) -> str:

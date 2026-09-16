@@ -1225,6 +1225,12 @@ def _adopt_table_bindings(schema: dict, binder: Any, registry: dict) -> None:
     schema["dataSources"] = binder.sources
 
 
+#: The binding root a page's own values answer to — `{{state.display}}`.
+#: One word rather than each value at the top level, so a state name can never
+#: collide with a dataSource name and a reader can always tell which is which.
+CLIENT_STATE_ROOT = "state"
+
+
 def dangling_bindings(schema: dict) -> list[str]:
     """`{{name}}` in the tree with no dataSource named `name`.
 
@@ -1243,6 +1249,15 @@ def dangling_bindings(schema: dict) -> list[str]:
     import re
 
     declared = {s.get("name") for s in (schema.get("dataSources") or [])}
+    # A SCREEN'S OWN VALUES ARE A SOURCE TOO. `clientState` declares values
+    # that live on the page and nowhere else, read as `{{state.display}}`; the
+    # binder has no fetch to rewrite for them and rightly leaves them alone,
+    # so without this they read as invented and the page is refused. That is
+    # what "binds {{display}}, which no data source provides" was: a
+    # calculator's display, correct, and rejected for having no table behind
+    # it.
+    if schema.get("clientState"):
+        declared.add(CLIENT_STATE_ROOT)
     found: set[str] = set()
 
     def _repeat_var(node: dict) -> str:
