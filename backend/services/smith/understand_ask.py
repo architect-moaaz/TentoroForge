@@ -48,6 +48,17 @@ Return ONLY a JSON object with exactly these keys:
                         it darker", "more compact". This is the design
                         system, not any one screen: NOT rename (no label
                         changes), NOT compose_route (no screen is rebuilt).
+      "add_workflow"  — a NEW business process: "email the admin after a
+                        registration", "archive a nurse instead of deleting",
+                        "send a reminder every Monday". Something the app
+                        should DO, not something a screen should show.
+      "edit_workflow" — change what an EXISTING process does: "when a nurse
+                        is registered also notify the ward manager", "the
+                        delete should ask for a reason first". "When <a thing
+                        an existing workflow already does> happens, also do
+                        Y" is THIS verb, on that workflow — not add_workflow.
+      "remove_workflow" — retire a process: "remove the delete nurse
+                        workflow", "stop sending the welcome email".
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
@@ -102,6 +113,18 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "element_label": the control's visible text AS IT IS NOW, exactly — a
       Table row action's label ("Delete") is a control as much as a Button's.
       Copy it from the Blueprint below; do not paraphrase it.
+
+  add_workflow needs:
+  "workflow": what the new process should do, in the user's own words.
+  "route": optional — the screen a person starts it from, as a route in the
+      Blueprint below, when they named one.
+
+  edit_workflow needs:
+  "workflow": which existing workflow, by the name the Blueprint below gives it.
+  "change": what should be different about it, in the user's words.
+
+  remove_workflow needs:
+  "workflow": which existing workflow, by the name the Blueprint below gives it.
 
   restyle needs:
   "change": what should look different, in the user's own words ("theme
@@ -353,6 +376,8 @@ def understand_ask(
         "element_label": str(data.get("element_label") or "").strip(),
         # restyle: the change to the look, in the user's words.
         "change": str(data.get("change") or "").strip(),
+        # workflows: what a new process should do, or which existing one is meant.
+        "workflow": str(data.get("workflow") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
         # literal — "a clearer label" is a note to a person, not an edit — and
         # a removal or a question legitimately has none, so "" is a real value

@@ -42,6 +42,13 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # wording. Needs only the change, in the user's words: the design agent
     # re-decides the section against it.
     "restyle": {"change"},
+    # Workflows — the business processes. `workflow` is what the new one
+    # should do (add) or which existing one is meant (edit/remove); `change`
+    # is what should be different about it. `route` may name the screen a
+    # new manual workflow starts from.
+    "add_workflow": {"workflow"},
+    "edit_workflow": {"workflow", "change"},
+    "remove_workflow": {"workflow"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -86,6 +93,23 @@ VERB_HELP: dict[str, str] = {
         "more compact\". Re-decides the design system against the request; "
         "every screen picks it up through the tokens. Needs the change in the "
         "user's words."
+    ),
+    "add_workflow": (
+        "Add a business process: \"email the admin after a registration\", "
+        "\"archive a nurse instead of deleting\". Declares the workflow, authors "
+        "its steps against the node catalogue, and puts a control for it on the "
+        "screen it starts from. Needs what it should do, in the user's words; "
+        "the screen is optional."
+    ),
+    "edit_workflow": (
+        "Change what an existing workflow does: \"when a nurse is registered, "
+        "also notify the ward manager\". Re-authors its steps against the "
+        "change; its name and inputs stay. Needs which workflow and what should "
+        "be different."
+    ),
+    "remove_workflow": (
+        "Retire a workflow and take its controls off every screen: \"remove the "
+        "delete nurse workflow\". Needs which workflow."
     ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "

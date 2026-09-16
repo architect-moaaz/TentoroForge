@@ -392,6 +392,26 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _workflow(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Add, change or retire a business process — the `workflows` section,
+        which no other verb touched. One implementation in
+        `services.smith.workflow_change.run`, shared with the tools."""
+        from services.smith.workflow_change import run as workflow_run
+
+        out = workflow_run(str(self.output_dir), verb,
+                           workflow=str(understanding.get("workflow") or "").strip() or user_message.strip(),
+                           change=str(understanding.get("change") or "").strip(),
+                           route=str(understanding.get("route") or "").strip(),
+                           reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _restyle(self, understanding: dict, user_message: str) -> "TurnResult":
         """Change the look of the application — the design system, which no
         other verb touches. Same shape as `_compose`: one implementation in
@@ -628,6 +648,8 @@ class SmithSession:
 
         if verb == "restyle":
             return self._restyle(understanding, user_message)
+        if verb in ("add_workflow", "edit_workflow", "remove_workflow"):
+            return self._workflow(verb, understanding, user_message)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":

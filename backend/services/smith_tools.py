@@ -1736,8 +1736,30 @@ def _smith_remove_page(output_dir: str, args: dict) -> dict:
     return result
 
 
+def _blueprint_workflow_change(output_dir: str, verb: str, args: dict) -> dict | None:
+    """A Blueprint-built app changes its workflows through the Blueprint —
+    `services.smith.workflow_change`, the same path the chat verb takes. The
+    file seams below edit `workflows/*.json` and `contracts/resource-registry.json`,
+    which such an app does not have; they stay for registry-only apps."""
+    from pathlib import Path as _P
+    if not (_P(output_dir) / ".forge" / "blueprint" / "current.json").exists():
+        return None
+    from services.smith.workflow_change import run as _wf_run
+    return _wf_run(
+        output_dir, verb,
+        workflow=str(args.get("request") or args.get("workflow") or args.get("workflow_id")
+                     or args.get("name") or args.get("id") or "").strip(),
+        change=str(args.get("change") or args.get("changes") or "").strip()
+        if not isinstance(args.get("changes"), dict) else json.dumps(args.get("changes")),
+        route=str(args.get("route") or "").strip(),
+    )
+
+
 def _smith_add_workflow(output_dir: str, args: dict) -> dict:
     """Direct wrapper around :func:`fix_applier._apply_add_workflow`."""
+    bp = _blueprint_workflow_change(output_dir, "add_workflow", args)
+    if bp is not None:
+        return bp
     from services.fix_applier import _apply_add_workflow
     diagnosis = {
         "artifact": {"kind": "workflow", "path": args.get("name") or ""},
@@ -1911,6 +1933,9 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     from services.confirmation_gate import needs_confirmation_result
     from services.fix_applier import _apply_remove_workflow
     wid = args.get("workflow_id") or args.get("workflow") or args.get("id") or ""
+    bp = _blueprint_workflow_change(output_dir, "remove_workflow", args)
+    if bp is not None:
+        return bp
     if not args.get("_confirmed"):
         return needs_confirmation_result(
             "workflow", wid,
@@ -2196,6 +2221,9 @@ def _smith_edit_workflow(output_dir: str, args: dict) -> dict:
     from services.edit_workflow_seam import edit_workflow
     wid = args.get("workflow_id") or args.get("id") or ""
     changes = args.get("changes") or {}
+    bp = _blueprint_workflow_change(output_dir, "edit_workflow", args)
+    if bp is not None:
+        return bp
 
     if isinstance(changes, dict) and not args.get("_confirmed"):
         destructive = [op for op in _DESTRUCTIVE_WORKFLOW_OPS if op in changes]

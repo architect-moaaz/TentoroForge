@@ -1564,6 +1564,16 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         written.append(rel)
         code_map.append({"artifact": wf.get("id"), "service": [rel]})
 
+    # A retired workflow's definition goes with it: the engine registers every
+    # file in this directory, so a stale one would keep a DEPRECATED workflow
+    # runnable — and a Verify would find a definition the Blueprint disowns.
+    live_slugs = {_workflow_slug(wf) for wf in workflows}
+    for wf in (doc.get("workflows") or []):
+        if wf.get("status") == "DEPRECATED":
+            slug = _workflow_slug(wf)
+            if slug not in live_slugs:
+                (out / f"{slug}.json").unlink(missing_ok=True)
+
     written.append(project_launch_roles(doc, app_root)["files"][0])
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 

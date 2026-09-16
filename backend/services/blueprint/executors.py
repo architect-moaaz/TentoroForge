@@ -1585,7 +1585,7 @@ def build_prompt(
 
     if node == "workflow_steps":
         return _workflow_steps_prompt(doc, system, subject, feedback,
-                                      output_dir=output_dir)
+                                      output_dir=output_dir, brief=brief)
 
     if node == "workflows":
         # The node catalog goes to `workflow_steps`, the one task that authors
@@ -2015,7 +2015,8 @@ _DECLARED_FIELDS: tuple[str, ...] = (
 
 
 def _workflow_steps_prompt(doc: dict, system: str, subject: str,
-                           feedback: str, *, output_dir: Any = None) -> tuple[str, str]:
+                           feedback: str, *, output_dir: Any = None,
+                           brief: str = "") -> tuple[str, str]:
     """One workflow, the node catalog, and the slice of the Blueprint its
     steps can name. The full `workflows` section is NOT sent: thirty-four
     sibling declarations are noise to an author writing the thirty-fifth."""
@@ -2043,6 +2044,8 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
         + json.dumps(context, indent=2, sort_keys=True)
         + "\n```"
     )
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user

@@ -896,3 +896,27 @@ def test_a_list_column_is_jsonb():
     reached it — the fixture's JSON text, the create form's comma string."""
     line, builder = drizzle_column({"name": "specialities", "type": "string[]", "required": True})
     assert builder == "jsonb" and line.startswith('specialities: jsonb("specialities")')
+
+
+def test_a_retired_workflows_definition_is_removed(tmp_path):
+    """The engine registers every file in definitions/; a stale file kept a
+    DEPRECATED workflow runnable after Smith retired it."""
+    from services.blueprint.projection import project_workflows
+    def wf(wid, name, status=None):
+        row = {"id": wid, "name": name, "purpose": "", "trigger": {"kind": "manual"}, "launchedFrom": [],
+               "inputs": [{"name": "record", "kind": "record", "entity": "E-1", "required": True}],
+               "steps": [{"key": "start", "name": "Start", "type": "trigger", "config": {"type": "manual"}, "next": ["do"]},
+                         {"key": "do", "name": name, "type": "action", "entity": "E-1",
+                          "config": {"actionType": "db_delete", "table": "things", "where": {"id": "{{record.id}}"}}, "next": ["done"]},
+                         {"key": "done", "name": "End", "type": "end", "next": []}]}
+        if status:
+            row["status"] = status
+        return row
+    doc = {"data": {"entities": [{"id": "E-1", "name": "Thing", "table": "things", "fields": [{"name": "id", "type": "uuid"}]}]},
+           "workflows": [wf("FLOW-001", "Delete Thing"), wf("FLOW-002", "Notify Admin")]}
+    project_workflows(doc, tmp_path)
+    defs = tmp_path / "src" / "lib" / "workflows" / "definitions"
+    assert sorted(p.name for p in defs.glob("*.json")) == ["delete-thing.json", "notify-admin.json"]
+    doc["workflows"][1]["status"] = "DEPRECATED"
+    project_workflows(doc, tmp_path)
+    assert sorted(p.name for p in defs.glob("*.json")) == ["delete-thing.json"]
