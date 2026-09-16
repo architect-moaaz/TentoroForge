@@ -98,6 +98,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # every page stops naming a frame, and the screens are composed from the
     # component library. Needs nothing — there is only ever one design set.
     "disconnect_design": set(),
+    # Undo. Needs nothing: it is always the last change, and asking which one
+    # would be asking the person to know what Smith recorded.
+    "revert": set(),
     "rebuild": set(),
 }
 
@@ -232,6 +235,13 @@ VERB_HELP: dict[str, str] = {
         "pages from components instead\". The design record is removed, no "
         "page names a frame any more, and every screen is composed from the "
         "component library. The requirements, entities and rules are untouched."
+    ),
+    "revert": (
+        "Undo the last change: \"undo that\", \"undo\", \"put it back\", "
+        "\"that was wrong, revert it\", \"go back\". The application is "
+        "restored as it stood before the change and every projection is "
+        "written out again. Said twice it goes back two changes. Needs "
+        "nothing — it is always the most recent change."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

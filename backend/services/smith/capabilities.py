@@ -56,6 +56,11 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Build the screens from a Figma or UX Pilot file, or unhook it and "
      "compose them from the component library instead.",
      frozenset({"connect_figma", "connect_uxpilot", "disconnect_design"})),
+    ("Putting it back",
+     "Undo the last change — the application returns to how it stood before "
+     "it, and saying it again goes back another. Nothing is deleted: the undo "
+     "is recorded too, so it can itself be undone.",
+     frozenset({"revert"})),
     ("The whole application",
      "Regenerate it from its definition.",
      frozenset({"rebuild"})),

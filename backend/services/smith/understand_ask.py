@@ -113,6 +113,11 @@ Return ONLY a JSON object with exactly these keys:
       "add_integration" / "remove_integration" — a third-party service:
                         "send email through SendGrid", "drop the Stripe
                         integration".
+      "revert"        — UNDO the last change: "undo that", "undo", "put it
+                        back", "that's not what I wanted, revert", "go back",
+                        "reverse that". Restores the application as it stood
+                        before the change. Not rebuild, which regenerates from
+                        the definition as it now stands.
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.

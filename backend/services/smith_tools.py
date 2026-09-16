@@ -1371,6 +1371,7 @@ READONLY_HANDLERS = {
     "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
+    "revert":                   lambda output_dir, args: _smith_revert(output_dir),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2119,6 +2120,13 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     result = _apply_remove_workflow(output_dir, diagnosis, git=False)
     result["edited_paths"] = [c["path"] for c in result.get("changes") or [] if c.get("path")]
     return result
+
+
+def _smith_revert(output_dir: str) -> dict:
+    """Undo the last recorded change and re-project. Takes no arguments: it is
+    always the most recent change."""
+    from services.smith.revert import run as _revert_run
+    return _revert_run(output_dir)
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:

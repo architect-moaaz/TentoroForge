@@ -579,6 +579,23 @@ class SmithSession:
             touched_paths=touched,
         )
 
+    def _revert(self) -> "TurnResult":
+        """Undo the last change (§91/§93).
+
+        The one verb that needs no facts from the ask: it is always the most
+        recent change, and asking which one would be asking the person to know
+        what Smith recorded.
+        """
+        from services.smith.revert import run as revert_run
+
+        out = revert_run(str(self.output_dir), reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not undo that."))
+        return TurnResult(status="resolved",
+                          answer=str(out.get("diff_summary") or "Undone."),
+                          touched_paths=list(out.get("edited_paths") or []))
+
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
         change a field-add is (F-01). The field is added to the Living
@@ -794,6 +811,8 @@ class SmithSession:
             return self._compose(verb, understanding, self._ask)
         if verb == "add_field":
             return self._add_field(understanding)
+        if verb == "revert":
+            return self._revert()
         if verb == "rebuild":
             # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
             # The build is driven by the client — `useBlueprintRun` posts the
