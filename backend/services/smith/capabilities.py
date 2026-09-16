@@ -101,6 +101,76 @@ def summary() -> str:
     return "\n".join(lines)
 
 
+#: An example is only useful as a chip if clicking it SAYS something Smith can
+#: route — so the chip labels are the quoted examples inside `VERB_HELP`,
+#: which are written in a user's words and classify back to their own verb.
+_EXAMPLE = __import__("re").compile(r"[\"“]([^\"“”]{8,70})[\"”]")
+
+#: Shorter than this and a word says nothing about which verb is meant. One
+#: rule, no list of words to maintain (see `compose._distinctive`).
+MIN_WORD = 4
+
+
+#: Endings trimmed so an inflection is the same word. Three rules rather than
+#: a stemmer or a list of pairs — and they are applied to BOTH sides, which is
+#: what matters: matching "change" to "changes" by prefix while counting them
+#: as different words made "changes" look like a word unique to one verb, and
+#: ranked `revert` above `edit_access` for "change who can delete a nurse".
+#: "s" before "es": a word ending in "e" keeps it ("changes" -> "change", not
+#: "chang"), which is what makes it the same word as the one in the help text.
+_ENDINGS = ("ing", "ed", "s", "es")
+
+
+def _stem(word: str) -> str:
+    for ending in _ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= MIN_WORD:
+            return word[:-len(ending)]
+    return word
+
+
+def _words(text: str) -> set[str]:
+    import re
+    return {_stem(w.lower()) for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", text or "")
+            if len(w) >= MIN_WORD}
+
+
+def nearest(message: str, limit: int = 3) -> list[tuple[str, str]]:
+    """The verbs closest to `message`, as (verb, an example of asking for it).
+
+    An unrecognised ask was answered with all thirty capabilities, which is a
+    wall to read and nothing to click. Ranked by the words the ask and the
+    verb's own help have in common — a guess about which is MEANT would be
+    wrong to act on, but offering three to choose between is a question, and
+    a question is always safe.
+    """
+    from services.smith.verbs import VERB_HELP
+
+    asked = _words(message)
+    if not asked:
+        return []
+    # A WORD IN EVERY ENTRY DISTINGUISHES NOTHING. "make" and "nurse" are in
+    # half the help texts; "colour" is in one. Weighting by how few entries a
+    # word appears in is what puts `restyle` above `edit_access` for "make the
+    # colours nicer" — and it is computed from the table, not from a list of
+    # words someone has to keep.
+    per_verb = {v: _words(h) for v, h in VERB_HELP.items()}
+    spread: dict[str, int] = {}
+    for words in per_verb.values():
+        for word in words:
+            spread[word] = spread.get(word, 0) + 1
+    scored: list[tuple[float, str, str]] = []
+    for verb, help_text in VERB_HELP.items():
+        overlap = sum(1.0 / spread[w] for w in (asked & per_verb[verb]))
+        if not overlap:
+            continue
+        example = _EXAMPLE.search(help_text)
+        if not example:
+            continue                       # nothing a click could say
+        scored.append((overlap, verb, example.group(1)))
+    scored.sort(key=lambda row: (-round(row[0], 6), row[1]))
+    return [(verb, example) for _score, verb, example in scored[:limit]]
+
+
 def verbs_covered() -> frozenset[str]:
     """Every verb the groups account for — compared against the verb table."""
     out: set[str] = set()

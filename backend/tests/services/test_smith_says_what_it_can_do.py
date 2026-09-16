@@ -61,7 +61,10 @@ def test_the_unknown_verb_reply_is_the_same_list(tmp_path):
         iteration_move_fn=lambda *a, **kw: None)
     result = session.run_iteration(user_message="refactor the codebase")
     assert result.status == "needs_user"
-    assert result.answer.startswith("I did not recognise that as something I can do.")
+    # Nothing in the ask is close to anything Smith knows, so the whole list
+    # is the honest answer; an ask that IS close is offered the closest few as
+    # chips instead (see test_smith_never_dead_ends).
+    assert result.answer.startswith("I did not recognise that as something I can do")
     assert cap.summary() in result.answer
 
 

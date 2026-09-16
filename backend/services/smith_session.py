@@ -763,19 +763,29 @@ class SmithSession:
         # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
         # five required fields, so a composition could not be expressed at all.
         # Requirements are per verb now; see services/smith/verbs.
-        from services.smith.verbs import (VERB_HELP, is_known, missing_fields,
+        from services.smith.verbs import (is_known, missing_fields,
                                           verb_of)
 
         verb = verb_of(understanding)
         if not is_known(understanding):
-            # THE WHOLE LIST, INCLUDING WHAT IS NOT A VERB. Built from
-            # `VERB_HELP` alone this named thirty changes and neither
-            # `verify & fix` nor any lifecycle command, so the one message
-            # whose entire job is "here is what I can do" was incomplete.
+            # THREE TO CHOOSE FROM, NOT THIRTY TO READ. The whole capability
+            # list is the right answer to "what can you do?" and the wrong one
+            # to a misrouted ask: it is a wall with nothing to click. The
+            # closest few, as the sentences that reach them, are a question.
+            from services.smith.capabilities import nearest as _nearest
+            close = _nearest(user_message)
+            if close:
+                return TurnResult(
+                    status="needs_user",
+                    answer=("I did not recognise that as something I can do. "
+                            "Did you mean one of these?"),
+                    options=[example for _verb, example in close] + ["Something else"],
+                )
             from services.smith.capabilities import summary as _capabilities
             return TurnResult(
                 status="needs_user",
-                answer="I did not recognise that as something I can do.\n\n" + _capabilities(),
+                answer=("I did not recognise that as something I can do, and it "
+                        "is not close to anything I know.\n\n" + _capabilities()),
             )
         # Only the new verbs are gated here. `rename` keeps the path it always
         # had — its fields are enforced by `understand_ask`, and re-checking
@@ -784,11 +794,15 @@ class SmithSession:
         if verb != "rename":
             gaps = missing_fields(understanding)
             if gaps:
-                return TurnResult(
-                    status="asked",
-                    answer=(f"I can do that, I just need {' and '.join(gaps)}. "
-                            + VERB_HELP.get(verb, "")),
-                )
+                # THE ANSWER SET IS IN THE BLUEPRINT. "I just need entity and
+                # field" named two contract slots and left the person to guess
+                # Smith's spelling of a value the document already holds. Asked
+                # with its own answers attached, the question is a click.
+                from services.smith.engine_blueprint_adapter import load_engine_doc
+                from services.smith.slot_options import ask_for
+                doc = load_engine_doc(str(self.output_dir)) or {}
+                question, choices = ask_for(gaps, doc, understanding)
+                return TurnResult(status="asked", answer=question, options=choices)
 
         if verb == "restyle":
             return self._restyle(understanding, self._ask)
