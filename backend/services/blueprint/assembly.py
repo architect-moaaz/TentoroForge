@@ -155,7 +155,14 @@ def _template_dirs() -> list[Path]:
 
 #: Scaffold files a template used to ship and no longer does; deleted from an
 #: application on every assembly so the old copy cannot shadow the new shape.
-RETIRED_SCAFFOLD_FILES: tuple[str, ...] = ("src/app/page.tsx",)
+RETIRED_SCAFFOLD_FILES: tuple[str, ...] = (
+    "src/app/page.tsx",
+    # The catch-all became OPTIONAL (`[[...slug]]`) so it serves "/" as well.
+    # Next refuses a segment that is both required and optional at one level,
+    # so an application assembled before that change must lose the old copy or
+    # it will not build at all.
+    "src/app/[...slug]/page.tsx",
+)
 
 
 def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:

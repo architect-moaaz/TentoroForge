@@ -1960,6 +1960,20 @@ FALLBACK_BY_NODE: dict[str, Any] = {
 }
 
 
+def _same_refusal(previous: str, reason: str) -> bool:
+    """Whether `reason` is what the last attempt was already told.
+
+    Compared on the words, ignoring spacing, because that is what the author
+    reads. A reason that differs only in which page id it names is a different
+    refusal and still worth another attempt.
+    """
+    said = " ".join(str(reason or "").split())
+    if not said or not previous.strip():
+        return False
+    last = previous.rstrip().rsplit("\n", 1)[-1]
+    return said in " ".join(last.split())
+
+
 def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
     """The feedback for the next attempt: EVERY refusal so far, not the last.
 
@@ -2113,13 +2127,27 @@ def _apply_subject(
         except ValueError:  # pragma: no cover — a subject not in its own list
             return 0
 
-    def _rejected(reason: str) -> str:
+    def _rejected(reason: str, *, deterministic: bool = False) -> str:
         """The proposal was refused. Either it goes round again (§103), or
         this was the last attempt: the node's fallback composes the subject,
         or the subject is lost."""
+        # THE SAME REFUSAL TWICE IS NOT WORTH PAYING FOR A THIRD TIME. A retry
+        # earns its cost by telling the author something it did not know; a
+        # refusal word for word identical to the last one tells it nothing,
+        # and the next attempt is the same call with the same answer.
+        #
+        # ONLY WHERE THE ANSWER CANNOT CHANGE. A validator is a function of
+        # what was proposed: refuse the same proposal the same way and it will
+        # again. A CRASH is not — a provider timeout or a truncated reply is
+        # the same message twice and a third call may well succeed — so an
+        # exception still gets every attempt it is allowed.
+        repeated = deterministic and _same_refusal(state.feedback.get(subject, ""), reason)
         state.feedback[subject] = accumulate_refusals(
             state.feedback.get(subject, ""), attempt, reason)
-        if attempt >= max_attempts:
+        if repeated and attempt < max_attempts:
+            _note(ledger, "node_retry", key, subject, attempt, max_attempts,
+                  f"refused the same way twice; not asking again — {reason}")
+        if attempt >= max_attempts or repeated:
             if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
                                  commit=commit, user_request=user_request, report=report,
                                  ledger=ledger, authored=state.authored):
@@ -2148,7 +2176,9 @@ def _apply_subject(
         from services.blueprint.refusals import record_refusal
         record_refusal(svc.output_dir, subject or key, 0,
                        list(getattr(outcome, "proposals", None) or []), _reason(exc))
-        return _rejected(_reason(exc))
+        # A validator's verdict on a proposal: deterministic, so the same
+        # words twice mean the same words a third time.
+        return _rejected(_reason(exc), deterministic=True)
 
     if application.applied:
         report.artifacts.extend(application.artifacts)

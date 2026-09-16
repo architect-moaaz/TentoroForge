@@ -15,7 +15,11 @@ _EXPECTED_FILES = [
     "postcss.config.js",
     ".gitignore",
     "src/app/layout.tsx",
-    "src/app/[...slug]/page.tsx",
+    # OPTIONAL, so the one route file serves "/" as well: `[...slug]` needs at
+    # least one segment, so an application whose only page is at the root —
+    # a calculator, a single-screen tool — answered 404 at its own address
+    # while `src/app/page.tsx` is deliberately retired on every assembly.
+    "src/app/[[...slug]]/page.tsx",
     "src/app/not-found.tsx",
 ]
 # NOTE: src/app/page.tsx (the root redirect) is GENERATED, not a static template,
@@ -193,3 +197,17 @@ def test_vendored_package_json_drops_unresolvable_private_deps():
                     assert v == f"file:../{suffix}", (
                         f"{pkg}: {k} not rewritten to sibling path"
                     )
+
+
+def test_the_catch_all_serves_the_root_as_well():
+    """`[...slug]` matches "/a" and "/a/b" and never "/". A single-page
+    application whose entry route IS "/" had nothing to serve it: the root
+    page template is retired on every assembly, and the catch-all could not
+    match. The route is optional now, and resolves the root's schema, which is
+    registered under "/" and stored as `home.json`."""
+    with tempfile.TemporaryDirectory() as td:
+        emit_standalone_app(output_dir=td, project_short_id="proj-1")
+        page = (Path(td) / "src" / "app" / "[[...slug]]" / "page.tsx").read_text()
+        assert not (Path(td) / "src" / "app" / "[...slug]").exists()
+        assert "const isRoot = slug.length === 0;" in page
+        assert 'relPath: "home", routeKey: "/"' in page

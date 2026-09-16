@@ -994,7 +994,19 @@ NODE_TASKS: dict[str, str] = {
         "English, and defaulting is the right answer far more often than not."
     ),
     "data_model": (
-        "Name the entities behind the requirements and state how they relate. "
+        "SOME APPLICATIONS STORE NOTHING, and then this section is empty. A "
+        "calculator, a converter, a scratch tool — the values live on the "
+        "screen while somebody uses them and are gone when they leave. If the "
+        "requirements say nothing is kept, return `entities: []` and say so in "
+        "`assumptions`; do not model the screen's own working state as a "
+        "table. Asked for a calculator that \"should not store anything in "
+        "database\", this named a CalculatorSession with a display value and a "
+        "pending operator, and every stage after it spent its time on a table "
+        "that should not exist — seven minutes authoring its columns, and a "
+        "page judged against a dashboard's floor because it now had an entity "
+        "to summarise.\n\n"
+        "Otherwise: name the entities behind the requirements and state how "
+        "they relate. "
         "For each entity give `name`, `table`, a one-sentence `description` "
         "and `fields: []` — EMPTY. Do not write fields: each entity's fields, "
         "keys, enums, sensitivity and constraints are authored afterwards, one "
@@ -2606,6 +2618,14 @@ EFFORT_BY_NODE: dict[str, str] = {
     # they decide. That objection was right about `data_model` too — the fix
     # there was the reply's shape, not its reasoning.
     "database": "medium",
+    # The same argument as `database`, one level up: `data_model` names the
+    # entity and what it is for, and this authors the columns of ONE of them
+    # against that. Measured at 284s for a first call on a five-field entity —
+    # longer than `database` was before it was tuned — while the two repair
+    # calls that followed took ~60s each, because a repair carries the
+    # finding and has something concrete to do. It fans out per entity, so
+    # the ceiling is paid once per record rather than once per build.
+    "entity_fields": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     "testing": "medium",
     # A short list of named third parties.

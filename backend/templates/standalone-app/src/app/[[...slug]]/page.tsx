@@ -32,10 +32,22 @@ export default async function Page({
   params,
 }: { params: Promise<{ slug?: string[] }> }) {
   const { slug = [] } = await params;
+  // OPTIONAL, SO IT SERVES "/" TOO. `[...slug]` needs at least one segment,
+  // so the root URL matched no route at all and Next answered 404 — while
+  // `src/app/page.tsx` is deliberately retired on every assembly, leaving
+  // nothing else to serve it. An application whose only page is at "/" — a
+  // calculator, a single-screen tool — was unreachable at its own address.
+  // The `["home"]` fallback below was written for this case and could never
+  // fire, because a required catch-all never yields an empty slug.
   const parts = slug.length ? slug : ["home"];
+  const isRoot = slug.length === 0;
   const schemasRoot = path.join(process.cwd(), "src", "schemas");
 
-  const attempts = _pathAttempts(parts);
+  // The root's schema is registered under "/" and stored as `home.json`, so
+  // the key and the file disagree for this one route and both are tried.
+  const attempts = isRoot
+    ? [{ relPath: "home", routeKey: "/" }, ..._pathAttempts(parts)]
+    : _pathAttempts(parts);
   let matched: { relPath: string; routeKey: string; id?: string } | null = null;
   // P1-O2: registry is authoritative. A route registered in registry.ts (even
   // if its file lives at an unusual on-disk path) must resolve. fs.access is
@@ -67,7 +79,7 @@ export default async function Page({
   // path can turn those back into links that resolve — including on literal
   // matches like `/conferences/<id>/sessions/new`, where no id is threaded at
   // all. See renderer's resolveCrumbHrefs.
-  const concretePath = "/" + parts.join("/");
+  const concretePath = isRoot ? "/" : "/" + parts.join("/");
   const qs = new URLSearchParams({ path: concretePath });
   if (matched.id !== undefined) qs.set("id", matched.id);
   const request = new Request(`internal:?${qs.toString()}`);

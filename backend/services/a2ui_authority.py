@@ -1366,7 +1366,34 @@ def _stderr_pump(progress: Any) -> tuple[Any, threading.Thread, Any]:
 
 # ------------------------------------------------------------------ compose
 
-def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list[dict]:
+def _summarises_something(schema: dict, contract: dict | None = None) -> bool:
+    """Whether this page has records to summarise.
+
+    A KPI counts something, a chart plots something, an activity surface lists
+    recent something. All three need records; a page with none is not a
+    dashboard whatever its route says, and holding it to a dashboard's floor
+    asks the composer to invent numbers it is forbidden to invent.
+
+    THE PAGE CONTRACT IS THE AUTHORITY, not the composition. "This page names
+    no entity" is the Blueprint's own statement about what the screen is for;
+    "this composition declared no data source" could equally be a composer
+    that forgot to bind one, and excusing that would let a real dashboard
+    ship blank. With no contract to read — a caller composing a page the
+    Blueprint has not described — it is judged exactly as before.
+    """
+    if contract is None:
+        return True
+    data = contract.get("data") or {}
+    if data.get("primaryEntity") or data.get("supportingEntities"):
+        return True
+    # The contract names none, but the composer bound some anyway: then the
+    # page does summarise something and the floor is the right judge of it.
+    sources = (schema or {}).get("dataSources")
+    return bool(sources)
+
+
+def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
+                    contract: dict | None = None) -> list[dict]:
     """The substance floor for this page kind. One dispatch point, so the
     decline criterion can never drift from what the delivery gate reports."""
     from services.dashboard_anatomy import dashboard_findings
@@ -1374,8 +1401,21 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list
 
     from services.a2ui_to_forge import dangling_bindings
 
-    if _family_of(kind, route) == "dashboard":
+    if _family_of(kind, route) == "dashboard" and _summarises_something(schema, contract):
         findings = dashboard_findings(route, schema, registry)
+    elif _family_of(kind, route) == "dashboard":
+        # A DASHBOARD FLOOR OVER NOTHING IS UNSATISFIABLE. The floor demands
+        # three KPI tiles, a chart and a recent-activity surface; every one of
+        # those counts, plots or lists RECORDS, and the composer is separately
+        # forbidden from writing a number it cannot bind. A page with no data
+        # source cannot satisfy both rules, so it fails for ever: a
+        # single-page calculator was declined three times, at 135 seconds a
+        # composition, for having no KPIs it could honestly show.
+        #
+        # `is_dashboard_route` says anything at "/" is a dashboard, and a
+        # route says nothing about what a page is for. What the page is for is
+        # in the page itself.
+        findings = page_kind_findings(kind, route, schema)
     else:
         findings = page_kind_findings(kind, route, schema)
 
@@ -1612,7 +1652,7 @@ def compose_page_via_a2ui(
 
     schema = result["schema"]
 
-    findings = _floor_findings(kind, route, schema, registry)
+    findings = _floor_findings(kind, route, schema, registry, contract)
     pruned: list[str] = []
     # NO SALVAGE. This used to drop the widgets the floor named and re-judge,
     # on the argument that a dashboard missing one chart beats no dashboard.
