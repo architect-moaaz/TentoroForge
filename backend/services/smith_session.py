@@ -250,6 +250,7 @@ class SmithSession:
         if not treat_as:
             return TurnResult(
                 status="asked",
+                options=["Specification", "Reference"],
                 answer=("Before I pull it in — is this design the "
                         "SPECIFICATION or a REFERENCE?\n\n"
                         "• Specification: I build exactly the screens on the page "
@@ -364,6 +365,7 @@ class SmithSession:
             # application's shape decided silently.
             return TurnResult(
                 status="asked",
+                options=["Specification", "Reference"],
                 answer=("Before I pull it in — is this design the "
                         "SPECIFICATION or a REFERENCE?\n\n"
                         "• Specification: I build exactly the screens you drew "
@@ -710,7 +712,11 @@ class SmithSession:
 
         clarification = (understanding.get("clarification_needed") or "").strip()
         if clarification:
-            return TurnResult(status="asked", answer=clarification)
+            # The choices ride as chips: picking one sends its label as the
+            # next turn, the way the definition's questions are answered.
+            choices = [str(c).strip() for c in (understanding.get("clarification_options") or [])
+                       if str(c or "").strip()]
+            return TurnResult(status="asked", answer=clarification, options=choices)
 
         # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
         # five required fields, so a composition could not be expressed at all.

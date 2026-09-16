@@ -39,6 +39,12 @@ Return ONLY a JSON object with exactly these keys:
       clear enough to act on. Ask when the request names no screen or element,
       when it could plausibly mean two different changes, or when acting on
       the wrong reading would be expensive to undo. Asking is not a failure.
+  "clarification_options": when the question offers CHOICES, the choices as
+      short labels, 2 to 5, each a complete answer on its own that they can
+      pick with one click — ["A new page at /calculator", "A panel on Nurse
+      Registration", "A panel on Master Data"]. Put the choices here rather
+      than spelling them out in the question; the question then just asks.
+      [] when the question is open (a name, a URL, a value).
   "verb": WHICH KIND OF CHANGE this is. Exactly one of:
       "rename"        — change the wording of something that already exists.
       "remove"        — take a control OFF a screen that exists: "remove the
@@ -384,13 +390,7 @@ def understand_ask(
     """
     ask = (user_message or "").strip()
     if not ask:
-        return {"answer": "",
-                "clarification_needed": "What would you like to change?",
-                "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed="What would you like to change?")
 
     # SHOWN, NOT JUST HAD. `reasoning` is where Smith's thinking goes on its
     # way to the user; without it the model still reasons and nobody sees it.
@@ -403,25 +403,15 @@ def understand_ask(
                                   history=_render_history(history),
                                   message=ask))
     except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
-        return {"clarification_needed":
-                "I could not reach my reasoning service just then — say that "
-                "again and I will try once more.",
-                "answer": "", "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed=(
+            "I could not reach my reasoning service just then — say that "
+            "again and I will try once more."))
 
     data = _parse(raw)
     if data is None:
-        return {"clarification_needed":
-                "I did not follow that. Which screen should I change, and "
-                "what on it?",
-                "answer": "", "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed=(
+            "I did not follow that. Which screen should I change, and "
+            "what on it?"))
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
     return {
@@ -487,7 +477,43 @@ def understand_ask(
         "field": (data.get("field") if isinstance(data.get("field"), dict)
                   else {"name": str(data.get("field")).strip()} if isinstance(data.get("field"), str) and str(data.get("field")).strip()
                   else {}),
+        # THE CHOICES, AS CHIPS. A question that offers alternatives used to
+        # spell them out in prose ("a new page, or a panel on Nurse
+        # Registration or Master Data — which?") and the person typed one
+        # back. Carried separately, the panel offers them as chips, the way
+        # the definition's own questions are offered.
+        "clarification_options": _labels(data.get("clarification_options")),
     }
+
+
+#: Every key an understanding carries, so a caller's `.get()` never meets a
+#: partial dict on exactly the paths that already went wrong.
+SHAPE: frozenset[str] = frozenset({
+    "answer", "clarification_needed", "clarification_options", "verb", "route",
+    "widgets", "figma_url", "token_env", "uxpilot_ref", "key_env", "treat_as",
+    "target_file", "element_label", "change", "workflow", "rule", "requirement",
+    "api", "integration", "new_value", "entity", "field",
+})
+
+
+def _blank(**given: Any) -> dict[str, Any]:
+    """An understanding with nothing in it but `given` — the full shape."""
+    out: dict[str, Any] = {k: "" for k in SHAPE}
+    out.update({"widgets": [], "field": {}, "clarification_options": []})
+    out.update(given)
+    return out
+
+
+def _labels(raw: Any) -> list[str]:
+    """Chip labels: strings, trimmed, non-empty, deduplicated, at most five."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        text = str(item or "").strip() if not isinstance(item, dict) else str(item.get("label") or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out[:5]
 
 
 def _parse(raw: str) -> dict | None:

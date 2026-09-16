@@ -345,6 +345,27 @@ def test_iteration_ask_user_when_understand_returns_low_confidence(tmp_path):
     result = session.run_iteration(user_message="it's broken")
     assert result.status == "asked"
     assert "which page" in result.answer.lower()
+    assert result.options == []
+
+
+def test_a_clarification_with_choices_offers_them_as_chips(tmp_path):
+    """"Where should the calculator live?" with three alternatives: the
+    alternatives reach the turn result as options, which the panel renders
+    as chips, so the person clicks rather than types one back."""
+    _init_repo(tmp_path)
+    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
+    bp.set_domain(name="ATS", primary_actors=[], core_verbs=[], distinctive_shape="", why="")
+    bp.save()
+
+    def _understand(m, ctx, **kw):
+        return {"clarification_needed": "Where should the calculator live?",
+                "clarification_options": ["A new page at /calculator", "A panel on Nurse Registration", " ", "A panel on Master Data"]}
+
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=_understand, iteration_move_fn=lambda *a, **kw: None)
+    result = session.run_iteration(user_message="add a calculator")
+    assert result.status == "asked" and result.answer == "Where should the calculator live?"
+    assert result.options == ["A new page at /calculator", "A panel on Nurse Registration", "A panel on Master Data"]
 
 
 # --------------------------------------------------------------------------- #
