@@ -579,6 +579,14 @@ class SmithSession:
             touched_paths=touched,
         )
 
+    @staticmethod
+    def _on_route(entry: dict, target: str) -> bool:
+        """Whether a collected label sits on the screen `target` names."""
+        from services.smith.labels import normalise
+        want = normalise(target)
+        return bool(want) and want in (normalise(entry.get("route") or ""),
+                                       normalise(entry.get("page") or ""))
+
     def _revert(self) -> "TurnResult":
         """Undo the last change (§91/§93).
 
@@ -867,12 +875,51 @@ class SmithSession:
 
         target_file = (understanding.get("target_file") or "").strip()
         element_label = (understanding.get("element_label") or "").strip()
+
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        doc = load_engine_doc(str(self.output_dir)) or {}
+
         if not target_file:
+            # The screens are in the Blueprint; asking for one by name and
+            # leaving the person to type it is a question they answer worse
+            # than a click does.
+            from services.smith.slot_options import options_for
             return TurnResult(
                 status="asked",
-                answer="I need one more detail — which file or screen "
-                       "should I edit? A route path or a screen name works.",
+                answer="Which screen?",
+                options=options_for("route", doc),
             )
+
+        # THE TREE KNOWS THE WORDS; THE PERSON SHOULD NOT HAVE TO. The move
+        # matches a label by string equality, so "the delete thing" and
+        # "Delete  button" both reached "I looked for it and could not find
+        # it" with a Delete sitting in the tree. Resolved here: one match is
+        # used, several are asked about, none is still said plainly.
+        if element_label:
+            from services.smith.labels import collect, describe, resolve
+            found = resolve(doc, element_label, target_file)
+            if found.get("candidates"):
+                return TurnResult(
+                    status="asked",
+                    answer=(f"There is more than one “{element_label}”. "
+                            "Which one did you mean?"),
+                    options=[describe(c) for c in found["candidates"]][:5],
+                )
+            if found.get("text"):
+                if found["text"] != element_label:
+                    understanding = {**understanding, "element_label": found["text"]}
+                    element_label = found["text"]
+            else:
+                on_screen = [c["text"] for c in collect(doc)
+                             if self._on_route(c, target_file)][:5]
+                if on_screen:
+                    return TurnResult(
+                        status="asked",
+                        answer=(f"I could not find “{element_label}” on "
+                                f"{target_file}, so I have changed nothing. "
+                                "Is it one of these?"),
+                        options=on_screen,
+                    )
 
         # The "is this even a rename?" question is the VERB's now, decided
         # above, so it is not re-litigated here. f1a601f checked `new_value`
