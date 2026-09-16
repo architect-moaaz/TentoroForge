@@ -3,8 +3,12 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight, Home, Eye, Plus, List as ListIcon, FileText,
-  PanelLeftClose, Layout, FilePlus,
+  PanelLeftClose, Layout, FilePlus, Trash2,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { useEditorStore, flushPersister } from "@/lib/editor-store";
 import { NewPageDialog } from "@/components/editor/NewPageDialog";
 import type { ScaffoldedPage } from "@/lib/page-scaffold";
@@ -88,6 +92,9 @@ export function PagePicker({
   });
 
   const pages: NavFlowPage[] = (navFlow as any)?.pages ?? [];
+  // Which page the app opens on — the delete confirmation says so when it is
+  // about to move, because that is the one consequence a user cannot see.
+  const initialPageId: string | undefined = (navFlow as any)?.initialPage;
 
   // Create a scaffolded page: add it to the store, flush to disk so the picker
   // + canvas can load it, refresh the nav-flow query, then activate it.
@@ -107,6 +114,37 @@ export function PagePicker({
     }
     await queryClient.invalidateQueries({ queryKey: ["nav-flow", projectId] });
     onChange(page.pageId);
+  };
+
+  /**
+   * ED-14 — delete a page.
+   *
+   * `removePage` has been in the reducer all along, atomic across pageSchemas +
+   * navFlow + transitions and with a working undo, and nothing ever dispatched
+   * it: the editor could add a page but not remove one. This is the missing
+   * caller, and it mirrors handleCreatePage above step for step so the two
+   * halves persist the same way.
+   */
+  const [pendingDelete, setPendingDelete] = useState<NavFlowPage | null>(null);
+
+  const handleDeletePage = async (page: NavFlowPage) => {
+    setPendingDelete(null);
+    // Worked out BEFORE the dispatch: after it, the store no longer knows this
+    // page existed, and we still need somewhere to send the user.
+    const fallback = pages.find((p) => p.id !== page.id)?.id;
+
+    dispatch({ type: "removePage", pageId: page.id });
+    if (useEditorStore.getState().lastError) return; // rejected — leave it surfaced
+
+    try {
+      await flushPersister();
+    } catch {
+      /* best-effort — the store no longer has the page either way */
+    }
+    await queryClient.invalidateQueries({ queryKey: ["nav-flow", projectId] });
+    // Deleting the page you were looking at would otherwise leave the canvas
+    // pointed at a page that no longer exists.
+    if (page.id === value && fallback) onChange(fallback);
   };
 
   // Does the project have a shell.json? When yes, surface it as a dedicated
@@ -180,6 +218,39 @@ export function PagePicker({
         </div>
       </header>
 
+      {/* Deleting a page is not just removing a row: removePage also drops every
+          transition that pointed at it, and hands the entry point to another
+          page if this one held it. That is worth one question first. */}
+      <Dialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete this page?</DialogTitle>
+            <DialogDescription>
+              <span className="font-mono text-foreground">{pendingDelete?.route}</span>
+              {pendingDelete?.title ? ` — ${pendingDelete.title}` : ""}
+              <br />
+              Its navigation links are removed with it
+              {pendingDelete && initialPageId === pendingDelete.id
+                ? ", and the app's entry page moves to the next page in the list"
+                : ""}
+              . You can undo this.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-confirm-delete-page=""
+              onClick={() => { if (pendingDelete) void handleDeletePage(pendingDelete); }}
+            >
+              Delete page
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <NewPageDialog
         open={newPageOpen}
         onOpenChange={setNewPageOpen}
@@ -228,25 +299,46 @@ export function PagePicker({
           const Icon = pageIcon(p.route);
           const isActive = p.id === value;
           const tag = pageTagToDisplay(p.route);
+          // The row was a single <button>; a delete control cannot nest inside
+          // one (invalid HTML, and the click would fight the row's own handler).
+          // The row is now a flex container holding two real buttons.
           return (
-            <button
+            <div
               key={p.id}
-              onClick={() => onChange(p.id)}
-              className={`group w-full text-left px-3 py-1.5 flex items-center gap-2 text-sm ${
+              className={`group w-full flex items-center text-sm ${
                 isActive ? "bg-muted/60" : "hover:bg-muted/40"
               }`}
             >
-              <Icon
-                size={14}
-                className={isActive ? "text-foreground" : "text-muted-foreground"}
-              />
-              <span className={`flex-1 truncate font-mono text-[12px] ${isActive ? "font-medium" : ""}`}>
-                {p.route}
-              </span>
-              {tag && (
-                <span className="text-[10px] tracking-wide text-muted-foreground">{tag}</span>
+              <button
+                onClick={() => onChange(p.id)}
+                className="min-w-0 flex-1 text-left px-3 py-1.5 flex items-center gap-2"
+              >
+                <Icon
+                  size={14}
+                  className={isActive ? "text-foreground" : "text-muted-foreground"}
+                />
+                <span className={`flex-1 truncate font-mono text-[12px] ${isActive ? "font-medium" : ""}`}>
+                  {p.route}
+                </span>
+                {tag && (
+                  <span className="text-[10px] tracking-wide text-muted-foreground">{tag}</span>
+                )}
+              </button>
+              {/* The last page is not deletable: a project with no pages has
+                  nothing to render and no route to fall back to. */}
+              {pages.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(p)}
+                  title={`Delete ${p.route}`}
+                  aria-label={`Delete page ${p.route}`}
+                  data-delete-page={p.id}
+                  className="shrink-0 px-2 py-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 size={13} />
+                </button>
               )}
-            </button>
+            </div>
           );
         })}
 

@@ -417,6 +417,9 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
         // caller can opt a standalone/public page out via `shell: false`.
         shell: action.shell ?? true,
       });
+      // Undo of "delete the entry page" has to put the entry back, not just the
+      // page. Only removePage's inverse sets this.
+      if (action.wasInitialPage) next.navFlow.initialPage = action.pageId;
       return {
         next,
         inverse: { type: "removePage", pageId: action.pageId },
@@ -436,6 +439,16 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
       const shell = (navPage as { shell?: boolean } | undefined)?.shell;
       const root = clone(pageSchema.root);
 
+      // THE ENTRY PAGE CAN BE DELETED TOO, AND initialPage MUST FOLLOW IT.
+      // Transitions were scrubbed below from the first version of this case, but
+      // `navFlow.initialPage` was left pointing at the page just deleted.
+      // validateNavConsistency rejects precisely that ("navFlow.initialPage=…
+      // unknown"), so deleting the entry page left the artifacts failing their
+      // own validation, and the generated app opening on a page that no longer
+      // exists. The next remaining page inherits it; when none remain there is
+      // no entry to name.
+      const wasInitialPage = next.navFlow.initialPage === action.pageId;
+
       // Remove from pageSchemas
       delete next.pageSchemas[action.pageId];
 
@@ -447,6 +460,8 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
         t => t.from !== action.pageId && t.to !== action.pageId,
       );
 
+      if (wasInitialPage) next.navFlow.initialPage = next.navFlow.pages[0]?.id;
+
       return {
         next,
         inverse: {
@@ -456,6 +471,7 @@ export function applyAction(artifacts: Artifacts, action: EditorAction): ApplyRe
           title,
           root,
           ...(shell === undefined ? {} : { shell }),
+          ...(wasInitialPage ? { wasInitialPage: true } : {}),
         },
       };
     }

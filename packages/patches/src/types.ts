@@ -76,7 +76,9 @@ export type EditorAction =
   | { type: "updateStyle"; pageId: PageId; nodeId: NodeId; styleKey: string; value: PropValue }
   | { type: "bindProp"; pageId: PageId; nodeId: NodeId; propName: PropPath; binding: string }
   | { type: "unbindProp"; pageId: PageId; nodeId: NodeId; propName: PropPath; literalValue: PropValue }
-  | { type: "addPage"; pageId: PageId; route: string; title: string; root: SchemaNode; shell?: boolean }
+  // `wasInitialPage` is set only by removePage's inverse, so undoing the
+  // deletion of the entry page restores its entry status and not just the page.
+  | { type: "addPage"; pageId: PageId; route: string; title: string; root: SchemaNode; shell?: boolean; wasInitialPage?: boolean }
   | { type: "removePage"; pageId: PageId }
   | { type: "renamePage"; pageId: PageId; title: string }
   | { type: "updateRoute"; pageId: PageId; route: string }
