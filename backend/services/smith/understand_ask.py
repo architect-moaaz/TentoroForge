@@ -48,6 +48,13 @@ Return ONLY a JSON object with exactly these keys:
                         it darker", "more compact". This is the design
                         system, not any one screen: NOT rename (no label
                         changes), NOT compose_route (no screen is rebuilt).
+      "edit_navigation" — the MENU: what is in it, in what order, under
+                        what label or icon or group heading, and which
+                        page the app opens on: "put Master Data first",
+                        "rename the menu item to Nurse Directory", "hide
+                        registration from the sidebar", "open on Master
+                        Data". NOT rename — a menu entry is not a control
+                        on a screen — and NOT compose_route.
       "add_workflow"  — a NEW business process: "email the admin after a
                         registration", "archive a nurse instead of deleting",
                         "send a reminder every Monday". Something the app
@@ -113,6 +120,9 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "element_label": the control's visible text AS IT IS NOW, exactly — a
       Table row action's label ("Delete") is a control as much as a Button's.
       Copy it from the Blueprint below; do not paraphrase it.
+
+  edit_navigation needs:
+  "change": what should be different about the menu, in the user's words.
 
   add_workflow needs:
   "workflow": what the new process should do, in the user's own words.

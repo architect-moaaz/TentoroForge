@@ -139,8 +139,9 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
         # has no element to edit. Without these the intent scopes Smith to
         # tools that cannot answer it.
         "compose_route", "add_widgets",
-        # The look of the application is the design system, not a page.
-        "restyle",
+        # The look of the application is the design system, not a page;
+        # the menu is the navigation, not a page.
+        "restyle", "edit_navigation",
         "verify_promise", "answer", "ask_user",
     ],
     "edit_workflow": [
@@ -247,6 +248,7 @@ TOOL_TAGS: dict[str, set[str]] = {
     # there was: tagging it `add` only would hide it from every edit ask.
     "compose_route":             {"add", "edit", "page"},
     "restyle":                   {"edit", "token"},
+    "edit_navigation":           {"edit", "shell"},
     "add_widgets":               {"add", "edit", "page", "component"},
     "add_workflow":              {"add", "workflow"},
     "add_entity":                {"add", "entity"},

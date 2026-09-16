@@ -616,6 +616,15 @@ TOOL_CATALOG: list[dict] = [
              "out again from scratch. NOT for changing one label or one "
              "field \u2014 that is edit_page. The page must already exist "
              "in the definition; check list_pages first."},
+    {"name": "edit_navigation",
+     "signature": "edit_navigation(change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE THE APP'S MENU \u2014 entries, order, labels, icons, group "
+             "headings, the page the app opens on: \"put Master Data first\", "
+             "\"rename the menu item to Nurse Directory\", \"hide registration "
+             "from the sidebar\", \"open on Master Data\". Revises the Blueprint's "
+             "navigation and re-projects the shell; no screen is composed. NOT "
+             "edit_page (a menu entry is not a control on a screen). Pass the "
+             "change in the user's words."},
     {"name": "restyle",
      "signature": "restyle(change) -> {applied, edited_paths, diff_summary, "
                   "changed, decision, reason?}",
@@ -1258,6 +1267,7 @@ READONLY_HANDLERS = {
     "run_guards":               lambda output_dir, args: _smith_run_guards(output_dir),
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
     "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
+    "edit_navigation":          lambda output_dir, args: _smith_edit_navigation(output_dir, args),
     "add_page":                 lambda output_dir, args: _smith_add_page(output_dir, args),
     # Whole-screen composition \u2014 the page_layouts agent, reachable from a
     # conversation. See services/smith/compose.py.
@@ -1348,6 +1358,20 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
         output_dir=output_dir,
         blueprint_summary=str((args or {}).get("blueprint_summary") or ""),
     )
+
+
+def _smith_edit_navigation(output_dir: str, args: dict) -> dict:
+    """Thin, like the compose tools: `services.smith.navigation_change.run` is
+    the one place the menu changes, and `smith_session` reaches it by verb."""
+    from services.smith.navigation_change import run as _nav_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "edit_navigation requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [],
+                "reason": "no change described. Pass change: what should be different about the menu."}
+    return _nav_run(output_dir, change)
 
 
 def _smith_restyle(output_dir: str, args: dict) -> dict:

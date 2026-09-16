@@ -46,6 +46,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # should do (add) or which existing one is meant (edit/remove); `change`
     # is what should be different about it. `route` may name the screen a
     # new manual workflow starts from.
+    # The menu — entries, order, labels, groups, landing route. `navigation`
+    # is a singleton section; the ask in the user's words is all it needs.
+    "edit_navigation": {"change"},
     "add_workflow": {"workflow"},
     "edit_workflow": {"workflow", "change"},
     "remove_workflow": {"workflow"},
@@ -92,6 +95,12 @@ VERB_HELP: dict[str, str] = {
         "density: \"change the theme colour to green\", \"make it darker and "
         "more compact\". Re-decides the design system against the request; "
         "every screen picks it up through the tokens. Needs the change in the "
+        "user's words."
+    ),
+    "edit_navigation": (
+        "Change the app's menu: \"put Master Data first\", \"call it Nurse "
+        "Directory\", \"hide the registration page from the menu\", \"group "
+        "these under Admin\", \"open on Master Data\". Needs the change in the "
         "user's words."
     ),
     "add_workflow": (

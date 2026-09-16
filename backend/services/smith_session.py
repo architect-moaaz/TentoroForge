@@ -392,6 +392,20 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _navigation(self, understanding: dict, user_message: str) -> "TurnResult":
+        """Change the menu — the `navigation` section. One implementation in
+        `services.smith.navigation_change.run`, shared with the tool."""
+        from services.smith.navigation_change import run as nav_run
+
+        change = str(understanding.get("change") or "").strip() or user_message.strip()
+        out = nav_run(str(self.output_dir), change, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not change the menu and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Changed the menu."),
+                          touched_paths=touched, diff_summary=", ".join(touched) if touched else "")
+
     def _workflow(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
         """Add, change or retire a business process — the `workflows` section,
         which no other verb touched. One implementation in
@@ -650,6 +664,8 @@ class SmithSession:
             return self._restyle(understanding, user_message)
         if verb in ("add_workflow", "edit_workflow", "remove_workflow"):
             return self._workflow(verb, understanding, user_message)
+        if verb == "edit_navigation":
+            return self._navigation(understanding, user_message)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":
