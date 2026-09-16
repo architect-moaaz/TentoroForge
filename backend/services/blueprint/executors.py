@@ -1632,7 +1632,7 @@ def build_prompt(
                                     output_dir=output_dir)
 
     if node == "entity_fields":
-        return _entity_fields_prompt(doc, system, subject, feedback)
+        return _entity_fields_prompt(doc, system, subject, feedback, brief=brief)
 
     if node == "page_contracts":
         # The answer space is the slot list, not "whatever pages you think of".
@@ -2089,7 +2089,7 @@ def pin_entity_set(result: AgentResult) -> None:
 
 
 def _entity_fields_prompt(doc: dict, system: str, subject: str,
-                          feedback: str) -> tuple[str, str]:
+                          feedback: str, *, brief: str = "") -> tuple[str, str]:
     """One entity in full, every entity by name, and the relationships that
     touch it — the foreign keys this entity must carry a column for."""
     row = declared_entity(doc, subject) or {"id": subject}
@@ -2124,6 +2124,8 @@ def _entity_fields_prompt(doc: dict, system: str, subject: str,
         + json.dumps(context, indent=2, sort_keys=True)
         + "\n```"
     )
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user

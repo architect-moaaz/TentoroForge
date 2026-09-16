@@ -66,6 +66,20 @@ Return ONLY a JSON object with exactly these keys:
                         Y" is THIS verb, on that workflow — not add_workflow.
       "remove_workflow" — retire a process: "remove the delete nurse
                         workflow", "stop sending the welcome email".
+      "edit_access"   — WHO may do WHAT: roles, permissions, screen access:
+                        "add a Ward Manager role", "only admins can delete a
+                        nurse", "make Master Data admin-only", "let anyone
+                        open registration without signing in".
+      "add_rule"      — a NEW business rule constraining a form or a record:
+                        "years of experience cannot exceed 60", "a nurse
+                        needs at least one speciality".
+      "edit_rule"     — change an EXISTING rule: "raise the experience cap
+                        to 70". "remove_rule" — retire one.
+      "add_entity"    — a NEW ENTITY in the data model: "add a Ward entity
+                        with a name and a capacity". NOT add_field (one new
+                        column on an existing entity is add_field).
+      "remove_entity" — retire an entity and everything on it: "we don't
+                        need the Department entity".
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
@@ -123,6 +137,22 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
 
   edit_navigation needs:
   "change": what should be different about the menu, in the user's words.
+
+  edit_access needs:
+  "change": who should be able to do what, in the user's words.
+
+  add_rule needs:
+  "rule": the rule in the user's words.
+
+  edit_rule / remove_rule need:
+  "rule": which rule, by the name the Blueprint below gives it; edit_rule
+      also "change": what should be different.
+
+  add_entity needs:
+  "entity": the entity in the user's words — its name and what it holds.
+
+  remove_entity needs:
+  "entity": which entity, by the name the Blueprint below gives it.
 
   add_workflow needs:
   "workflow": what the new process should do, in the user's own words.
@@ -388,6 +418,8 @@ def understand_ask(
         "change": str(data.get("change") or "").strip(),
         # workflows: what a new process should do, or which existing one is meant.
         "workflow": str(data.get("workflow") or "").strip(),
+        # rules: the rule in the user's words, or which existing one is meant.
+        "rule": str(data.get("rule") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
         # literal — "a clearer label" is a note to a person, not an edit — and
         # a removal or a question legitimately has none, so "" is a real value

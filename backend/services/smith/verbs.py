@@ -52,6 +52,16 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_workflow": {"workflow"},
     "edit_workflow": {"workflow", "change"},
     "remove_workflow": {"workflow"},
+    # Access — roles, permissions, who reaches which screen. One verb: the
+    # security agent re-decides the model and a second call the screens.
+    "edit_access": {"change"},
+    # Business rules — what constrains a form or a record.
+    "add_rule": {"rule"},
+    "edit_rule": {"rule", "change"},
+    "remove_rule": {"rule"},
+    # The data model — a new entity, or one retired with everything on it.
+    "add_entity": {"entity"},
+    "remove_entity": {"entity"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -119,6 +129,32 @@ VERB_HELP: dict[str, str] = {
     "remove_workflow": (
         "Retire a workflow and take its controls off every screen: \"remove the "
         "delete nurse workflow\". Needs which workflow."
+    ),
+    "edit_access": (
+        "Change who can do what: \"add a Ward Manager role\", \"only admins can "
+        "delete a nurse\", \"make Master Data admin-only\", \"let anyone open "
+        "registration without signing in\". Re-decides roles, permissions and "
+        "screen access. Needs the change in the user's words."
+    ),
+    "add_rule": (
+        "Add a business rule: \"years of experience cannot exceed 60\", \"a nurse "
+        "needs at least one speciality\". Authored against the entities and "
+        "projected so it fires on the form. Needs the rule in the user's words."
+    ),
+    "edit_rule": (
+        "Change an existing business rule. Needs which rule and what should be "
+        "different."
+    ),
+    "remove_rule": ("Retire a business rule. Needs which rule."),
+    "add_entity": (
+        "Add a NEW ENTITY to the data model: \"add a Ward entity with a name and "
+        "a capacity\". Declares it, authors its fields, projects the data layer. "
+        "NOT add_field (that is one column on an existing entity). Needs the "
+        "entity in the user's words."
+    ),
+    "remove_entity": (
+        "Retire an entity and everything standing on it — its screens, its "
+        "workflows, its relationships. Needs which entity."
     ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "

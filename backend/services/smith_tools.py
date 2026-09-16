@@ -616,6 +616,27 @@ TOOL_CATALOG: list[dict] = [
              "out again from scratch. NOT for changing one label or one "
              "field \u2014 that is edit_page. The page must already exist "
              "in the definition; check list_pages first."},
+    {"name": "edit_access",
+     "signature": "edit_access(change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE WHO CAN DO WHAT \u2014 roles, permissions, which roles open which "
+             "screen, whether a screen needs a sign-in: \"add a Ward Manager role\", "
+             "\"only admins can delete a nurse\", \"make Master Data admin-only\". "
+             "Re-decides the Blueprint's roles, permissions and page access and "
+             "re-projects the middleware and access maps. On a Blueprint-built app "
+             "add_role / remove_role / restrict_page_to_role route here. Pass the "
+             "change in the user's words."},
+    {"name": "add_rule",
+     "signature": "add_rule(rule) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "ADD A BUSINESS RULE in the user's words: \"years of experience cannot "
+             "exceed 60\". Authored against the entities, recorded in the Blueprint, "
+             "projected so it fires on the form. On a Blueprint-built app "
+             "create_business_rule routes here."},
+    {"name": "edit_rule",
+     "signature": "edit_rule(rule, change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE AN EXISTING BUSINESS RULE: which rule (by name) and what should be different."},
+    {"name": "remove_rule",
+     "signature": "remove_rule(rule) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "RETIRE A BUSINESS RULE by name; it stops firing and stays in the history."},
     {"name": "edit_navigation",
      "signature": "edit_navigation(change) -> {applied, edited_paths, diff_summary, reason?}",
      "desc": "CHANGE THE APP'S MENU \u2014 entries, order, labels, icons, group "
@@ -1187,6 +1208,11 @@ def _read_forge_project_id(output_dir: str) -> str | None:
 
 
 def _smith_create_business_rule(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        text = " ".join(str(args.get(k) or "") for k in ("name", "rule_type", "field_name") if args.get(k))
+        cfg = args.get("config")
+        text = (text + (f" — {json.dumps(cfg)}" if cfg else "")).strip()
+        return _smith_rule(output_dir, "add_rule", {"rule": text})
     """Author a Business Rule (project_rules) and ship it into the running app.
 
     Writes the rule to the platform DB (so the editor's Rules panel sees it),
@@ -1268,6 +1294,10 @@ READONLY_HANDLERS = {
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
     "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
     "edit_navigation":          lambda output_dir, args: _smith_edit_navigation(output_dir, args),
+    "edit_access":              lambda output_dir, args: _smith_edit_access(output_dir, args),
+    "add_rule":                 lambda output_dir, args: _smith_rule(output_dir, "add_rule", args),
+    "edit_rule":                lambda output_dir, args: _smith_rule(output_dir, "edit_rule", args),
+    "remove_rule":              lambda output_dir, args: _smith_rule(output_dir, "remove_rule", args),
     "add_page":                 lambda output_dir, args: _smith_add_page(output_dir, args),
     # Whole-screen composition \u2014 the page_layouts agent, reachable from a
     # conversation. See services/smith/compose.py.
@@ -1358,6 +1388,31 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
         output_dir=output_dir,
         blueprint_summary=str((args or {}).get("blueprint_summary") or ""),
     )
+
+
+def _is_blueprint_app(output_dir: str) -> bool:
+    from pathlib import Path as _P
+    return (_P(output_dir) / ".forge" / "blueprint" / "current.json").exists()
+
+
+def _smith_edit_access(output_dir: str, args: dict) -> dict:
+    from services.smith.access_change import run as _access_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "edit_access requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [], "reason": "no change described. Pass change: who should be able to do what."}
+    return _access_run(output_dir, change)
+
+
+def _smith_rule(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.rule_change import run as _rule_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    rule = str(args.get("rule") or args.get("name") or args.get("request") or "").strip()
+    if not rule:
+        return {"applied": False, "edited_paths": [], "reason": "no rule named. Pass rule: the rule in the user's words, or its name."}
+    return _rule_run(output_dir, verb, rule=rule, change=str(args.get("change") or "").strip())
 
 
 def _smith_edit_navigation(output_dir: str, args: dict) -> dict:
@@ -1877,6 +1932,14 @@ def _smith_set_field_interaction(output_dir: str, args: dict) -> dict:
 
 
 def _smith_add_entity(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        from services.smith.entity_change import run as _entity_run
+        fields = args.get("fields")
+        text = str(args.get("request") or args.get("name") or "").strip()
+        if fields:
+            text += " with " + (", ".join(f"{f.get('name')} ({f.get('type')})" if isinstance(f, dict) else str(f) for f in fields)
+                                if isinstance(fields, list) else str(fields))
+        return _entity_run(output_dir, "add_entity", entity=text)
     """Direct wrapper around :func:`fix_applier._apply_add_entity`."""
     from services.fix_applier import _apply_add_entity
     diagnosis = {
@@ -1894,6 +1957,9 @@ def _smith_add_entity(output_dir: str, args: dict) -> dict:
 
 
 def _smith_remove_entity(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        from services.smith.entity_change import run as _entity_run
+        return _entity_run(output_dir, "remove_entity", entity=str(args.get("entity") or args.get("name") or "").strip())
     """Drop an entire entity. Highest blast radius, so it confirms first with
     the true cascade (dependent pages/workflows/relationships)."""
     from services.confirmation_gate import needs_confirmation_result
@@ -2300,18 +2366,24 @@ def _smith_verify_promise(output_dir: str, args: dict) -> dict:
 
 
 def _smith_add_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"add a role named {args.get('role_name') or args.get('name') or ''}"})
     """Add a role to plan['actors']. Phase 6."""
     from services.role_seams import add_role_in_file
     return add_role_in_file(output_dir, args.get("role_name") or "")
 
 
 def _smith_remove_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"remove the role {args.get('role_name') or args.get('name') or ''}"})
     """Remove a role from plan['actors']. Phase 6."""
     from services.role_seams import remove_role_in_file
     return remove_role_in_file(output_dir, args.get("role_name") or "")
 
 
 def _smith_restrict_page_to_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"only the {args.get('role_name') or ''} role may open {args.get('page_route') or args.get('route') or ''}"})
     """Set access.roles on a page. Phase 6."""
     from services.role_seams import restrict_page_to_role_in_file
     return restrict_page_to_role_in_file(

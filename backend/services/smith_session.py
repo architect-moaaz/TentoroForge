@@ -392,6 +392,28 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _section(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Access, rules and entities — three Blueprint sections, one dispatch.
+        Each seam is also a tool; both reach the same `run`."""
+        u = {k: str(understanding.get(k) or "").strip() for k in ("change", "rule", "entity")}
+        reasoning = self._reasoning
+        if verb == "edit_access":
+            from services.smith.access_change import run as go
+            out = go(str(self.output_dir), u["change"] or user_message.strip(), reasoning=reasoning)
+        elif verb in ("add_rule", "edit_rule", "remove_rule"):
+            from services.smith.rule_change import run as go
+            out = go(str(self.output_dir), verb, rule=u["rule"] or user_message.strip(), change=u["change"], reasoning=reasoning)
+        else:
+            from services.smith.entity_change import run as go
+            # add_field's `entity` is a name; here it is the ask in the user's words.
+            out = go(str(self.output_dir), verb, entity=u["entity"] or user_message.strip(), reasoning=reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched, diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _navigation(self, understanding: dict, user_message: str) -> "TurnResult":
         """Change the menu — the `navigation` section. One implementation in
         `services.smith.navigation_change.run`, shared with the tool."""
@@ -666,6 +688,8 @@ class SmithSession:
             return self._workflow(verb, understanding, user_message)
         if verb == "edit_navigation":
             return self._navigation(understanding, user_message)
+        if verb in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
+            return self._section(verb, understanding, user_message)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":
