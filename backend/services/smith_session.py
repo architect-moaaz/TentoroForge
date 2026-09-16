@@ -144,6 +144,8 @@ class SmithSession:
         #: The turn's whole ask — what was asked for, plus the answer to any
         #: question Smith asked about it. Set by `run_iteration`.
         self._ask = ""
+        #: What was typed on THIS turn, before the carried ask is folded in.
+        self._last_message = ""
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -457,13 +459,80 @@ class SmithSession:
         else:
             from services.smith.entity_change import run as go
             # add_field's `entity` is a name; here it is the ask in the user's words.
-            out = go(str(self.output_dir), verb, entity=u["entity"] or user_message.strip(), reasoning=reasoning)
+            ref = u["entity"] or user_message.strip()
+            if verb == "remove_entity":
+                gate = self._confirm_cascade("remove_entity", ref, self._cascade_of_entity(ref))
+                if gate is not None:
+                    return gate
+            out = go(str(self.output_dir), verb, entity=ref, reasoning=reasoning)
         if not out.get("applied"):
             return TurnResult(status="needs_user",
                               answer=str(out.get("reason") or f"I could not {verb.replace('_', ' ')} and have changed nothing."))
         touched = list(out.get("edited_paths") or [])
         return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
                           touched_paths=touched, diff_summary=", ".join(touched[:8]) if touched else "")
+
+    def _cascade_of_entity(self, ref: str) -> list[str]:
+        """What retiring this record would take with it, in a person's words."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.entity_change import consequences
+
+        said = consequences(load_engine_doc(str(self.output_dir)) or {}, ref)
+        if not said.get("found"):
+            return []
+        out = []
+        if said["pages"]:
+            out.append(f"{len(said['pages'])} screen(s) — {', '.join(said['pages'])} — "
+                       "retired and taken off the menu")
+        if said["workflows"]:
+            out.append(f"{len(said['workflows'])} automatic process(es) — "
+                       f"{', '.join(said['workflows'])} — stopped, and their "
+                       "buttons taken off every screen")
+        if said["pointing"]:
+            out.append("records that point at it: " + ", ".join(said["pointing"]))
+        return out
+
+    def _cascade_of_field(self, entity: str, field: str) -> list[str]:
+        """Where a box is used, and the one thing undo cannot bring back."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.field_change import consequences
+
+        said = consequences(load_engine_doc(str(self.output_dir)) or {}, entity, field)
+        if not said.get("found"):
+            return []
+        out = ["everything written in it so far, which cannot be brought back"]
+        if said["used"]:
+            out.append("it comes off " + ", ".join(said["used"]))
+        if said["rules"]:
+            out.append("rules that check it are retired: " + ", ".join(said["rules"]))
+        if said["workflows"]:
+            out.append("processes that use it are re-authored: " + ", ".join(said["workflows"]))
+        return out
+
+    def _confirm_cascade(self, verb: str, target: str, consequences: list[str]) -> "TurnResult | None":
+        """Show what a change takes with it and wait for a yes — or None when
+        the yes is already in hand.
+
+        The dependency set was computed one line before the removal started,
+        and nobody was shown it. The yes is kept against a fingerprint of THIS
+        operation (services.smith.confirm), so the turn that says "go ahead"
+        is not read as the same ask arriving again — which would show the
+        question a second time, for ever.
+        """
+        from services.smith import confirm
+
+        if not consequences:
+            return None                       # nothing cascades: nothing to warn about
+        if confirm.granted(self.output_dir, self._last_message, verb, target):
+            return None
+        confirm.remember(self.output_dir, confirm.fingerprint(verb, target))
+        return TurnResult(
+            status="asked",
+            answer=("That does not only remove what you named. It also takes:\n"
+                    + "\n".join(f"- {c}" for c in consequences)
+                    + "\n\nShall I go ahead?"),
+            options=[confirm.YES_LABEL, confirm.NO_LABEL],
+        )
 
     def _navigation(self, understanding: dict, user_message: str) -> "TurnResult":
         """Change the menu — the `navigation` section. One implementation in
@@ -699,6 +768,10 @@ class SmithSession:
         """
         carried = pending_ask.take(self.output_dir)
         self._ask = pending_ask.joined(carried, user_message)
+        # The consent test reads what was typed NOW, not the accumulated ask:
+        # "go ahead" is a yes, "remove complaints\n\ngo ahead" is not a
+        # sentence anybody typed.
+        self._last_message = user_message
         result = self._iterate(user_message, history)
         if result.status == "asked":
             # Still unanswered: keep it for the turn that answers. The
@@ -820,6 +893,17 @@ class SmithSession:
             return self._navigation(understanding, self._ask)
         if verb in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
             return self._section(verb, understanding, self._ask)
+        if verb == "remove_field":
+            # A COLUMN'S DATA IS THE ONE THING UNDO DOES NOT BRING BACK, so it
+            # is named before it goes, with everywhere the box is used.
+            gate = self._confirm_cascade(
+                "remove_field",
+                f"{understanding.get('entity') or ''}.{(understanding.get('field') or {}).get('name') or ''}",
+                self._cascade_of_field(
+                    str(understanding.get("entity") or ""),
+                    str((understanding.get("field") or {}).get("name") or "")))
+            if gate is not None:
+                return gate
         if verb in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement",
                     "edit_product", "add_api", "remove_api", "add_integration", "remove_integration"):
             return self._definition(verb, understanding, self._ask)

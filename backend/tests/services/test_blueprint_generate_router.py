@@ -433,3 +433,18 @@ def test_the_lifecycle_words_are_answered_where_they_are_typed(tmp_path):
     # Only an exact one-word command is the verb.
     assert _lifecycle_verb("preview") == "preview"
     assert _lifecycle_verb("preview the nurses page") is None
+
+
+def test_the_go_ahead_to_build_is_the_whole_message_not_a_word_in_it():
+    """"Build it" typed by a layman was answered with a description of a card
+    to press. It is a door now — but "build a dashboard" is still a screen to
+    compose, so the consent has to BE the message."""
+    from routers.blueprint_generate import _is_build_consent
+
+    for said in ("build", "build it", "Build it.", "go on then", "do it",
+                 "make it", "yes, build it", "approve and build", "PROCEED"):
+        assert _is_build_consent(said), said
+    for said in ("build a dashboard", "build a page for reports",
+                 "rebuild the nurses page", "do it after the phone number",
+                 "", "   "):
+        assert not _is_build_consent(said), said

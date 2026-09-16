@@ -379,6 +379,45 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
             "surfaced": surfaced, "edited_paths": _project(svc, app_root)}
 
 
+def consequences(doc: dict, entity_ref: str, field_ref: str) -> dict:
+    """Where a field is used, WITHOUT removing any of it — so the question
+    can name what goes before it goes. The column's data goes with it, and
+    that is the part no undo of the Blueprint brings back."""
+    try:
+        ent, fld = find_field(doc, entity_ref, field_ref)
+    except SectionChangeError as exc:
+        return {"found": False, "reason": str(exc)}
+    name = str(fld.get("name"))
+    eid, ename = str(ent["id"]), str(ent.get("name") or "")
+    pages = {str(p.get("id")): p for p in (doc.get("pages") or []) if isinstance(p, dict)}
+    used: list[str] = []
+    for layout in _live(doc.get("pageLayouts")):
+        if not _touches_entity(doc, layout, eid, ename):
+            continue
+        page = pages.get(str(layout.get("page"))) or {}
+        where = str(page.get("name") or page.get("route") or "")
+        for node in _walk(layout.get("root")):
+            props = node.get("props") or {}
+            # `columns` is a count on some components and a list on others,
+            # so the shape is checked rather than assumed.
+            fields = props.get("fields") if isinstance(props.get("fields"), list) else []
+            columns = props.get("columns") if isinstance(props.get("columns"), list) else []
+            if any(isinstance(f, dict) and str(f.get("name") or "") == name for f in fields):
+                used.append(f"the form on {where}")
+            if any(isinstance(c, dict) and str(c.get("key") or "") == name for c in columns):
+                used.append(f"the table on {where}")
+    word = _word_re(name)
+    rules = [str(r.get("name")) for r in _live(doc.get("businessRules"))
+             if str(r.get("entity") or "") == eid
+             and (any(isinstance(r.get(k), str) and word.search(r[k]) for k in ("when", "expression"))
+                  or any(isinstance(a, dict) and str(a.get("field") or "") == name
+                         for a in list(r.get("then") or []) + list(r.get("otherwise") or [])))]
+    flows = [str(w.get("name")) for w in _live(doc.get("workflows"))
+             if word.search(json.dumps(w.get("inputs") or [])) or word.search(json.dumps(w.get("steps") or []))]
+    return {"found": True, "entity": ename, "field": name,
+            "used": sorted(set(used)), "rules": rules, "workflows": sorted(set(flows))}
+
+
 def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | None = None,
                  reasoning: Any = None) -> dict:
     from services.blueprint.functional_completeness import _workflow_targets_entity

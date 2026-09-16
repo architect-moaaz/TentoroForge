@@ -1539,6 +1539,32 @@ async def smith_chat(
                                  app_name=getattr(project, "name", "") or "")
                 return built
 
+            # "BUILD IT" IS A DOOR, NOT A SIGNPOST. Typed by a layman it was
+            # answered with a description of a card to press, which is the
+            # answer a machine gives. The gate is not bypassed: this records
+            # the approval the same way the card does, so a definition changed
+            # since the last approval is still refused as stale — the refusal
+            # just happens after the click rather than instead of it.
+            if svc is not None and defined and _is_build_consent(req.message):
+                from services.blueprint import approval as _approval
+                if _is_built(output_dir) and _approval.state_of(svc.doc, "plan") == "approved":
+                    # Already built, and nothing has changed since it was
+                    # approved: rebuilding costs minutes and money for the
+                    # same application, so it is asked rather than assumed.
+                    emit("message", {
+                        "text": ("It is already built from this definition, and "
+                                 "nothing has changed since. Building it again "
+                                 "takes a few minutes and produces the same "
+                                 "application.\n\nWhat would you like to do?"),
+                        "options": ["Build it again anyway", "Show me the screens",
+                                    "Nothing, I'll change something first"],
+                        "status": "asked"})
+                    return {"status": "asked"}
+                emit("message", {"text": "Building it now — this takes a few minutes."})
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=True, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
+
             # THE USER TOOK THE VERIFY OFFER. A built application and a message
             # that is the consent to the review Smith offered after the build —
             # so run it now. Gated on `_is_built`: the offer only exists for a
@@ -2046,6 +2072,29 @@ def _is_verify_consent(message: str) -> bool:
         return False
     return m.startswith(("verify ", "verify.", "verify!", "auto-verify ",
                          "auto verify ", "check and fix "))
+
+
+#: The whole message, not a word inside it: "build a dashboard" is a screen to
+#: compose and "build it" is the go-ahead. Matched like `_is_verify_consent`,
+#: which this follows — the offer's own words plus the obvious typed ones.
+_BUILD_CONSENT = frozenset({
+    "build", "build it", "build the app", "build the application", "make it",
+    "go on then", "go ahead", "do it", "start", "start it", "yes build it",
+    "build it now", "approve and build", "yes, build it", "go", "proceed",
+    "ok build it", "let's build it", "lets build it",
+})
+
+
+def _is_build_consent(message: str) -> bool:
+    """Whether a message IS the go-ahead to build.
+
+    A layman types it and used to be handed a description of a card. The
+    approval gate is not bypassed by this — the caller records the approval
+    exactly as the card does, and a definition that changed since the last
+    approval is still refused as stale.
+    """
+    m = " ".join((message or "").strip().lower().rstrip(".!").split())
+    return m in _BUILD_CONSENT
 
 
 def _verify_scope(message: str) -> list[str] | None:

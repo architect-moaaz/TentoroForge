@@ -126,6 +126,28 @@ def dependents(doc: dict, eid: str) -> dict:
     return {"pages": pages, "workflows": workflows, "relationships": rels, "pointing": pointing}
 
 
+def consequences(doc: dict, ref: str) -> dict:
+    """What retiring `ref` would take with it, WITHOUT taking any of it.
+
+    The set was already computed inside the removal, one line before it
+    started removing; the person found out what a cascade was by looking at
+    the result. Returned here so the question can be asked first.
+    """
+    from services.smith.section_change import find_named, names
+
+    ent = find_named(_live(doc), ref, id_prefix="ENTITY-")
+    if ent is None:
+        return {"found": False, "names": names(_live(doc))}
+    deps = dependents(doc, str(ent.get("id")))
+    return {
+        "found": True, "name": str(ent.get("name") or ""), "id": str(ent.get("id")),
+        "pages": [str(p.get("route") or p.get("name") or "") for p in deps["pages"]],
+        "workflows": [str(w.get("name") or "") for w in deps["workflows"]],
+        "relationships": len(deps["relationships"]),
+        "pointing": list(deps["pointing"]),
+    }
+
+
 def _retire_pages(svc: Any, pages: list[dict]) -> list[str]:
     ids = {str(p.get("id")) for p in pages}
     routes = []
