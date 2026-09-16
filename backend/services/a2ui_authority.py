@@ -751,15 +751,19 @@ def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[
     if not entity:
         return []
     my_family = families.get(page_id) or ""
-    def sibling(family: str) -> str:
+    def sibling(family: str, with_id: bool | None = None) -> str:
         for pid, fam in families.items():
             if pid != page_id and fam == family and (registry.get("pageEntity") or {}).get(pid) == entity:
-                return routes.get(pid) or ""
+                r = routes.get(pid) or ""
+                if with_id is not None and (("[" in r) != with_id):
+                    continue
+                return r
         return ""
     def workflow(op: str) -> dict | None:
         return next((w for w in registry.get("workflows") or []
                      if w.get("op") == op and w.get("entity") == entity), None)
-    form_route, record_route = sibling("form"), sibling("record")
+    form_route = sibling("form", with_id=False) or sibling("form")
+    edit_route, record_route = sibling("form", with_id=True), sibling("record")
     lines: list[str] = []
     on_list = my_family == "collection"
     for a in actions:
@@ -775,7 +779,12 @@ def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[
                 lines.append(f"- `{a}`: a Button that navigates to `{form_route}` — it does NOT run a workflow.")
         elif verb in ("edit", "update"):
             wf = workflow("db_update")
-            if my_family != "form" and form_route:
+            if my_family != "form" and edit_route:
+                rid = "{{id}}" if on_list else "the record's id, bound from this screen's record source"
+                lines.append(f"- `{a}`: a {'row action' if on_list else 'Button'} that navigates to "
+                             f"`{edit_route.replace('[id]', rid)}` (the edit screen) — it does NOT run "
+                             f"{wf['id'] if wf else 'the update workflow'}.")
+            elif my_family != "form" and form_route:
                 rid = "{{id}}" if on_list else "the record's id, bound from this screen's record source"
                 lines.append(f"- `{a}`: a {'row action' if on_list else 'Button'} that navigates to "
                              f"`{form_route}?id=`{rid} — it does NOT run "

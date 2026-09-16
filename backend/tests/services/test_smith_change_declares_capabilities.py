@@ -92,3 +92,35 @@ def test_the_words_that_name_a_capability():
     assert sc.capabilities_named("change the title to Nurses") == []
     assert sc.capabilities_named("let users update a nurse and view record details") == ["edit", "view"]
     assert sc.capabilities_named("add a Register Nurse button") == ["create"]
+
+
+def test_an_edit_request_gets_the_edit_screen_the_definition_never_made(svc, monkeypatch):
+    """Med Registration: "implement the edit functionality" re-composed the
+    list, whose Edit already pointed at /nurse-registration/{{id}} — a route
+    nothing served, because only the create screen existed. The platform's
+    rule is that a form page with `[id]` in its route IS the edit screen, so
+    Smith creates it, makes it reachable and launchable, and composes it
+    before the list."""
+    calls = _stub_compose(monkeypatch)
+    sc.add_widgets(svc, "/master-data", ["Edit action button on each row"],
+                   request="Can you implement the edit functionality")
+    doc = BlueprintService.load(output_dir=svc.output_dir).doc
+    edit = next(p for p in doc["pages"] if p["route"] == "/nurse-registration/[id]")
+    assert edit["pattern"] == "form" and edit["name"] == "Edit Nurse"
+    assert edit["actions"] == ["save_edit", "cancel"] and edit["data"] == {"primaryEntity": "ENTITY-001"}
+    lst = next(p for p in doc["pages"] if p["route"] == "/master-data")
+    assert edit["id"] in lst["navigatesTo"]                              # the list reaches it
+    upd = next(w for w in doc["workflows"] if w["id"] == "FLOW-002")
+    assert edit["id"] in upd["launchedFrom"]                              # the composer may bind it there
+    assert calls == ["/nurse-registration/[id]", "/master-data"]          # edit screen first, then the list
+    # Asked again: the screen exists, nothing is created twice.
+    sc.add_widgets(svc, "/master-data", ["Edit action button on each row"], request="implement edit")
+    assert [p["route"] for p in BlueprintService.load(output_dir=svc.output_dir).doc["pages"]].count("/nurse-registration/[id]") == 1
+
+
+def test_no_edit_screen_is_invented_without_an_update_workflow(svc, monkeypatch):
+    calls = _stub_compose(monkeypatch)
+    svc.doc["workflows"] = [w for w in svc.doc["workflows"] if w["id"] != "FLOW-002"]; svc.save()
+    sc.add_widgets(svc, "/master-data", ["Edit button"], request="implement the edit functionality")
+    assert "/nurse-registration/[id]" not in [p["route"] for p in BlueprintService.load(output_dir=svc.output_dir).doc["pages"]]
+    assert calls == ["/master-data"]

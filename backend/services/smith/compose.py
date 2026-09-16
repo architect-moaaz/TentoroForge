@@ -325,7 +325,19 @@ def add_widgets(
     # A capability the request names is contract, not prose: the verb goes into
     # `actions` and its workflow is declared, so the composition is HELD to it.
     page = _page_for_route(svc.doc, page.get("route") or route) or page
+    named = capabilities_named(f"{request} {' '.join(wanted)}")
     declare_capabilities(svc, page, f"{request} {' '.join(wanted)}")
+    # An edit needs a screen that edits. Created and composed FIRST, so the
+    # list's Edit has somewhere to go by the time the list is composed.
+    if "edit" in named:
+        page = _page_for_route(svc.doc, page.get("route") or route) or page
+        edit_page = ensure_edit_page(svc, page)
+        if edit_page is not None:
+            tell(reasoning, f"There was no screen to edit a record on — creating "
+                            f"{edit_page.get('route')} first.", "step")
+            compose_route(svc, edit_page["route"], app_root=app_root,
+                          request=f"compose the edit screen at {edit_page['route']}",
+                          executor=executor, reasoning=reasoning)
 
     return compose_route(
         svc, page.get("route") or route, app_root=app_root,
@@ -389,6 +401,68 @@ def declare_capabilities(svc: Any, page: dict, request: str) -> list[str]:
     settle_crud_gaps(svc, only_pages={str(page.get("id"))})
     logger.info("[smith] %s actions += %s", page.get("route"), added)
     return added
+
+
+def ensure_edit_page(svc: Any, page: dict) -> dict | None:
+    """The screen an `edit` needs, created when the definition has none.
+
+    The platform's own rule: a form page whose route carries `[id]` is an
+    EDIT screen (one form, pre-filled, submit saves); a form without one is a
+    CREATE screen. Med Registration was defined with the create screen only
+    — `/nurse-registration` — and `save_edit` declared on it, which one Form
+    running one workflow cannot honour. "Implement the edit functionality"
+    then re-composed the list, whose Edit already navigated to
+    `/nurse-registration/{{id}}`: a route nothing served. The edit lives on
+    its own page. Returns the page created, or None when one can already
+    host it (an `[id]` form page or a record page for the entity)."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    pages = [p for p in (svc.doc.get("pages") or []) if p.get("status") != "DEPRECATED"
+             and str((p.get("data") or {}).get("primaryEntity") or "") == entity]
+    from services.blueprint.functional_completeness import page_family
+    if any(page_family(p) == "record" or (page_family(p) == "form" and "[" in str(p.get("route") or ""))
+           for p in pages):
+        return None
+    create = next((p for p in pages if page_family(p) == "form"), None)
+    update = next((w for w in (svc.doc.get("workflows") or [])
+                   if any((st.get("config") or {}).get("actionType") == "db_update"
+                          for st in w.get("steps") or [])
+                   and any(str(st.get("entity")) == entity for st in w.get("steps") or [])), None)
+    if create is None or update is None:
+        return None                        # nothing to edit with — Page↔Workflow's, not a page's
+    ename = next((str(e.get("name")) for e in (svc.doc.get("data") or {}).get("entities") or []
+                  if str(e.get("id")) == entity), entity)
+    route = str(create.get("route") or "").rstrip("/") + "/[id]"
+    from services.blueprint.ids import page_key
+    body = {
+        "name": f"Edit {ename}", "route": route, "pattern": "form",
+        "purpose": f"Change one existing {ename}: the form opens pre-filled with its current values "
+                   f"and saving runs {update.get('name') or update.get('id')}.",
+        "actions": ["save_edit", "cancel"],
+        "data": {"primaryEntity": entity},
+        "requirements": list(create.get("requirements") or []),
+        "navigatesTo": [str(p["id"]) for p in pages if page_family(p) == "collection" and p.get("id")],
+        "primaryTasks": [f"Edit an existing {ename} and save the changes"],
+    }
+    if create.get("module"):
+        body["module"] = create["module"]
+    if create.get("users"):
+        body["users"] = list(create["users"])
+    new_page = svc.upsert("pages", body, natural_key=page_key(route))
+    # The list reaches it, and the update workflow is launchable from it —
+    # the composer binds only workflows declared to start from a screen.
+    for p in svc.doc.get("pages") or []:
+        if page_family(p) == "collection" and str((p.get("data") or {}).get("primaryEntity") or "") == entity:
+            nav = list(p.get("navigatesTo") or [])
+            if new_page["id"] not in nav:
+                p["navigatesTo"] = nav + [new_page["id"]]
+    launched = list(update.get("launchedFrom") or [])
+    if new_page["id"] not in launched:
+        update["launchedFrom"] = launched + [new_page["id"]]
+    svc.save()
+    logger.info("[smith] created the edit screen %s (%s) for %s", route, new_page["id"], ename)
+    return new_page
 
 
 VERBS = ("compose_route", "add_widgets")
