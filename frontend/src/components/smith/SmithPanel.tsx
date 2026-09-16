@@ -49,6 +49,8 @@ import {
   SkipForward,
   XCircle,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
 import {
@@ -235,6 +237,38 @@ export interface SmithPanelProps {
   className?: string;
 }
 
+/**
+ * Smith's side of the conversation, rendered as light markdown.
+ *
+ * Smith answers about an application by naming its screens, routes, fields
+ * and requirements, and a paragraph that names six of them in a row is a
+ * wall. The backend now writes a one-line lead and a list where there is a
+ * list, with the names in bold; this is where that structure becomes
+ * visible. Compact on purpose — the bubble is a chat message, not a
+ * document — so headings are flattened to bold and lists sit tight.
+ */
+function SmithProse({ text }: { text: string }) {
+  return (
+    <div
+      className={cn(
+        "prose prose-sm max-w-none text-sm leading-relaxed text-foreground",
+        "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
+        "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4",
+        "[&_li]:my-0.5 [&_li]:pl-0.5 [&_li>p]:my-0",
+        "[&_strong]:font-semibold [&_strong]:text-foreground",
+        "[&_code]:rounded [&_code]:bg-background/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-[0.85em] [&_code]:font-normal",
+        "[&_code]:before:content-none [&_code]:after:content-none",
+        "[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold",
+        "[&_h1]:my-1.5 [&_h2]:my-1.5 [&_h3]:my-1.5",
+        "[&_a]:underline [&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:not-italic",
+        "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
+      )}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 export function SmithPanel({
   projectId,
   initialBrief,
@@ -295,7 +329,7 @@ export function SmithPanel({
             const rows = (await res.json()) as Array<Record<string, unknown>>;
             if (!Array.isArray(rows)) return;
             setMessages((cur) => {
-              const seen = new Set(cur.map((m) => `${m.role} ${m.text}`));
+              const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
               const add = rows
                 .filter((r) => String(r.content ?? "").trim())
                 .map((r) => {
@@ -308,7 +342,7 @@ export function SmithPanel({
                     at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
                   };
                 })
-                .filter((m) => !seen.has(`${m.role} ${m.text}`));
+                .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
               return add.length ? [...cur, ...add] : cur;
             });
           } catch {
@@ -910,7 +944,11 @@ export function SmithPanel({
                   : "bg-muted",
               )}
             >
-            <p>{m.text}</p>
+            {m.role === "user" ? (
+              <p className="whitespace-pre-wrap">{m.text}</p>
+            ) : (
+              <SmithProse text={m.text} />
+            )}
 
             {m.diffSummary && (
               // §71 — what the change touched, before it is believed.

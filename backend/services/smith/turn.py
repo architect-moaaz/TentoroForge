@@ -194,7 +194,7 @@ TURN_SCHEMA: dict[str, Any] = {
         },
         "reply": {
             "type": "string",
-            "description": "What to say to the user. Plain prose, no markdown headings.",
+            "description": ("What to say to the user. Shown as markdown in a chat bubble: a short lead, then a bulleted list when naming more than two things (names in **bold**, routes and ids in `code`). No headings."),
         },
         "confidence": {
             "type": "number",
@@ -827,7 +827,7 @@ EXPLAIN_SCHEMA: dict[str, Any] = {
     "properties": {
         "answer": {
             "type": "string",
-            "description": "The explanation, in plain prose.",
+            "description": ("The explanation, shown as markdown in a chat bubble: a short lead, then a bulleted list when naming more than two things (names in **bold**, routes and ids in `code`). No headings."),
         },
     },
 }

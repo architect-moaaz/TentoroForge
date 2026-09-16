@@ -107,12 +107,18 @@ def _status_report(doc: dict) -> str:
     except Exception:  # noqa: BLE001
         by_user = 0
     if not reqs and not pages:
-        return ("State: DISCOVERY — nothing defined yet. Describe what you want "
-                "to build, then say `define` to draft the definition.")
+        return ("**State:** DISCOVERY — nothing defined yet.\n\nDescribe what "
+                "you want to build, then say `define` to draft the definition.")
     nxt = ("Say `approve` to build." if state in ("BLUEPRINT_REVIEW", "DEFINITION")
            else "Say `define` to (re)draft the definition, then `approve` to build.")
-    return (f"State: {state}. {reqs} requirement(s), {pages} page(s) drafted; "
-            f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
+    return "\n".join([
+        f"**State:** {state}",
+        f"- **Requirements:** {reqs}",
+        f"- **Pages:** {pages}",
+        f"- **Decisions:** {total_dec} recorded, {by_user} from you",
+        "",
+        nxt,
+    ])
 
 
 def _is_built(output_dir) -> bool:
@@ -380,26 +386,26 @@ def _requirement_report(doc: dict, req_id: str) -> str:
         if not reqs:
             return (f"{req_id} can't be traced yet — this project has no "
                     "requirements defined. Say `define` first.")
-        return (f"{req_id} isn't a requirement in this Blueprint. It has "
+        return (f"`{req_id}` isn't a requirement in this Blueprint. It has "
                 f"{len(reqs)} requirement(s), e.g. {known}.")
     desc = str(match.get("description") or "").strip()
-    lines = [f"{req_id} — {desc}" if desc else req_id]
+    lines = [f"**{req_id}** — {desc}" if desc else f"**{req_id}**"]
     try:
         from services.smith import code_intel
         tr = code_intel.trace(doc, req_id)
-        lines.append(f"Verdict: {getattr(tr, 'verdict', 'UNKNOWN')}.")
+        lines.append(f"- **Verdict:** {getattr(tr, 'verdict', 'UNKNOWN')}")
         chain = getattr(tr, "chain", {}) or {}
         order = ("FLOW", "RULE", "PAGE", "API", "ENTITY", "TEST")
-        parts = [f"{p.title()}: {', '.join(chain[p])}"
+        parts = [f"- **{p.title()}:** " + ", ".join(f"`{i}`" for i in chain[p])
                  for p in order if chain.get(p)]
         # Anything the ordered list didn't name, so nothing is silently dropped.
-        parts += [f"{p.title()}: {', '.join(ids)}"
+        parts += [f"- **{p.title()}:** " + ", ".join(f"`{i}`" for i in ids)
                   for p, ids in sorted(chain.items())
                   if p not in order and ids]
         if parts:
-            lines.append("Traced to — " + "; ".join(parts) + ".")
+            lines.extend(parts)
         else:
-            lines.append("Nothing cites it yet — it has no implementing "
+            lines.append("- Nothing cites it yet — it has no implementing "
                          "artifacts in the Blueprint.")
     except Exception:  # noqa: BLE001 — a trace degrades to the text + id, never 500s
         pass

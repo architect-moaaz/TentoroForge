@@ -26,10 +26,15 @@ Return ONLY a JSON object with exactly these keys:
 
   "answer": if they are ASKING ABOUT the application rather than asking you to
       change it — how something works, whether something is stored, what
-      happens when they do X — answer it from the Blueprint below, in two or
-      three plain sentences, and leave every other field "". Answer only what
-      the Blueprint actually says; if it does not say, reply that it does not
-      and name what you would need. "" when the request is a change.
+      happens when they do X — answer it from the Blueprint below and leave
+      every other field "". Answer only what the Blueprint actually says; if
+      it does not say, reply that it does not and name what you would need.
+      "" when the request is a change.
+      SHAPE OF AN ANSWER (it is shown as markdown in a chat bubble): one
+      short lead sentence, then a bulleted list whenever you are naming more
+      than two things — screens, routes, fields, requirements, roles — one
+      per line, with the name in **bold** and its route or id in `code`.
+      Keep each bullet to one line. No headings, no closing summary.
   "clarification_needed": a question to ask them, or "" if the request is
       clear enough to act on. Ask when the request names no screen or element,
       when it could plausibly mean two different changes, or when acting on
