@@ -75,7 +75,9 @@ def test_missing_keys_normalise_to_strings():
     # the same dict. An absent verb still means rename.
     assert out["verb"] == "" and out["route"] == "" and out["widgets"] == []
     assert out["clarification_options"] == [] and out["field"] == {}
-    assert all(out[k] == "" for k in SHAPE - {"widgets", "field", "clarification_options", "target_file"})
+    assert out["further_asks"] == []
+    assert all(out[k] == "" for k in SHAPE - {"widgets", "field", "target_file",
+                                              "clarification_options", "further_asks"})
 
 
 def test_a_replacement_carries_the_value_to_write():

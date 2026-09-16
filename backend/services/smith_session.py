@@ -656,6 +656,18 @@ class SmithSession:
         return bool(want) and want in (normalise(entry.get("route") or ""),
                                        normalise(entry.get("page") or ""))
 
+    def _run_step(self, step: str) -> "TurnResult":
+        """One step of an agreed plan, as an ordinary turn.
+
+        Re-entering `_iterate` rather than a second execution path: a step is
+        a normal ask and must be able to do everything one can — ask its own
+        question, refuse, confirm a cascade — with the rest of the plan still
+        waiting behind it.
+        """
+        self._ask = step
+        self._last_message = step
+        return self._iterate(step, None)
+
     def _revert(self) -> "TurnResult":
         """Undo the last change (§91/§93).
 
@@ -766,6 +778,32 @@ class SmithSession:
         the ask between the two, recorded when Smith asks and taken here; the
         seams get both, in the order they were said.
         """
+        from services.smith import plan as _plan_mod
+
+        # AGREED, SO DO THE FIRST ONE NOW. The yes is a turn of its own; it
+        # would otherwise be spent saying "starting" and the person would have
+        # to ask again for the thing they just agreed to.
+        if _plan_mod.peek(self.output_dir) and (
+                _plan_mod.wants_next(user_message)
+                or user_message.strip() == _plan_mod.ALL_LABEL
+                or user_message.strip() == _plan_mod.FIRST_LABEL):
+            only_one = user_message.strip() == _plan_mod.FIRST_LABEL
+            step = _plan_mod.take_next(self.output_dir)
+            if only_one:
+                _plan_mod.clear(self.output_dir)
+            if step:
+                pending_ask.clear(self.output_dir)
+                result = self._run_step(step)
+                rest = _plan_mod.peek(self.output_dir)
+                note = _plan_mod.remaining_note(rest)
+                if note and result.status == "resolved":
+                    result.answer += note
+                return result
+        if user_message.strip() == _plan_mod.REWORD_LABEL:
+            _plan_mod.clear(self.output_dir)
+            return TurnResult(status="asked",
+                              answer="Go ahead — tell me the one thing you want first.")
+
         carried = pending_ask.take(self.output_dir)
         self._ask = pending_ask.joined(carried, user_message)
         # The consent test reads what was typed NOW, not the accumulated ask:
@@ -832,6 +870,23 @@ class SmithSession:
         answered = (understanding.get("answer") or "").strip()
         if answered:
             return TurnResult(status="no_op", answer=answered)
+
+        # SEVERAL ASKS IN ONE MESSAGE. Shown as a plan and agreed to once,
+        # rather than the biggest one happening in silence. Nothing is done
+        # before the yes — starting on step one while showing the list is the
+        # old behaviour with a receipt.
+        from services.smith import plan as _plan
+        further = [str(a) for a in (understanding.get("further_asks") or []) if str(a).strip()]
+        if further and not _plan.wants_next(user_message):
+            steps = [user_message.strip()] + further
+            from services.smith import confirm as _confirm
+            if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
+                _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))
+                _plan.remember(self.output_dir, steps)
+                return TurnResult(status="asked",
+                                  answer=_plan.as_question(steps),
+                                  options=[_plan.ALL_LABEL, _plan.FIRST_LABEL,
+                                           _plan.REWORD_LABEL])
 
         clarification = (understanding.get("clarification_needed") or "").strip()
         if clarification:
