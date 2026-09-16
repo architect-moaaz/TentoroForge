@@ -202,6 +202,14 @@ export function Button({
           return;
         }
         if (workflow) {
+          // A destructive Button asks first — the same confirmation a danger
+          // row action gets, so "delete with a confirmation prompt" is the
+          // platform's behaviour rather than a Dialog composed per page.
+          if (variant === "danger" && typeof window !== "undefined"
+              && typeof window.confirm === "function"
+              && !window.confirm(`${label ?? "Delete"}? This cannot be undone.`)) {
+            return;
+          }
           // ctxDispatch can be undefined when Provider/library resolve different
           // renderer copies in a standalone app — fall back to a direct API POST.
           const dispatch = __dispatch ?? ctxDispatch ?? fallbackDispatch;

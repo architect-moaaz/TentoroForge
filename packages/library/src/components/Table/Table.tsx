@@ -96,6 +96,14 @@ function humanize(key: string): string {
   const s = String(key ?? "").replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
   return s ? s.replace(/\b\w/g, (c) => c.toUpperCase()) : "";
 }
+/** The one confirmation every destructive control goes through. A host with
+ *  no window (SSR, tests) proceeds; a person gets asked, naming the row. */
+export function confirmDestructive(label: string, rec?: Record<string, unknown>): boolean {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+  const name = rec && (rec.name ?? rec.title ?? rec.fullName ?? rec.label ?? rec.id);
+  return window.confirm(`${label}${name ? ` "${String(name)}"` : ""}? This cannot be undone.`);
+}
+
 function applyTemplate(tpl: string, rec: Record<string, unknown>): string {
   // Accept both the schema's Mustache-style {{id}} (what the generator emits for
   // rowHref / navigate) and bare {id}. Matching only {id} turned "/x/{{id}}" into
@@ -510,6 +518,11 @@ export function Table(props: TableProps) {
         console.warn(`[Table] row action "${a.label}" skipped: the row has no id`);
         return;
       }
+      // A DESTRUCTIVE ROW ACTION ASKS FIRST. "Delete, with a confirmation
+      // prompt" is what every brief asks for and what the composition
+      // conventions promise; a `danger` row action ran on the click. The
+      // platform confirms, once, here — not a Dialog re-composed per page.
+      if (a.variant === "danger" && !confirmDestructive(a.label, r)) return;
       // Re-entrancy guard: ignore clicks while this row-action is mid-flight
       // (belt-and-suspenders with the button's disabled attr).
       if (busyKeys.has(key)) return;
