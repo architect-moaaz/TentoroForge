@@ -616,6 +616,17 @@ TOOL_CATALOG: list[dict] = [
              "out again from scratch. NOT for changing one label or one "
              "field \u2014 that is edit_page. The page must already exist "
              "in the definition; check list_pages first."},
+    {"name": "restyle",
+     "signature": "restyle(change) -> {applied, edited_paths, diff_summary, "
+                  "changed, decision, reason?}",
+     "desc": "CHANGE HOW THE APPLICATION LOOKS \u2014 theme or brand colour, "
+             "palette, typography, spacing, density: \"change the theme "
+             "colour to green\", \"darker and more compact\". Records the ask "
+             "as the binding decision on the design system, re-runs the "
+             "design agent against it and re-projects the tokens; every "
+             "screen picks the new look up without being re-composed. NOT "
+             "edit_page (no single label or control) and NOT compose_route "
+             "(no screen is rebuilt). Pass the change in the user's words."},
     {"name": "add_widgets",
      "signature": "add_widgets(route, widgets[], request?) -> {applied, "
                   "edited_paths, diff_summary, reason?}",
@@ -1246,6 +1257,7 @@ READONLY_HANDLERS = {
     "edit_workflow":            lambda output_dir, args: _smith_edit_workflow(output_dir, args),
     "run_guards":               lambda output_dir, args: _smith_run_guards(output_dir),
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
+    "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
     "add_page":                 lambda output_dir, args: _smith_add_page(output_dir, args),
     # Whole-screen composition \u2014 the page_layouts agent, reachable from a
     # conversation. See services/smith/compose.py.
@@ -1336,6 +1348,20 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
         output_dir=output_dir,
         blueprint_summary=str((args or {}).get("blueprint_summary") or ""),
     )
+
+
+def _smith_restyle(output_dir: str, args: dict) -> dict:
+    """Thin on purpose, like the compose tools: `services.smith.restyle.run`
+    is the one place a restyle happens, and `smith_session` reaches it by verb."""
+    from services.smith.restyle import run as _restyle_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "restyle requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [],
+                "reason": "no change described. Pass change: what should look different, in the user's words."}
+    return _restyle_run(output_dir, change)
 
 
 def _smith_compose(output_dir: str, args: dict, verb: str) -> dict:

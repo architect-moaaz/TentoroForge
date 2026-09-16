@@ -392,6 +392,23 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _restyle(self, understanding: dict, user_message: str) -> "TurnResult":
+        """Change the look of the application — the design system, which no
+        other verb touches. Same shape as `_compose`: one implementation in
+        `services.smith.restyle.run`, shared with the tool of the same name."""
+        from services.smith.restyle import run as restyle_run
+
+        change = str(understanding.get("change") or "").strip() or user_message.strip()
+        out = restyle_run(str(self.output_dir), change, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not restyle the application and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Restyled."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched) if touched else "")
+
     def _compose(self, verb: str, understanding: dict,
                  user_message: str) -> "TurnResult":
         """Compose a screen, or add sections to one, through the real agent.
@@ -609,6 +626,8 @@ class SmithSession:
                             + VERB_HELP.get(verb, "")),
                 )
 
+        if verb == "restyle":
+            return self._restyle(understanding, user_message)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":

@@ -993,6 +993,12 @@ class TaskSpec:
     #: otherwise a retry re-runs an identical prompt and reproduces the
     #: identical mistake, which is exactly what it did.
     feedback: str = ""
+    #: What Smith is asking of this call beyond the node's standing task —
+    #: a change to an artifact that already exists, and what to keep. Empty
+    #: on a build; set when a conversation re-runs one node ("restyle the
+    #: design system: primary colour green"). Feedback is about the last
+    #: attempt; a brief is about this one.
+    brief: str = ""
 
 
 @dataclass

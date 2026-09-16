@@ -36,6 +36,12 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # as a rename with nothing to write, and as often chose compose_route,
     # which re-laid the screen out with the control still declared on it.
     "remove": {"target_file", "element_label"},
+    # The look of the application — colours, type, density. Lives in
+    # `designSystem`, a section no other verb touches; "change the theme
+    # colour to green" was squeezed into a rename of the palette decision's
+    # wording. Needs only the change, in the user's words: the design agent
+    # re-decides the section against it.
+    "restyle": {"change"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -73,6 +79,13 @@ VERB_HELP: dict[str, str] = {
         "Take a control off a screen that exists — a button, a row action, a "
         "link: \"remove the delete button\". Needs the screen and the control's "
         "exact visible text. The screen stops declaring what the control did."
+    ),
+    "restyle": (
+        "Change how the application LOOKS — theme colour, palette, type, "
+        "density: \"change the theme colour to green\", \"make it darker and "
+        "more compact\". Re-decides the design system against the request; "
+        "every screen picks it up through the tokens. Needs the change in the "
+        "user's words."
     ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "

@@ -42,6 +42,12 @@ Return ONLY a JSON object with exactly these keys:
                         the one control goes, and the screen stops offering
                         what it did. NOT compose_route — that lays the whole
                         screen out again with the control still declared.
+      "restyle"       — change how the application LOOKS: theme or brand
+                        colour, palette, typography, spacing, density —
+                        "change the theme colour from blue to green", "make
+                        it darker", "more compact". This is the design
+                        system, not any one screen: NOT rename (no label
+                        changes), NOT compose_route (no screen is rebuilt).
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
@@ -96,6 +102,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "element_label": the control's visible text AS IT IS NOW, exactly — a
       Table row action's label ("Delete") is a control as much as a Button's.
       Copy it from the Blueprint below; do not paraphrase it.
+
+  restyle needs:
+  "change": what should look different, in the user's own words ("theme
+      colour green instead of blue", "darker, more compact"). Not a hex
+      value unless they gave one; the design agent decides the scheme.
 
   compose_route needs:
   "route": the path of the screen, as it appears in the Blueprint ("/",
@@ -340,6 +351,8 @@ def understand_ask(
         "treat_as": _design_scope(data.get("treat_as")),
         "target_file": str(data.get("target_file") or "").strip(),
         "element_label": str(data.get("element_label") or "").strip(),
+        # restyle: the change to the look, in the user's words.
+        "change": str(data.get("change") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
         # literal — "a clearer label" is a note to a person, not an edit — and
         # a removal or a question legitimately has none, so "" is a real value

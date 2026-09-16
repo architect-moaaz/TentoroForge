@@ -1412,9 +1412,13 @@ def _conventions_addendum(doc: dict) -> str:
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
-    output_dir: Any = None,
+    output_dir: Any = None, brief: str = "",
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
+
+    ``brief`` is Smith's ask for THIS call — what should change in an artifact
+    that already exists, and what must stay. It is not feedback: feedback says
+    why the last attempt was refused, a brief says what this attempt is for.
 
     ``inline_schema`` is set when the transport cannot enforce the envelope, so
     the schema is stated in the prompt instead. It is a weaker guarantee — a
@@ -1617,6 +1621,8 @@ def build_prompt(
                 "\n\n" + workflow_slot_prompt(doc) + "\n\n```json\n"
                 + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
             )
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
@@ -2978,7 +2984,7 @@ def make_executor(
                 svc.doc, spec.node,
                 inline_schema=not getattr(client, "enforces_schema", True),
                 subject=spec.subject, feedback=spec.feedback, references=shown,
-                output_dir=svc.output_dir,
+                output_dir=svc.output_dir, brief=getattr(spec, "brief", "") or "",
             )
         last: Exception | None = None
 
