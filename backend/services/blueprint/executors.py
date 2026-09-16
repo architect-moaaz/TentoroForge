@@ -2891,6 +2891,12 @@ def make_executor(
                 # reached nobody.
                 feedback=spec.feedback or "",
                 contract=page,
+                # WHAT THIS CALL IS FOR. Smith sets a brief when a
+                # conversation asks for one page; without it the composer saw
+                # only the page contract and the domain, so "not that — a
+                # simple arithmetic calculator" re-composed the identical
+                # screen from the identical prompt.
+                brief=getattr(spec, "brief", "") or "",
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)

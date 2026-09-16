@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from services.smith import pending_ask
 from services.smith_blueprint import Blueprint
 from services.smith_blueprint_context import (
     blueprint_to_context,
@@ -140,6 +141,9 @@ class SmithSession:
         # Where Smith's reasoning goes so the user can read it. None means
         # nobody is watching, which is every caller that predates it.
         self._reasoning = reasoning_fn
+        #: The turn's whole ask — what was asked for, plus the answer to any
+        #: question Smith asked about it. Set by `run_iteration`.
+        self._ask = ""
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -658,6 +662,27 @@ class SmithSession:
 
     def run_iteration(self, user_message: str,
                       history: list[tuple[str, str]] | None = None) -> TurnResult:
+        """One turn, carrying whatever ask the last turn could not act on.
+
+        A change is often two turns: the ask, Smith's question about it, and
+        the answer. The turn that acts is the third, and it used to act on the
+        answer alone — "a new page at /calculator" became a page's whole
+        purpose and the composer's only subject, and the sentence that asked
+        for a calculator reached nothing. `services.smith.pending_ask` holds
+        the ask between the two, recorded when Smith asks and taken here; the
+        seams get both, in the order they were said.
+        """
+        carried = pending_ask.take(self.output_dir)
+        self._ask = pending_ask.joined(carried, user_message)
+        result = self._iterate(user_message, history)
+        if result.status == "asked":
+            # Still unanswered: keep it for the turn that answers. The
+            # question itself is not kept — it is Smith's, not the ask.
+            pending_ask.remember(self.output_dir, self._ask)
+        return result
+
+    def _iterate(self, user_message: str,
+                 history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
 
         Contract:
@@ -746,16 +771,16 @@ class SmithSession:
                 )
 
         if verb == "restyle":
-            return self._restyle(understanding, user_message)
+            return self._restyle(understanding, self._ask)
         if verb in ("add_workflow", "edit_workflow", "remove_workflow"):
-            return self._workflow(verb, understanding, user_message)
+            return self._workflow(verb, understanding, self._ask)
         if verb == "edit_navigation":
-            return self._navigation(understanding, user_message)
+            return self._navigation(understanding, self._ask)
         if verb in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
-            return self._section(verb, understanding, user_message)
+            return self._section(verb, understanding, self._ask)
         if verb in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement",
                     "edit_product", "add_api", "remove_api", "add_integration", "remove_integration"):
-            return self._definition(verb, understanding, user_message)
+            return self._definition(verb, understanding, self._ask)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":
@@ -763,7 +788,7 @@ class SmithSession:
         if verb == "disconnect_design":
             return self._disconnect_design(user_message)
         if verb in ("compose_route", "add_widgets"):
-            return self._compose(verb, understanding, user_message)
+            return self._compose(verb, understanding, self._ask)
         if verb == "add_field":
             return self._add_field(understanding)
         if verb == "rebuild":

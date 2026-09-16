@@ -126,7 +126,11 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
         # Business-terms purpose is a required field; the request is the closest
         # thing to a stated reason we have, and it reads back sensibly in the
         # definition ("add a screen for clients") until the user refines it.
-        "purpose": (request.strip() or f"The {name} screen.")[:280],
+        # ON ONE LINE. The request now carries the whole ask — the sentence
+        # that asked for the screen as well as the answer that placed it — and
+        # a purpose is read back in the definition as a phrase, not a
+        # transcript.
+        "purpose": (" ".join(request.split()) or f"The {name} screen.")[:280],
         "primaryTasks": [],
     }
     # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
@@ -202,7 +206,12 @@ def compose_route(
         spec = TaskSpec(task_id=f"smith-compose-{page['id']}-{attempt}",
                         node="page_layouts", agent=COMPOSER_AGENT,
                         attempt=attempt, subject=page["id"],
-                        feedback=feedback or None)
+                        feedback=feedback or None,
+                        # THE WORDS THAT ASKED FOR THIS COMPOSITION. A brief
+                        # is about this attempt, feedback about the last one;
+                        # without it a conversation could recompose a page
+                        # forever and never say what it wanted different.
+                        brief=request or "")
 
         tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
         result = run(spec)

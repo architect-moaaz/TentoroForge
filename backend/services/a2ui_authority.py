@@ -137,6 +137,30 @@ _JOB = {
         "your judgement of the domain calls for — you are not filling in a "
         "template."
     ),
+    # Keyed by the literal, like every other job here: the constant that
+    # names it (STANDALONE_FAMILY) is declared with its siblings below, and
+    # this table is built before them.
+    "standalone": (
+        # NAMES NO COMPONENTS, for the same reason as every job below it: the
+        # A2UI server scans this text for capability keywords and makes any
+        # match mandatory, so a component named here as an example is read as
+        # a demand.
+        #
+        # THE SCREEN THAT IS NOT ABOUT A RECORD. Asked for "a simple
+        # arithmetic calculator", Smith made a page with no pattern, which
+        # `_family_of` reduced to `collection` — "this screen shows many
+        # records of one kind" — and the only records on offer were the
+        # application's own. What came back was a workforce dashboard of nurse
+        # counts and ward capacities. Nothing in the brief could have
+        # prevented it: the composer had been told the screen surveys records
+        # and been handed the records.
+        "This screen is a self-contained tool. The application's stored "
+        "records are not its subject: the values a person puts in live on the "
+        "screen while they work, and nothing is written down unless the "
+        "screen's own brief says so. Compose exactly what that brief asks "
+        "for, and nothing beside it — no survey of records this screen does "
+        "not touch, no summary of data it has nothing to do with."
+    ),
     "collection": (
         # NAMES NO COMPONENTS, DELIBERATELY. The A2UI server scans this text
         # for capability keywords and makes any match mandatory
@@ -190,6 +214,12 @@ _JOB = {
 #: covers the whole enum and a test holds it there. This is for kinds from
 #: outside the Blueprint pipeline.
 UNCLASSIFIED_FAMILY = "collection"
+
+#: A screen that is not about the application's records at all — a calculator,
+#: a converter, a scratch tool. It has no entry in the eighteen-value pattern
+#: enum, which is why it arrives with no pattern and fell to
+#: :data:`UNCLASSIFIED_FAMILY`; see :func:`build_requirement`.
+STANDALONE_FAMILY = "standalone"
 
 
 def _family_of(kind: Any, route: Any = "") -> str:
@@ -531,7 +561,8 @@ def build_requirement(root: Path, kind: str = "dashboard",
                       presentation: str = "page", *,
                       contract: dict | None = None,
                       registry: dict | None = None,
-                      page_id: str = "") -> str:
+                      page_id: str = "",
+                      brief: str = "") -> str:
     # `shared_context` is accepted and ignored — it belongs to
     # `build_domain_context` now. See the note there; in short, this string is
     # the one the A2UI server scans for feature keywords, and a design system
@@ -558,7 +589,21 @@ def build_requirement(root: Path, kind: str = "dashboard",
     actors = [a.get("name") or a.get("role") for a in (plan.get("actors") or [])
               if isinstance(a, dict)]
 
-    parts = [f"Compose the {route} screen of {app}.", "", _JOB[_family_of(kind, route)]]
+    # ONE ANSWER TO "WHAT SHAPE IS THIS SCREEN", used by the job, the form
+    # branch below and the composition guidance — `_family_of` was called
+    # three times and the standalone case would have had to be added to each.
+    family = _family_of(kind, route)
+    if is_standalone(kind, contract):
+        # A page with no declared pattern AND no entity is not an undeclared
+        # collection, it is a screen about something other than the
+        # application's records.
+        family = STANDALONE_FAMILY
+
+    parts = [f"Compose the {route} screen of {app}.", "", _JOB[family]]
+
+    # WHAT THIS ONE IS FOR, BEFORE ANYTHING GENERAL. The page's own purpose
+    # and tasks, then the words that asked for it.
+    parts.extend(_screen_brief(contract, brief))
 
     # CREATE AND EDIT ARE ONE FORM, NOT TWO. The `form` job reads "collects or
     # edits ONE record" for both, so the composer hedged and authored BOTH a
@@ -571,7 +616,7 @@ def build_requirement(root: Path, kind: str = "dashboard",
     # creates one (`/x/new`, but also custom routes like `/add-data` — matching
     # only `/new` missed those and let the duplicate back in). So: an id in the
     # route → edit; no id → create.
-    if _family_of(kind, route) == "form":
+    if family == "form":
         if "[" in str(route or ""):
             parts.append(
                 "\nThis is an EDIT screen: it changes ONE EXISTING record, its "
@@ -632,10 +677,20 @@ def build_requirement(root: Path, kind: str = "dashboard",
     parts.extend(_contract_guidance(contract, registry or {}, page_id))
     if actors:
         parts.append("\nWHO USES IT: " + ", ".join(str(a) for a in actors if a))
-    guidance = build_composition_guidance(root, _family_of(kind, route))
+    guidance = build_composition_guidance(root, family)
     if guidance:
         parts.append("\n" + guidance)
     parts.append(
+        # NOT BACKED BY THE RECORDS. The demand below is right for every
+        # screen of the application's own data and wrong for a tool: told
+        # that every number must come from the entities, a calculator can
+        # only be composed out of nurses and wards.
+        "\nThis screen is not backed by the application's records. Do not "
+        "bind what it shows to the entities in the domain context and do not "
+        "bring in records it has nothing to do with — the values it works on "
+        "are the ones the person enters here, while they are here. An action "
+        "it does take must still name a workflow the domain context lists."
+        if family == STANDALONE_FAMILY else
         # "a trend" cost every page an attempt and a chart it did not need.
         # The A2UI server reads the requirement for words that name a chart —
         # chart, graph, trend, plot, over time — and rejects any payload
@@ -806,6 +861,56 @@ def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[
             "every attempt:\n" + "\n".join(lines)]
 
 
+def is_standalone(kind: Any, contract: dict | None) -> bool:
+    """Whether this screen is about something other than the app's records.
+
+    Both halves come from the page contract — no declared pattern and no
+    entity — so this is a reading of the definition, not a guess from the
+    route's spelling. Shared by the requirement and the domain context, which
+    otherwise contradicted each other.
+    """
+    return not str(kind or "").strip() and not _entities_named(contract)
+
+
+def _entities_named(contract: dict | None) -> list[str]:
+    """The entities a page contract says its screen is about."""
+    data = (contract or {}).get("data") or {}
+    named = [str(data.get("primaryEntity") or "").strip()]
+    named += [str(e or "").strip() for e in (data.get("supportingEntities") or [])]
+    return [e for e in named if e]
+
+
+def _screen_brief(contract: dict | None, brief: str = "") -> list[str]:
+    """What this screen is for, in the definition's words and the user's.
+
+    The composer was briefed from the family job and the domain alone. So a
+    page the person had described in a sentence arrived as "compose the
+    /calculator screen" with no sense of what a calculator is, and the only
+    subject it had been given was the application's own entities.
+
+    Two halves, because they have different lifetimes. The contract's
+    `purpose` and `primaryTasks` are the durable record — read again by every
+    later recomposition, including the ones the DAG runs. `brief` is what was
+    said in the turn that asked for THIS composition, which is the only way a
+    correction ("that is not what I meant") can reach the composer at all.
+    """
+    out: list[str] = []
+    purpose = " ".join(str((contract or {}).get("purpose") or "").split())
+    tasks = [" ".join(str(t).split())
+             for t in ((contract or {}).get("primaryTasks") or []) if str(t or "").strip()]
+    if purpose or tasks:
+        said = ("\nWHAT THIS SCREEN IS FOR — the screen's own brief. Where it "
+                "and the general shape above disagree, this wins:")
+        if purpose:
+            said += f"\n{purpose}"
+        said += "".join(f"\n  - {t}" for t in tasks)
+        out.append(said)
+    asked = str(brief or "").strip()
+    if asked:
+        out.append("\nWHAT THE PERSON ASKED FOR, IN THEIR OWN WORDS:\n" + asked)
+    return out
+
+
 def _contract_guidance(contract: dict | None, registry: dict,
                        page_id: str) -> list[str]:
     """What the page contract asks of this screen that the family text does
@@ -928,7 +1033,7 @@ def build_composition_guidance(root: Path,
 
 def build_domain_context(root: Path, registry: dict | None = None,
                          page_id: str = "", shared_context: str = "",
-                         feedback: str = "") -> str:
+                         feedback: str = "", *, standalone: bool = False) -> str:
     """The entities, columns and workflows a composition may bind to.
 
     Came back empty for every Blueprint-pipeline page — it read plan.json
@@ -982,9 +1087,19 @@ def build_domain_context(root: Path, registry: dict | None = None,
     parts = []
     if lines:
         parts.append(
-            "The application's real entities and columns. Every number and "
-            "every row on this screen comes from these — do not invent "
-            "fields:\n" + "\n".join(lines)
+            # A SCREEN THAT IS NOT ABOUT THESE STILL SEES THEM, because it may
+            # run one of their workflows — but telling it that every number it
+            # shows comes from them contradicts the job it was given, and a
+            # contradiction is decided by whichever sentence the model weighs
+            # more. A calculator was composed out of nurse counts and ward
+            # capacities under exactly that instruction.
+            ("The application's entities and columns. This screen is not about "
+             "them: show them only if its own brief asks for them, and take "
+             "the values it works on from the person using it:\n"
+             if standalone else
+             "The application's real entities and columns. Every number and "
+             "every row on this screen comes from these — do not invent "
+             "fields:\n") + "\n".join(lines)
             + "\nA column marked (list) holds several values: a Form collects "
               "it with a field of kind \"tags\" (never text or textarea), and "
               "a Table column shows it as text."
@@ -1294,6 +1409,7 @@ def compose_page_via_a2ui(
     progress: Any = None,
     feedback: str = "",
     contract: dict | None = None,
+    brief: str = "",
 ) -> dict[str, Any]:
     """Try to own one page. Writes nothing unless the result clears the floor
     for that page's kind.
@@ -1366,11 +1482,13 @@ def compose_page_via_a2ui(
                                                          presentation,
                                                          contract=contract,
                                                          registry=registry,
-                                                         page_id=page_id),
+                                                         page_id=page_id,
+                                                         brief=brief),
                                        build_domain_context(root, registry,
                                                             page_id,
                                                             shared_context,
-                                                            feedback))
+                                                            feedback,
+                                                            standalone=is_standalone(kind, contract)))
         except ComposerUnavailable as exc:
             # Still never a failed build — but neither the attempts left here
             # nor the pages after this one can change the answer, so this
