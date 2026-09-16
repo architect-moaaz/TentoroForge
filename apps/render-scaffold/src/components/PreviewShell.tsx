@@ -30,7 +30,8 @@ export function PreviewShell({ projectId, navFlow, children }: PreviewShellProps
   );
 
   const navTo = (route: string) => {
-    const path = route === "/" ? `/p/${projectId}` : `/p/${projectId}${route}`;
+    // Next's `basePath` ("/p") is prepended by the router itself.
+    const path = route === "/" ? `/${projectId}` : `/${projectId}${route}`;
     router.push(path);
   };
 
