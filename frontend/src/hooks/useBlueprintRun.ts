@@ -378,6 +378,9 @@ export function useBlueprintRun(projectId: string | null) {
               // holding is the only place the exchange exists.
               history: opts.history ?? [],
               approved: opts.approved ?? false,
+              // §14 — the documents attached on /blueprint/new. Carried on
+              // every turn: the definition re-reads the whole brief each time.
+              evidence: opts.evidence ?? [],
             }),
           },
         );

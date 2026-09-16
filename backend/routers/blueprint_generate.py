@@ -739,6 +739,36 @@ def _output_dir(project: Any) -> Path:
     return project_root(str(project.id))
 
 
+def _brief_with_documents(brief: str, evidence: Any) -> str:
+    """The brief plus the supplied documents, labelled so the reader can tell
+    what the person said from what a document said.
+
+    For the turn's own reading — the clarifier, the design-link scan — not
+    for the Blueprint: the documents are stored beside it by `_run_dag`
+    (services.blueprint.documents) and the agents read them from there, so
+    `application.description` stays the user's words.
+    """
+    from services.blueprint import documents as _documents
+    block = _documents.labelled(evidence)
+    return f"{brief}\n\n{block}" if block else brief
+
+
+def _has_design_references(project_id: str) -> bool:
+    """Whether the user has designated an upload as design direction.
+
+    The clarifier is told when a design travels with the brief so it does not
+    ask which palette fits a design that has already chosen its own — and it
+    only knew about a Figma or UX Pilot link in the prose. A screenshot
+    attached and marked "read as design direction" is the same fact.
+    """
+    from services import chat_attachments, design_reference
+    try:
+        return bool(design_reference.read_design_references(
+            chat_attachments.attachments_root(), str(project_id)))
+    except Exception:  # noqa: BLE001 — no designation readable is no designation
+        return False
+
+
 def _with_evidence(req: "BlueprintGenerateRequest") -> str:
     """The description, plus whatever the user uploaded.
 
@@ -1154,6 +1184,13 @@ class SmithChatRequest(BaseModel):
     source: str = "user"
     #: §25 — the definition has been seen and accepted, so build the rest.
     approved: bool = False
+    #: §14 — the text of documents the person supplied rather than typed (the
+    #: requirements file attached on /blueprint/new). It lived only on the
+    #: legacy generate request, and the panel posts here: an attached
+    #: specification was read in the browser, carried to the project page,
+    #: and dropped at this door — the requirements were written from the
+    #: one-line brief alone and cited no document.
+    evidence: list[str] = Field(default_factory=list)
 
 
 def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
@@ -1529,7 +1566,7 @@ async def smith_chat(
                 from services.smith.figma_connect import find_in as _figma_in
                 from services.smith.uxpilot_connect import find_in as _uxpilot_in
 
-                _the_brief = _brief_from(req.history, req.message)
+                _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
 
                 # §16 asks rather than assumes — but ONE decision at a time, in
@@ -1560,8 +1597,10 @@ async def smith_chat(
                 if _user_turns < _MAX_CLARIFY_TURNS:
                     from services.smith.clarify_brief import clarify_brief
 
-                    asked = clarify_brief(_the_brief,
-                                          design_attached=bool(named_design))
+                    asked = clarify_brief(
+                        _the_brief,
+                        design_attached=bool(named_design)
+                        or _has_design_references(str(project_id)))
                     if asked:
                         # ONE question this turn — it carries its own options,
                         # and its answer reaches the next turn through `history`,
@@ -1622,7 +1661,8 @@ async def smith_chat(
                 defined_now = _run_dag(str(output_dir), app_root,
                                        _brief_from(req.history, req.message),
                                        approved=req.approved, emit=emit,
-                                       app_name=getattr(project, "name", "") or "")
+                                       app_name=getattr(project, "name", "") or "",
+                                       documents=req.evidence)
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
                 # DEFECT-B-03: the answers that shaped this definition are
@@ -1651,7 +1691,8 @@ async def smith_chat(
                     and _definition_edit(req.message):
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=False, emit=emit,
-                                app_name=getattr(project, "name", "") or "")
+                                app_name=getattr(project, "name", "") or "",
+                                documents=req.evidence)
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
@@ -1828,7 +1869,8 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
-             announce_completion: bool = True) -> dict:
+             announce_completion: bool = True,
+             documents: Any = None) -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116).
 
     When an approved build reaches completion it offers to verify — as part of
@@ -1853,6 +1895,20 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
         svc = BlueprintService.load(output_dir=output_dir)
+        if approved and announce_completion:
+            # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
+            # definition as it stands, so a plan approval that had gone stale
+            # (the definition changed after the last approval) is renewed by
+            # the person's click — and a chat "build" between the change and
+            # this click is refused as stale rather than silently renewed.
+            # The review's re-compose passes announce_completion=False and
+            # records nothing: nobody approved anything there.
+            from services.blueprint import approval as _approval
+            if _approval.state_of(svc.doc, "plan") != "approved":
+                try:
+                    _approval.record(svc, "plan")
+                except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
+                    logger.exception("could not record the plan approval for %s", output_dir)
         if description:
             # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
             # assigned, so a clarifying exchange destroyed the request that
@@ -1893,6 +1949,16 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             output_dir=output_dir, app_id=Path(output_dir).name,
             name=app_name or "Application", domain="unknown",
             description=description)
+
+    # WHAT THE USER HANDED OVER, KEPT WHERE EVERY RUN CAN READ IT. The
+    # documents travel with the request that carried them; the runs that
+    # follow — the clarified re-definition, the build after approval — read
+    # them from beside the Blueprint (services.blueprint.documents), so the
+    # requirements agent cites `document 1` on each of them and the
+    # description above stays the user's own words.
+    if documents:
+        from services.blueprint import documents as _documents
+        _documents.store(output_dir, documents)
 
     plan = [k for lvl in levels() for k in lvl]
     if not approved:

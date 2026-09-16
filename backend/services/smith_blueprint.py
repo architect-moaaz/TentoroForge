@@ -75,7 +75,7 @@ class BlueprintPath:
 
 _KNOWN_TOP_LEVEL_FIELDS = frozenset({
     "project_id", "domain", "entities", "workflows", "pages",
-    "design_decisions", "change_log",
+    "requirements", "design_decisions", "change_log",
 })
 
 
@@ -88,6 +88,10 @@ class Blueprint:
     entities: list[dict[str, Any]] = field(default_factory=list)
     workflows: list[dict[str, Any]] = field(default_factory=list)
     pages: list[dict[str, Any]] = field(default_factory=list)
+    # What the app must do, each line with where it came from (§14). Read
+    # from the engine's document; Smith answers "which of these came from
+    # the file I uploaded?" from the evidence, and from nowhere else.
+    requirements: list[dict[str, Any]] = field(default_factory=list)
     design_decisions: list[dict[str, Any]] = field(default_factory=list)
     change_log: list[dict[str, Any]] = field(default_factory=list)
 
@@ -163,6 +167,7 @@ class Blueprint:
             entities=list(raw.get("entities") or []),
             workflows=list(raw.get("workflows") or []),
             pages=list(raw.get("pages") or []),
+            requirements=list(raw.get("requirements") or []),
             design_decisions=list(raw.get("design_decisions") or []),
             change_log=list(raw.get("change_log") or []),
             _extras=extras,
@@ -216,6 +221,7 @@ class Blueprint:
             "entities": list(self.entities),
             "workflows": list(self.workflows),
             "pages": list(self.pages),
+            "requirements": list(self.requirements),
             "design_decisions": list(self.design_decisions),
             "change_log": list(self.change_log),
         }

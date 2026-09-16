@@ -117,3 +117,22 @@ def test_every_early_return_carries_the_full_shape():
                             # the token itself is never a field Smith carries.
                             # `treat_as` is evidence vs specification (§48).
                             "figma_url", "token_env", "treat_as"}
+
+
+def test_a_quoted_title_inside_the_answer_still_parses():
+    """A-03: asked which requirements came from the uploaded document, the
+    model answered — and wrote the document's title in quotes inside the JSON
+    string. The object failed to load and the turn fell to 'I did not follow
+    that', a change-request deflection to a question it had just answered."""
+    from services.smith.understand_ask import _parse
+    raw = ('{\n  "answer": "All ten came from the document titled "Clinic '
+           'Visit Tracker — Requirements". Nothing else.",\n'
+           '  "clarification_needed": "",\n  "verb": ""\n}')
+    parsed = _parse(raw)
+    assert parsed is not None
+    assert parsed["answer"].startswith("All ten came from the document titled "
+                                       '"Clinic Visit Tracker')
+    assert parsed["verb"] == ""
+    # Well-formed output is untouched, escaped quotes included.
+    good = '{"answer": "say \\"hi\\"", "verb": ""}'
+    assert _parse(good) == {"answer": 'say "hi"', "verb": ""}

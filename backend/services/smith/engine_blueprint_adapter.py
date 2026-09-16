@@ -75,6 +75,22 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "domain": domain,
+        # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
+        # questions from this context, and "which requirements came from the
+        # document I uploaded?" has its answer in `requirements[].evidence`
+        # — nowhere else. Without them here Smith could only guess from the
+        # brief's prose.
+        "requirements": [
+            {
+                "id": r.get("id"),
+                "description": r.get("description") or "",
+                "evidence": [
+                    {"type": e.get("type"), "source": e.get("source")}
+                    for e in (r.get("evidence") or []) if isinstance(e, dict)
+                ],
+            }
+            for r in _live(doc.get("requirements"))
+        ],
         "entities": [
             {
                 "name": e.get("name"),

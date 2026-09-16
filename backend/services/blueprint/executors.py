@@ -965,7 +965,13 @@ NODE_TASKS: dict[str, str] = {
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
         "testable statement of something a user can do, with the evidence it came "
-        "from. Do not design the solution."
+        "from. Do not design the solution.\n\n"
+        "EVIDENCE NAMES ITS SOURCE. A requirement drawn from what the person typed "
+        "cites evidence of type `conversation`. A requirement drawn from the text "
+        "under SUPPLIED DOCUMENTS cites evidence of type `document`, with `source` "
+        "naming the document (\"document 1\") and `message` quoting the sentence it "
+        "came from — so the application can say which requirements the uploaded "
+        "document produced. A requirement supported by both cites both."
     ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
@@ -1747,6 +1753,12 @@ def build_prompt(
         + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
         + "\n```"
     )
+    # WHAT THE USER HANDED OVER. A specification uploaded instead of typed is
+    # kept beside the Blueprint (services.blueprint.documents), not inside
+    # `application.description`, and put in front of the nodes that read it
+    # on every run — the first definition, the clarified one, the build.
+    from services.blueprint import documents as _documents
+    user += _documents.addendum(output_dir, node)
     # EVERY BRANCH ABOVE CARRIES THE REJECTION; THIS ONE DROPPED IT. The
     # specialised branches return early having appended `feedback`, so the
     # nodes with no branch of their own — data_model, business_rules, apis,

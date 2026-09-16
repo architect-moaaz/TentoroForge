@@ -148,3 +148,25 @@ def test_pick_relevant_slice_accepts_none_ask_for_bootstrap_turns(tmp_path):
     bp = _new(tmp_path)
     sliced = pick_relevant_slice(bp, ask=None)
     assert sliced is bp
+
+
+def test_requirements_render_with_their_evidence(tmp_path):
+    """Smith answers 'which requirements came from the document I uploaded?'
+    from `requirements[].evidence`; the context never carried requirements at
+    all, so the only answer available was a guess from the brief's prose."""
+    bp = Blueprint(project_id="p1", domain={"name": "clinic"}, requirements=[
+        {"id": "REQ-001", "description": "Reception registers a patient.",
+         "evidence": [{"type": "document", "source": "document 1"}]},
+        {"id": "REQ-002", "description": "Nurse closes a visit.",
+         "evidence": [{"type": "conversation"},
+                      {"type": "screenshot", "source": "board.png"}]},
+    ])
+    ctx = blueprint_to_context(bp)
+    assert "## Requirements (2)" in ctx
+    assert "- REQ-001: Reception registers a patient.  [from: document 1]" in ctx
+    assert "- REQ-002: Nurse closes a visit.  [from: conversation, screenshot board.png]" in ctx
+
+
+def test_requirements_alone_are_not_an_empty_blueprint(tmp_path):
+    bp = Blueprint(project_id="p1", requirements=[{"id": "REQ-001", "description": "x"}])
+    assert "bootstrap conversation" not in blueprint_to_context(bp)

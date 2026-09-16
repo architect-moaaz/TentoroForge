@@ -418,3 +418,34 @@ def test_a_removal_lands_in_a_repo_with_no_commits(tmp_path):
     assert seen["new_value"] == ""                       # a removal, to the move
     assert result.status == "resolved", result.answer
     assert result.touched_paths == ["app/src/schemas/master-data.json"]
+
+
+def test_a_build_asked_for_in_chat_is_refused_while_the_plan_approval_is_stale(tmp_path):
+    """C-04: the approval recorded at the last build is fingerprinted against
+    the product surface; a definition changed since is a stale approval, and
+    "build" is refused with the reason and the way to renew — before anything
+    is spent. A fresh approval gets the ordinary "open the card" answer."""
+    from services.blueprint import approval
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="App", domain="ops")
+    svc.doc["requirements"] = [{"id": "REQ-001", "description": "Do a thing.", "status": "APPROVED",
+                                "evidence": [{"message": "do a thing", "type": "conversation"}]}]
+    svc.save()
+    approval.record(svc, "plan")
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=lambda m, c, history=None: {"verb": "rebuild"},
+                           iteration_move_fn=lambda *a, **k: None)
+    fresh = session.run_iteration(user_message="build")
+    assert fresh.status == "needs_user" and "Approve and build" in fresh.answer and "stale" not in fresh.answer.lower()
+    # the definition changes materially: a module goes
+    svc.doc["application"]["name"] = "Renamed App"
+    svc.commit(user_request="rename", smith_interpretation="rename", before=svc.snapshot(), affected=[])
+    assert approval.state_of(svc.doc, "plan") == "stale"
+    refused = session.run_iteration(user_message="build")
+    assert refused.status == "needs_user"
+    assert "Not building on the current approval" in refused.answer and "reviewed again" in refused.answer
+    assert "Approve and build" in refused.answer                      # the way to renew it
+    # re-approving is what the card's click does: recorded fresh, the build proceeds
+    approval.record(svc, "plan")
+    assert approval.state_of(BlueprintService.load(output_dir=str(tmp_path)).doc, "plan") == "approved"
+    assert "stale" not in session.run_iteration(user_message="build").answer.lower()

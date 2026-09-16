@@ -392,6 +392,26 @@ class SmithSession:
 
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _stale_plan_reason(self) -> str:
+        """Why the plan approval no longer stands, or "" when it does (or there
+        is no Blueprint / no approval yet to be stale)."""
+        from pathlib import Path
+        if not (Path(self.output_dir) / ".forge" / "blueprint" / "current.json").exists():
+            return ""
+        try:
+            from services.blueprint import approval
+            from services.blueprint.service import BlueprintService
+            doc = BlueprintService.load(output_dir=str(self.output_dir)).doc
+            if approval.state_of(doc, "plan") != "stale":
+                return ""
+            answer = approval.latest(doc, "plan") or {}
+            return (f"the plan was approved at version {answer.get('version', '?')} and the definition "
+                    f"is now at version {doc.get('version', '?')} — it has changed since and must be "
+                    "reviewed again")
+        except Exception:  # noqa: BLE001 — a gate that cannot be read does not block the answer
+            logger.exception("could not read the plan gate")
+            return ""
+
     def _definition(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
         """Fields, requirements, product, APIs and integrations — the rest of
         the definition, changeable after the build."""
@@ -735,6 +755,21 @@ class SmithSession:
             # to reach it. It used to answer "say rebuild again to confirm",
             # and nothing consumed the confirmation: saying it again returned
             # the same sentence forever.
+            # THE GATE IS CONSULTED HERE, before anyone spends anything. The
+            # approval recorded at the last build is fingerprinted against the
+            # product surface; a definition changed since is a stale approval,
+            # and a build on a stale approval is refused with the reason and
+            # the way to renew it — the card, whose "Approve and build" IS the
+            # renewal. Nothing here starts a run.
+            stale = self._stale_plan_reason()
+            if stale:
+                return TurnResult(
+                    status="needs_user",
+                    answer=(f"Not building on the current approval: {stale}. Open the "
+                            "\u201cDefinition ready to review\u201d card above and press "
+                            "\u201cApprove and build\u201d to renew it against the definition "
+                            "as it now stands; the build then proceeds."),
+                )
             return TurnResult(
                 status="needs_user",
                 answer=("Building the whole application is started from the "

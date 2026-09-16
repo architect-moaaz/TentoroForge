@@ -499,4 +499,51 @@ def _parse(raw: str) -> dict | None:
         parsed = json.loads(match.group(0))
         return parsed if isinstance(parsed, dict) else None
     except ValueError:
+        pass
+    try:
+        parsed = json.loads(_escape_inner_quotes(match.group(0)))
+        return parsed if isinstance(parsed, dict) else None
+    except ValueError:
         return None
+
+
+def _escape_inner_quotes(text: str) -> str:
+    """`text` with the double quotes INSIDE its string values escaped.
+
+    Asked which requirements came from the uploaded document, the model
+    answered well — and wrote the document's title in quotes inside the
+    JSON string, so the object would not load and the turn fell through to
+    "I did not follow that": a change-request deflection to a question it
+    had just answered. A quote inside a string that is not followed (after
+    whitespace) by `,` `}` `]` or `:` cannot be closing the string, so it is
+    content. Only reached when a plain load has already failed.
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_str:
+            if ch == "\\":
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if ch == '"':
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j >= n or text[j] in ",}]:":
+                    in_str = False
+                    out.append(ch)
+                else:
+                    out.append('\\"')
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+        out.append(ch)
+        i += 1
+    return "".join(out)

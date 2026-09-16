@@ -372,3 +372,16 @@ def test_the_current_page_scope_is_a_route_list():
     assert bg._verify_scope("verify only the current page /admin/foo.") == ["/admin/foo"]
     assert bg._verify_scope("Verify the app and fix anything that's broken.") is None
     assert bg._verify_scope("Verify only the critical journeys.") is None
+
+
+def test_the_chat_request_carries_the_supplied_documents_into_the_brief():
+    """A-03/B-08: the requirements file attached on /blueprint/new is read in
+    the browser and posted with the first turn. It reached only the legacy
+    generate request; the panel posts to smith/chat, which dropped it."""
+    from routers.blueprint_generate import SmithChatRequest, _brief_with_documents
+    req = SmithChatRequest(message="a clinic visit tracker", evidence=["1. Reception registers a patient."])
+    assert req.evidence == ["1. Reception registers a patient."]
+    brief = _brief_with_documents("a clinic visit tracker", req.evidence)
+    assert brief.startswith("a clinic visit tracker") and "SUPPLIED DOCUMENTS" in brief
+    assert "--- document 1 ---\n1. Reception registers a patient." in brief
+    assert _brief_with_documents("x", []) == "x" and _brief_with_documents("x", ["  "]) == "x"
