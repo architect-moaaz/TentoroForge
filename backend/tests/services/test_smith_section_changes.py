@@ -127,9 +127,12 @@ def test_access_is_re_decided_and_the_screens_follow(svc):
     assert roles["Admin"]["permissions"] == [svc._t.perm["id"]] and roles["User"]["permissions"] == []
     assert roles["User"]["id"] == svc._t.role["id"]                                              # kept under its name
     page = next(p for p in fresh.doc["pages"] if p["id"] == svc._t.lst["id"])
-    assert page["users"] == [roles["Admin"]["id"]] and page["access"] == "authenticated"
+    # naming roles is a role restriction — the only access the middleware gates by role
+    assert page["users"] == [roles["Admin"]["id"]] and page["access"] == "role_restricted"
+    from services.blueprint.projection import role_routes
+    assert role_routes(fresh.doc) == [{"route": "/master-data", "roles": ["Admin"]}]
     assert out["roles_after"] == ["User", "Admin"] and out["pages_changed"] == ["/master-data"]
-    assert "Admin" in calls[0] and "/master-data → authenticated for Admin" in ac.summary_of(out, "x")
+    assert "Admin" in calls[0] and "/master-data → role_restricted for Admin" in ac.summary_of(out, "x")
 
 
 def test_a_screen_access_that_names_an_unknown_role_is_refused_then_retried(svc):

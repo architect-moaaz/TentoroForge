@@ -39,7 +39,9 @@ PAGE_ACCESS_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "page": {"type": "string", "description": "the page id"},
-                    "access": {"type": "string", "enum": ["public", "authenticated"]},
+                    "access": {"type": "string", "enum": ["public", "authenticated", "role_restricted"],
+                               "description": "public = no sign-in; authenticated = any signed-in role; "
+                                              "role_restricted = only the roles listed"},
                     "roles": {"type": "array", "items": {"type": "string"},
                               "description": "role NAMES that may open it; empty = every signed-in role"},
                 },
@@ -103,8 +105,15 @@ def _check_page_access(svc: Any, entries: list[dict]) -> tuple[list[tuple[dict, 
             else:
                 ids.append(rid)
         access = str(e.get("access") or "authenticated")
-        if access not in ("public", "authenticated"):
-            problems.append(f"access {access!r} is not public or authenticated")
+        if access not in ("public", "authenticated", "role_restricted"):
+            problems.append(f"access {access!r} is not public, authenticated or role_restricted")
+        # ONLY `role_restricted` MAKES THE MIDDLEWARE COMPARE ROLES. Naming
+        # roles on an `authenticated` page records a restriction nothing
+        # enforces — which is what the first live run did to Master Data.
+        if ids and access == "authenticated":
+            access = "role_restricted"
+        if not ids and access == "role_restricted":
+            access = "authenticated"
         resolved.append((page, access, ids))
     return resolved, problems
 
@@ -178,9 +187,10 @@ def change_access(svc: Any, change: str, *, app_root: str | None = None, executo
         "You revise which roles may open which screens of an application that is already built, "
         "and whether a screen needs a sign-in at all.\n"
         "Rules: change ONLY what the request asks; every other page keeps its access and roles. "
-        "`access` is \"public\" (no sign-in) or \"authenticated\". `roles` names the roles that may "
-        "open the page, from the roles given; an empty list means every signed-in role. Return "
-        "every page, changed or not. Say in `note` anything that could not be done."
+        "`access` is \"public\" (no sign-in), \"authenticated\" (any signed-in role) or "
+        "\"role_restricted\" (only the roles listed). `roles` names the roles that may open the "
+        "page, from the roles given; naming roles means role_restricted. Return every page, "
+        "changed or not. Say in `note` anything that could not be done."
     )
     user = (f"The request: \"{change}\".\n\nThe roles: {', '.join(str(r.get('name')) for r in _live(svc.doc.get('roles'))) or '(none)'}\n\n"
             f"The pages as they stand:\n{json.dumps(_pages_lines(svc.doc), indent=1)}\n\nReturn the pages as they should be.")
