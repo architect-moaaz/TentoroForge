@@ -101,6 +101,17 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
+    # thing people ask for that Smith genuinely cannot do. Without a verb they
+    # were classified as whatever was nearest — "delete the Wards page" as a
+    # control removal — or fell to "I did not recognise that", which is true
+    # and useless. As verbs they are recognised, answered with the REASON, and
+    # offered the nearest thing that does work. They change nothing.
+    "remove_page": {"route"},
+    "rename_entity": {"entity", "new_value"},
+    "change_field_type": {"entity", "field"},
+    "edit_api": {"api"},
+    "reorder": {"route"},
     "rebuild": set(),
 }
 
@@ -235,6 +246,31 @@ VERB_HELP: dict[str, str] = {
         "pages from components instead\". The design record is removed, no "
         "page names a frame any more, and every screen is composed from the "
         "component library. The requirements, entities and rules are untouched."
+    ),
+    "remove_page": (
+        "They want a whole SCREEN gone: \"delete the Wards page\", \"remove "
+        "the reports screen\". Cannot be done directly. Needs the route."
+    ),
+    "rename_entity": (
+        "They want a whole KIND OF RECORD called something else everywhere: "
+        "\"call nurses colleagues\", \"rename the Ward record to Unit\". "
+        "Cannot be done. Needs the record and the new name. NOT rename_field, "
+        "which is one box on a record."
+    ),
+    "change_field_type": (
+        "They want an existing box to hold a different KIND of value: \"make "
+        "the phone number a number instead of text\", \"the date should be a "
+        "date, not free text\". Cannot be done. Needs the record and the box."
+    ),
+    "edit_api": (
+        "They want an existing endpoint CHANGED rather than added or removed: "
+        "\"make that endpoint take a date range\". Cannot be done. Needs "
+        "which endpoint."
+    ),
+    "reorder": (
+        "They want things MOVED AROUND on a screen that already exists: "
+        "\"move the chart above the table\", \"put the search at the top\". "
+        "Nothing rearranges a composed screen. Needs the screen."
     ),
     "revert": (
         "Undo the last change: \"undo that\", \"undo\", \"put it back\", "

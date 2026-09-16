@@ -93,6 +93,19 @@ def _lifecycle_verb(message: str) -> str | None:
     return word if word in _LIFECYCLE_VERBS else None
 
 
+#: Where the application is, said as a place rather than as a state name.
+_WHERE_IT_IS = {
+    "DISCOVERY": "Still working out what you want.",
+    "CLARIFICATION": "Still working out what you want.",
+    "DEFINITION": "I have written down what I understood; it is waiting for you to read.",
+    "BLUEPRINT_REVIEW": "I have written down what I understood; it is waiting for you to read.",
+    "IMPLEMENTATION": "Building it now.",
+    "PREVIEW": "Built, and you can look at it.",
+    "VERIFICATION": "Built, and being read back page by page.",
+    "COMPLETE": "Built and checked.",
+}
+
+
 def _status_report(doc: dict) -> str:
     """A deterministic status line read straight off the Blueprint — never a
     define. Answers 'where are we' with the state, what has been drafted, and
@@ -107,18 +120,25 @@ def _status_report(doc: dict) -> str:
     except Exception:  # noqa: BLE001
         by_user = 0
     if not reqs and not pages:
-        return ("**State:** DISCOVERY — nothing defined yet.\n\nDescribe what "
-                "you want to build, then say `define` to draft the definition.")
-    nxt = ("Say `approve` to build." if state in ("BLUEPRINT_REVIEW", "DEFINITION")
-           else "Say `define` to (re)draft the definition, then `approve` to build.")
-    return "\n".join([
-        f"**State:** {state}",
-        f"- **Requirements:** {reqs}",
-        f"- **Pages:** {pages}",
-        f"- **Decisions:** {total_dec} recorded, {by_user} from you",
+        return ("Nothing is written down yet.\n\nTell me what you want to "
+                "build, in your own words, and I will write down what I "
+                "understood before anything is built.")
+    # A STATE MACHINE'S NAME IS NOT AN ANSWER. "BLUEPRINT_REVIEW" tells a
+    # person nothing about what to do; where they are and what is next does.
+    where = _WHERE_IT_IS.get(str(state), "")
+    nxt = ("It is waiting for you: read what I wrote down, and press "
+           "**Approve and build** — or tell me what to change first."
+           if state in ("BLUEPRINT_REVIEW", "DEFINITION")
+           else "Tell me what to change, or say `build` when you want it built.")
+    lines = [where] if where else []
+    lines += [
+        f"- **{reqs}** thing(s) it has to do",
+        f"- **{pages}** screen(s) described",
+        f"- **{total_dec}** decision(s) recorded, {by_user} of them yours",
         "",
         nxt,
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def _preview_report(doc: dict, output_dir) -> str:
@@ -1569,6 +1589,30 @@ async def smith_chat(
             # that is the consent to the review Smith offered after the build —
             # so run it now. Gated on `_is_built`: the offer only exists for a
             # built app, and "verify" said to a definition is not this.
+            # DECLINING IS AN ANSWER. "Not now" is one of the options Smith
+            # itself offers, and it used to fall through to the architect,
+            # which read it as a change to reason about.
+            if " ".join((req.message or "").strip().lower().rstrip(".!").split()) in _DECLINED:
+                emit("message", {"text": ("Right — nothing run. Say `verify` "
+                                          "whenever you want me to read the pages, "
+                                          "or just tell me what to change."),
+                                 "status": "reported"})
+                return {"status": "reported"}
+
+            # WHAT IT COSTS, BEFORE IT IS SPENT. The chip asks the scope; a
+            # typed "verify" named none, and the whole application is fifteen
+            # to twenty-five minutes of composing. Asked once, with the same
+            # three scopes the chip offers — and the answer is itself a verify
+            # consent, so the next turn runs it.
+            if svc is not None and _is_built(output_dir) \
+                    and _is_verify_consent(req.message) \
+                    and _verify_scope(req.message) is None \
+                    and not _scope_was_chosen(req.message):
+                emit("message", {"text": _verify_scope_question(svc.doc),
+                                 "options": list(_VERIFY_SCOPES),
+                                 "status": "asked"})
+                return {"status": "asked"}
+
             if svc is not None and _is_built(output_dir) \
                     and _is_verify_consent(req.message):
                 _run_smith_review(str(output_dir), app_root, emit=emit,
@@ -2095,6 +2139,40 @@ def _is_build_consent(message: str) -> bool:
     """
     m = " ".join((message or "").strip().lower().rstrip(".!").split())
     return m in _BUILD_CONSENT
+
+
+#: The three scopes, in the words the chip already uses so both paths agree.
+#: The first two carry their own scope; the third is the whole application and
+#: says so, which is what makes choosing it a decision rather than a default.
+_VERIFY_SCOPES = ("Verify only the critical journeys.",
+                  "Verify the whole application — every page",
+                  "Not now")
+
+
+#: Turning an offer down, as a whole message. Smith offered these words; it
+#: should not then hand them to the architect as a change to interpret.
+_DECLINED = frozenset({"not now", "no", "no thanks", "no thank you", "nope",
+                       "later", "maybe later", "not yet", "skip", "skip it",
+                       "nothing", "leave it", "no, leave it"})
+
+
+def _scope_was_chosen(message: str) -> bool:
+    """Whether this message is already an answer to the scope question, so the
+    question is asked once rather than every time the answer comes back."""
+    m = " ".join((message or "").strip().lower().split())
+    return any(m == s.lower().rstrip(".") or m == s.lower() for s in _VERIFY_SCOPES) \
+        or "whole application" in m or "critical journey" in m
+
+
+def _verify_scope_question(doc: dict) -> str:
+    """The question, with the size of the thing being offered."""
+    pages = len([p for p in (doc or {}).get("pages") or []
+                 if isinstance(p, dict) and p.get("status") != "DEPRECATED"])
+    how_long = "fifteen to twenty-five minutes" if pages > 6 else "several minutes"
+    return (f"Before I start: reading every page as it renders takes {how_long} "
+            f"for an application this size ({pages} screen(s)), because each one "
+            "is looked at and anything off is composed again.\n\nHow much "
+            "should I look at?")
 
 
 def _verify_scope(message: str) -> list[str] | None:

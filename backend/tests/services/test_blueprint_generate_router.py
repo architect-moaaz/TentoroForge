@@ -448,3 +448,28 @@ def test_the_go_ahead_to_build_is_the_whole_message_not_a_word_in_it():
                  "rebuild the nurses page", "do it after the phone number",
                  "", "   "):
         assert not _is_build_consent(said), said
+
+
+def test_a_typed_verify_is_told_what_it_costs_and_asked_how_much():
+    """The chip asks the scope; a typed "verify" named none and ran the whole
+    application — fifteen to twenty-five minutes of composing."""
+    from routers.blueprint_generate import (_DECLINED, _VERIFY_SCOPES,
+                                            _is_verify_consent,
+                                            _scope_was_chosen,
+                                            _verify_scope_question)
+
+    doc = {"pages": [{"route": f"/p{i}"} for i in range(8)]}
+    said = _verify_scope_question(doc)
+    assert "fifteen to twenty-five minutes" in said and "8 screen(s)" in said
+    assert said.rstrip().endswith("How much should I look at?")
+    # Small applications are not told a big number.
+    assert "several minutes" in _verify_scope_question({"pages": [{"route": "/a"}]})
+
+    # A bare consent has no scope, so it is asked; an answer to the question
+    # is not asked again.
+    assert _is_verify_consent("verify") and not _scope_was_chosen("verify")
+    for scope in _VERIFY_SCOPES[:2]:
+        assert _scope_was_chosen(scope), scope
+    # Turning it down is an answer, not a change to interpret.
+    assert "not now" in _DECLINED and "no thanks" in _DECLINED
+    assert not _is_verify_consent("Not now")

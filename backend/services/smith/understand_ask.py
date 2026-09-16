@@ -113,6 +113,20 @@ Return ONLY a JSON object with exactly these keys:
       "add_integration" / "remove_integration" — a third-party service:
                         "send email through SendGrid", "drop the Stripe
                         integration".
+      "remove_page"   — a whole SCREEN should go: "delete the Wards page",
+                        "remove the reports screen". Not a control on a
+                        screen (that is "remove").
+      "rename_entity" — a whole KIND OF RECORD should be called something
+                        else: "call nurses colleagues", "rename Ward to
+                        Unit". Not rename_field, which is one box.
+      "change_field_type" — an existing box should hold a different KIND of
+                        value: "make the phone number a number not text".
+      "edit_api"      — an existing endpoint should CHANGE: "make that
+                        endpoint take a date range". Adding or removing one
+                        is add_api / remove_api.
+      "reorder"       — things should MOVE AROUND on a screen that exists:
+                        "move the chart above the table", "put the search at
+                        the top".
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood

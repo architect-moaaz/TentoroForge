@@ -687,7 +687,7 @@ class SmithSession:
         fname = str(field.get("name") or "").strip()
         if not entity or not fname:
             return TurnResult(status="asked",
-                              answer="I need the entity and the new field's name and type.")
+                              answer="Which record should it go on, and what should the box be called?")
 
         # Map Smith's SQL-ish type words to the Blueprint's field vocabulary.
         _t = str(field.get("type") or "string").lower().strip()
@@ -746,9 +746,9 @@ class SmithSession:
                             touched: list[str]) -> "TurnResult":
         return TurnResult(
             status="resolved",
-            answer=(f"Added a {ftype} column “{fname}” to {entity}. It is nullable "
-                    "and applied as a migration, so existing rows keep their data "
-                    "and nothing rebuilds"
+            answer=(f"Added **{fname}** to **{entity}** — a {ftype} box, optional, "
+                    "so records that already exist simply have it empty and "
+                    "nothing is rebuilt"
                     + (f". Updated: {', '.join(touched[:6])}." if touched else ".")
                     + " Say which screen should show it and I will put it there."),
             touched_paths=touched,
@@ -919,6 +919,17 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        from services.smith.limits import cannot as _cannot
+        if _cannot(verb):
+            # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely
+            # cannot serve; each now says why in a clause and offers the
+            # nearest thing that works, as sentences a click can say.
+            from services.smith.engine_blueprint_adapter import load_engine_doc
+            from services.smith.limits import answer as _limit_answer
+            said, options = _limit_answer(verb, understanding,
+                                          load_engine_doc(str(self.output_dir)) or {})
+            if said:
+                return TurnResult(status="needs_user", answer=said, options=options)
         if verb == "rebuild":
             # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
             # The build is driven by the client — `useBlueprintRun` posts the
@@ -1126,11 +1137,23 @@ class SmithSession:
         )
         bp.save()
 
-        answer = (
-            f"Done. Changed `{target_file}` — "
-            f"{(understanding.get('current_behavior') or 'previous state').strip()}"
-            f" → {(understanding.get('desired_behavior') or 'requested change').strip()}."
-        )
+        # WHAT CHANGED, IN THE WORDS ON THE SCREEN. "Changed /master-data —
+        # previous state → requested change" is the shape of a sentence with
+        # nothing in it: it is what the template says when the model filled in
+        # neither behaviour, which is most of the time for a rename or a
+        # removal, where the label IS the change.
+        label = str(understanding.get("element_label") or "").strip()
+        new_text = str(understanding.get("new_value") or "").strip()
+        if label and new_text:
+            answer = f"Done — **{label}** on {target_file} now says **{new_text}**."
+        elif label:
+            answer = (f"Done — **{label}** is off {target_file}, and the screen "
+                      "no longer offers what it did.")
+        else:
+            was = str(understanding.get("current_behavior") or "").strip()
+            now = str(understanding.get("desired_behavior") or "").strip()
+            answer = (f"Done — {target_file}: {was} → {now}." if was and now
+                      else f"Done — {target_file} has been changed.")
         return TurnResult(
             status="resolved",
             answer=answer,

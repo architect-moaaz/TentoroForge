@@ -123,3 +123,47 @@ def test_the_turn_offers_the_closest_asks_when_the_verb_is_unknown(tmp_path):
     assert result.options[-1] == "Something else"
     # The thirty-item wall is gone from this reply.
     assert "**The screens**" not in result.answer
+
+
+def test_a_state_machines_name_is_not_an_answer():
+    """"State: BLUEPRINT_REVIEW" tells a person nothing about what to do."""
+    from routers.blueprint_generate import _status_report
+
+    said = _status_report({"state": "BLUEPRINT_REVIEW", "requirements": [1] * 12,
+                           "pages": [1] * 5, "decisions": []})
+    assert "BLUEPRINT_REVIEW" not in said and "State:" not in said
+    assert "waiting for you to read" in said and "Approve and build" in said
+    assert "thing(s) it has to do" in said and "screen(s) described" in said
+
+    empty = _status_report({})
+    assert "DISCOVERY" not in empty and "Nothing is written down yet" in empty
+
+
+def test_a_change_is_confirmed_in_the_words_on_the_screen(tmp_path):
+    """"Changed /master-data — previous state → requested change" is the shape
+    of a sentence with nothing in it."""
+    import subprocess
+
+    from services.smith_session import IterationMove, SmithSession
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "page.json").write_text('{"label": "Delete"}')
+    for cmd in (["git", "add", "-A"],
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"]):
+        subprocess.run(cmd, cwd=tmp_path, check=True)
+
+    def _move(understanding, output_dir):
+        (tmp_path / "src" / "page.json").write_text('{"label": "Archive"}')
+        return IterationMove(move_name="rename", touched_paths=["src/page.json"])
+
+    session = SmithSession(
+        project_id="p1", output_dir=str(tmp_path), guards_fn=lambda *a, **kw: [],
+        understand_ask_fn=lambda m, ctx, **kw: {
+            "verb": "rename", "target_file": "src/page.json",
+            "element_label": "Delete", "new_value": "Archive",
+            "screen": "x", "current_behavior": "", "desired_behavior": ""},
+        iteration_move_fn=_move)
+    result = session.run_iteration(user_message="change Delete to Archive")
+    assert "previous state" not in result.answer and "requested change" not in result.answer
+    assert "**Delete**" in result.answer and "**Archive**" in result.answer
