@@ -24,6 +24,9 @@ divergence §115 refuses.
 
 from __future__ import annotations
 
+import json
+import re
+
 import logging
 from pathlib import Path
 from typing import Any, Sequence
@@ -123,7 +126,11 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
         # Business-terms purpose is a required field; the request is the closest
         # thing to a stated reason we have, and it reads back sensibly in the
         # definition ("add a screen for clients") until the user refines it.
-        "purpose": (request.strip() or f"The {name} screen.")[:280],
+        # ON ONE LINE. The request now carries the whole ask — the sentence
+        # that asked for the screen as well as the answer that placed it — and
+        # a purpose is read back in the definition as a phrase, not a
+        # transcript.
+        "purpose": (" ".join(request.split()) or f"The {name} screen.")[:280],
         "primaryTasks": [],
     }
     # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
@@ -132,9 +139,11 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
     # Blueprint loaded without its ids.json — an import or a restore). bootstrap
     # binds the document's ids into the registry first; it is idempotent, so it
     # is free when the registry is already in step.
+    from services.blueprint.ids import page_key
     from services.smith.smith import bootstrap as _bind_ids
     _bind_ids(svc)
-    page = svc.upsert("pages", body, natural_key=want)
+    # THE REGISTRY'S OWN KEY — the one the definition allocates pages under.
+    page = svc.upsert("pages", body, natural_key=page_key(want))
     svc.save()
     logger.info("[smith] add_page %s -> %s", want, page.get("id"))
     return page
@@ -197,7 +206,12 @@ def compose_route(
         spec = TaskSpec(task_id=f"smith-compose-{page['id']}-{attempt}",
                         node="page_layouts", agent=COMPOSER_AGENT,
                         attempt=attempt, subject=page["id"],
-                        feedback=feedback or None)
+                        feedback=feedback or None,
+                        # THE WORDS THAT ASKED FOR THIS COMPOSITION. A brief
+                        # is about this attempt, feedback about the last one;
+                        # without it a conversation could recompose a page
+                        # forever and never say what it wanted different.
+                        brief=request or "")
 
         tell(reasoning, f"Composing the screen at {page.get('route')}.", "step")
         result = run(spec)
@@ -312,9 +326,12 @@ def add_widgets(
         # the contract still records what was asked for, and a retry composes
         # against it rather than starting from a page that never heard the
         # request.
+        from services.blueprint.ids import page_key
         body = {k: v for k, v in page.items() if k != "id"}
         body["primaryTasks"] = tasks + added
-        svc.upsert("pages", body, natural_key=str(page.get("route") or page["id"]))
+        # Under the registry's own key: keyed by the bare route, the allocator
+        # minted a SECOND page id for the same route (PAGE-003 beside PAGE-002).
+        svc.upsert("pages", body, natural_key=page_key(str(page.get("route") or route)))
         svc.save()
         logger.info("[smith] %s primaryTasks += %s", page.get("route"), added)
 
@@ -330,7 +347,238 @@ def add_widgets(
 #: Which verbs this module answers for. `run` is what the agent loop calls, so
 #: an unknown verb has to be named rather than silently doing the default —
 #: that silence is the whole failure this module exists to remove.
+#: What a change request can ask a screen to DO, by the words people use for
+#: it, in the page contract's own action vocabulary. Prefix-matched on word
+#: boundaries: "delete", "deletion", "deleting"; "remove", "removal".
+_CAPABILITY_WORDS: dict[str, tuple[str, ...]] = {
+    "delete": ("delet", "remov", "destroy", "archiv"),      # delete/deletion/deleting, remove/removal
+    "edit": ("edit", "updat"),
+    "create": ("creat", "register", "add new", "new record"),
+    "view": ("view record", "open record", "view details", "record details"),
+}
+
+
+def capabilities_named(request: str) -> list[str]:
+    import re as _re
+    text = (request or "").lower()
+    return [verb for verb, words in _CAPABILITY_WORDS.items()
+            if any(_re.search(r"\b" + _re.escape(w), text) for w in words)]
+
+
+def declare_capabilities(svc: Any, page: dict, request: str) -> list[str]:
+    """Record in the page contract what the request asks the screen to DO,
+    and declare the workflow it needs. Returns the actions added.
+
+    "Add a Delete Record button on each row" went into `primaryTasks` — free
+    text the composer reads as a wish — and the page was re-composed with no
+    `delete` in its `actions` and no workflow that deletes a Nurse. The
+    composer, correctly, left Delete out (the action model says: no delete
+    workflow, do not bind Delete to Update), and the turn still reported
+    "added Delete Record". A capability is contract, not prose: the verb goes
+    into `actions`, the missing CRUD workflow is declared the way the verify
+    declares it, and the composition is then held to it — a tree without the
+    control is refused, so the reply can only claim what landed.
+    """
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return []
+    have = {str(a).lower().split("_")[0] for a in (page.get("actions") or []) if isinstance(a, str)}
+    added = [v for v in capabilities_named(request) if v not in have]
+    if not added:
+        return []
+    from services.blueprint.ids import page_key
+    from services.smith.smith import bootstrap as _bind_ids
+    _bind_ids(svc)                        # the registry in step with the document before any allocation
+    body = {k: v for k, v in page.items() if k != "id"}
+    body["actions"] = list(page.get("actions") or []) + added
+    svc.upsert("pages", body, natural_key=page_key(str(page.get("route") or "")))
+    svc.save()
+    from services.smith.review_gaps import settle_crud_gaps
+    settle_crud_gaps(svc, only_pages={str(page.get("id"))})
+    # A workflow that already exists for the verb is LAUNCHED FROM this page
+    # now — the composer binds only workflows declared to start from a
+    # screen, and a removal takes the page off that list, so a later "add it
+    # back" must put it on again or the control is composed against a
+    # workflow the brief never offered.
+    page_id = str(page.get("id") or "")
+    ops = {"delete": "db_delete", "edit": "db_update", "create": "db_insert"}
+    for w in svc.doc.get("workflows") or []:
+        if w.get("status") == "DEPRECATED":
+            continue
+        step_ops = {str((st.get("config") or {}).get("actionType") or "") for st in w.get("steps") or []}
+        on_entity = any(str(st.get("entity")) == entity for st in w.get("steps") or [])
+        if on_entity and any(ops.get(v) in step_ops for v in added) and page_id not in (w.get("launchedFrom") or []):
+            w["launchedFrom"] = list(w.get("launchedFrom") or []) + [page_id]
+    svc.save()
+    logger.info("[smith] %s actions += %s", page.get("route"), added)
+    return added
+
+
+def ensure_edit_page(svc: Any, page: dict) -> dict | None:
+    """The screen an `edit` needs, created when the definition has none.
+
+    The platform's own rule: a form page whose route carries `[id]` is an
+    EDIT screen (one form, pre-filled, submit saves); a form without one is a
+    CREATE screen. Med Registration was defined with the create screen only
+    — `/nurse-registration` — and `save_edit` declared on it, which one Form
+    running one workflow cannot honour. "Implement the edit functionality"
+    then re-composed the list, whose Edit already navigated to
+    `/nurse-registration/{{id}}`: a route nothing served. The edit lives on
+    its own page. Returns the page created, or None when one can already
+    host it (an `[id]` form page or a record page for the entity)."""
+    entity = str((page.get("data") or {}).get("primaryEntity") or "")
+    if not entity:
+        return None
+    pages = [p for p in (svc.doc.get("pages") or []) if p.get("status") != "DEPRECATED"
+             and str((p.get("data") or {}).get("primaryEntity") or "") == entity]
+    from services.blueprint.functional_completeness import page_family
+    if any(page_family(p) == "record" or (page_family(p) == "form" and "[" in str(p.get("route") or ""))
+           for p in pages):
+        return None
+    create = next((p for p in pages if page_family(p) == "form"), None)
+    update = next((w for w in (svc.doc.get("workflows") or [])
+                   if any((st.get("config") or {}).get("actionType") == "db_update"
+                          for st in w.get("steps") or [])
+                   and any(str(st.get("entity")) == entity for st in w.get("steps") or [])), None)
+    if create is None or update is None:
+        return None                        # nothing to edit with — Page↔Workflow's, not a page's
+    ename = next((str(e.get("name")) for e in (svc.doc.get("data") or {}).get("entities") or []
+                  if str(e.get("id")) == entity), entity)
+    route = str(create.get("route") or "").rstrip("/") + "/[id]"
+    from services.blueprint.ids import page_key
+    body = {
+        "name": f"Edit {ename}", "route": route, "pattern": "form",
+        "purpose": f"Change one existing {ename}: the form opens pre-filled with its current values "
+                   f"and saving runs {update.get('name') or update.get('id')}.",
+        "actions": ["save_edit", "cancel"],
+        "data": {"primaryEntity": entity},
+        "requirements": list(create.get("requirements") or []),
+        "navigatesTo": [str(p["id"]) for p in pages if page_family(p) == "collection" and p.get("id")],
+        "primaryTasks": [f"Edit an existing {ename} and save the changes"],
+    }
+    if create.get("module"):
+        body["module"] = create["module"]
+    if create.get("users"):
+        body["users"] = list(create["users"])
+    new_page = svc.upsert("pages", body, natural_key=page_key(route))
+    # The list reaches it, and the update workflow is launchable from it —
+    # the composer binds only workflows declared to start from a screen.
+    for p in svc.doc.get("pages") or []:
+        if page_family(p) == "collection" and str((p.get("data") or {}).get("primaryEntity") or "") == entity:
+            nav = list(p.get("navigatesTo") or [])
+            if new_page["id"] not in nav:
+                p["navigatesTo"] = nav + [new_page["id"]]
+    launched = list(update.get("launchedFrom") or [])
+    if new_page["id"] not in launched:
+        update["launchedFrom"] = launched + [new_page["id"]]
+    svc.save()
+    logger.info("[smith] created the edit screen %s (%s) for %s", route, new_page["id"], ename)
+    return new_page
+
+
+def prepare_capabilities(svc: Any, route: str, request: str, *, app_root: str | None = None,
+                         executor: Any = None, reasoning: Any = None) -> dict:
+    """Before EITHER compose verb runs: what the request asks the screen to
+    DO becomes contract (`declare_capabilities`), and an edit gets the screen
+    it needs (`ensure_edit_page`), composed first so the list's Edit has
+    somewhere to go. Lives on the one entry point both verbs share — wired
+    into `add_widgets` alone, "implement the edit functionality" went through
+    `compose_route` and none of it happened."""
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return {"declared": [], "created": []}
+    declared = declare_capabilities(svc, page, request)
+    created: list[str] = []
+    if "edit" in capabilities_named(request):
+        page = _page_for_route(svc.doc, route) or page
+        edit_page = ensure_edit_page(svc, page)
+        if edit_page is not None:
+            created.append(str(edit_page["route"]))
+            tell(reasoning, f"There was no screen to edit a record on — creating "
+                            f"{edit_page.get('route')} first.", "step")
+            compose_route(svc, edit_page["route"], app_root=app_root,
+                          request=f"compose the edit screen at {edit_page['route']}",
+                          executor=executor, reasoning=reasoning)
+    return {"declared": declared, "created": created}
+
+
 VERBS = ("compose_route", "add_widgets")
+
+
+#: Below this a word is too common to say anything about whether a particular
+#: thing was composed — "add", "row", "the". A curated list of such words is
+#: the exception list this codebase has been burned by; a length is one rule
+#: with nothing to maintain, and being wrong about it leaves a claim
+#: unchecked rather than contradicting a true one.
+MIN_DISTINCTIVE = 5
+
+
+def _distinctive(widget: str) -> str:
+    """The longest word of a widget ask, lowercased, or "" when it has none
+    worth looking for. An identifier survives whole ("fathersname"), which is
+    what makes it the most specific thing the ask contains."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or "")]
+    longest = max(words, key=len, default="")
+    return longest if len(longest) >= MIN_DISTINCTIVE else ""
+
+
+def unshown(svc: Any, route: str, wanted: Sequence[str]) -> list[str]:
+    """The asked widgets the page's live layout does not contain.
+
+    The composer is TOLD what to add and is free to lay the page out without
+    it — it did exactly that with a "Father's Name (fathersName) input field",
+    and the reply said "added". A widget counts as shown when its longest
+    word appears anywhere in the layout — a label, a binding, a column key.
+    An ask with no long word is left unchecked rather than guessed at.
+    """
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return []
+    layouts = [l for l in (svc.doc.get("pageLayouts") or [])
+               if isinstance(l, dict) and str(l.get("page")) == str(page.get("id"))
+               and l.get("status") not in ("SUPERSEDED", "DEPRECATED")]
+    if not layouts:
+        return [str(w) for w in wanted]
+    hay = json.dumps(layouts[-1].get("root") or {}).lower()
+    missing = []
+    for w in wanted:
+        word = _distinctive(str(w))
+        if word and word not in hay:
+            missing.append(str(w))
+    return missing
+
+
+def _field_named(svc: Any, route: str, widget: str) -> tuple[dict, dict] | None:
+    """The page's primary entity and the field a widget ask names, or None.
+
+    "Father's Name (fathersName) input field" names `Nurse.fathersName`; a
+    "recent activity" section names nothing. Matched on the field's name as
+    an identifier, or on its name spelled out as words.
+    """
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return None
+    eid = str((page.get("data") or {}).get("primaryEntity") or "")
+    ent = next((e for e in ((svc.doc.get("data") or {}).get("entities") or [])
+                if isinstance(e, dict) and str(e.get("id")) == eid), None)
+    if ent is None:
+        return None
+    low = " " + re.sub(r"[^a-z0-9]+", " ", (widget or "").lower()) + " "
+    idents = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or "")}
+    # THE MOST SPECIFIC FIELD WINS. "Father's Name (fathersName) input field"
+    # names `fathersName`; it also contains the word "name", and `name` is a
+    # field too. Taking the first match put the wrong field on the form.
+    hits: list[dict] = []
+    for f in ent.get("fields") or []:
+        fname = str((f or {}).get("name") or "")
+        if not fname or (f or {}).get("primaryKey"):
+            continue
+        words = " " + " ".join(re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", fname).lower().split()) + " "
+        if fname.lower() in idents or (len(words.strip()) >= 4 and words in low):
+            hits.append(f)
+    if not hits:
+        return None
+    return ent, max(hits, key=lambda f: len(str(f.get("name") or "")))
 
 
 def run(output_dir: str, verb: str, *, route: str = "",
@@ -359,19 +607,68 @@ def run(output_dir: str, verb: str, *, route: str = "",
 
     app_root = str(Path(output_dir) / "app")
     wanted = [str(w).strip() for w in (widgets or []) if str(w).strip()]
+    if verb not in VERBS:
+        return {"applied": False, "edited_paths": [],
+                "reason": f"unknown compose verb {verb!r}; "
+                          f"expected one of {', '.join(VERBS)}"}
+    try:
+        prepared = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
+                                        app_root=app_root, reasoning=reasoning)
+    except ComposeError as exc:
+        return {"applied": False, "edited_paths": [], "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] preparing %s for %s failed", route, verb)
+        return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+    extra = "".join(
+        ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
+        + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
+    # A FIELD THE ENTITY ALREADY HAS NEEDS NO COMPOSER. "Show fathersName on
+    # the registration page" asks for a control on a form, and the form is in
+    # the layout; putting it there is deterministic. The composer, asked the
+    # same thing, re-laid the page out and left the field off it.
+    # Either verb: "I cannot see fathersName on the registration page" is
+    # read as a recompose as often as an add, and both mean the same thing
+    # when the words name a field the entity has.
+    if verb in ("add_widgets", "compose_route"):
+        from services.smith.field_change import show_field, summary_of
+        shown: list[dict] = []
+        rest: list[str] = []
+        asks = list(wanted) if verb == "add_widgets" else ([request] if _field_named(svc, route, request) else [])
+        for w in asks:
+            hit = _field_named(svc, route, w)
+            if hit is None:
+                rest.append(w)
+                continue
+            ent, fld = hit
+            page = _page_for_route(svc.doc, route) or {}
+            try:
+                out = show_field(svc, str(ent.get("name") or ""), str(fld.get("name") or ""),
+                                 page_id=str(page.get("id") or "") or None,
+                                 app_root=app_root, reasoning=reasoning)
+            except Exception as exc:  # noqa: BLE001 — falls through to the composer
+                logger.warning("[smith] could not surface %s on %s: %s", w, route, exc)
+                rest.append(w)
+                continue
+            if out.get("applied"):
+                shown.append(out)
+            else:
+                rest.append(w)
+        if shown and not rest:
+            paths = sorted({p for o in shown for p in (o.get("edited_paths") or [])})
+            return {"applied": True, "edited_paths": paths,
+                    "diff_summary": "\n\n".join(summary_of("show_field", o) for o in shown),
+                    "version": int(svc.doc.get("version") or 0), "reason": "", "missing": []}
+        if verb == "add_widgets":
+            wanted = rest
     try:
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
                                  request=request, reasoning=reasoning)
-            did = f"added {', '.join(wanted)} to {route}"
+            did = f"added {', '.join(wanted)} to {route}{extra}"
         elif verb == "compose_route":
             result = compose_route(svc, route, app_root=app_root,
                                    request=request, reasoning=reasoning)
-            did = f"composed {route}"
-        else:
-            return {"applied": False, "edited_paths": [],
-                    "reason": f"unknown compose verb {verb!r}; "
-                              f"expected one of {', '.join(VERBS)}"}
+            did = f"composed {route}{extra}"
     except ComposeError as exc:
         # The composer declining is a real outcome and says so.
         return {"applied": False, "edited_paths": [], "reason": str(exc)}
@@ -384,6 +681,10 @@ def run(output_dir: str, verb: str, *, route: str = "",
     # read `artifacts`, which ChangeResult does not have, so every successful
     # composition reported nothing changed.
     committed = sorted(getattr(result, "committed", None) or [])
+    missing = unshown(svc, route, wanted) if verb == "add_widgets" else []
+    if missing:
+        did = (f"re-composed {route}{extra}, but the new screen does not show "
+               f"{', '.join(missing)}")
     return {
         "applied": bool(getattr(result, "applied", False)),
         "edited_paths": committed,
@@ -391,4 +692,5 @@ def run(output_dir: str, verb: str, *, route: str = "",
                                if committed else ""),
         "version": getattr(result, "version", 0),
         "reason": str(getattr(result, "reason", "") or ""),
+        "missing": missing,
     }

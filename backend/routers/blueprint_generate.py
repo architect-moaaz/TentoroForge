@@ -81,7 +81,7 @@ router = APIRouter(tags=["generation", "blueprint"])
 
 #: Words that are COMMANDS, not descriptions to reason about.
 _LIFECYCLE_VERBS = frozenset({"status", "define", "approve", "build", "preview",
-                              "export", "deploy"})
+                              "export", "deploy", "help"})
 
 
 def _lifecycle_verb(message: str) -> str | None:
@@ -91,6 +91,19 @@ def _lifecycle_verb(message: str) -> str | None:
         return None
     word = message.strip().lower().rstrip(".!").strip()
     return word if word in _LIFECYCLE_VERBS else None
+
+
+#: Where the application is, said as a place rather than as a state name.
+_WHERE_IT_IS = {
+    "DISCOVERY": "Still working out what you want.",
+    "CLARIFICATION": "Still working out what you want.",
+    "DEFINITION": "I have written down what I understood; it is waiting for you to read.",
+    "BLUEPRINT_REVIEW": "I have written down what I understood; it is waiting for you to read.",
+    "IMPLEMENTATION": "Building it now.",
+    "PREVIEW": "Built, and you can look at it.",
+    "VERIFICATION": "Built, and being read back page by page.",
+    "COMPLETE": "Built and checked.",
+}
 
 
 def _status_report(doc: dict) -> str:
@@ -107,12 +120,69 @@ def _status_report(doc: dict) -> str:
     except Exception:  # noqa: BLE001
         by_user = 0
     if not reqs and not pages:
-        return ("State: DISCOVERY — nothing defined yet. Describe what you want "
-                "to build, then say `define` to draft the definition.")
-    nxt = ("Say `approve` to build." if state in ("BLUEPRINT_REVIEW", "DEFINITION")
-           else "Say `define` to (re)draft the definition, then `approve` to build.")
-    return (f"State: {state}. {reqs} requirement(s), {pages} page(s) drafted; "
-            f"{total_dec} decision(s) recorded ({by_user} from you). {nxt}")
+        return ("Nothing is written down yet.\n\nTell me what you want to "
+                "build, in your own words, and I will write down what I "
+                "understood before anything is built.")
+    # A STATE MACHINE'S NAME IS NOT AN ANSWER. "BLUEPRINT_REVIEW" tells a
+    # person nothing about what to do; where they are and what is next does.
+    where = _WHERE_IT_IS.get(str(state), "")
+    nxt = ("It is waiting for you: read what I wrote down, and press "
+           "**Approve and build** — or tell me what to change first."
+           if state in ("BLUEPRINT_REVIEW", "DEFINITION")
+           else "Tell me what to change, or say `build` when you want it built.")
+    lines = [where] if where else []
+    lines += [
+        f"- **{reqs}** thing(s) it has to do",
+        f"- **{pages}** screen(s) described",
+        f"- **{total_dec}** decision(s) recorded, {by_user} of them yours",
+        "",
+        nxt,
+    ]
+    return "\n".join(lines)
+
+
+def _preview_report(doc: dict, output_dir) -> str:
+    """Where to look at the application, or why there is nothing to look at.
+
+    `preview`, `export` and `deploy` were in `_LIFECYCLE_VERBS` and only
+    `status` had a branch, so they fell through to the architect: typing
+    "preview" came back refusing a build on a stale approval, and "export"
+    came back asking what kind of export. Deterministic, like the status
+    report — these are commands, and none of them needs a model.
+    """
+    if not _is_built(output_dir):
+        return ("Nothing to look at yet — this application has not been built.\n\n"
+                "Open the **Definition ready to review** card above and press "
+                "**Approve and build**. The screens appear in the panel on the "
+                "left as they land.")
+    routes = [str(p.get("route")) for p in (doc or {}).get("pages") or []
+              if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("route")]
+    lines = ["It is built. Pick a page in the Blueprint panel on the left and it "
+             "opens in the preview beside this conversation."]
+    if routes:
+        lines.append("")
+        lines += [f"- `{r}`" for r in sorted(set(routes))[:12]]
+    return "\n".join(lines)
+
+
+def _export_report(output_dir) -> str:
+    """How to take the source away. Chat cannot hand over a file."""
+    if not _is_built(output_dir):
+        return ("There is nothing to export yet — this application has not been "
+                "built, so there is no source to take away.")
+    return ("I cannot hand you a file from this box. **Export** in the project "
+            "menu gives you the whole source as a zip, with a Dockerfile and a "
+            "compose file if you want them, or pushes it to a git repository.")
+
+
+def _deploy_refusal() -> str:
+    """Publishing, refused in the one place a person asks for it."""
+    return ("Publishing is not something I do from a typed sentence. It puts the "
+            "application on the internet under your account and needs "
+            "credentials and a deliberate go-ahead, so it is done from the "
+            "project's own deploy action by someone who can sign in to it.\n\n"
+            "What I can do from here is change the application itself, or hand "
+            "you the source to deploy wherever you like — say `export`.")
 
 
 def _is_built(output_dir) -> bool:
@@ -380,104 +450,30 @@ def _requirement_report(doc: dict, req_id: str) -> str:
         if not reqs:
             return (f"{req_id} can't be traced yet — this project has no "
                     "requirements defined. Say `define` first.")
-        return (f"{req_id} isn't a requirement in this Blueprint. It has "
+        return (f"`{req_id}` isn't a requirement in this Blueprint. It has "
                 f"{len(reqs)} requirement(s), e.g. {known}.")
     desc = str(match.get("description") or "").strip()
-    lines = [f"{req_id} — {desc}" if desc else req_id]
+    lines = [f"**{req_id}** — {desc}" if desc else f"**{req_id}**"]
     try:
         from services.smith import code_intel
         tr = code_intel.trace(doc, req_id)
-        lines.append(f"Verdict: {getattr(tr, 'verdict', 'UNKNOWN')}.")
+        lines.append(f"- **Verdict:** {getattr(tr, 'verdict', 'UNKNOWN')}")
         chain = getattr(tr, "chain", {}) or {}
         order = ("FLOW", "RULE", "PAGE", "API", "ENTITY", "TEST")
-        parts = [f"{p.title()}: {', '.join(chain[p])}"
+        parts = [f"- **{p.title()}:** " + ", ".join(f"`{i}`" for i in chain[p])
                  for p in order if chain.get(p)]
         # Anything the ordered list didn't name, so nothing is silently dropped.
-        parts += [f"{p.title()}: {', '.join(ids)}"
+        parts += [f"- **{p.title()}:** " + ", ".join(f"`{i}`" for i in ids)
                   for p, ids in sorted(chain.items())
                   if p not in order and ids]
         if parts:
-            lines.append("Traced to — " + "; ".join(parts) + ".")
+            lines.extend(parts)
         else:
-            lines.append("Nothing cites it yet — it has no implementing "
+            lines.append("- Nothing cites it yet — it has no implementing "
                          "artifacts in the Blueprint.")
     except Exception:  # noqa: BLE001 — a trace degrades to the text + id, never 500s
         pass
     return "\n".join(lines)
-
-
-# The only external systems this platform integrates with are the two design
-# SOURCES. Everything else — an ATS, a CRM, a payments or messaging provider —
-# is not something Smith can wire up, and saying so plainly beats asking which
-# sync direction the user wants for a thing that will never be built.
-_SUPPORTED_INTEGRATIONS = ("figma", "ux pilot", "uxpilot")
-#: Phrasings that mean "wire this app to an external system".
-_INTEGRATION_PHRASES = (
-    "integrate with", "integration with", "integrate it with", "integrate into",
-    "connect to", "connect it to", "connect with", "connect this to",
-    "sync with", "sync to", "sync it with", "hook up to", "hook it up to",
-    "pull from", "webhook to", "api integration with",
-)
-#: If the target names a part of THIS app, the phrase is internal wiring ("connect
-#: the form to the dashboard"), not an external integration — leave it to the mover.
-_INTERNAL_TARGET_NOUNS = (
-    "page", "screen", "route", "dashboard", "table", "list", "form", "view",
-    "workflow", "tab", "panel", "section", "field", "button", "modal", "sidebar",
-    "nav", "menu", "record", "entity", "database", "db", "endpoint", "api route",
-)
-
-
-def _unsupported_integration(message: str) -> str | None:
-    """The external system a message asks to integrate with, when that system
-    is NOT one Smith supports — or None.
-
-    DEFECT-F-07: 'Integrate with Greenhouse' was met with 'which sync direction
-    — import / push / two-way?', implying a capability the platform does not
-    have. Only Figma and UX Pilot (design sources) are wired; an ATS/CRM/payment
-    integration is not, and the honest answer is to say so and offer what can be
-    done (record it as a requirement, or rebuild), not to interview the user
-    about a build that will never happen.
-
-    Conservative: fires only on an explicit integration phrase, and never for
-    the two design sources (they have their own connect flow).
-    """
-    if not message:
-        return None
-    low = message.lower()
-    for phrase in _INTEGRATION_PHRASES:
-        idx = low.find(phrase)
-        if idx == -1:
-            continue
-        tail = message[idx + len(phrase):].strip()
-        tail_low = tail.lower()
-        if not tail:
-            continue
-        if any(s in tail_low for s in _SUPPORTED_INTEGRATIONS):
-            return None  # Figma / UX Pilot — the supported design-source flow
-        # The named system, trimmed to its first clause / few words for the reply.
-        name = re.split(r"[.,;:\n]", tail, maxsplit=1)[0].strip()
-        name = " ".join(name.split()[:5])
-        if not name:
-            continue
-        # "connect the form to the dashboard" is internal wiring, not an
-        # external integration — don't refuse it as one.
-        if any(re.search(rf"\b{re.escape(n)}\b", name.lower())
-               for n in _INTERNAL_TARGET_NOUNS):
-            return None
-        return name
-    return None
-
-
-def _unsupported_integration_reply(name: str) -> str:
-    return (
-        f"I can't connect an app to {name} — external integrations like that "
-        "aren't something I can build yet. The only outside sources I wire up "
-        "are Figma and UX Pilot, and those are design references, not data "
-        "connections.\n\nWhat I can do: record it as a requirement so it's "
-        "captured in the definition (and whoever builds the integration later "
-        "has it written down), or make changes to the app I did build. Want me "
-        "to note it as a requirement?"
-    )
 
 
 #: Action verbs whose presence means the app actually DOES something. A brief
@@ -737,6 +733,36 @@ def _output_dir(project: Any) -> Path:
     if recorded:
         return Path(recorded)
     return project_root(str(project.id))
+
+
+def _brief_with_documents(brief: str, evidence: Any) -> str:
+    """The brief plus the supplied documents, labelled so the reader can tell
+    what the person said from what a document said.
+
+    For the turn's own reading — the clarifier, the design-link scan — not
+    for the Blueprint: the documents are stored beside it by `_run_dag`
+    (services.blueprint.documents) and the agents read them from there, so
+    `application.description` stays the user's words.
+    """
+    from services.blueprint import documents as _documents
+    block = _documents.labelled(evidence)
+    return f"{brief}\n\n{block}" if block else brief
+
+
+def _has_design_references(project_id: str) -> bool:
+    """Whether the user has designated an upload as design direction.
+
+    The clarifier is told when a design travels with the brief so it does not
+    ask which palette fits a design that has already chosen its own — and it
+    only knew about a Figma or UX Pilot link in the prose. A screenshot
+    attached and marked "read as design direction" is the same fact.
+    """
+    from services import chat_attachments, design_reference
+    try:
+        return bool(design_reference.read_design_references(
+            chat_attachments.attachments_root(), str(project_id)))
+    except Exception:  # noqa: BLE001 — no designation readable is no designation
+        return False
 
 
 def _with_evidence(req: "BlueprintGenerateRequest") -> str:
@@ -1161,6 +1187,13 @@ class SmithChatRequest(BaseModel):
     source: str = "user"
     #: §25 — the definition has been seen and accepted, so build the rest.
     approved: bool = False
+    #: §14 — the text of documents the person supplied rather than typed (the
+    #: requirements file attached on /blueprint/new). It lived only on the
+    #: legacy generate request, and the panel posts here: an attached
+    #: specification was read in the browser, carried to the project page,
+    #: and dropped at this door — the requirements were written from the
+    #: one-line brief alone and cited no document.
+    evidence: list[str] = Field(default_factory=list)
 
 
 def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
@@ -1237,6 +1270,14 @@ def _remember(loop: Any, project_id: Any, role: str, content: str,
     """
     if not (content or "").strip():
         return
+
+    # §42: chat history is the first place a raw credential must not come to
+    # rest. `understand_ask` already drops one out of the field the model
+    # returns, so it never reaches the Blueprint or a reply — but the message
+    # itself was stored exactly as typed, which put a pasted token on disk and
+    # handed it back to every later turn through the history endpoint.
+    from services.smith.secrets_scrub import scrub as _scrub
+    content = _scrub(content)
 
     async def _write() -> None:
         try:
@@ -1431,6 +1472,27 @@ async def smith_chat(
                 emit("message", {"text": _status_report(svc.doc if svc else {}),
                                  "status": "reported"})
                 return {"status": "reported"}
+            # THE OTHER LIFECYCLE WORDS, ANSWERED WHERE THEY ARE TYPED. They
+            # were declared in `_LIFECYCLE_VERBS` and handled nowhere, so the
+            # architect took them as changes to reason about.
+            if verb == "preview":
+                emit("message", {"text": _preview_report(svc.doc if svc else {}, output_dir),
+                                 "status": "reported"})
+                return {"status": "reported"}
+            if verb == "export":
+                emit("message", {"text": _export_report(output_dir), "status": "reported"})
+                return {"status": "reported"}
+            if verb == "deploy":
+                emit("message", {"text": _deploy_refusal(), "status": "needs_user"})
+                return {"status": "needs_user"}
+            if verb == "help":
+                # ONE LIST, NOT THE MODEL'S RECOLLECTION OF ONE. See
+                # services.smith.capabilities: the answer built from the verb
+                # table alone left out `verify & fix` and every lifecycle
+                # command, which are not verbs.
+                from services.smith.capabilities import summary as _capabilities
+                emit("message", {"text": _capabilities(), "status": "reported"})
+                return {"status": "reported"}
 
             # DEFECT-I-05: 'Trace REQ-001' is a question with a determinate
             # answer — the requirement's text, verdict and the ids that cite it,
@@ -1455,17 +1517,14 @@ async def smith_chat(
                     emit("message", {"text": cited, "status": "reported"})
                     return {"status": "reported"}
 
-            # DEFECT-F-07: an external integration Smith cannot build (an ATS, a
-            # CRM, a payments provider) is refused honestly here — before the
-            # model can engage as if it were a normal change and ask which sync
-            # direction the user wants for something that will never be built.
-            # Not gated on `approved`: an integration ask is never an approval.
-            if not req.approved:
-                unsupported = _unsupported_integration(req.message)
-                if unsupported:
-                    emit("message", {"text": _unsupported_integration_reply(unsupported),
-                                     "status": "asked"})
-                    return {"status": "asked"}
+            # DEFECT-F-07 was an integration ask met with an interview about
+            # sync direction for a capability that does not exist. The answer
+            # then was a phrase list that refused anything naming an outside
+            # system. `add_integration` is the answer now: it DECLARES the
+            # integration with the names of the secrets it would need and says
+            # plainly that nothing is wired — one honest outcome for every
+            # phrasing, where the list gave "send email through SendGrid" a
+            # declaration and "connect it to our payroll system" a refusal.
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
@@ -1507,10 +1566,60 @@ async def smith_chat(
                                  app_name=getattr(project, "name", "") or "")
                 return built
 
+            # "BUILD IT" IS A DOOR, NOT A SIGNPOST. Typed by a layman it was
+            # answered with a description of a card to press, which is the
+            # answer a machine gives. The gate is not bypassed: this records
+            # the approval the same way the card does, so a definition changed
+            # since the last approval is still refused as stale — the refusal
+            # just happens after the click rather than instead of it.
+            if svc is not None and defined and _is_build_consent(req.message):
+                from services.blueprint import approval as _approval
+                if _is_built(output_dir) and _approval.state_of(svc.doc, "plan") == "approved":
+                    # Already built, and nothing has changed since it was
+                    # approved: rebuilding costs minutes and money for the
+                    # same application, so it is asked rather than assumed.
+                    emit("message", {
+                        "text": ("It is already built from this definition, and "
+                                 "nothing has changed since. Building it again "
+                                 "takes a few minutes and produces the same "
+                                 "application.\n\nWhat would you like to do?"),
+                        "options": ["Build it again anyway", "Show me the screens",
+                                    "Nothing, I'll change something first"],
+                        "status": "asked"})
+                    return {"status": "asked"}
+                emit("message", {"text": "Building it now — this takes a few minutes."})
+                return _run_dag(str(output_dir), app_root, req.message,
+                                approved=True, emit=emit,
+                                app_name=getattr(project, "name", "") or "")
+
             # THE USER TOOK THE VERIFY OFFER. A built application and a message
             # that is the consent to the review Smith offered after the build —
             # so run it now. Gated on `_is_built`: the offer only exists for a
             # built app, and "verify" said to a definition is not this.
+            # DECLINING IS AN ANSWER. "Not now" is one of the options Smith
+            # itself offers, and it used to fall through to the architect,
+            # which read it as a change to reason about.
+            if " ".join((req.message or "").strip().lower().rstrip(".!").split()) in _DECLINED:
+                emit("message", {"text": ("Right — nothing run. Say `verify` "
+                                          "whenever you want me to read the pages, "
+                                          "or just tell me what to change."),
+                                 "status": "reported"})
+                return {"status": "reported"}
+
+            # WHAT IT COSTS, BEFORE IT IS SPENT. The chip asks the scope; a
+            # typed "verify" named none, and the whole application is fifteen
+            # to twenty-five minutes of composing. Asked once, with the same
+            # three scopes the chip offers — and the answer is itself a verify
+            # consent, so the next turn runs it.
+            if svc is not None and _is_built(output_dir) \
+                    and _is_verify_consent(req.message) \
+                    and _verify_scope(req.message) is None \
+                    and not _scope_was_chosen(req.message):
+                emit("message", {"text": _verify_scope_question(svc.doc),
+                                 "options": list(_VERIFY_SCOPES),
+                                 "status": "asked"})
+                return {"status": "asked"}
+
             if svc is not None and _is_built(output_dir) \
                     and _is_verify_consent(req.message):
                 _run_smith_review(str(output_dir), app_root, emit=emit,
@@ -1536,7 +1645,7 @@ async def smith_chat(
                 from services.smith.figma_connect import find_in as _figma_in
                 from services.smith.uxpilot_connect import find_in as _uxpilot_in
 
-                _the_brief = _brief_from(req.history, req.message)
+                _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
 
                 # §16 asks rather than assumes — but ONE decision at a time, in
@@ -1567,8 +1676,10 @@ async def smith_chat(
                 if _user_turns < _MAX_CLARIFY_TURNS:
                     from services.smith.clarify_brief import clarify_brief
 
-                    asked = clarify_brief(_the_brief,
-                                          design_attached=bool(named_design))
+                    asked = clarify_brief(
+                        _the_brief,
+                        design_attached=bool(named_design)
+                        or _has_design_references(str(project_id)))
                     if asked:
                         # ONE question this turn — it carries its own options,
                         # and its answer reaches the next turn through `history`,
@@ -1629,7 +1740,8 @@ async def smith_chat(
                 defined_now = _run_dag(str(output_dir), app_root,
                                        _brief_from(req.history, req.message),
                                        approved=req.approved, emit=emit,
-                                       app_name=getattr(project, "name", "") or "")
+                                       app_name=getattr(project, "name", "") or "",
+                                       documents=req.evidence)
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
                 # DEFECT-B-03: the answers that shaped this definition are
@@ -1658,7 +1770,8 @@ async def smith_chat(
                     and _definition_edit(req.message):
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=False, emit=emit,
-                                app_name=getattr(project, "name", "") or "")
+                                app_name=getattr(project, "name", "") or "",
+                                documents=req.evidence)
 
             # An application exists, so Smith reasons about it.
             # §7 — WHAT SMITH IS THINKING, WHILE IT THINKS IT. A turn that
@@ -1835,7 +1948,8 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
-             announce_completion: bool = True) -> dict:
+             announce_completion: bool = True,
+             documents: Any = None) -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116).
 
     When an approved build reaches completion it offers to verify — as part of
@@ -1860,6 +1974,20 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
         svc = BlueprintService.load(output_dir=output_dir)
+        if approved and announce_completion:
+            # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
+            # definition as it stands, so a plan approval that had gone stale
+            # (the definition changed after the last approval) is renewed by
+            # the person's click — and a chat "build" between the change and
+            # this click is refused as stale rather than silently renewed.
+            # The review's re-compose passes announce_completion=False and
+            # records nothing: nobody approved anything there.
+            from services.blueprint import approval as _approval
+            if _approval.state_of(svc.doc, "plan") != "approved":
+                try:
+                    _approval.record(svc, "plan")
+                except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
+                    logger.exception("could not record the plan approval for %s", output_dir)
         if description:
             # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
             # assigned, so a clarifying exchange destroyed the request that
@@ -1900,6 +2028,16 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             output_dir=output_dir, app_id=Path(output_dir).name,
             name=app_name or "Application", domain="unknown",
             description=description)
+
+    # WHAT THE USER HANDED OVER, KEPT WHERE EVERY RUN CAN READ IT. The
+    # documents travel with the request that carried them; the runs that
+    # follow — the clarified re-definition, the build after approval — read
+    # them from beside the Blueprint (services.blueprint.documents), so the
+    # requirements agent cites `document 1` on each of them and the
+    # description above stays the user's own words.
+    if documents:
+        from services.blueprint import documents as _documents
+        _documents.store(output_dir, documents)
 
     plan = [k for lvl in levels() for k in lvl]
     if not approved:
@@ -1985,6 +2123,63 @@ def _is_verify_consent(message: str) -> bool:
         return False
     return m.startswith(("verify ", "verify.", "verify!", "auto-verify ",
                          "auto verify ", "check and fix "))
+
+
+#: The whole message, not a word inside it: "build a dashboard" is a screen to
+#: compose and "build it" is the go-ahead. Matched like `_is_verify_consent`,
+#: which this follows — the offer's own words plus the obvious typed ones.
+_BUILD_CONSENT = frozenset({
+    "build", "build it", "build the app", "build the application", "make it",
+    "go on then", "go ahead", "do it", "start", "start it", "yes build it",
+    "build it now", "approve and build", "yes, build it", "go", "proceed",
+    "ok build it", "let's build it", "lets build it",
+})
+
+
+def _is_build_consent(message: str) -> bool:
+    """Whether a message IS the go-ahead to build.
+
+    A layman types it and used to be handed a description of a card. The
+    approval gate is not bypassed by this — the caller records the approval
+    exactly as the card does, and a definition that changed since the last
+    approval is still refused as stale.
+    """
+    m = " ".join((message or "").strip().lower().rstrip(".!").split())
+    return m in _BUILD_CONSENT
+
+
+#: The three scopes, in the words the chip already uses so both paths agree.
+#: The first two carry their own scope; the third is the whole application and
+#: says so, which is what makes choosing it a decision rather than a default.
+_VERIFY_SCOPES = ("Verify only the critical journeys.",
+                  "Verify the whole application — every page",
+                  "Not now")
+
+
+#: Turning an offer down, as a whole message. Smith offered these words; it
+#: should not then hand them to the architect as a change to interpret.
+_DECLINED = frozenset({"not now", "no", "no thanks", "no thank you", "nope",
+                       "later", "maybe later", "not yet", "skip", "skip it",
+                       "nothing", "leave it", "no, leave it"})
+
+
+def _scope_was_chosen(message: str) -> bool:
+    """Whether this message is already an answer to the scope question, so the
+    question is asked once rather than every time the answer comes back."""
+    m = " ".join((message or "").strip().lower().split())
+    return any(m == s.lower().rstrip(".") or m == s.lower() for s in _VERIFY_SCOPES) \
+        or "whole application" in m or "critical journey" in m
+
+
+def _verify_scope_question(doc: dict) -> str:
+    """The question, with the size of the thing being offered."""
+    pages = len([p for p in (doc or {}).get("pages") or []
+                 if isinstance(p, dict) and p.get("status") != "DEPRECATED"])
+    how_long = "fifteen to twenty-five minutes" if pages > 6 else "several minutes"
+    return (f"Before I start: reading every page as it renders takes {how_long} "
+            f"for an application this size ({pages} screen(s)), because each one "
+            "is looked at and anything off is composed again.\n\nHow much "
+            "should I look at?")
 
 
 def _verify_scope(message: str) -> list[str] | None:

@@ -112,18 +112,41 @@ def test_an_empty_project_still_reads_empty(tmp_path):
     assert bp.pages == [] and bp.entities == []
 
 
-def test_smiths_own_file_still_wins_when_it_exists(tmp_path):
-    """The adapter is a fallback, not a takeover: a project that has been
-    written by Smith keeps what Smith wrote."""
+def test_the_engine_document_wins_and_smiths_file_keeps_what_only_it_has(tmp_path):
+    """Reversed deliberately. Smith's own file used to win, so on a project
+    with both, Smith read the application as it stood some builds ago: a
+    record with a field that had been renamed and without one that had been
+    added. Asked to validate the telephone number it asked whether one
+    existed — correctly, from a picture that was out of date.
+
+    The engine's document changes on every build and every seam; Smith's
+    changes when Smith happens to save. The truth is the engine's, and the
+    change log of Smith's own moves is the part only Smith has."""
+    forge = tmp_path / ".forge"
+    forge.mkdir()
+    (forge / "blueprint.json").write_text(json.dumps({
+        "project_id": "t",
+        "pages": [{"route": "/stale", "schema_path": "x.json"}],
+        "change_log": [{"at": "then", "smith_move": "rename"}],
+    }))
+    engine = forge / "blueprint" / "current.json"
+    engine.parent.mkdir()
+    engine.write_text(json.dumps({"pages": [{"route": "/from-engine"}]}))
+
+    bp = Blueprint.load(project_id="t", output_dir=str(tmp_path))
+    assert [p["route"] for p in bp.pages] == ["/from-engine"]
+    assert [m["smith_move"] for m in bp.change_log] == ["rename"]
+
+
+def test_smiths_own_file_is_still_the_whole_store_without_an_engine_document(tmp_path):
+    """A legacy application has no engine document, and then Smith's file is
+    not a stale copy of anything — it is the only one there is."""
     forge = tmp_path / ".forge"
     forge.mkdir()
     (forge / "blueprint.json").write_text(json.dumps({
         "project_id": "t",
         "pages": [{"route": "/only-mine", "schema_path": "x.json"}],
     }))
-    engine = forge / "blueprint" / "current.json"
-    engine.parent.mkdir()
-    engine.write_text(json.dumps({"pages": [{"route": "/from-engine"}]}))
 
     bp = Blueprint.load(project_id="t", output_dir=str(tmp_path))
     assert [p["route"] for p in bp.pages] == ["/only-mine"]

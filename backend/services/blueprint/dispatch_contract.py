@@ -219,6 +219,67 @@ def dispatch_findings(doc: Mapping[str, Any]) -> list[dict]:
     return out
 
 
+def _is_list(type_name: Any) -> bool:
+    t = str(type_name or "").strip().lower()
+    return t.endswith("[]") or t in ("array", "list")
+
+
+def _list_inputs(doc: Mapping[str, Any], page: Mapping[str, Any], form: Mapping[str, Any],
+                 wf: Mapping[str, Any]) -> set[str]:
+    """The names a Form collects that hold SEVERAL values — by the workflow
+    input's type, or the entity column's."""
+    names: set[str] = set()
+    for i in wf.get("inputs") or []:
+        if isinstance(i, dict) and i.get("name") and _is_list(i.get("type")):
+            names.add(str(i["name"]))
+    wanted = {str((form.get("props") or {}).get("entity") or ""),
+              str((page.get("data") or {}).get("primaryEntity") or "")}
+    for e in _live((doc.get("data") or {}).get("entities")):
+        if str(e.get("id")) in wanted or str(e.get("name")) in wanted:
+            for f in e.get("fields") or []:
+                if isinstance(f, dict) and f.get("name") and _is_list(f.get("type")):
+                    names.add(str(f["name"]))
+    return names
+
+
+def field_kind_findings(doc: Mapping[str, Any]) -> list[dict]:
+    """A Form field that collects a list with a control that submits a string.
+
+    The edit form for a nurse held `specialities` — `string[]` on the entity
+    and on the workflow input — in a textarea with a "comma-separated" hint.
+    It rendered the record's array as its JSON text and would have written a
+    comma string back. The shape of the value is contract: a list is
+    collected by a `tags` field, which submits an array."""
+    out: list[dict] = []
+    layouts = {str(l.get("page")): l for l in _live(doc.get("pageLayouts"))}
+    pages = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    for d in control_dispatches(doc):
+        if d.control != "Form":
+            continue
+        wf = _workflow_by_id(dict(doc), d.workflow_id)
+        page, layout = pages.get(d.page_id) or {}, layouts.get(d.page_id) or {}
+        layout = projected_layout(doc, page, layout) if layout else {}
+        form = _control_node(layout, d)
+        if wf is None or form is None:
+            continue
+        lists = _list_inputs(doc, page, form, wf)
+        if not lists:
+            continue
+        for f in (form.get("props") or {}).get("fields") or []:
+            if not isinstance(f, dict) or str(f.get("name") or "") not in lists:
+                continue
+            kind = str(f.get("kind") or "")
+            if kind == "tags":
+                continue
+            out.append({"rule": "form-field-kind-mismatch", "page": d.page_id,
+                        "detail": f"{d.route}: the form's `{f.get('name')}` field is kind "
+                                  f"{kind or 'text'!r}, but {f.get('name')} holds a list "
+                                  f"(string[]) — a list is collected by a field of kind "
+                                  f"\"tags\", which submits it as an array. A text control "
+                                  f"shows the array as JSON and writes a string back."})
+    return out
+
+
 def _control_node(layout: Mapping[str, Any], d: Dispatch) -> dict | None:
     """The layout node a Dispatch came from (a row action's Table, else the
     control itself), for the input check that reasons about page scope."""
@@ -268,5 +329,5 @@ def dispatches(doc: Mapping[str, Any]) -> list[dict]:
     return out
 
 
-__all__ = ["Dispatch", "control_dispatches", "projected_layout", "step_refs", "workflow_ref_findings",
+__all__ = ["field_kind_findings", "Dispatch", "control_dispatches", "projected_layout", "step_refs", "workflow_ref_findings",
            "dispatch_findings", "dispatches", "RUNTIME_HEADS"]

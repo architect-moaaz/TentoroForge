@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import {
   WorkflowDispatcherProvider,
   createWorkflowDispatch,
+  destinationAfterDelete,
 } from "@tentoroforge/renderer";
 
 export function WorkflowDispatchProvider({ children }: { children: ReactNode }) {
@@ -30,7 +31,7 @@ export function WorkflowDispatchProvider({ children }: { children: ReactNode }) 
       createWorkflowDispatch({
         onStart: (name) =>
           toast.loading(`Running ${name}…`, { id: `wf:${name}` }),
-        onSuccess: (name, result) => {
+        onSuccess: (name, result, args) => {
           // Summarize what actually happened. `steps_ran` / `log.length` /
           // an entity id from the returned row are the three things a user
           // wants to see — "Done" alone left them staring at an unchanged
@@ -59,7 +60,14 @@ export function WorkflowDispatchProvider({ children }: { children: ReactNode }) 
           });
           void entityId; // reserved for a future "View" action once page routes are stable
           // Re-fetch server components so data the workflow changed shows up.
-          router.refresh();
+          // A delete of the record this page is standing on is a departure:
+          // refreshing re-rendered a page for a record that no longer
+          // existed, empty and still armed. Go up to the list instead.
+          const away = typeof window !== "undefined"
+            ? destinationAfterDelete(args, result, window.location.pathname)
+            : null;
+          if (away) router.push(away);
+          else router.refresh();
         },
         onError: (name, message) =>
           toast.error(message || "Workflow failed", {

@@ -1355,3 +1355,8 @@ def test_the_app_brief_is_every_page_and_no_field(doc, page, entity):
     assert brief["requirements"][0]["id"] == "REQ-001"
     # Entity fields belong to the per-page call, where they become columns.
     assert "headcount" not in json.dumps(brief)
+
+
+def test_a_list_column_is_collected_as_tags():
+    """`string[]` fell through to text; the record's array then showed as JSON."""
+    assert pp.form_fields_for({"fields": [{"name": "specialities", "type": "string[]"}]})[0]["kind"] == "tags"

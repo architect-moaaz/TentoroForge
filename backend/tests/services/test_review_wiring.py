@@ -117,3 +117,49 @@ def test_unrepaired_pages_are_read_from_the_build_report():
     ]}}
     assert unrepaired_pages(built) == {"PAGE-001": "Observer↔Requirement: REQ-012: Female filters on Male"}
     assert unrepaired_pages({}) == {} and unrepaired_pages(None) == {}
+
+
+# --- the contract reviews the pages the camera cannot reach ----------------
+
+def _list_field_doc():
+    """An edit page on a dynamic route whose form collects a `string[]` column
+    with a textarea — the fault the create form was re-composed for while the
+    edit page, never screenshotted, kept it."""
+    wf = {"id": "FLOW-002", "name": "Edit Nurse", "trigger": {"kind": "manual"}, "launchedFrom": ["PAGE-004"],
+          "inputs": [{"name": "record", "kind": "record", "entity": "ENTITY-001", "required": True},
+                     {"name": "specialities", "kind": "field", "type": "string[]", "required": True}],
+          "steps": [{"key": "u", "name": "u", "type": "action", "entity": "ENTITY-001",
+                     "config": {"actionType": "db_update", "table": "nurses",
+                                "values": {"specialities": "{{specialities}}"}, "where": {"id": "{{record.id}}"}},
+                     "next": []}]}
+    return {
+        "data": {"entities": [{"id": "ENTITY-001", "name": "Nurse", "table": "nurses",
+                               "fields": [{"name": "id", "type": "uuid"},
+                                          {"name": "specialities", "type": "string[]"}]}]},
+        "pages": [{"id": "PAGE-004", "route": "/nurse-registration/[id]", "pattern": "form",
+                   "actions": ["save_edit"], "data": {"primaryEntity": "ENTITY-001"}}],
+        "workflows": [wf],
+        "pageLayouts": [{"page": "PAGE-004", "dataSources": [{"name": "nurse", "entity": "Nurse", "op": "get"}],
+                         "root": {"type": "Form", "props": {"workflow": "FLOW-002", "submitLabel": "Save",
+                                  "args": {"record": "{{nurse.id}}"},
+                                  "fields": [{"name": "specialities", "kind": "textarea", "label": "Specialities"}]},
+                                  "children": []}}],
+    }
+
+
+def test_the_contracts_findings_reach_a_page_the_camera_cannot(monkeypatch, tmp_path):
+    from services.blueprint.visual_repair import repair_briefs_from_visual_qa
+    from services.smith import review_wiring as rw
+    monkeypatch.setattr(rw, "_capture_pages", lambda *a, **k: [])          # a dynamic route: no shot
+    monkeypatch.setattr(rw, "_functional_findings", lambda *a, **k: [{"route": "/x", "kind": "never", "severity": "error", "note": "not run without shots"}])
+    doc = _list_field_doc()
+    report = rw.make_critique(str(tmp_path), lambda: doc)()
+    assert report is not None and report["pages_reviewed"] == ["/nurse-registration/[id]"]
+    assert [f["kind"] for f in report["findings"]] == ["form-field-kind-mismatch"]
+    assert "tags" in report["findings"][0]["note"]
+    assert list(repair_briefs_from_visual_qa(report, doc)) == ["PAGE-004"]     # it becomes a re-compose brief
+    # narrowed to another route: the finding is out of scope, and nothing to review
+    assert rw.make_critique(str(tmp_path), lambda: doc, routes=["/master-data"])() is None
+    # and the page composed right has no contract finding
+    doc["pageLayouts"][0]["root"]["props"]["fields"][0]["kind"] = "tags"
+    assert rw._contract_findings(doc) == []

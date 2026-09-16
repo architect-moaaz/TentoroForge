@@ -67,14 +67,21 @@ def test_an_empty_message_asks_without_calling_the_model():
 
 def test_missing_keys_normalise_to_strings():
     """`run_iteration` calls .strip() on these."""
+    from services.smith.understand_ask import SHAPE
     out = understand_ask("x", CTX, provider=_says('{"target_file":"/plants"}'))
-    assert out == {"answer": "", "clarification_needed": "", "target_file": "/plants",
-                   "element_label": "", "new_value": "",
-                   # `run_iteration` dispatches on the verb and reads route and
-                   # widgets off the same dict. An absent verb still means
-                   # rename, which is what every turn used to be.
-                   "verb": "", "route": "", "widgets": [],
-                   "figma_url": "", "token_env": "", "treat_as": ""}
+    assert set(out) == SHAPE
+    # ONE FACT, TWO NAMES: a route given as `target_file` is the same screen,
+    # and leaving `route` empty made the turn ask which screen about a screen
+    # it had already been told.
+    assert out["target_file"] == "/plants" and out["route"] == "/plants"
+    # `run_iteration` dispatches on the verb and reads route and widgets off
+    # the same dict. An absent verb still means rename.
+    assert out["verb"] == "" and out["widgets"] == []
+    assert out["clarification_options"] == [] and out["field"] == {}
+    assert out["asks"] == []
+    assert all(out[k] == "" for k in SHAPE - {"widgets", "field", "target_file",
+                                              "route", "clarification_options",
+                                              "asks"})
 
 
 def test_a_replacement_carries_the_value_to_write():
@@ -110,10 +117,41 @@ def test_every_early_return_carries_the_full_shape():
         understand_ask("x", CTX, provider=boom),
         understand_ask("x", CTX, provider=_says("not json")),
     ):
-        assert set(out) == {"answer", "clarification_needed", "target_file",
-                            "element_label", "new_value",
-                            "verb", "route", "widgets",
-                            # connect_figma. `token_env` is a variable NAME;
-                            # the token itself is never a field Smith carries.
-                            # `treat_as` is evidence vs specification (§48).
-                            "figma_url", "token_env", "treat_as"}
+        from services.smith.understand_ask import SHAPE
+        assert set(out) == SHAPE
+        assert out["clarification_needed"] and out["clarification_options"] == []
+
+
+def test_a_quoted_title_inside_the_answer_still_parses():
+    """A-03: asked which requirements came from the uploaded document, the
+    model answered — and wrote the document's title in quotes inside the JSON
+    string. The object failed to load and the turn fell to 'I did not follow
+    that', a change-request deflection to a question it had just answered."""
+    from services.smith.understand_ask import _parse
+    raw = ('{\n  "answer": "All ten came from the document titled "Clinic '
+           'Visit Tracker — Requirements". Nothing else.",\n'
+           '  "clarification_needed": "",\n  "verb": ""\n}')
+    parsed = _parse(raw)
+    assert parsed is not None
+    assert parsed["answer"].startswith("All ten came from the document titled "
+                                       '"Clinic Visit Tracker')
+    assert parsed["verb"] == ""
+    # Well-formed output is untouched, escaped quotes included.
+    good = '{"answer": "say \\"hi\\"", "verb": ""}'
+    assert _parse(good) == {"answer": 'say "hi"', "verb": ""}
+
+
+def test_a_question_with_choices_carries_them_as_chips():
+    """A clarification that offers alternatives used to spell them out in prose
+    and leave the person to type one back; the choices now ride separately,
+    so the panel offers them as chips."""
+    out = understand_ask("add a calculator", CTX, provider=_says(
+        '{"clarification_needed": "Where should the calculator live?", '
+        '"clarification_options": ["A new page at /calculator", " A panel on Nurse Registration ", "", '
+        '{"label": "A panel on Master Data"}, "A new page at /calculator", "x", "y", "z"]}'))
+    assert out["clarification_needed"] == "Where should the calculator live?"
+    assert out["clarification_options"] == ["A new page at /calculator", "A panel on Nurse Registration",
+                                            "A panel on Master Data", "x", "y"]
+    # Not a list: no chips, and no crash.
+    out = understand_ask("x", CTX, provider=_says('{"clarification_needed": "Which?", "clarification_options": "a, b"}'))
+    assert out["clarification_options"] == []

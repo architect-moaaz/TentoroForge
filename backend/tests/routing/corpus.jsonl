@@ -1,0 +1,138 @@
+{"say": "make it nicer", "verb": "restyle", "note": "vague but about the look"}
+{"say": "this page is rubbish", "verb": null, "note": "asks which screen"}
+{"say": "add phone", "verb": "add_field", "note": "asks which record"}
+{"say": "add a phone number to nurses", "verb": "add_field"}
+{"say": "nurses need a phone number", "verb": "add_field"}
+{"say": "give nurses a phone number", "verb": "add_field"}
+{"say": "there's nowhere to put the phone number", "verb": "add_field"}
+{"say": "I need to store a mobile for each nurse", "verb": "add_field"}
+{"say": "can u add phone", "verb": "add_field"}
+{"say": "we also write down their phone", "verb": "add_field"}
+{"say": "add the father's name to nurses", "verb": "add_field"}
+{"say": "nurses need a registration number", "verb": "add_field"}
+{"say": "add years of experience", "verb": "add_field"}
+{"say": "shifts need an hourly rate", "verb": "add_field"}
+{"say": "a tick box for has a driving licence", "verb": "add_field"}
+{"say": "every nurse has a start date", "verb": "add_field"}
+{"say": "on nurses, phone should be mobile", "verb": "rename_field"}
+{"say": "rename years of experience to experience years", "verb": "rename_field"}
+{"say": "the ward's capacity should be called beds", "verb": "rename_field"}
+{"say": "change fathersName to guardianName everywhere", "verb": "rename_field"}
+{"say": "drop the location field from nurses", "verb": "remove_field"}
+{"say": "nurses don't need a fax number", "verb": "remove_field"}
+{"say": "take the middle name off, nobody uses it", "verb": "remove_field"}
+{"say": "remove notes from wards", "verb": "remove_field"}
+{"say": "add a Ward with a name and a number of beds", "verb": "add_entity"}
+{"say": "we also need to keep track of shifts", "verb": "add_entity"}
+{"say": "we keep a record of every training course a nurse does", "verb": "add_entity"}
+{"say": "there's another thing: the agencies that supply nurses", "verb": "add_entity"}
+{"say": "I need to record complaints", "verb": "add_entity"}
+{"say": "we don't need departments any more", "verb": "remove_entity"}
+{"say": "remove agencies, we stopped using them", "verb": "remove_entity"}
+{"say": "scrap the training records", "verb": "remove_entity"}
+{"say": "the wards page is empty", "verb": "compose_route"}
+{"say": "nothing happens when I click Wards", "verb": "compose_route"}
+{"say": "/nurses just shows an error", "verb": "compose_route"}
+{"say": "I need a page for reports", "verb": "compose_route"}
+{"say": "can we have a wards screen", "verb": "compose_route"}
+{"say": "build a dashboard", "verb": "compose_route"}
+{"say": "this page is a mess, do it again", "verb": "compose_route"}
+{"say": "lay the registration page out again from scratch", "verb": "compose_route"}
+{"say": "put today's shifts on the home page", "verb": "add_widgets"}
+{"say": "the dashboard needs a count of nurses on duty", "verb": "add_widgets"}
+{"say": "add a chart of registrations per month", "verb": "add_widgets"}
+{"say": "I want a search box on the nurses list", "verb": "add_widgets"}
+{"say": "I can't see the father's name on the registration page", "verb": "add_widgets"}
+{"say": "where's the phone number gone?", "verb": "add_widgets"}
+{"say": "the ward isn't in the table", "verb": "add_widgets"}
+{"say": "add the phone column to the list", "verb": "add_widgets"}
+{"say": "the button should say Register Nurse, not Add Nurse", "verb": "rename"}
+{"say": "the title at the top should be New nurse", "verb": "rename"}
+{"say": "the column header says Experience, make it Years of experience", "verb": "rename"}
+{"say": "the little Delete link on each row should say Archive", "verb": "rename"}
+{"say": "Save should say Submit for approval", "verb": "rename"}
+{"say": "spelling mistake — it says Recieve", "verb": "rename"}
+{"say": "it says Employee, we say Colleague", "verb": "rename"}
+{"say": "remove the Delete button from the nurses page", "verb": "remove"}
+{"say": "get rid of the Export link", "verb": "remove"}
+{"say": "take the Add Nurse button off the dashboard", "verb": "remove"}
+{"say": "we don't want a Cancel button on this form", "verb": "remove"}
+{"say": "too many buttons, drop the Print one", "verb": "remove"}
+{"say": "email the ward manager whenever a nurse is registered", "verb": "add_workflow"}
+{"say": "when a shift is approved, tell the nurse", "verb": "add_workflow"}
+{"say": "every Monday morning, remind anyone with no shifts booked", "verb": "add_workflow"}
+{"say": "I want a button that archives a nurse instead of deleting them", "verb": "add_workflow"}
+{"say": "a month after someone leaves, delete their details", "verb": "add_workflow"}
+{"say": "when a nurse is registered, also tell the ward manager", "verb": "edit_workflow"}
+{"say": "the delete should ask for a reason first", "verb": "edit_workflow"}
+{"say": "archiving should take them off their ward too", "verb": "edit_workflow"}
+{"say": "send the welcome email an hour later, not straight away", "verb": "edit_workflow"}
+{"say": "stop sending the welcome email", "verb": "remove_workflow"}
+{"say": "remove the archive nurse thing", "verb": "remove_workflow"}
+{"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
+{"say": "experience can't be more than 60 years", "verb": "add_rule"}
+{"say": "a nurse must have at least one speciality", "verb": "add_rule"}
+{"say": "two nurses can't have the same registration number", "verb": "add_rule"}
+{"say": "the phone number shouldn't be optional", "verb": "add_rule"}
+{"say": "a shift can't end before it starts", "verb": "add_rule"}
+{"say": "you can't put more nurses on a ward than it has beds", "verb": "add_rule"}
+{"say": "make it 70 years instead of 60", "verb": "edit_rule"}
+{"say": "make the phone optional after all", "verb": "edit_rule"}
+{"say": "drop the experience limit", "verb": "remove_rule"}
+{"say": "stop nagging about the registration number", "verb": "remove_rule"}
+{"say": "add a ward manager role", "verb": "edit_access"}
+{"say": "there are three kinds of user: admin, manager, nurse", "verb": "edit_access"}
+{"say": "only admins can delete a nurse", "verb": "edit_access"}
+{"say": "managers can approve shifts but not add nurses", "verb": "edit_access"}
+{"say": "anyone should be able to open the registration page without logging in", "verb": "edit_access"}
+{"say": "make Master Data admin only", "verb": "edit_access"}
+{"say": "take the login off, it's internal", "verb": "edit_access"}
+{"say": "change the colour from blue to green", "verb": "restyle"}
+{"say": "use our hospital colours — deep teal and warm grey", "verb": "restyle"}
+{"say": "make it darker", "verb": "restyle"}
+{"say": "make it more compact, we stare at it all day", "verb": "restyle"}
+{"say": "bigger text, the screen is across the room", "verb": "restyle"}
+{"say": "it looks like a toy — make it look clinical", "verb": "restyle"}
+{"say": "too bright", "verb": "restyle"}
+{"say": "put Master Data first", "verb": "edit_navigation"}
+{"say": "call that menu item Nurse Directory", "verb": "edit_navigation"}
+{"say": "group Nurses, Wards and Shifts under Admin", "verb": "edit_navigation"}
+{"say": "take the registration page out of the menu", "verb": "edit_navigation"}
+{"say": "it should open on Master Data, not the dashboard", "verb": "edit_navigation"}
+{"say": "the thing down the left is in a silly order", "verb": "edit_navigation"}
+{"say": "move Reports to the bottom of the menu", "verb": "edit_navigation"}
+{"say": "note for later: nurses should be able to mark themselves unavailable", "verb": "add_requirement"}
+{"say": "we'll need an audit trail of who changed what", "verb": "add_requirement"}
+{"say": "remember that agencies will eventually need their own login", "verb": "add_requirement"}
+{"say": "forget what I said about offline working", "verb": "remove_requirement"}
+{"say": "call the app Nurse Roster", "verb": "edit_product"}
+{"say": "it's for planning shifts on one ward", "verb": "edit_product"}
+{"say": "it's for ward managers, not HR", "verb": "edit_product"}
+{"say": "we say colleague, never employee", "verb": "edit_product"}
+{"say": "the whole thing should be in Arabic", "verb": "edit_product"}
+{"say": "our rota system needs to pull today's shifts automatically", "verb": "add_api"}
+{"say": "an endpoint that lists wards", "verb": "add_api"}
+{"say": "my IT guy is asking for an API for the nurse list", "verb": "add_api"}
+{"say": "remove the export endpoint", "verb": "remove_api"}
+{"say": "send the emails through SendGrid", "verb": "add_integration"}
+{"say": "text people through Twilio", "verb": "add_integration"}
+{"say": "connect it to our payroll system", "verb": "add_integration"}
+{"say": "take Stripe out, we don't charge anyone", "verb": "remove_integration"}
+{"say": "use this design https://figma.com/design/abc/Nurse-Roster", "verb": "connect_figma"}
+{"say": "our designer sent me this, can you use it", "verb": "connect_figma"}
+{"say": "forget the design, do it your way", "verb": "disconnect_design"}
+{"say": "undo that", "verb": "revert"}
+{"say": "undo", "verb": "revert"}
+{"say": "put it back", "verb": "revert"}
+{"say": "that's not what I wanted, revert it", "verb": "revert"}
+{"say": "delete the Wards page", "verb": "remove_page"}
+{"say": "remove the reports screen", "verb": "remove_page"}
+{"say": "call nurses colleagues everywhere", "verb": "rename_entity"}
+{"say": "make the phone number a number instead of text", "verb": "change_field_type"}
+{"say": "change that endpoint to take a date range", "verb": "edit_api"}
+{"say": "move the chart above the table", "verb": "reorder"}
+{"say": "put the search at the top", "verb": "reorder"}
+{"say": "rebuild everything", "verb": "rebuild"}
+{"say": "start again", "verb": "rebuild"}
+{"say": "that thing I said about approvals — it's the manager who approves, not the admin", "verb": "edit_requirement"}
+{"say": "use this UX Pilot page https://uxpilot.ai/p/abc123", "verb": "connect_uxpilot"}

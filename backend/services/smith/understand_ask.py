@@ -26,22 +26,133 @@ Return ONLY a JSON object with exactly these keys:
 
   "answer": if they are ASKING ABOUT the application rather than asking you to
       change it — how something works, whether something is stored, what
-      happens when they do X — answer it from the Blueprint below, in two or
-      three plain sentences, and leave every other field "". Answer only what
-      the Blueprint actually says; if it does not say, reply that it does not
-      and name what you would need. "" when the request is a change.
+      happens when they do X — answer it from the Blueprint below and leave
+      every other field "". Answer only what the Blueprint actually says; if
+      it does not say, reply that it does not and name what you would need.
+      "" when the request is a change.
+      SHAPE OF AN ANSWER (it is shown as markdown in a chat bubble): one
+      short lead sentence, then a bulleted list whenever you are naming more
+      than two things — screens, routes, fields, requirements, roles — one
+      per line, with the name in **bold** and its route or id in `code`.
+      Keep each bullet to one line. No headings, no closing summary.
+      IF THEY ASK WHAT YOU CAN DO, the verbs below are only half of it. Say
+      also that you can report `status`, say where to `preview` it, `export`
+      the source, and — once it is built — `verify & fix`, which reads every
+      page as it renders and re-composes anything off. And that building runs
+      from the "Approve and build" card rather than a typed sentence, and
+      that publishing is not done from the chat at all.
   "clarification_needed": a question to ask them, or "" if the request is
       clear enough to act on. Ask when the request names no screen or element,
       when it could plausibly mean two different changes, or when acting on
       the wrong reading would be expensive to undo. Asking is not a failure.
+  "asks": when the message asks for MORE THAN ONE thing, EVERY ask in it,
+      each a sentence on its own, in their words, in the order they should
+      happen — the first one included, even though its facts are also in the
+      fields above. "Add a phone number, show it on the form and make it
+      required" is ["add a phone number to nurses", "show the phone number on
+      the registration form", "make the phone number required"]. [] when the
+      message asks for one thing. Do not split one change into steps:
+      "rename the delete button to archive" is one ask, not two. Never put
+      the whole message in as the first item — that reads as a step that
+      does everything.
+  "clarification_options": when the question offers CHOICES, the choices as
+      short labels, 2 to 5, each a complete answer on its own that they can
+      pick with one click — ["A new page of its own", "A panel on the screen
+      they named", "Both"]. Draw them from THIS application: a choice between
+      screens names its own screens and their routes. Put the choices here
+      rather than spelling them out in the question; the question then asks.
+      [] when the question is open (a name, a URL, a value).
   "verb": WHICH KIND OF CHANGE this is. Exactly one of:
       "rename"        — change the wording of something that already exists.
+      "remove"        — take a control OFF a screen that exists: "remove the
+                        delete button", "get rid of the export link", "drop
+                        the Add Nurse button". The screen is not rebuilt;
+                        the one control goes, and the screen stops offering
+                        what it did. NOT compose_route — that lays the whole
+                        screen out again with the control still declared.
+      "restyle"       — change how the application LOOKS: theme or brand
+                        colour, palette, typography, spacing, density —
+                        "change the theme colour from blue to green", "make
+                        it darker", "more compact". This is the design
+                        system, not any one screen: NOT rename (no label
+                        changes), NOT compose_route (no screen is rebuilt).
+      "edit_navigation" — the MENU: what is in it, in what order, under
+                        what label or icon or group heading, and which
+                        page the app opens on: "put Master Data first",
+                        "rename the menu item to Nurse Directory", "hide
+                        registration from the sidebar", "open on Master
+                        Data". NOT rename — a menu entry is not a control
+                        on a screen — and NOT compose_route.
+      "add_workflow"  — a NEW business process: "email the admin after a
+                        registration", "archive a nurse instead of deleting",
+                        "send a reminder every Monday". Something the app
+                        should DO, not something a screen should show.
+      "edit_workflow" — change what an EXISTING process does: "when a nurse
+                        is registered also notify the ward manager", "the
+                        delete should ask for a reason first". "When <a thing
+                        an existing workflow already does> happens, also do
+                        Y" is THIS verb, on that workflow — not add_workflow.
+      "remove_workflow" — retire a process: "remove the delete nurse
+                        workflow", "stop sending the welcome email".
+      "edit_access"   — WHO may do WHAT: roles, permissions, screen access:
+                        "add a Ward Manager role", "only admins can delete a
+                        nurse", "make Master Data admin-only", "let anyone
+                        open registration without signing in".
+      "add_rule"      — a NEW business rule constraining a form or a record:
+                        "years of experience cannot exceed 60", "a nurse
+                        needs at least one speciality".
+      "edit_rule"     — change an EXISTING rule: "raise the experience cap
+                        to 70". "remove_rule" — retire one.
+      "add_entity"    — a NEW ENTITY in the data model: "add a Ward entity
+                        with a name and a capacity". NOT add_field (one new
+                        column on an existing entity is add_field).
+      "remove_entity" — retire an entity and everything on it: "we don't
+                        need the Department entity".
+      "rename_field"  — a field of an entity gets a new name: "rename
+                        yearsOfExperience to experienceYears".
+      "remove_field"  — a field goes: "drop the location field from nurses".
+      "add_requirement" / "edit_requirement" / "remove_requirement" — the
+                        stated requirements: "the app should also let a
+                        nurse mark herself unavailable" (add), "REQ-012
+                        should say…" (edit), "we no longer need…" (remove).
+      "edit_product"  — what the app is called or is for: "call the app
+                        Nurse Roster", "the objective is…", "it is for ward
+                        managers", "the interface should be in Arabic".
+      "add_api" / "remove_api" — an API endpoint: "an endpoint that lists
+                        wards", "remove the export endpoint".
+      "add_integration" / "remove_integration" — a third-party service:
+                        "send email through SendGrid", "drop the Stripe
+                        integration".
+      "remove_page"   — a whole SCREEN should go: "delete the Wards page",
+                        "remove the reports screen". Not a control on a
+                        screen (that is "remove").
+      "rename_entity" — a whole KIND OF RECORD should be called something
+                        else: "call nurses colleagues", "rename Ward to
+                        Unit". Not rename_field, which is one box.
+      "change_field_type" — an existing box should hold a different KIND of
+                        value: "make the phone number a number not text".
+      "edit_api"      — an existing endpoint should CHANGE: "make that
+                        endpoint take a date range". Adding or removing one
+                        is add_api / remove_api.
+      "reorder"       — things should MOVE AROUND on a screen that exists:
+                        "move the chart above the table", "put the search at
+                        the top".
+      "revert"        — UNDO the last change: "undo that", "undo", "put it
+                        back", "that's not what I wanted, revert", "go back",
+                        "reverse that". Restores the application as it stood
+                        before the change. Not rebuild, which regenerates from
+                        the definition as it now stands.
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
       "add_widgets"   — add named sections to a screen that exists: "put
                         upcoming sessions and quorum status on the dashboard".
                         NOT for a new data-model field — that is add_field.
+                        A field the entity ALREADY HAS that a screen does not
+                        show ("I cannot see fathersName on the registration
+                        page", "show phone on the nurse form") is THIS verb,
+                        with the field as the widget — not compose_route,
+                        which lays the whole screen out again.
       "add_field"     — add ONE NEW field/attribute to an existing entity's
                         DATA MODEL: "add a discount field to offers", "give
                         tasks a due date", "customers need a phone number".
@@ -84,6 +195,69 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
       a removal. Give the literal text to write, not a description of it: for
       "call it New plant" the value is "New plant", not "a clearer label".
 
+  remove needs:
+  "target_file": the route or schema path of the screen the control is on —
+      a value that appears in the Blueprint below.
+  "element_label": the control's visible text AS IT IS NOW, exactly — a
+      Table row action's label ("Delete") is a control as much as a Button's.
+      Copy it from the Blueprint below; do not paraphrase it.
+
+  rename_field needs:
+  "entity": the entity's name as the Blueprint spells it; "field": the field's
+      current name; "new_value": the new name.
+
+  remove_field needs:
+  "entity" and "field", as above.
+
+  add_requirement needs "requirement": the requirement in the user's words.
+  edit_requirement needs "requirement": which one (its id or its wording) and
+      "change": what it should say instead.
+  remove_requirement needs "requirement": which one.
+
+  edit_product needs "change": what should be different, in the user's words.
+
+  add_api needs "api": the endpoint in the user's words; remove_api needs
+      "api": which one (method and path, or its id).
+
+  add_integration needs "integration": the service in the user's words;
+      remove_integration needs "integration": which one.
+
+  edit_navigation needs:
+  "change": what should be different about the menu, in the user's words.
+
+  edit_access needs:
+  "change": who should be able to do what, in the user's words.
+
+  add_rule needs:
+  "rule": the rule in the user's words.
+
+  edit_rule / remove_rule need:
+  "rule": which rule, by the name the Blueprint below gives it; edit_rule
+      also "change": what should be different.
+
+  add_entity needs:
+  "entity": the entity in the user's words — its name and what it holds.
+
+  remove_entity needs:
+  "entity": which entity, by the name the Blueprint below gives it.
+
+  add_workflow needs:
+  "workflow": what the new process should do, in the user's own words.
+  "route": optional — the screen a person starts it from, as a route in the
+      Blueprint below, when they named one.
+
+  edit_workflow needs:
+  "workflow": which existing workflow, by the name the Blueprint below gives it.
+  "change": what should be different about it, in the user's words.
+
+  remove_workflow needs:
+  "workflow": which existing workflow, by the name the Blueprint below gives it.
+
+  restyle needs:
+  "change": what should look different, in the user's own words ("theme
+      colour green instead of blue", "darker, more compact"). Not a hex
+      value unless they gave one; the design agent decides the scheme.
+
   compose_route needs:
   "route": the path of the screen, as it appears in the Blueprint ("/",
       "/sessions"). The screen's name works too if that is how they said it.
@@ -97,9 +271,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   add_field needs:
   "entity": the name of the existing entity gaining the field, as the Blueprint
       spells it ("Offer", "Task").
-  "field": a JSON object with "name" and "type" for the new column — name in the
-      app's style ("discountPercent"), type one of text / varchar / int /
-      decimal / boolean / date / timestamp. (Optional: length, precision, scale.)
+  "field": a JSON object with "name", "type" and "label" for the new column —
+      name in the app's style ("fathersName"), type one of text / varchar /
+      int / decimal / boolean / date / timestamp, label the words they used
+      ("Father's Name"), which is what the form will show.
+      (Optional: length, precision, scale.)
 
   connect_figma needs:
       "figma_url": the Figma link exactly as they gave it, whole.
@@ -250,13 +426,7 @@ def understand_ask(
     """
     ask = (user_message or "").strip()
     if not ask:
-        return {"answer": "",
-                "clarification_needed": "What would you like to change?",
-                "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed="What would you like to change?")
 
     # SHOWN, NOT JUST HAD. `reasoning` is where Smith's thinking goes on its
     # way to the user; without it the model still reasons and nobody sees it.
@@ -269,25 +439,28 @@ def understand_ask(
                                   history=_render_history(history),
                                   message=ask))
     except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
-        return {"clarification_needed":
-                "I could not reach my reasoning service just then — say that "
-                "again and I will try once more.",
-                "answer": "", "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed=(
+            "I could not reach my reasoning service just then — say that "
+            "again and I will try once more."))
 
     data = _parse(raw)
     if data is None:
-        return {"clarification_needed":
-                "I did not follow that. Which screen should I change, and "
-                "what on it?",
-                "answer": "", "verb": "", "route": "", "widgets": [],
-                "figma_url": "", "token_env": "",
-                "uxpilot_ref": "", "key_env": "",
-                "treat_as": "",
-                "target_file": "", "element_label": "", "new_value": ""}
+        return _blank(clarification_needed=(
+            "I did not follow that. Which screen should I change, and "
+            "what on it?"))
+
+    # ONE FACT UNDER TWO NAMES. `route` and `target_file` both mean "which
+    # screen": the composing verbs read one and the editing verbs read the
+    # other, and the model fills whichever the example it matched used. Asked
+    # to "delete the Master Data page" it answered `remove_page` with
+    # `target_file: /master-data` and `route: ""` — so the turn asked which
+    # screen, about a screen the understanding had already named.
+    _route = str(data.get("route") or "").strip()
+    _target = str(data.get("target_file") or "").strip()
+    if not _route and _is_route(_target):
+        _route = _target
+    if not _target and _route:
+        _target = _route
 
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
     return {
@@ -311,7 +484,7 @@ def understand_ask(
         # Empty is still `rename` downstream (`verbs.verb_of`), which is what
         # every caller predating this field already did.
         "verb": str(data.get("verb") or "").strip().lower(),
-        "route": str(data.get("route") or "").strip(),
+        "route": _route,
         "widgets": [str(w).strip() for w in (data.get("widgets") or [])
                     if str(w).strip()],
         "figma_url": str(data.get("figma_url") or "").strip(),
@@ -325,8 +498,18 @@ def understand_ask(
         # A NAME, never an `ep_` key — the same guard `token_env` has.
         "key_env": _env_name_only(data.get("key_env")),
         "treat_as": _design_scope(data.get("treat_as")),
-        "target_file": str(data.get("target_file") or "").strip(),
+        "target_file": _target,
         "element_label": str(data.get("element_label") or "").strip(),
+        # restyle: the change to the look, in the user's words.
+        "change": str(data.get("change") or "").strip(),
+        # workflows: what a new process should do, or which existing one is meant.
+        "workflow": str(data.get("workflow") or "").strip(),
+        # rules: the rule in the user's words, or which existing one is meant.
+        "rule": str(data.get("rule") or "").strip(),
+        # the definition after the build
+        "requirement": str(data.get("requirement") or "").strip(),
+        "api": str(data.get("api") or "").strip(),
+        "integration": str(data.get("integration") or "").strip(),
         # What to write, not a description of it. `move_dispatcher` needs a
         # literal — "a clearer label" is a note to a person, not an edit — and
         # a removal or a question legitimately has none, so "" is a real value
@@ -336,8 +519,70 @@ def understand_ask(
         # string + a dict so `missing_fields` sees them and `run_iteration` can
         # hand them to the seam. Absent for every other verb.
         "entity": str(data.get("entity") or "").strip(),
-        "field": data.get("field") if isinstance(data.get("field"), dict) else {},
+        # add_field wants {name, type}; rename_field / remove_field name the
+        # field as a string. A string is kept as {"name": …} rather than
+        # dropped — dropped, "rename yearsOfExperience" reached the seam as
+        # "Nurse has no field ''".
+        "field": (data.get("field") if isinstance(data.get("field"), dict)
+                  else {"name": str(data.get("field")).strip()} if isinstance(data.get("field"), str) and str(data.get("field")).strip()
+                  else {}),
+        # THE CHOICES, AS CHIPS. A question that offers alternatives used to
+        # spell them out in prose ("a new page, or a panel on Nurse
+        # Registration or Master Data — which?") and the person typed one
+        # back. Carried separately, the panel offers them as chips, the way
+        # the definition's own questions are offered.
+        "clarification_options": _labels(data.get("clarification_options")),
+        # SEVERAL ASKS IN ONE MESSAGE. One verb comes back, so the rest used
+        # to be dropped in silence — the biggest one happened and the person
+        # found out later. `services.smith.plan` turns these into a plan.
+        #
+        # EVERY ask, not the ones after the first: the first step was the raw
+        # message, so a four-step plan opened with the whole sentence and read
+        # as a step that did all of it.
+        "asks": _labels(data.get("asks") or data.get("further_asks")),
     }
+
+
+#: Every key an understanding carries, so a caller's `.get()` never meets a
+#: partial dict on exactly the paths that already went wrong.
+SHAPE: frozenset[str] = frozenset({
+    "answer", "clarification_needed", "clarification_options", "verb", "route",
+    "widgets", "figma_url", "token_env", "uxpilot_ref", "key_env", "treat_as",
+    "target_file", "element_label", "change", "workflow", "rule", "requirement",
+    "api", "integration", "new_value", "entity", "field", "asks",
+})
+
+
+def _blank(**given: Any) -> dict[str, Any]:
+    """An understanding with nothing in it but `given` — the full shape."""
+    out: dict[str, Any] = {k: "" for k in SHAPE}
+    out.update({"widgets": [], "field": {}, "clarification_options": [],
+                "asks": []})
+    out.update(given)
+    return out
+
+
+def _is_route(text: str) -> bool:
+    """Whether a `target_file` is a ROUTE rather than a path to a file.
+
+    Understanding returns either, depending on what the Blueprint slice showed
+    it; only the route half is the same fact as `route`.
+    """
+    text = (text or "").strip()
+    return bool(text) and text.startswith("/") and not text.endswith(".json") \
+        and "src/" not in text
+
+
+def _labels(raw: Any) -> list[str]:
+    """Chip labels: strings, trimmed, non-empty, deduplicated, at most five."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        text = str(item or "").strip() if not isinstance(item, dict) else str(item.get("label") or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out[:5]
 
 
 def _parse(raw: str) -> dict | None:
@@ -361,4 +606,51 @@ def _parse(raw: str) -> dict | None:
         parsed = json.loads(match.group(0))
         return parsed if isinstance(parsed, dict) else None
     except ValueError:
+        pass
+    try:
+        parsed = json.loads(_escape_inner_quotes(match.group(0)))
+        return parsed if isinstance(parsed, dict) else None
+    except ValueError:
         return None
+
+
+def _escape_inner_quotes(text: str) -> str:
+    """`text` with the double quotes INSIDE its string values escaped.
+
+    Asked which requirements came from the uploaded document, the model
+    answered well — and wrote the document's title in quotes inside the
+    JSON string, so the object would not load and the turn fell through to
+    "I did not follow that": a change-request deflection to a question it
+    had just answered. A quote inside a string that is not followed (after
+    whitespace) by `,` `}` `]` or `:` cannot be closing the string, so it is
+    content. Only reached when a plain load has already failed.
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_str:
+            if ch == "\\":
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if ch == '"':
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j >= n or text[j] in ",}]:":
+                    in_str = False
+                    out.append(ch)
+                else:
+                    out.append('\\"')
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+        out.append(ch)
+        i += 1
+    return "".join(out)

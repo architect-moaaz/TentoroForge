@@ -378,6 +378,9 @@ export function useBlueprintRun(projectId: string | null) {
               // holding is the only place the exchange exists.
               history: opts.history ?? [],
               approved: opts.approved ?? false,
+              // §14 — the documents attached on /blueprint/new. Carried on
+              // every turn: the definition re-reads the whole brief each time.
+              evidence: opts.evidence ?? [],
             }),
           },
         );
@@ -502,7 +505,16 @@ export function reduce(
       // Smith's reasoning, as it arrives. Not folded into `messages`: it is
       // how the answer was reached, not part of the conversation, and the
       // server does not write it to the transcript either.
-      if (!String(data.text ?? "").trim()) return prev;
+      // A blank step is nothing, and a blank OPENING fragment is nothing —
+      // but a reasoning fragment that is only a space or a newline in the
+      // middle of a stream is part of the text: dropping it ran the words on
+      // either side together once the fragments were joined for display.
+      {
+        const text = String(data.text ?? "");
+        const prior = prev.thoughts[prev.thoughts.length - 1];
+        const midStream = data.kind !== "step" && prior?.kind === "reasoning";
+        if (midStream ? !text : !text.trim()) return prev;
+      }
       return {
         ...prev,
         thoughts: [...prev.thoughts, {

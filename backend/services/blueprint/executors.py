@@ -965,7 +965,13 @@ NODE_TASKS: dict[str, str] = {
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
         "testable statement of something a user can do, with the evidence it came "
-        "from. Do not design the solution."
+        "from. Do not design the solution.\n\n"
+        "EVIDENCE NAMES ITS SOURCE. A requirement drawn from what the person typed "
+        "cites evidence of type `conversation`. A requirement drawn from the text "
+        "under SUPPLIED DOCUMENTS cites evidence of type `document`, with `source` "
+        "naming the document (\"document 1\") and `message` quoting the sentence it "
+        "came from — so the application can say which requirements the uploaded "
+        "document produced. A requirement supported by both cites both."
     ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
@@ -1412,9 +1418,13 @@ def _conventions_addendum(doc: dict) -> str:
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
-    output_dir: Any = None,
+    output_dir: Any = None, brief: str = "",
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
+
+    ``brief`` is Smith's ask for THIS call — what should change in an artifact
+    that already exists, and what must stay. It is not feedback: feedback says
+    why the last attempt was refused, a brief says what this attempt is for.
 
     ``inline_schema`` is set when the transport cannot enforce the envelope, so
     the schema is stated in the prompt instead. It is a weaker guarantee — a
@@ -1581,7 +1591,7 @@ def build_prompt(
 
     if node == "workflow_steps":
         return _workflow_steps_prompt(doc, system, subject, feedback,
-                                      output_dir=output_dir)
+                                      output_dir=output_dir, brief=brief)
 
     if node == "workflows":
         # The node catalog goes to `workflow_steps`, the one task that authors
@@ -1617,6 +1627,8 @@ def build_prompt(
                 "\n\n" + workflow_slot_prompt(doc) + "\n\n```json\n"
                 + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
             )
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
@@ -1626,7 +1638,7 @@ def build_prompt(
                                     output_dir=output_dir)
 
     if node == "entity_fields":
-        return _entity_fields_prompt(doc, system, subject, feedback)
+        return _entity_fields_prompt(doc, system, subject, feedback, brief=brief)
 
     if node == "page_contracts":
         # The answer space is the slot list, not "whatever pages you think of".
@@ -1741,6 +1753,12 @@ def build_prompt(
         + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
         + "\n```"
     )
+    # WHAT THE USER HANDED OVER. A specification uploaded instead of typed is
+    # kept beside the Blueprint (services.blueprint.documents), not inside
+    # `application.description`, and put in front of the nodes that read it
+    # on every run — the first definition, the clarified one, the build.
+    from services.blueprint import documents as _documents
+    user += _documents.addendum(output_dir, node)
     # EVERY BRANCH ABOVE CARRIES THE REJECTION; THIS ONE DROPPED IT. The
     # specialised branches return early having appended `feedback`, so the
     # nodes with no branch of their own — data_model, business_rules, apis,
@@ -2009,7 +2027,8 @@ _DECLARED_FIELDS: tuple[str, ...] = (
 
 
 def _workflow_steps_prompt(doc: dict, system: str, subject: str,
-                           feedback: str, *, output_dir: Any = None) -> tuple[str, str]:
+                           feedback: str, *, output_dir: Any = None,
+                           brief: str = "") -> tuple[str, str]:
     """One workflow, the node catalog, and the slice of the Blueprint its
     steps can name. The full `workflows` section is NOT sent: thirty-four
     sibling declarations are noise to an author writing the thirty-fifth."""
@@ -2037,6 +2056,8 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
         + json.dumps(context, indent=2, sort_keys=True)
         + "\n```"
     )
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
@@ -2080,7 +2101,7 @@ def pin_entity_set(result: AgentResult) -> None:
 
 
 def _entity_fields_prompt(doc: dict, system: str, subject: str,
-                          feedback: str) -> tuple[str, str]:
+                          feedback: str, *, brief: str = "") -> tuple[str, str]:
     """One entity in full, every entity by name, and the relationships that
     touch it — the foreign keys this entity must carry a column for."""
     row = declared_entity(doc, subject) or {"id": subject}
@@ -2115,6 +2136,8 @@ def _entity_fields_prompt(doc: dict, system: str, subject: str,
         + json.dumps(context, indent=2, sort_keys=True)
         + "\n```"
     )
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
@@ -2701,6 +2724,28 @@ def make_executor(
     longest stretch of a compose turn silent.
     """
 
+    def _record_composer_usage(spec: TaskSpec, out: dict, elapsed: float) -> None:
+        """The composer calls the model itself; its cost reached no ledger,
+        so page composition — the dominant cost of a build — was missing from
+        every per-application figure. The MCP now reports it and it is
+        recorded here as the page's own entry, `a2ui_pages:compose`."""
+        got = out.get("usage") if isinstance(out, dict) else None
+        if usage is None or not got or not isinstance(got, dict):
+            return
+        try:
+            usage.record(
+                node=spec.node, agent=f"{spec.agent}:compose",
+                usage=Usage(model=str(got.get("model") or ""),
+                            input_tokens=int(got.get("input_tokens") or 0),
+                            output_tokens=int(got.get("output_tokens") or 0),
+                            cache_read_tokens=int(got.get("cache_read_tokens") or 0),
+                            cache_write_tokens=int(got.get("cache_write_tokens") or 0)),
+                elapsed_s=elapsed,
+                project=str((svc.doc.get("application") or {}).get("id", "")),
+            )
+        except Exception:  # noqa: BLE001 — the ledger never fails a build
+            logger.debug("[a2ui] usage record failed", exc_info=True)
+
     def _compose_via_a2ui(spec: TaskSpec) -> AgentResult | None:
         """§34 — A2UI composes the page; the agent is what runs if it declines.
 
@@ -2830,6 +2875,7 @@ def make_executor(
         with svc.lock:
             context = shared_context(svc.doc)
             registry = registry_from_blueprint(svc.doc)
+        t0 = time.monotonic()
         try:
             out = compose_page_via_a2ui(
                 svc.output_dir, page["route"], page.get("pattern") or "",
@@ -2845,10 +2891,17 @@ def make_executor(
                 # reached nobody.
                 feedback=spec.feedback or "",
                 contract=page,
+                # WHAT THIS CALL IS FOR. Smith sets a brief when a
+                # conversation asks for one page; without it the composer saw
+                # only the page contract and the domain, so "not that — a
+                # simple arithmetic calculator" re-composed the identical
+                # screen from the identical prompt.
+                brief=getattr(spec, "brief", "") or "",
             )
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
             return None
+        _record_composer_usage(spec, out, time.monotonic() - t0)
         if not out.get("applied") or not out.get("root"):
             reason = str(out.get("reason") or "").strip()
             logger.info("[a2ui] %s declined (%s) — authoring agent runs",
@@ -2954,7 +3007,7 @@ def make_executor(
                 svc.doc, spec.node,
                 inline_schema=not getattr(client, "enforces_schema", True),
                 subject=spec.subject, feedback=spec.feedback, references=shown,
-                output_dir=svc.output_dir,
+                output_dir=svc.output_dir, brief=getattr(spec, "brief", "") or "",
             )
         last: Exception | None = None
 

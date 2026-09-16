@@ -320,6 +320,56 @@ def read_page(output_dir: str, path: str) -> dict:
 # Tool catalog — what Smith sees in his system prompt.
 # --------------------------------------------------------------------------- #
 
+#: Wording a defect taught us, kept where the generated line from `VERB_HELP`
+#: would lose it. Everything else is generated — this description advertised
+#: NINE of the thirty verbs, so every verb the coverage work added was
+#: invisible to the model reading it, and `restyle` or `edit_access` could not
+#: be chosen from a list that never mentioned them.
+_VERB_NOTES: dict[str, str] = {
+    'add_field':
+        "add ONE NEW field/attribute to an existing entity's DATA MODEL: 'add a discount field to offers', 'give tasks a due date'. This is the verb whenever the ask introduces a new field on an entity, EVEN IF it also says 'and show it on <page>' — the column must exist before any page can show it, and add_widgets/compose_route cannot create a column. Pick add_field now; displaying the field is a separate later edit_page turn.",
+    'add_widgets':
+        "add named sections to a screen: 'put upcoming sessions and quorum status on the dashboard'. NOT for a new data-model field (see add_field).",
+    'compose_route':
+        'build or rebuild the screen at a route. Use this when a route renders nothing.',
+    'connect_figma':
+        'attach a Figma design as evidence. `token_env` is the NAME of the environment variable holding the token (e.g. FIGMA_TOKEN); never the token itself, which must not reach the conversation log.',
+    'connect_uxpilot':
+        'attach a UX Pilot page as evidence. `key_env` is the NAME of the environment variable holding the UX Pilot API key; never the key itself.',
+    'disconnect_design':
+        "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
+    'rebuild':
+        'regenerate the whole application from its definition.',
+    'rename':
+        'change the wording of something that exists.',
+}
+
+
+def _understand_ask_desc() -> str:
+    """The tool's description, carrying every verb the dispatcher can run.
+
+    Generated from `REQUIRED_BY_VERB`, so it cannot fall behind it again: a
+    verb the model is never told about is a verb it never picks, and the ask
+    lands on whichever of the nine it had heard of instead.
+    """
+    from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
+
+    lines = ["REQUIRED first tool for any change ask (skip for greetings/meta "
+             "questions). CHOOSE THE VERB FIRST — each needs different facts, "
+             "and a request forced into the wrong one fails as 'nothing to "
+             "change':"]
+    for verb in sorted(REQUIRED_BY_VERB):
+        fields = "{" + ", ".join(sorted(REQUIRED_BY_VERB[verb])) + "}"
+        said = _VERB_NOTES.get(verb) or " ".join(str(VERB_HELP.get(verb, "")).split())
+        lines.append(f"  {verb} {fields} — {said}")
+    lines.append("Omitting `verb` means rename. If you can't confidently fill "
+                 "the verb's fields, use read_page / list_pages first; if the "
+                 "ask itself is ambiguous, set `clarification_needed` and "
+                 "follow up with ask_user. Only SKIP understand_ask for "
+                 "greeting/explain turns — every edit turn is gated on it.")
+    return "\n".join(lines)
+
+
 TOOL_CATALOG: list[dict] = [
     # Inspection ---------------------------------------------------------
     {"name": "recall",
@@ -536,43 +586,7 @@ TOOL_CATALOG: list[dict] = [
     {"name": "understand_ask",
      "signature": "understand_ask({verb, ...fields for that verb, "
                   "confidence?, clarification_needed?})",
-     "desc": "REQUIRED first tool for any change ask (skip for "
-             "greetings/meta questions). CHOOSE THE VERB FIRST — each "
-             "needs different facts, and a request forced into the "
-             "wrong one fails as 'nothing to change':\n"
-             "  rename        {screen, element_label, current_behavior, "
-             "desired_behavior, target_file} — change the wording of "
-             "something that exists.\n"
-             "  compose_route {route} — build or rebuild the screen at a "
-             "route. Use this when a route renders nothing.\n"
-             "  add_widgets   {route, widgets:[...]} — add named sections "
-             "to a screen: 'put upcoming sessions and quorum status on "
-             "the dashboard'. NOT for a new data-model field (see add_field).\n"
-             "  add_field     {entity, field} — add ONE NEW field/attribute "
-             "to an existing entity's DATA MODEL: 'add a discount field to "
-             "offers', 'give tasks a due date'. This is the verb whenever the "
-             "ask introduces a new field on an entity, EVEN IF it also says "
-             "'and show it on <page>' — the column must exist before any page "
-             "can show it, and add_widgets/compose_route cannot create a "
-             "column. Pick add_field now; displaying the field is a separate "
-             "later edit_page turn.\n"
-             "  connect_figma {figma_url, token_env} — attach a Figma "
-             "design as evidence. `token_env` is the NAME of the environment "
-             "variable holding the token (e.g. FIGMA_TOKEN); never the token "
-             "itself, which must not reach the conversation log.\n"
-             "  connect_uxpilot {uxpilot_ref, key_env} — attach a UX Pilot "
-             "page as evidence. `key_env` is the NAME of the environment "
-             "variable holding the UX Pilot API key; never the key itself.\n"
-             "  disconnect_design {} — remove the connected design and "
-             "compose every screen from the component library instead: "
-             "'disconnect the Figma design', 'drop the design'.\n"
-             "  rebuild       {} — regenerate the whole application from "
-             "its definition.\n"
-             "Omitting `verb` means rename. If you can't confidently fill "
-             "the verb's fields, use read_page / list_pages first; if the "
-             "ask itself is ambiguous, set `clarification_needed` and "
-             "follow up with ask_user. Only SKIP understand_ask for "
-             "greeting/explain turns — every edit turn is gated on it."},
+     "desc": _understand_ask_desc()},
     {"name": "think",
      "signature": "think(thought) -> {recorded, chars}",
      "desc": "Private reasoning step. No-op side-effects; the thought "
@@ -616,6 +630,81 @@ TOOL_CATALOG: list[dict] = [
              "out again from scratch. NOT for changing one label or one "
              "field \u2014 that is edit_page. The page must already exist "
              "in the definition; check list_pages first."},
+    {"name": "rename_field",
+     "signature": "rename_field(entity, field, new_value) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "RENAME A FIELD everywhere the Blueprint uses it \u2014 the entity, table columns, "
+             "form fields, bindings, workflow values and reads, rules, relationships. "
+             "Deterministic. On a Blueprint-built app edit_field(rename) routes here."},
+    {"name": "remove_field",
+     "signature": "remove_field(entity, field) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "REMOVE A FIELD and take it out of every screen, workflow and rule that used it; "
+             "what still reads it is named for Verify & Fix. On a Blueprint-built app the "
+             "legacy remove_field routes here."},
+    {"name": "add_requirement",
+     "signature": "add_requirement(requirement) -> {applied, diff_summary}",
+     "desc": "RECORD A NEW REQUIREMENT in the user's words. Nothing implements it until asked."},
+    {"name": "edit_requirement",
+     "signature": "edit_requirement(requirement, change) -> {applied, diff_summary}",
+     "desc": "RESTATE A REQUIREMENT; the screens, workflows and rules citing it are re-authored against the new wording."},
+    {"name": "remove_requirement",
+     "signature": "remove_requirement(requirement) -> {applied, diff_summary}",
+     "desc": "RETIRE A REQUIREMENT and take it off what cited it."},
+    {"name": "edit_product",
+     "signature": "edit_product(change) -> {applied, diff_summary}",
+     "desc": "CHANGE WHAT THE APP IS CALLED OR IS FOR: name, description, objectives, terminology, personas, locale."},
+    {"name": "add_api",
+     "signature": "add_api(api) -> {applied, diff_summary}",
+     "desc": "DECLARE AN ENDPOINT for an entity, guarded by a permission. Data routes are served by the data engine; anything else needs a handler."},
+    {"name": "remove_api",
+     "signature": "remove_api(api) -> {applied, diff_summary}",
+     "desc": "RETIRE AN ENDPOINT by method and path or id."},
+    {"name": "add_integration",
+     "signature": "add_integration(integration) -> {applied, diff_summary}",
+     "desc": "DECLARE AN INTEGRATION with the NAMES of its secrets (never values)."},
+    {"name": "remove_integration",
+     "signature": "remove_integration(integration) -> {applied, diff_summary}",
+     "desc": "RETIRE AN INTEGRATION by name."},
+    {"name": "edit_access",
+     "signature": "edit_access(change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE WHO CAN DO WHAT \u2014 roles, permissions, which roles open which "
+             "screen, whether a screen needs a sign-in: \"add a Ward Manager role\", "
+             "\"only admins can delete a nurse\", \"make Master Data admin-only\". "
+             "Re-decides the Blueprint's roles, permissions and page access and "
+             "re-projects the middleware and access maps. On a Blueprint-built app "
+             "add_role / remove_role / restrict_page_to_role route here. Pass the "
+             "change in the user's words."},
+    {"name": "add_rule",
+     "signature": "add_rule(rule) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "ADD A BUSINESS RULE in the user's words: \"years of experience cannot "
+             "exceed 60\". Authored against the entities, recorded in the Blueprint, "
+             "projected so it fires on the form. On a Blueprint-built app "
+             "create_business_rule routes here."},
+    {"name": "edit_rule",
+     "signature": "edit_rule(rule, change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE AN EXISTING BUSINESS RULE: which rule (by name) and what should be different."},
+    {"name": "remove_rule",
+     "signature": "remove_rule(rule) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "RETIRE A BUSINESS RULE by name; it stops firing and stays in the history."},
+    {"name": "edit_navigation",
+     "signature": "edit_navigation(change) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "CHANGE THE APP'S MENU \u2014 entries, order, labels, icons, group "
+             "headings, the page the app opens on: \"put Master Data first\", "
+             "\"rename the menu item to Nurse Directory\", \"hide registration "
+             "from the sidebar\", \"open on Master Data\". Revises the Blueprint's "
+             "navigation and re-projects the shell; no screen is composed. NOT "
+             "edit_page (a menu entry is not a control on a screen). Pass the "
+             "change in the user's words."},
+    {"name": "restyle",
+     "signature": "restyle(change) -> {applied, edited_paths, diff_summary, "
+                  "changed, decision, reason?}",
+     "desc": "CHANGE HOW THE APPLICATION LOOKS \u2014 theme or brand colour, "
+             "palette, typography, spacing, density: \"change the theme "
+             "colour to green\", \"darker and more compact\". Records the ask "
+             "as the binding decision on the design system, re-runs the "
+             "design agent against it and re-projects the tokens; every "
+             "screen picks the new look up without being re-composed. NOT "
+             "edit_page (no single label or control) and NOT compose_route "
+             "(no screen is rebuilt). Pass the change in the user's words."},
     {"name": "add_widgets",
      "signature": "add_widgets(route, widgets[], request?) -> {applied, "
                   "edited_paths, diff_summary, reason?}",
@@ -1167,6 +1256,11 @@ def _read_forge_project_id(output_dir: str) -> str | None:
 
 
 def _smith_create_business_rule(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        text = " ".join(str(args.get(k) or "") for k in ("name", "rule_type", "field_name") if args.get(k))
+        cfg = args.get("config")
+        text = (text + (f" — {json.dumps(cfg)}" if cfg else "")).strip()
+        return _smith_rule(output_dir, "add_rule", {"rule": text})
     """Author a Business Rule (project_rules) and ship it into the running app.
 
     Writes the rule to the platform DB (so the editor's Rules panel sees it),
@@ -1246,6 +1340,21 @@ READONLY_HANDLERS = {
     "edit_workflow":            lambda output_dir, args: _smith_edit_workflow(output_dir, args),
     "run_guards":               lambda output_dir, args: _smith_run_guards(output_dir),
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
+    "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
+    "edit_navigation":          lambda output_dir, args: _smith_edit_navigation(output_dir, args),
+    "edit_access":              lambda output_dir, args: _smith_edit_access(output_dir, args),
+    "rename_field":             lambda output_dir, args: _smith_field_change(output_dir, "rename_field", args),
+    "add_requirement":          lambda output_dir, args: _smith_definition(output_dir, "add_requirement", args),
+    "edit_requirement":         lambda output_dir, args: _smith_definition(output_dir, "edit_requirement", args),
+    "remove_requirement":       lambda output_dir, args: _smith_definition(output_dir, "remove_requirement", args),
+    "edit_product":             lambda output_dir, args: _smith_definition(output_dir, "edit_product", args),
+    "add_api":                  lambda output_dir, args: _smith_definition(output_dir, "add_api", args),
+    "remove_api":               lambda output_dir, args: _smith_definition(output_dir, "remove_api", args),
+    "add_integration":          lambda output_dir, args: _smith_definition(output_dir, "add_integration", args),
+    "remove_integration":       lambda output_dir, args: _smith_definition(output_dir, "remove_integration", args),
+    "add_rule":                 lambda output_dir, args: _smith_rule(output_dir, "add_rule", args),
+    "edit_rule":                lambda output_dir, args: _smith_rule(output_dir, "edit_rule", args),
+    "remove_rule":              lambda output_dir, args: _smith_rule(output_dir, "remove_rule", args),
     "add_page":                 lambda output_dir, args: _smith_add_page(output_dir, args),
     # Whole-screen composition \u2014 the page_layouts agent, reachable from a
     # conversation. See services/smith/compose.py.
@@ -1262,6 +1371,7 @@ READONLY_HANDLERS = {
     "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
+    "revert":                   lambda output_dir, args: _smith_revert(output_dir),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -1336,6 +1446,82 @@ def _dispatch_tool_app_modifier(output_dir: str, args: dict) -> dict:
         output_dir=output_dir,
         blueprint_summary=str((args or {}).get("blueprint_summary") or ""),
     )
+
+
+def _is_blueprint_app(output_dir: str) -> bool:
+    from pathlib import Path as _P
+    return (_P(output_dir) / ".forge" / "blueprint" / "current.json").exists()
+
+
+def _smith_field_change(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.field_change import run as _field_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    field = args.get("field") or args.get("field_name") or ""
+    field = str(field.get("name") or "") if isinstance(field, dict) else str(field)
+    return _field_run(output_dir, verb, entity=str(args.get("entity") or ""), field=field,
+                      new_value=str(args.get("new_value") or args.get("new_name") or ""))
+
+
+def _smith_definition(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.definition_change import run as _def_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    key = {"add_requirement": "requirement", "edit_requirement": "requirement", "remove_requirement": "requirement",
+           "edit_product": "change", "add_api": "api", "remove_api": "api",
+           "add_integration": "integration", "remove_integration": "integration"}[verb]
+    text = str(args.get(key) or args.get("request") or "").strip()
+    if not text:
+        return {"applied": False, "edited_paths": [], "reason": f"nothing given. Pass {key}."}
+    return _def_run(output_dir, verb, text=text, change=str(args.get("change") or "").strip())
+
+
+def _smith_edit_access(output_dir: str, args: dict) -> dict:
+    from services.smith.access_change import run as _access_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "edit_access requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [], "reason": "no change described. Pass change: who should be able to do what."}
+    return _access_run(output_dir, change)
+
+
+def _smith_rule(output_dir: str, verb: str, args: dict) -> dict:
+    from services.smith.rule_change import run as _rule_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    rule = str(args.get("rule") or args.get("name") or args.get("request") or "").strip()
+    if not rule:
+        return {"applied": False, "edited_paths": [], "reason": "no rule named. Pass rule: the rule in the user's words, or its name."}
+    return _rule_run(output_dir, verb, rule=rule, change=str(args.get("change") or "").strip())
+
+
+def _smith_edit_navigation(output_dir: str, args: dict) -> dict:
+    """Thin, like the compose tools: `services.smith.navigation_change.run` is
+    the one place the menu changes, and `smith_session` reaches it by verb."""
+    from services.smith.navigation_change import run as _nav_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "edit_navigation requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [],
+                "reason": "no change described. Pass change: what should be different about the menu."}
+    return _nav_run(output_dir, change)
+
+
+def _smith_restyle(output_dir: str, args: dict) -> dict:
+    """Thin on purpose, like the compose tools: `services.smith.restyle.run`
+    is the one place a restyle happens, and `smith_session` reaches it by verb."""
+    from services.smith.restyle import run as _restyle_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "restyle requires an object arg"}
+    change = str(args.get("change") or args.get("request") or "").strip()
+    if not change:
+        return {"applied": False, "edited_paths": [],
+                "reason": "no change described. Pass change: what should look different, in the user's words."}
+    return _restyle_run(output_dir, change)
 
 
 def _smith_compose(output_dir: str, args: dict, verb: str) -> dict:
@@ -1710,8 +1896,30 @@ def _smith_remove_page(output_dir: str, args: dict) -> dict:
     return result
 
 
+def _blueprint_workflow_change(output_dir: str, verb: str, args: dict) -> dict | None:
+    """A Blueprint-built app changes its workflows through the Blueprint —
+    `services.smith.workflow_change`, the same path the chat verb takes. The
+    file seams below edit `workflows/*.json` and `contracts/resource-registry.json`,
+    which such an app does not have; they stay for registry-only apps."""
+    from pathlib import Path as _P
+    if not (_P(output_dir) / ".forge" / "blueprint" / "current.json").exists():
+        return None
+    from services.smith.workflow_change import run as _wf_run
+    return _wf_run(
+        output_dir, verb,
+        workflow=str(args.get("request") or args.get("workflow") or args.get("workflow_id")
+                     or args.get("name") or args.get("id") or "").strip(),
+        change=str(args.get("change") or args.get("changes") or "").strip()
+        if not isinstance(args.get("changes"), dict) else json.dumps(args.get("changes")),
+        route=str(args.get("route") or "").strip(),
+    )
+
+
 def _smith_add_workflow(output_dir: str, args: dict) -> dict:
     """Direct wrapper around :func:`fix_applier._apply_add_workflow`."""
+    bp = _blueprint_workflow_change(output_dir, "add_workflow", args)
+    if bp is not None:
+        return bp
     from services.fix_applier import _apply_add_workflow
     diagnosis = {
         "artifact": {"kind": "workflow", "path": args.get("name") or ""},
@@ -1805,6 +2013,14 @@ def _smith_set_field_interaction(output_dir: str, args: dict) -> dict:
 
 
 def _smith_add_entity(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        from services.smith.entity_change import run as _entity_run
+        fields = args.get("fields")
+        text = str(args.get("request") or args.get("name") or "").strip()
+        if fields:
+            text += " with " + (", ".join(f"{f.get('name')} ({f.get('type')})" if isinstance(f, dict) else str(f) for f in fields)
+                                if isinstance(fields, list) else str(fields))
+        return _entity_run(output_dir, "add_entity", entity=text)
     """Direct wrapper around :func:`fix_applier._apply_add_entity`."""
     from services.fix_applier import _apply_add_entity
     diagnosis = {
@@ -1822,6 +2038,9 @@ def _smith_add_entity(output_dir: str, args: dict) -> dict:
 
 
 def _smith_remove_entity(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        from services.smith.entity_change import run as _entity_run
+        return _entity_run(output_dir, "remove_entity", entity=str(args.get("entity") or args.get("name") or "").strip())
     """Drop an entire entity. Highest blast radius, so it confirms first with
     the true cascade (dependent pages/workflows/relationships)."""
     from services.confirmation_gate import needs_confirmation_result
@@ -1885,6 +2104,9 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     from services.confirmation_gate import needs_confirmation_result
     from services.fix_applier import _apply_remove_workflow
     wid = args.get("workflow_id") or args.get("workflow") or args.get("id") or ""
+    bp = _blueprint_workflow_change(output_dir, "remove_workflow", args)
+    if bp is not None:
+        return bp
     if not args.get("_confirmed"):
         return needs_confirmation_result(
             "workflow", wid,
@@ -1900,6 +2122,13 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     return result
 
 
+def _smith_revert(output_dir: str) -> dict:
+    """Undo the last recorded change and re-project. Takes no arguments: it is
+    always the most recent change."""
+    from services.smith.revert import run as _revert_run
+    return _revert_run(output_dir)
+
+
 def _smith_add_field(output_dir: str, args: dict) -> dict:
     """Add one column to an EXISTING entity — the incremental data-model change
     a field-add is supposed to be, instead of a whole-app rebuild (F-01).
@@ -1911,8 +2140,15 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
     field = args.get("field")
     if not isinstance(field, dict):
         # Flat shorthand: {entity, name, type, ...}
-        field = {k: args[k] for k in ("name", "type", "length", "precision", "scale", "default")
+        field = {k: args[k] for k in ("name", "type", "label", "length", "precision", "scale", "default")
                  if k in args}
+    if _is_blueprint_app(output_dir):
+        # The Blueprint seam: the column AND the control on every form that
+        # edits the entity and every table that lists it, committed and
+        # re-projected — the same path the verb takes in smith_session.
+        from services.smith.field_change import run as _field_run
+        return _field_run(output_dir, "add_field", entity=str(args.get("entity") or ""),
+                          field={k: field.get(k) for k in ("name", "type", "label") if field.get(k)})
     diagnosis = {
         "artifact": {"kind": "field", "path": f"{args.get('entity') or ''}.{field.get('name') or ''}"},
         "explanation": "",
@@ -1927,6 +2163,8 @@ def _smith_add_field(output_dir: str, args: dict) -> dict:
 
 
 def _smith_remove_field(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_field_change(output_dir, "remove_field", args)
     """Drop one column from an existing entity. Data-affecting and
     reference-breaking, so it confirms first (unless ``_confirmed``)."""
     from services.confirmation_gate import needs_confirmation_result
@@ -1952,6 +2190,10 @@ def _smith_remove_field(output_dir: str, args: dict) -> dict:
 
 
 def _smith_edit_field(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        if not (args.get("new_name") or args.get("new_value")):
+            return {"applied": False, "edited_paths": [], "reason": "on a Blueprint-built app a field is renamed with new_name; retyping is not supported yet"}
+        return _smith_field_change(output_dir, "rename_field", args)
     """Rename and/or retype one column. A rename is reference-breaking, so a
     rename confirms first; a pure retype applies directly."""
     from services.confirmation_gate import needs_confirmation_result
@@ -2170,6 +2412,9 @@ def _smith_edit_workflow(output_dir: str, args: dict) -> dict:
     from services.edit_workflow_seam import edit_workflow
     wid = args.get("workflow_id") or args.get("id") or ""
     changes = args.get("changes") or {}
+    bp = _blueprint_workflow_change(output_dir, "edit_workflow", args)
+    if bp is not None:
+        return bp
 
     if isinstance(changes, dict) and not args.get("_confirmed"):
         destructive = [op for op in _DESTRUCTIVE_WORKFLOW_OPS if op in changes]
@@ -2222,18 +2467,24 @@ def _smith_verify_promise(output_dir: str, args: dict) -> dict:
 
 
 def _smith_add_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"add a role named {args.get('role_name') or args.get('name') or ''}"})
     """Add a role to plan['actors']. Phase 6."""
     from services.role_seams import add_role_in_file
     return add_role_in_file(output_dir, args.get("role_name") or "")
 
 
 def _smith_remove_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"remove the role {args.get('role_name') or args.get('name') or ''}"})
     """Remove a role from plan['actors']. Phase 6."""
     from services.role_seams import remove_role_in_file
     return remove_role_in_file(output_dir, args.get("role_name") or "")
 
 
 def _smith_restrict_page_to_role(output_dir: str, args: dict) -> dict:
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        return _smith_edit_access(output_dir, {"change": f"only the {args.get('role_name') or ''} role may open {args.get('page_route') or args.get('route') or ''}"})
     """Set access.roles on a page. Phase 6."""
     from services.role_seams import restrict_page_to_role_in_file
     return restrict_page_to_role_in_file(

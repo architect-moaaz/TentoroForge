@@ -50,6 +50,15 @@ describe("thought events", () => {
     expect(s.thoughts).toEqual([]);
   });
 
+  it("keeps a whitespace fragment in the middle of a reasoning stream", () => {
+    // Fragments are joined for display; the space between two words arrives
+    // as its own event, and dropping it ran the words together.
+    let s = reduce(EMPTY, "thought", { text: "Considering" });
+    s = reduce(s, "thought", { text: " " });
+    s = reduce(s, "thought", { text: "the route." });
+    expect(s.thoughts.map((t) => t.text).join("")).toBe("Considering the route.");
+  });
+
   it("does not put reasoning in the transcript", () => {
     // It is how the answer was reached, not part of the conversation — and
     // the server does not write it to the stored transcript either.

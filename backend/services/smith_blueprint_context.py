@@ -97,13 +97,16 @@ def blueprint_to_context(
     # remaining budget with change_log.
     header = _render_header(bp)
     domain = _render_domain(bp)
+    requirements = _render_requirements(bp)
     entities = _render_entities(bp)
+    rules = _render_rules(bp)
     workflows = _render_workflows(bp)
     pages = _render_pages(bp)
     decisions = _render_design_decisions(bp)
 
     core_sections = "\n".join(
-        s for s in (header, domain, entities, workflows, pages, decisions) if s
+        s for s in (header, domain, requirements, entities, rules, workflows,
+                    pages, decisions) if s
     )
 
     remaining = max(0, budget.max_chars - len(core_sections) - 200)
@@ -132,6 +135,8 @@ def _blueprint_is_empty(bp: Blueprint) -> bool:
     return (
         bp.domain is None
         and not bp.entities and not bp.workflows and not bp.pages
+        and not getattr(bp, "requirements", None)
+        and not getattr(bp, "business_rules", None)
         and not bp.design_decisions and not bp.change_log
     )
 
@@ -168,6 +173,40 @@ def _render_domain(bp: Blueprint) -> str:
     return "\n".join(parts)
 
 
+def _render_requirements(bp: Blueprint) -> str:
+    """Every requirement with where it came from.
+
+    The evidence is the point: a requirement that cites `document 1` came
+    from the file the user uploaded, one that cites a screenshot was read off
+    a picture, and one that cites the conversation was said. Smith is asked
+    which is which, and this is the only place the answer lives.
+    """
+    reqs = [r for r in (getattr(bp, "requirements", None) or [])
+            if isinstance(r, dict)]
+    if not reqs:
+        return "## Requirements\n(none recorded yet.)"
+    lines = [f"## Requirements ({len(reqs)})"]
+    for r in reqs:
+        desc = " ".join(str(r.get("description") or "").split())
+        cites = []
+        for e in (r.get("evidence") or []):
+            if not isinstance(e, dict):
+                continue
+            kind = str(e.get("type") or "").strip()
+            src = str(e.get("source") or "").strip()
+            # "document 1" already names its kind; "screenshot board.png"
+            # needs it said.
+            if src and src.lower().startswith(kind.lower()):
+                cites.append(src)
+            else:
+                cites.append(f"{kind} {src}".strip() if src else kind)
+        line = f"- {r.get('id') or '?'}: {desc}"
+        if cites:
+            line += f"  [from: {', '.join(c for c in cites if c)}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _render_entities(bp: Blueprint) -> str:
     if not bp.entities:
         return "## Entities\n(none yet.)"
@@ -181,6 +220,45 @@ def _render_entities(bp: Blueprint) -> str:
         if why:
             summary += f"  · why: {why}"
         lines.append(summary)
+        # ITS BOXES, WHICH IS WHAT "DOES IT ALREADY HAVE ONE" ASKS ABOUT.
+        # Asked to validate the telephone number, Smith asked whether a
+        # telephone field existed: the entity's name and table were all it
+        # could see, so the only honest thing it could do was ask.
+        spelled = []
+        for f in (e.get("fields") or []):
+            if not isinstance(f, dict) or not f.get("name"):
+                continue
+            one = f"{f['name']}: {f.get('type') or 'string'}"
+            if f.get("required"):
+                one += ", required"
+            if f.get("enumValues"):
+                one += " [" + "|".join(str(v) for v in f["enumValues"][:6]) + "]"
+            spelled.append(one)
+        if spelled:
+            lines.append("    fields — " + "; ".join(spelled))
+        elif e.get("key_fields"):
+            lines.append("    fields — " + ", ".join(str(k) for k in e["key_fields"]))
+    return "\n".join(lines)
+
+
+def _render_rules(bp: Blueprint) -> str:
+    """The rules already in force.
+
+    Asked to add one, Smith could not tell whether it was already there, so
+    every rule was either a question or a duplicate the seam refused after the
+    fact. The seam still refuses duplicates; this is what lets the ANSWER say
+    so instead.
+    """
+    rules = [r for r in (getattr(bp, "business_rules", None) or []) if isinstance(r, dict)]
+    if not rules:
+        return "## Rules\n(none yet.)"
+    lines = [f"## Rules ({len(rules)})"]
+    for r in rules:
+        said = " ".join(str(r.get("statement") or "").split())
+        line = f"- **{r.get('name') or '?'}**: {said}"
+        if r.get("when"):
+            line += f"  · when `{r['when']}`"
+        lines.append(line)
     return "\n".join(lines)
 
 

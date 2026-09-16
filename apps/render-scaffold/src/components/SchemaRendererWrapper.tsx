@@ -17,7 +17,8 @@
 import * as React from "react";
 import { Engine, EngineProvider } from "@tentoroforge/engine";
 import type { DesignSpec } from "@tentoroforge/engine";
-import { WorkflowDispatcherProvider } from "@tentoroforge/renderer";
+import { NavigatorProvider, WorkflowDispatcherProvider } from "@tentoroforge/renderer";
+import { useRouter } from "next/navigation";
 import { resolvePreviewSync } from "@/lib/resolvePreviewSync";
 
 interface SchemaRendererWrapperProps {
@@ -42,6 +43,12 @@ interface SchemaRendererWrapperProps {
    *  similar Tailwind utilities resolve to the project's actual brand colors.
    *  Without this the preview renders with no brand colours (unstyled buttons). */
   cssVarTokens?: Record<string, unknown>;
+  /** The project ships src/app/tokens.css, projected from its Blueprint and
+   *  inlined by the page on `html:root`. EngineProvider writes its DEFAULT
+   *  semantic colours (--primary: #2563eb …) inline on its wrapper element,
+   *  which outranks any stylesheet — so with the flag set it emits none, and
+   *  the project's palette is what renders. */
+  hasProjectTokens?: boolean;
 }
 
 
@@ -53,6 +60,7 @@ export function SchemaRendererWrapper({
   projectId,
   navFlow,
   cssVarTokens,
+  hasProjectTokens = false,
 }: SchemaRendererWrapperProps) {
   // Synthetic designSpec from the discrete scaffold inputs. EngineProvider
   // reads register + tokens from this object; Engine reads illustrationBasePath
@@ -96,11 +104,37 @@ export function SchemaRendererWrapper({
     [navFlow, projectId],
   );
 
+  // THE PREVIEW SERVES AN APP UNDER /p/<id>. Every navigation the app makes —
+  // a Button's nav trigger, a Table row's Edit, a row link — is an app-relative
+  // route ("/nurse-registration/<id>") that the library hands to the host's
+  // Navigator. Without one here the default navigator did a hard assign of
+  // that route, escaping the base path: a row's Edit reached a 404 in the
+  // preview while the standalone app was fine.
+  // Next's `basePath` ("/p") is prepended by the router itself; the app's
+  // routes live at `/<projectId>/<slug>` beneath it.
+  const router = useRouter();
+  const navigator = React.useMemo(() => {
+    const base = projectId ? `/${projectId}` : "";
+    const withBase = (url: string) =>
+      base && url.startsWith("/") && !url.startsWith(`${base}/`) && url !== base
+        ? `${base}${url === "/" ? "" : url}`
+        : url;
+    return {
+      push: (url: string) => router.push(withBase(url)),
+      replace: (url: string) => router.replace(withBase(url)),
+      back: () => router.back(),
+      refresh: () => router.refresh(),
+    };
+  }, [router, projectId]);
+
   return (
-    <EngineProvider designSpec={designSpec} navFlow={navFlow ?? null} cssVarTokens={cssVarTokens ?? null}>
-      <WorkflowDispatcherProvider dispatch={authDispatcher}>
-        <Engine schema={page} previewData={resolvedPreview} apiBaseUrl="" />
-      </WorkflowDispatcherProvider>
+    <EngineProvider designSpec={designSpec} navFlow={navFlow ?? null} cssVarTokens={cssVarTokens ?? null}
+                    semanticVars={!hasProjectTokens}>
+      <NavigatorProvider value={navigator}>
+        <WorkflowDispatcherProvider dispatch={authDispatcher}>
+          <Engine schema={page} previewData={resolvedPreview} apiBaseUrl="" />
+        </WorkflowDispatcherProvider>
+      </NavigatorProvider>
     </EngineProvider>
   );
 }

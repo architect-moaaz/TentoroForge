@@ -253,7 +253,10 @@ def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
     for f in _visible_fields(entity):
         if not _asked_of_a_person(f, creating=creating):
             continue
-        kind = FORM_KINDS.get(str(f.get("type") or "").lower(), "text")
+        type_name = str(f.get("type") or "").lower()
+        # A list column (`string[]`) is collected as several values.
+        kind = "tags" if type_name.endswith("[]") or type_name in ("array", "list") \
+            else FORM_KINDS.get(type_name, "text")
         field: dict[str, Any] = {
             "kind": kind,
             "name": f.get("name"),

@@ -48,6 +48,7 @@ export {
   WorkflowDispatcherProvider,
   WorkflowDispatcherContext,
   createWorkflowDispatch,
+  destinationAfterDelete,
   type WorkflowDispatch,
   type WorkflowDispatchOptions,
 } from "./client/WorkflowDispatcher";

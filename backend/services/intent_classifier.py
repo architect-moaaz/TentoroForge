@@ -139,6 +139,9 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
         # has no element to edit. Without these the intent scopes Smith to
         # tools that cannot answer it.
         "compose_route", "add_widgets",
+        # The look of the application is the design system, not a page;
+        # the menu is the navigation, not a page.
+        "restyle", "edit_navigation",
         "verify_promise", "answer", "ask_user",
     ],
     "edit_workflow": [
@@ -244,6 +247,21 @@ TOOL_TAGS: dict[str, set[str]] = {
     # route creates a layout where there was none AND replaces one where
     # there was: tagging it `add` only would hide it from every edit ask.
     "compose_route":             {"add", "edit", "page"},
+    "restyle":                   {"edit", "token"},
+    "edit_navigation":           {"edit", "shell"},
+    "edit_access":               {"add", "edit", "delete", "auth"},
+    "rename_field":              {"edit", "entity"},
+    "add_requirement":           {"add", "meta"},
+    "edit_requirement":          {"edit", "meta"},
+    "remove_requirement":        {"delete", "meta"},
+    "edit_product":              {"edit", "meta"},
+    "add_api":                   {"add", "meta"},
+    "remove_api":                {"delete", "meta"},
+    "add_integration":           {"add", "meta"},
+    "remove_integration":        {"delete", "meta"},
+    "add_rule":                  {"add", "form", "entity"},
+    "edit_rule":                 {"edit", "form", "entity"},
+    "remove_rule":               {"delete", "form", "entity"},
     "add_widgets":               {"add", "edit", "page", "component"},
     "add_workflow":              {"add", "workflow"},
     "add_entity":                {"add", "entity"},

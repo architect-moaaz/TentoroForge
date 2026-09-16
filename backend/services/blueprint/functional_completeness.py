@@ -652,8 +652,9 @@ def page_findings(doc: dict) -> list[dict]:
     # "the row names the record"; this one about the POST body — "the row
     # action sends {id}". Both must hold. After the page loop, since it reads
     # the projected tree (the record carried onto the control).
-    from services.blueprint.dispatch_contract import dispatch_findings
+    from services.blueprint.dispatch_contract import dispatch_findings, field_kind_findings
     out.extend(dispatch_findings(doc))
+    out.extend(field_kind_findings(doc))
     return out
 
 

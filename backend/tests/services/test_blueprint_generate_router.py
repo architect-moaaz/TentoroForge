@@ -372,3 +372,104 @@ def test_the_current_page_scope_is_a_route_list():
     assert bg._verify_scope("verify only the current page /admin/foo.") == ["/admin/foo"]
     assert bg._verify_scope("Verify the app and fix anything that's broken.") is None
     assert bg._verify_scope("Verify only the critical journeys.") is None
+
+
+def test_the_chat_request_carries_the_supplied_documents_into_the_brief():
+    """A-03/B-08: the requirements file attached on /blueprint/new is read in
+    the browser and posted with the first turn. It reached only the legacy
+    generate request; the panel posts to smith/chat, which dropped it."""
+    from routers.blueprint_generate import SmithChatRequest, _brief_with_documents
+    req = SmithChatRequest(message="a clinic visit tracker", evidence=["1. Reception registers a patient."])
+    assert req.evidence == ["1. Reception registers a patient."]
+    brief = _brief_with_documents("a clinic visit tracker", req.evidence)
+    assert brief.startswith("a clinic visit tracker") and "SUPPLIED DOCUMENTS" in brief
+    assert "--- document 1 ---\n1. Reception registers a patient." in brief
+    assert _brief_with_documents("x", []) == "x" and _brief_with_documents("x", ["  "]) == "x"
+
+
+def test_a_credential_is_taken_out_before_the_turn_is_written_down():
+    """§42: chat history is the first place a raw credential must not rest.
+    The extracted FIELD was already dropped, so a token never reached the
+    Blueprint — but the message was stored exactly as typed, which put it on
+    disk and handed it back to every later turn."""
+    from services.smith.secrets_scrub import MASK, carries_secret, scrub
+
+    assert scrub("use figd_abcdefghij1234567890 please").startswith("use " + MASK)
+    assert MASK in scrub("my key is SG.abcdefghij.klmnopqrstuv")
+    assert scrub("password: hunter2000") == "password: " + MASK
+    assert MASK in scrub("Authorization: Bearer sk-ant-abcdefghijklmnop1234")
+    # A NAME IS NOT A SECRET — it is the thing Smith asks for.
+    for kept in ("set SENDGRID_API_KEY in the environment",
+                 "the API_KEY = SENDGRID_API_KEY variable",
+                 "add a phone number to nurses",
+                 "call the app Nurse Roster"):
+        assert scrub(kept) == kept and not carries_secret(kept)
+    assert scrub("") == "" and scrub(None) == ""
+    # Idempotent: scrubbing what is already scrubbed changes nothing.
+    once = scrub("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijkl")
+    assert scrub(once) == once
+
+
+def test_the_lifecycle_words_are_answered_where_they_are_typed(tmp_path):
+    """`preview`, `export` and `deploy` were declared lifecycle verbs with no
+    branch, so the architect took them as changes: "preview" came back
+    refusing a build on a stale approval and "export" asked what kind."""
+    from routers.blueprint_generate import (_deploy_refusal, _export_report,
+                                            _lifecycle_verb, _preview_report)
+
+    doc = {"pages": [{"route": "/master-data", "id": "PAGE-001"},
+                     {"route": "/gone", "id": "PAGE-002", "status": "DEPRECATED"}]}
+    assert "Nothing to look at yet" in _preview_report(doc, tmp_path)
+    assert "nothing to export yet" in _export_report(tmp_path)
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    built = _preview_report(doc, tmp_path)
+    assert "`/master-data`" in built and "/gone" not in built
+    assert "Export" in _export_report(tmp_path)
+    # Publishing is never done from a typed sentence.
+    said = _deploy_refusal()
+    assert "not something I do from a typed sentence" in said and "export" in said
+    # Only an exact one-word command is the verb.
+    assert _lifecycle_verb("preview") == "preview"
+    assert _lifecycle_verb("preview the nurses page") is None
+
+
+def test_the_go_ahead_to_build_is_the_whole_message_not_a_word_in_it():
+    """"Build it" typed by a layman was answered with a description of a card
+    to press. It is a door now — but "build a dashboard" is still a screen to
+    compose, so the consent has to BE the message."""
+    from routers.blueprint_generate import _is_build_consent
+
+    for said in ("build", "build it", "Build it.", "go on then", "do it",
+                 "make it", "yes, build it", "approve and build", "PROCEED"):
+        assert _is_build_consent(said), said
+    for said in ("build a dashboard", "build a page for reports",
+                 "rebuild the nurses page", "do it after the phone number",
+                 "", "   "):
+        assert not _is_build_consent(said), said
+
+
+def test_a_typed_verify_is_told_what_it_costs_and_asked_how_much():
+    """The chip asks the scope; a typed "verify" named none and ran the whole
+    application — fifteen to twenty-five minutes of composing."""
+    from routers.blueprint_generate import (_DECLINED, _VERIFY_SCOPES,
+                                            _is_verify_consent,
+                                            _scope_was_chosen,
+                                            _verify_scope_question)
+
+    doc = {"pages": [{"route": f"/p{i}"} for i in range(8)]}
+    said = _verify_scope_question(doc)
+    assert "fifteen to twenty-five minutes" in said and "8 screen(s)" in said
+    assert said.rstrip().endswith("How much should I look at?")
+    # Small applications are not told a big number.
+    assert "several minutes" in _verify_scope_question({"pages": [{"route": "/a"}]})
+
+    # A bare consent has no scope, so it is asked; an answer to the question
+    # is not asked again.
+    assert _is_verify_consent("verify") and not _scope_was_chosen("verify")
+    for scope in _VERIFY_SCOPES[:2]:
+        assert _scope_was_chosen(scope), scope
+    # Turning it down is an answer, not a change to interpret.
+    assert "not now" in _DECLINED and "no thanks" in _DECLINED
+    assert not _is_verify_consent("Not now")

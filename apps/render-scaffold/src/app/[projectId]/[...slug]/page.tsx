@@ -115,7 +115,50 @@ async function loadProjectGlobalsCss(projectRoot: string): Promise<string> {
     );
     // Remove @tailwind directives — they're Tailwind-CLI-only and would
     // appear as invalid CSS if injected into the browser at runtime.
-    return text.replace(/^@tailwind\s+\w+\s*;\s*$/gm, "").trim();
+    // The `@import "./tokens.css"` goes too: inlined as a <style>, a
+    // relative @import resolves against the page URL (/p/<id>/<route>/tokens.css),
+    // 404s, and the palette the Blueprint projected never reached the
+    // preview. loadProjectTokensCss() carries it in instead.
+    return text
+      .replace(/^@tailwind\s+\w+\s*;\s*$/gm, "")
+      .replace(/^@import\s+["']\.\/tokens\.css["']\s*;\s*$/gm, "")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The project's design tokens (src/app/tokens.css, projected from the
+ * Blueprint's designSystem), in the dialect THIS scaffold's Tailwind reads.
+ *
+ * Two dialects meet here. The generated app's Tailwind maps `primary` to
+ * `hsl(var(--primary))`, so tokens.css emits bare triplets — `--primary: 149
+ * 30% 42%`. The scaffold's Tailwind maps it to `var(--primary)` — a whole
+ * colour — and its own globals.css supplies `hsl(221.2 83.2% 53.3%)` as the
+ * default. Injected verbatim, a bare triplet is an invalid colour and the
+ * utility falls back to the default; that, plus the 404 above, is why every
+ * Blueprint-built app previewed in shadcn blue whatever palette it declared
+ * ("change the theme colour to green" changed the Blueprint, the decision
+ * and tokens.css, and the preview stayed blue).
+ *
+ * So each bare-triplet value is wrapped as `hsl(...)`; colours already whole
+ * (hex, rgb, hsl) and non-colour tokens (radius, spacing) pass through. The
+ * rules stay on `html:root`, which outranks the scaffold's `:root` defaults
+ * without `!important`. Empty when the project has no tokens.css.
+ */
+async function loadProjectTokensCss(projectRoot: string): Promise<string> {
+  try {
+    const text = await fs.readFile(
+      path.join(projectRoot, "src", "app", "tokens.css"),
+      "utf8",
+    );
+    return text
+      .replace(
+        /(--[\w-]+)\s*:\s*(\d{1,3}(?:\.\d+)?\s+\d{1,3}(?:\.\d+)?%\s+\d{1,3}(?:\.\d+)?%)\s*;/g,
+        (_m, name: string, triplet: string) => `${name}: hsl(${triplet});`,
+      )
+      .trim();
   } catch {
     return "";
   }
@@ -256,6 +299,7 @@ export default async function Page({
   // interactions). Empty string when the file is absent — preserves the
   // existing scaffold-default render path for older projects.
   const projectGlobalsCss = await loadProjectGlobalsCss(projectRoot!);
+  const projectTokensCss = await loadProjectTokensCss(projectRoot!);
 
   const a11yTree = buildA11yTree(page as any);
 
@@ -299,6 +343,7 @@ export default async function Page({
     projectId,
     navFlow,
     cssVarTokens: cssVarTokens ?? undefined,
+    hasProjectTokens: !!projectTokensCss,
   };
 
   // Render strategy:
@@ -338,6 +383,13 @@ export default async function Page({
       data-page-path={pagePath}
       data-register={register}
     >
+      {projectTokensCss && (
+        <style
+          data-project-tokens=""
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: projectTokensCss }}
+        />
+      )}
       {projectGlobalsCss && (
         <style
           // eslint-disable-next-line react/no-danger

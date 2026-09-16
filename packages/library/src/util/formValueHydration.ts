@@ -39,6 +39,29 @@ export type HydrationFieldSpec = {
 // Per-control hydrators                                                     //
 // --------------------------------------------------------------------------
 
+/**
+ * A tags control holds a string[]. The record may carry the array itself
+ * (a jsonb column), its JSON text (an array written through a text column,
+ * or a fixture serialised on the way in), or a comma-separated string (what
+ * a plain text field over the same column used to submit). All three become
+ * the array; anything else becomes an empty list.
+ */
+function hydrateTags(v: unknown): string[] {
+  if (v == null || v === "") return [];
+  if (Array.isArray(v)) return v.map((t) => String(t).trim()).filter(Boolean);
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (s.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed.map((t) => String(t).trim()).filter(Boolean);
+      } catch { /* not JSON — fall through to the comma split */ }
+    }
+    return s.split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 function hydrateDate(v: unknown): string {
   if (v == null) return "";
   const s = String(v);
@@ -169,6 +192,8 @@ export function hydrateFieldValue(rawValue: unknown, field: HydrationFieldSpec):
       return hydrateFileUpload(rawValue);
     case "keyvalue":
       return hydrateKeyValue(rawValue);
+    case "tags":
+      return hydrateTags(rawValue);
     case "object":
       return hydrateObject(rawValue, field.fields);
     case "textarea":

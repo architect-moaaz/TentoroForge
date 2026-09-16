@@ -83,9 +83,19 @@ def _var_name(entity: dict) -> str:
 from services.blueprint.page_planner import DERIVED_ON_CREATE
 
 
+def is_list_type(type_name: Any) -> bool:
+    """`string[]`, `text[]`, `enum[]` — a column that holds several values."""
+    t = str(type_name or "").strip().lower()
+    return t.endswith("[]") or t in ("array", "list", "string list", "text list")
+
+
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
-    builder = _TYPES.get(str(field.get("type") or "").lower(), _DEFAULT_TYPE)
+    type_name = str(field.get("type") or "").lower()
+    # A LIST IS JSON. `string[]` fell through to the text default, so the
+    # column held whatever shape reached it: the fixture's JSON text, the
+    # create form's comma string. jsonb holds the array the tags field submits.
+    builder = "jsonb" if is_list_type(type_name) else _TYPES.get(type_name, _DEFAULT_TYPE)
     col = to_snake(field.get("name") or "col")
     line = f'{field.get("name")}: {builder}("{col}")'
     if field.get("primaryKey"):
@@ -1553,6 +1563,16 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         rel = f"src/lib/workflows/definitions/{slug}.json"
         written.append(rel)
         code_map.append({"artifact": wf.get("id"), "service": [rel]})
+
+    # A retired workflow's definition goes with it: the engine registers every
+    # file in this directory, so a stale one would keep a DEPRECATED workflow
+    # runnable — and a Verify would find a definition the Blueprint disowns.
+    live_slugs = {_workflow_slug(wf) for wf in workflows}
+    for wf in (doc.get("workflows") or []):
+        if wf.get("status") == "DEPRECATED":
+            slug = _workflow_slug(wf)
+            if slug not in live_slugs:
+                (out / f"{slug}.json").unlink(missing_ok=True)
 
     written.append(project_launch_roles(doc, app_root)["files"][0])
     return {"files": written, "workflows": len(written), "codeMap": code_map}

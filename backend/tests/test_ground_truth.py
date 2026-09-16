@@ -263,3 +263,45 @@ def test_snapshot_baseline_captures_status_and_guards(tmp_path):
     )
     assert snap["status"] == ["extra.txt"]
     assert snap["guards"] == [{"guard": "g1", "message": "pre-existing"}]
+
+
+# --------------------------------------------------------------------------- #
+# The tree itself — a repo with no commits
+# --------------------------------------------------------------------------- #
+
+def test_a_rewritten_file_in_a_repo_with_no_commits_is_seen(tmp_path):
+    """Every generated project starts this way: `.git` and no commits. To git,
+    `app/` is one untracked entry before and after the turn and there is no
+    HEAD to diff against — a page schema the projection rewrote was reported
+    as "nothing actually changed on disk". The tree fingerprint is the truth."""
+    subprocess.check_call(["git", "init", "-q", str(tmp_path)])
+    (tmp_path / ".gitignore").write_text("node_modules/\n")
+    schema = tmp_path / "app" / "src" / "schemas" / "master-data.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_text('{"rowActions": [{"label": "Edit"}, {"label": "Delete", "workflow": "FLOW-003"}]}\n')
+    (tmp_path / "app" / "node_modules" / "x").mkdir(parents=True)
+    (tmp_path / "app" / "node_modules" / "x" / "index.js").write_text("1")
+    (tmp_path / ".forge").mkdir()
+    (tmp_path / ".forge" / "ledger.jsonl").write_text("a\n")
+
+    baseline = ground_truth.snapshot_baseline(str(tmp_path))
+    assert "app/src/schemas/master-data.json" in baseline["tree"]
+    assert not any(p.startswith("app/node_modules") or p.startswith(".forge") for p in baseline["tree"])
+
+    schema.write_text('{"rowActions": [{"label": "Edit"}]}\n')
+    (tmp_path / ".forge" / "ledger.jsonl").write_text("a\nb\n")          # churn, not a change
+
+    # git's view: identical before and after
+    assert set(ground_truth.git_status_modified(str(tmp_path))) == set(baseline["status"])
+    assert ground_truth.git_diff_lines(str(tmp_path), ["app/src/schemas/master-data.json"]) == ""
+    # the tree's view: the rewrite, and the lines that went
+    assert ground_truth.tree_changes(str(tmp_path), baseline["tree"]) == ["app/src/schemas/master-data.json"]
+    diff = ground_truth.tree_diff_lines(str(tmp_path), baseline["tree"], ["app/src/schemas/master-data.json"])
+    assert '-{"rowActions": [{"label": "Edit"}, {"label": "Delete"' in diff
+    assert '+{"rowActions": [{"label": "Edit"}]}' in diff
+
+
+def test_tree_changes_without_a_baseline_claims_nothing(tmp_path):
+    (tmp_path / "a.txt").write_text("x")
+    assert ground_truth.tree_changes(str(tmp_path), None) == []
+    assert ground_truth.tree_diff_lines(str(tmp_path), {}, ["a.txt"]) == ""

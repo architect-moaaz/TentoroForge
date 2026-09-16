@@ -75,7 +75,7 @@ class BlueprintPath:
 
 _KNOWN_TOP_LEVEL_FIELDS = frozenset({
     "project_id", "domain", "entities", "workflows", "pages",
-    "design_decisions", "change_log",
+    "requirements", "business_rules", "design_decisions", "change_log",
 })
 
 
@@ -88,6 +88,13 @@ class Blueprint:
     entities: list[dict[str, Any]] = field(default_factory=list)
     workflows: list[dict[str, Any]] = field(default_factory=list)
     pages: list[dict[str, Any]] = field(default_factory=list)
+    # What the app must do, each line with where it came from (§14). Read
+    # from the engine's document; Smith answers "which of these came from
+    # the file I uploaded?" from the evidence, and from nowhere else.
+    requirements: list[dict[str, Any]] = field(default_factory=list)
+    #: The rules in force. Read for the same reason as the fields: a question
+    #: Smith can answer from the document must not be asked of the person.
+    business_rules: list[dict[str, Any]] = field(default_factory=list)
     design_decisions: list[dict[str, Any]] = field(default_factory=list)
     change_log: list[dict[str, Any]] = field(default_factory=list)
 
@@ -109,29 +116,45 @@ class Blueprint:
         The loader is tolerant: malformed JSON logs a warning and
         returns an empty blueprint (the caller can decide whether to
         overwrite or bail); unknown top-level fields are preserved."""
-        path = BlueprintPath(output_dir).file
-        if not path.exists():
-            # THE ENGINE'S BLUEPRINT, IF THERE IS ONE. Two stores exist: the
-            # DAG writes .forge/blueprint/current.json, this class reads
-            # .forge/blueprint.json, and nothing writes the second. So Smith
-            # loaded an empty blueprint on a project with a fully generated
-            # application, decided there was nothing to reason about, and
-            # routed every message to bootstrap — which is why a rename
-            # answered with the bootstrap seam message even once the iteration
-            # seams were wired.
-            #
-            # Read, not copied. The engine's document stays authoritative and
-            # this is a projection of it, so the two cannot drift into
-            # disagreeing about what the application is.
-            from services.smith.engine_blueprint_adapter import (
-                load_engine_doc, to_smith_fields,
-            )
+        # THE ENGINE'S DOCUMENT IS THE APPLICATION. Two stores exist: the DAG
+        # writes .forge/blueprint/current.json and this class reads
+        # .forge/blueprint.json. This used to prefer its own file and fall
+        # back to the engine's, which is the wrong way round — the engine's
+        # document changes on every build and every seam, and Smith's copy
+        # changes when Smith happens to save. On a project with both, Smith
+        # was reading an application as it stood some builds ago: a nurse
+        # record with `yearsOfExperience` and no phone number, months after
+        # the field was renamed and the phone number added. Asked to validate
+        # the telephone number it asked whether one existed, correctly, from
+        # a picture that was out of date.
+        #
+        # Read, not copied. Smith's own file still supplies what the engine's
+        # has no notion of — the change log of Smith's moves — so nothing is
+        # lost by preferring the truth for everything else.
+        from services.smith.engine_blueprint_adapter import (
+            load_engine_doc, to_smith_fields,
+        )
 
-            doc = load_engine_doc(output_dir)
+        path = BlueprintPath(output_dir).file
+        engine = load_engine_doc(output_dir)
+        if engine:
             bp = cls(project_id=project_id)
-            if doc:
-                for key, value in to_smith_fields(doc).items():
-                    setattr(bp, key, value)
+            for key, value in to_smith_fields(engine).items():
+                setattr(bp, key, value)
+            if path.exists():
+                try:
+                    mine = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    mine = {}
+                if isinstance(mine, dict):
+                    bp.change_log = list(mine.get("change_log") or [])
+                    bp._extras = {k: v for k, v in mine.items()
+                                  if k not in _KNOWN_TOP_LEVEL_FIELDS and not k.startswith("_")}
+            bp._output_dir = output_dir
+            return bp
+
+        if not path.exists():
+            bp = cls(project_id=project_id)
             bp._output_dir = output_dir
             return bp
 
@@ -163,6 +186,8 @@ class Blueprint:
             entities=list(raw.get("entities") or []),
             workflows=list(raw.get("workflows") or []),
             pages=list(raw.get("pages") or []),
+            requirements=list(raw.get("requirements") or []),
+            business_rules=list(raw.get("business_rules") or []),
             design_decisions=list(raw.get("design_decisions") or []),
             change_log=list(raw.get("change_log") or []),
             _extras=extras,
@@ -216,6 +241,8 @@ class Blueprint:
             "entities": list(self.entities),
             "workflows": list(self.workflows),
             "pages": list(self.pages),
+            "requirements": list(self.requirements),
+            "business_rules": list(self.business_rules),
             "design_decisions": list(self.design_decisions),
             "change_log": list(self.change_log),
         }

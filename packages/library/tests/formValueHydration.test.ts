@@ -215,3 +215,23 @@ describe("hydrateFormValues", () => {
     expect(hydrateFormValues(null, [{ kind: "text", name: "x" }])).toEqual({});
   });
 });
+
+describe("hydrateFieldValue — tags (a string[] column)", () => {
+  const spec: HydrationFieldSpec = { kind: "tags", name: "specialities" };
+  it("keeps the array the record carries", () => {
+    expect(hydrateFieldValue(["Pediatrics", "ICU"], spec)).toEqual(["Pediatrics", "ICU"]);
+  });
+  it("parses the JSON text an array was written as", () => {
+    expect(hydrateFieldValue('["Pediatrics","Neonatal Care"]', spec)).toEqual(["Pediatrics", "Neonatal Care"]);
+  });
+  it("splits the comma text a plain field used to submit", () => {
+    expect(hydrateFieldValue("Pediatrics, ICU , Wound Care", spec)).toEqual(["Pediatrics", "ICU", "Wound Care"]);
+  });
+  it("nulls and blanks become an empty list", () => {
+    expect(hydrateFieldValue(null, spec)).toEqual([]);
+    expect(hydrateFieldValue("", spec)).toEqual([]);
+  });
+  it("a text field over the same value still shows the JSON text — the kind is the fix", () => {
+    expect(hydrateFieldValue(["a", "b"], { kind: "text", name: "x" })).toBe('["a","b"]');
+  });
+});

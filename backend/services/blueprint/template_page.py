@@ -76,15 +76,22 @@ def _workflow_for(doc: Mapping[str, Any], entity_id: str, op: str) -> dict | Non
     return None
 
 
-def _sibling(doc: Mapping[str, Any], page: Mapping[str, Any], family: str) -> dict | None:
+def _sibling(doc: Mapping[str, Any], page: Mapping[str, Any], family: str,
+             *, with_id: bool | None = None) -> dict | None:
+    """A sibling page of `family` for the same entity. ``with_id`` picks a form
+    that edits (route carries `[id]`) or one that creates (no id) — the
+    platform's own distinction — so an Edit never navigates to the create form."""
     eid = str((page.get("data") or {}).get("primaryEntity") or "")
     for p in _live(doc.get("pages")):
         if p is page or str(p.get("id")) == str(page.get("id")):
             continue
         if str((p.get("data") or {}).get("primaryEntity") or "") != eid:
             continue
-        if family_of(p) == family:
-            return p
+        if family_of(p) != family:
+            continue
+        if with_id is not None and (("[" in str(p.get("route") or "")) != with_id):
+            continue
+        return p
     return None
 
 
@@ -98,7 +105,9 @@ def _field_kind(f: Mapping[str, Any]) -> dict:
     opts = f.get("enumValues") or f.get("enum") or f.get("options")   # `enumValues` is the Blueprint's key
     spec: dict[str, Any] = {"name": str(f["name"]), "label": _humanise(str(f["name"])),
                             "required": bool(f.get("required", False))}
-    if isinstance(opts, list) and opts:
+    if t.endswith("[]") or t in ("array", "list"):
+        spec["kind"] = "tags"                   # several values, submitted as an array
+    elif isinstance(opts, list) and opts:
         spec["kind"] = "select"
         spec["options"] = [{"label": str(o), "value": str(o)} if not isinstance(o, dict) else
                            {"label": str(o.get("label") or o.get("value")), "value": str(o.get("value"))}
@@ -148,7 +157,8 @@ def template_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | N
     create = _workflow_for(doc, eid, "db_insert")
     update = _workflow_for(doc, eid, "db_update")
     delete = _workflow_for(doc, eid, "db_delete")
-    form_page = _sibling(doc, page, "form")
+    form_page = _sibling(doc, page, "form", with_id=False) or _sibling(doc, page, "form")
+    edit_page = _sibling(doc, page, "form", with_id=True)
     record_page = _sibling(doc, page, "record")
     list_page = _sibling(doc, page, "collection")
     src = _slug(ename)
@@ -169,7 +179,10 @@ def template_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | N
         if record_page:
             row_actions.append({"label": "View",
                                 "navigate": _ROUTE_ID.sub("{{id}}", str(record_page.get("route")))})
-        if form_page and update:
+        if edit_page:
+            row_actions.append({"label": "Edit",
+                                "navigate": _ROUTE_ID.sub("{{id}}", str(edit_page.get("route")))})
+        elif form_page and update:
             row_actions.append({"label": "Edit",
                                 "navigate": f"{form_page.get('route')}?id={{{{id}}}}"})
         if delete:
@@ -216,7 +229,11 @@ def template_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | N
             actions.append({"type": "Button", "props": {"label": f"Back to {list_page.get('name') or 'list'}",
                                                         "variant": "secondary",
                                                         "navigate": str(list_page.get("route"))}, "children": []})
-        if form_page and update:
+        if edit_page:
+            actions.append({"type": "Button", "props": {"label": f"Edit {ename}", "variant": "secondary",
+                                                        "navigate": _ROUTE_ID.sub(f"{{{{{src}.id}}}}", str(edit_page.get("route")))},
+                            "children": []})
+        elif form_page and update:
             actions.append({"type": "Button", "props": {"label": f"Edit {ename}", "variant": "secondary",
                                                         "navigate": f"{form_page.get('route')}?id={{{{{src}.id}}}}"},
                             "children": []})

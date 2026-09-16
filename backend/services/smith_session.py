@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from services.smith import pending_ask
 from services.smith_blueprint import Blueprint
 from services.smith_blueprint_context import (
     blueprint_to_context,
@@ -52,6 +53,8 @@ from services.ground_truth import (
     git_diff_lines,
     guard_delta,
     snapshot_baseline,
+    tree_changes,
+    tree_diff_lines,
 )
 from services.narrator_artifacts import (
     DiscoveryArtifact,
@@ -138,6 +141,11 @@ class SmithSession:
         # Where Smith's reasoning goes so the user can read it. None means
         # nobody is watching, which is every caller that predates it.
         self._reasoning = reasoning_fn
+        #: The turn's whole ask — what was asked for, plus the answer to any
+        #: question Smith asked about it. Set by `run_iteration`.
+        self._ask = ""
+        #: What was typed on THIS turn, before the carried ask is folded in.
+        self._last_message = ""
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -248,6 +256,7 @@ class SmithSession:
         if not treat_as:
             return TurnResult(
                 status="asked",
+                options=["Specification", "Reference"],
                 answer=("Before I pull it in — is this design the "
                         "SPECIFICATION or a REFERENCE?\n\n"
                         "• Specification: I build exactly the screens on the page "
@@ -362,6 +371,7 @@ class SmithSession:
             # application's shape decided silently.
             return TurnResult(
                 status="asked",
+                options=["Specification", "Reference"],
                 answer=("Before I pull it in — is this design the "
                         "SPECIFICATION or a REFERENCE?\n\n"
                         "• Specification: I build exactly the screens you drew "
@@ -389,6 +399,191 @@ class SmithSession:
             )
 
         return TurnResult(status="resolved", answer=out["summary"])
+
+    def _stale_plan_reason(self) -> str:
+        """Why the plan approval no longer stands, or "" when it does (or there
+        is no Blueprint / no approval yet to be stale)."""
+        from pathlib import Path
+        if not (Path(self.output_dir) / ".forge" / "blueprint" / "current.json").exists():
+            return ""
+        try:
+            from services.blueprint import approval
+            from services.blueprint.service import BlueprintService
+            doc = BlueprintService.load(output_dir=str(self.output_dir)).doc
+            if approval.state_of(doc, "plan") != "stale":
+                return ""
+            answer = approval.latest(doc, "plan") or {}
+            return (f"the plan was approved at version {answer.get('version', '?')} and the definition "
+                    f"is now at version {doc.get('version', '?')} — it has changed since and must be "
+                    "reviewed again")
+        except Exception:  # noqa: BLE001 — a gate that cannot be read does not block the answer
+            logger.exception("could not read the plan gate")
+            return ""
+
+    def _definition(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Fields, requirements, product, APIs and integrations — the rest of
+        the definition, changeable after the build."""
+        u = {k: understanding.get(k) for k in ("entity", "field", "new_value", "requirement", "change", "api", "integration")}
+        field = u.get("field")
+        field = str(field.get("name") or "") if isinstance(field, dict) else str(field or "")
+        text = {"add_requirement": u.get("requirement"), "edit_requirement": u.get("requirement"),
+                "remove_requirement": u.get("requirement"), "add_api": u.get("api"), "remove_api": u.get("api"),
+                "add_integration": u.get("integration"), "remove_integration": u.get("integration"),
+                "edit_product": u.get("change")}.get(verb)
+        if verb in ("rename_field", "remove_field"):
+            from services.smith.field_change import run as go
+            out = go(str(self.output_dir), verb, entity=str(u.get("entity") or ""), field=field,
+                     new_value=str(u.get("new_value") or ""), reasoning=self._reasoning)
+        else:
+            from services.smith.definition_change import run as go
+            out = go(str(self.output_dir), verb, text=str(text or "").strip() or user_message.strip(),
+                     change=str(u.get("change") or "").strip(), reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched, diff_summary=", ".join(touched[:8]) if touched else "")
+
+    def _section(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Access, rules and entities — three Blueprint sections, one dispatch.
+        Each seam is also a tool; both reach the same `run`."""
+        u = {k: str(understanding.get(k) or "").strip() for k in ("change", "rule", "entity")}
+        reasoning = self._reasoning
+        if verb == "edit_access":
+            from services.smith.access_change import run as go
+            out = go(str(self.output_dir), u["change"] or user_message.strip(), reasoning=reasoning)
+        elif verb in ("add_rule", "edit_rule", "remove_rule"):
+            from services.smith.rule_change import run as go
+            out = go(str(self.output_dir), verb, rule=u["rule"] or user_message.strip(), change=u["change"], reasoning=reasoning)
+        else:
+            from services.smith.entity_change import run as go
+            # add_field's `entity` is a name; here it is the ask in the user's words.
+            ref = u["entity"] or user_message.strip()
+            if verb == "remove_entity":
+                gate = self._confirm_cascade("remove_entity", ref, self._cascade_of_entity(ref))
+                if gate is not None:
+                    return gate
+            out = go(str(self.output_dir), verb, entity=ref, reasoning=reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched, diff_summary=", ".join(touched[:8]) if touched else "")
+
+    def _cascade_of_entity(self, ref: str) -> list[str]:
+        """What retiring this record would take with it, in a person's words."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.entity_change import consequences
+
+        said = consequences(load_engine_doc(str(self.output_dir)) or {}, ref)
+        if not said.get("found"):
+            return []
+        out = []
+        if said["pages"]:
+            out.append(f"{len(said['pages'])} screen(s) — {', '.join(said['pages'])} — "
+                       "retired and taken off the menu")
+        if said["workflows"]:
+            out.append(f"{len(said['workflows'])} automatic process(es) — "
+                       f"{', '.join(said['workflows'])} — stopped, and their "
+                       "buttons taken off every screen")
+        if said["pointing"]:
+            out.append("records that point at it: " + ", ".join(said["pointing"]))
+        return out
+
+    def _cascade_of_field(self, entity: str, field: str) -> list[str]:
+        """Where a box is used, and the one thing undo cannot bring back."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.field_change import consequences
+
+        said = consequences(load_engine_doc(str(self.output_dir)) or {}, entity, field)
+        if not said.get("found"):
+            return []
+        out = ["everything written in it so far, which cannot be brought back"]
+        if said["used"]:
+            out.append("it comes off " + ", ".join(said["used"]))
+        if said["rules"]:
+            out.append("rules that check it are retired: " + ", ".join(said["rules"]))
+        if said["workflows"]:
+            out.append("processes that use it are re-authored: " + ", ".join(said["workflows"]))
+        return out
+
+    def _confirm_cascade(self, verb: str, target: str, consequences: list[str]) -> "TurnResult | None":
+        """Show what a change takes with it and wait for a yes — or None when
+        the yes is already in hand.
+
+        The dependency set was computed one line before the removal started,
+        and nobody was shown it. The yes is kept against a fingerprint of THIS
+        operation (services.smith.confirm), so the turn that says "go ahead"
+        is not read as the same ask arriving again — which would show the
+        question a second time, for ever.
+        """
+        from services.smith import confirm
+
+        if not consequences:
+            return None                       # nothing cascades: nothing to warn about
+        if confirm.granted(self.output_dir, self._last_message, verb, target):
+            return None
+        confirm.remember(self.output_dir, confirm.fingerprint(verb, target))
+        return TurnResult(
+            status="asked",
+            answer=("That does not only remove what you named. It also takes:\n"
+                    + "\n".join(f"- {c}" for c in consequences)
+                    + "\n\nShall I go ahead?"),
+            options=[confirm.YES_LABEL, confirm.NO_LABEL],
+        )
+
+    def _navigation(self, understanding: dict, user_message: str) -> "TurnResult":
+        """Change the menu — the `navigation` section. One implementation in
+        `services.smith.navigation_change.run`, shared with the tool."""
+        from services.smith.navigation_change import run as nav_run
+
+        change = str(understanding.get("change") or "").strip() or user_message.strip()
+        out = nav_run(str(self.output_dir), change, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not change the menu and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Changed the menu."),
+                          touched_paths=touched, diff_summary=", ".join(touched) if touched else "")
+
+    def _workflow(self, verb: str, understanding: dict, user_message: str) -> "TurnResult":
+        """Add, change or retire a business process — the `workflows` section,
+        which no other verb touched. One implementation in
+        `services.smith.workflow_change.run`, shared with the tools."""
+        from services.smith.workflow_change import run as workflow_run
+
+        out = workflow_run(str(self.output_dir), verb,
+                           workflow=str(understanding.get("workflow") or "").strip() or user_message.strip(),
+                           change=str(understanding.get("change") or "").strip(),
+                           route=str(understanding.get("route") or "").strip(),
+                           reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         f"I could not {verb.replace('_', ' ')} and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
+
+    def _restyle(self, understanding: dict, user_message: str) -> "TurnResult":
+        """Change the look of the application — the design system, which no
+        other verb touches. Same shape as `_compose`: one implementation in
+        `services.smith.restyle.run`, shared with the tool of the same name."""
+        from services.smith.restyle import run as restyle_run
+
+        change = str(understanding.get("change") or "").strip() or user_message.strip()
+        out = restyle_run(str(self.output_dir), change, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not restyle the application and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Restyled."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched) if touched else "")
 
     def _compose(self, verb: str, understanding: dict,
                  user_message: str) -> "TurnResult":
@@ -426,13 +621,69 @@ class SmithSession:
                                          f"{route} and have changed nothing."))
 
         touched = list(out.get("edited_paths") or [])
+        missing = [str(m) for m in (out.get("missing") or [])]
+        if missing:
+            # THE SCREEN CHANGED, THE ASK IS NOT ON IT. The composer was told
+            # what to add and laid the page out without it; "added X to
+            # /route" here would be the claim that sent the person to look
+            # for a field that is not there.
+            return TurnResult(
+                status="needs_user",
+                answer=("I re-composed **" + route + "**, but the new screen does "
+                        "not show what you asked for:\n"
+                        + "\n".join(f"- {m}" for m in missing)
+                        + "\n\nIf it is a field of the record, ask me to add "
+                          "the field to the entity and I will put it on the "
+                          "form directly. Otherwise say what it should contain "
+                          "and I will compose the screen again."),
+                touched_paths=touched,
+            )
+        # A paragraph of its own: the summary may end in a list, and a
+        # sentence appended to a list's last line becomes part of the bullet.
         return TurnResult(
             status="resolved",
             answer=(str(out.get("diff_summary") or f"I updated {route}.")
-                    + (f" Updated: {', '.join(touched[:6])}." if touched
+                    + (f"\n\nUpdated: {', '.join(touched[:6])}." if touched
                        else "")),
             touched_paths=touched,
         )
+
+    @staticmethod
+    def _on_route(entry: dict, target: str) -> bool:
+        """Whether a collected label sits on the screen `target` names."""
+        from services.smith.labels import normalise
+        want = normalise(target)
+        return bool(want) and want in (normalise(entry.get("route") or ""),
+                                       normalise(entry.get("page") or ""))
+
+    def _run_step(self, step: str) -> "TurnResult":
+        """One step of an agreed plan, as an ordinary turn.
+
+        Re-entering `_iterate` rather than a second execution path: a step is
+        a normal ask and must be able to do everything one can — ask its own
+        question, refuse, confirm a cascade — with the rest of the plan still
+        waiting behind it.
+        """
+        self._ask = step
+        self._last_message = step
+        return self._iterate(step, None)
+
+    def _revert(self) -> "TurnResult":
+        """Undo the last change (§91/§93).
+
+        The one verb that needs no facts from the ask: it is always the most
+        recent change, and asking which one would be asking the person to know
+        what Smith recorded.
+        """
+        from services.smith.revert import run as revert_run
+
+        out = revert_run(str(self.output_dir), reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not undo that."))
+        return TurnResult(status="resolved",
+                          answer=str(out.get("diff_summary") or "Undone."),
+                          touched_paths=list(out.get("edited_paths") or []))
 
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
@@ -448,7 +699,7 @@ class SmithSession:
         fname = str(field.get("name") or "").strip()
         if not entity or not fname:
             return TurnResult(status="asked",
-                              answer="I need the entity and the new field's name and type.")
+                              answer="Which record should it go on, and what should the box be called?")
 
         # Map Smith's SQL-ish type words to the Blueprint's field vocabulary.
         _t = str(field.get("type") or "string").lower().strip()
@@ -475,55 +726,99 @@ class SmithSession:
             touched = [c["path"] for c in (out.get("changes") or []) if c.get("path")]
             return self._added_field_result(fname, bp_type, entity, touched)
 
+        # THE COLUMN AND THE CONTROL, IN ONE TURN. "Add father's name in the
+        # Nurse Registration" asks for a place to type it, not only a column;
+        # the seam puts the field on every form that edits the entity and
+        # every table that lists it, commits the Blueprint, and re-projects.
         try:
             from services.blueprint.service import BlueprintService
-            from services.blueprint.projection import project_data_layer
+            from services.smith import field_change as fc
+            from services.smith.section_change import SectionChangeError
             svc = BlueprintService.load(output_dir=str(self.output_dir))
-            entities = (svc.doc.get("data") or {}).get("entities") or []
-            target = next((e for e in entities
-                           if str(e.get("name") or "").lower() == entity.lower()), None)
-            if target is None:
-                known = ", ".join(str(e.get("name")) for e in entities) or "(none)"
-                return TurnResult(status="needs_user",
-                                  answer=f"There is no {entity!r} entity. I can see: {known}.")
-            fields = target.setdefault("fields", [])
-            if any(str(f.get("name") or "").lower() == fname.lower() for f in fields):
-                return TurnResult(status="no_op",
-                                  answer=f"{entity} already has a {fname!r} field, so I changed nothing.")
-            # A new field is NEVER required — an existing row has no value for it,
-            # so the column must be nullable for the migration to apply cleanly.
-            # The Blueprint field schema is closed (name/type/required only for a
-            # plain column); precision/scale are a projection concern, so they
-            # are not carried onto the Blueprint field.
-            fields.append({"name": fname, "type": bp_type, "required": False})
-            svc.validate()
-            svc.save()
             app_root = Path(self.output_dir) / "app"
-            if not (app_root / "src" / "db" / "schema").exists():
+            if not (app_root / "src").exists():
                 app_root = Path(self.output_dir)
-            res = project_data_layer(svc.doc, app_root)
-            touched = list(res.get("files") or res.get("written") or [])
+            try:
+                out = fc.add_field(
+                    svc, entity,
+                    {"name": fname, "type": bp_type,
+                     "label": str(field.get("label") or "")},
+                    app_root=str(app_root), reasoning=self._reasoning)
+            except SectionChangeError as exc:
+                return TurnResult(status="needs_user", answer=str(exc))
         except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
             logger.exception("add_field failed for %s.%s", entity, fname)
             return TurnResult(status="needs_user",
                               answer=f"I could not add {fname!r} to {entity}: {exc}")
-        return self._added_field_result(fname, bp_type, entity, touched)
+        return TurnResult(status="resolved", answer=fc.summary_of("add_field", out),
+                          touched_paths=list(out.get("edited_paths") or []))
 
     @staticmethod
     def _added_field_result(fname: str, ftype: str, entity: str,
                             touched: list[str]) -> "TurnResult":
         return TurnResult(
             status="resolved",
-            answer=(f"Added a {ftype} column “{fname}” to {entity}. It is nullable "
-                    "and applied as a migration, so existing rows keep their data "
-                    "and nothing rebuilds"
+            answer=(f"Added **{fname}** to **{entity}** — a {ftype} box, optional, "
+                    "so records that already exist simply have it empty and "
+                    "nothing is rebuilt"
                     + (f". Updated: {', '.join(touched[:6])}." if touched else ".")
-                    + f" Say “show {fname} on the offer detail page” and I will surface it."),
+                    + " Say which screen should show it and I will put it there."),
             touched_paths=touched,
         )
 
     def run_iteration(self, user_message: str,
                       history: list[tuple[str, str]] | None = None) -> TurnResult:
+        """One turn, carrying whatever ask the last turn could not act on.
+
+        A change is often two turns: the ask, Smith's question about it, and
+        the answer. The turn that acts is the third, and it used to act on the
+        answer alone — "a new page at /calculator" became a page's whole
+        purpose and the composer's only subject, and the sentence that asked
+        for a calculator reached nothing. `services.smith.pending_ask` holds
+        the ask between the two, recorded when Smith asks and taken here; the
+        seams get both, in the order they were said.
+        """
+        from services.smith import plan as _plan_mod
+
+        # AGREED, SO DO THE FIRST ONE NOW. The yes is a turn of its own; it
+        # would otherwise be spent saying "starting" and the person would have
+        # to ask again for the thing they just agreed to.
+        if _plan_mod.peek(self.output_dir) and (
+                _plan_mod.wants_next(user_message)
+                or user_message.strip() == _plan_mod.ALL_LABEL
+                or user_message.strip() == _plan_mod.FIRST_LABEL):
+            only_one = user_message.strip() == _plan_mod.FIRST_LABEL
+            step = _plan_mod.take_next(self.output_dir)
+            if only_one:
+                _plan_mod.clear(self.output_dir)
+            if step:
+                pending_ask.clear(self.output_dir)
+                result = self._run_step(step)
+                rest = _plan_mod.peek(self.output_dir)
+                note = _plan_mod.remaining_note(rest)
+                if note and result.status == "resolved":
+                    result.answer += note
+                return result
+        if user_message.strip() == _plan_mod.REWORD_LABEL:
+            _plan_mod.clear(self.output_dir)
+            return TurnResult(status="asked",
+                              answer="Go ahead — tell me the one thing you want first.")
+
+        carried = pending_ask.take(self.output_dir)
+        self._ask = pending_ask.joined(carried, user_message)
+        # The consent test reads what was typed NOW, not the accumulated ask:
+        # "go ahead" is a yes, "remove complaints\n\ngo ahead" is not a
+        # sentence anybody typed.
+        self._last_message = user_message
+        result = self._iterate(user_message, history)
+        if result.status == "asked":
+            # Still unanswered: keep it for the turn that answers. The
+            # question itself is not kept — it is Smith's, not the ask.
+            pending_ask.remember(self.output_dir, self._ask)
+        return result
+
+    def _iterate(self, user_message: str,
+                 history: list[tuple[str, str]] | None = None) -> TurnResult:
         """Ground-truth-verified iteration.
 
         Contract:
@@ -576,23 +871,57 @@ class SmithSession:
         if answered:
             return TurnResult(status="no_op", answer=answered)
 
+        # SEVERAL ASKS IN ONE MESSAGE. Shown as a plan and agreed to once,
+        # rather than the biggest one happening in silence. Nothing is done
+        # before the yes — starting on step one while showing the list is the
+        # old behaviour with a receipt.
+        from services.smith import plan as _plan
+        steps = [str(a).strip() for a in (understanding.get("asks") or []) if str(a).strip()]
+        if len(steps) > 1 and not _plan.wants_next(user_message):
+            from services.smith import confirm as _confirm
+            if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
+                _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))
+                planned, over = _plan.split(steps)
+                _plan.remember(self.output_dir, planned)
+                return TurnResult(status="asked",
+                                  answer=_plan.as_question(planned, over),
+                                  options=[_plan.ALL_LABEL, _plan.FIRST_LABEL,
+                                           _plan.REWORD_LABEL])
+
         clarification = (understanding.get("clarification_needed") or "").strip()
         if clarification:
-            return TurnResult(status="asked", answer=clarification)
+            # The choices ride as chips: picking one sends its label as the
+            # next turn, the way the definition's questions are answered.
+            choices = [str(c).strip() for c in (understanding.get("clarification_options") or [])
+                       if str(c or "").strip()]
+            return TurnResult(status="asked", answer=clarification, options=choices)
 
         # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
         # five required fields, so a composition could not be expressed at all.
         # Requirements are per verb now; see services/smith/verbs.
-        from services.smith.verbs import (VERB_HELP, is_known, missing_fields,
+        from services.smith.verbs import (is_known, missing_fields,
                                           verb_of)
 
         verb = verb_of(understanding)
         if not is_known(understanding):
+            # THREE TO CHOOSE FROM, NOT THIRTY TO READ. The whole capability
+            # list is the right answer to "what can you do?" and the wrong one
+            # to a misrouted ask: it is a wall with nothing to click. The
+            # closest few, as the sentences that reach them, are a question.
+            from services.smith.capabilities import nearest as _nearest
+            close = _nearest(user_message)
+            if close:
+                return TurnResult(
+                    status="needs_user",
+                    answer=("I did not recognise that as something I can do. "
+                            "Did you mean one of these?"),
+                    options=[example for _verb, example in close] + ["Something else"],
+                )
+            from services.smith.capabilities import summary as _capabilities
             return TurnResult(
                 status="needs_user",
-                answer=("I did not recognise that as something I can do. I can "
-                        + "; ".join(f"{v} — {h.split('.')[0].lower()}"
-                                    for v, h in VERB_HELP.items()) + "."),
+                answer=("I did not recognise that as something I can do, and it "
+                        "is not close to anything I know.\n\n" + _capabilities()),
             )
         # Only the new verbs are gated here. `rename` keeps the path it always
         # had — its fields are enforced by `understand_ask`, and re-checking
@@ -601,12 +930,47 @@ class SmithSession:
         if verb != "rename":
             gaps = missing_fields(understanding)
             if gaps:
-                return TurnResult(
-                    status="asked",
-                    answer=(f"I can do that, I just need {' and '.join(gaps)}. "
-                            + VERB_HELP.get(verb, "")),
-                )
+                # THE ANSWER SET IS IN THE BLUEPRINT. "I just need entity and
+                # field" named two contract slots and left the person to guess
+                # Smith's spelling of a value the document already holds. Asked
+                # with its own answers attached, the question is a click.
+                from services.smith.engine_blueprint_adapter import load_engine_doc
+                from services.smith.slot_options import ask_for, fill_from
+                doc = load_engine_doc(str(self.output_dir)) or {}
+                # ASKED FOR ONLY WHAT WAS NOT SAID. The answer is often in the
+                # message already — "delete the Master Data page" names the
+                # screen — and asking for it is asking a person to repeat
+                # themselves.
+                known = fill_from(gaps, self._ask, doc, understanding)
+                if known:
+                    understanding = {**understanding, **known}
+                    gaps = missing_fields(understanding)
+                if gaps:
+                    question, choices = ask_for(gaps, doc, understanding)
+                    return TurnResult(status="asked", answer=question, options=choices)
 
+        if verb == "restyle":
+            return self._restyle(understanding, self._ask)
+        if verb in ("add_workflow", "edit_workflow", "remove_workflow"):
+            return self._workflow(verb, understanding, self._ask)
+        if verb == "edit_navigation":
+            return self._navigation(understanding, self._ask)
+        if verb in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
+            return self._section(verb, understanding, self._ask)
+        if verb == "remove_field":
+            # A COLUMN'S DATA IS THE ONE THING UNDO DOES NOT BRING BACK, so it
+            # is named before it goes, with everywhere the box is used.
+            gate = self._confirm_cascade(
+                "remove_field",
+                f"{understanding.get('entity') or ''}.{(understanding.get('field') or {}).get('name') or ''}",
+                self._cascade_of_field(
+                    str(understanding.get("entity") or ""),
+                    str((understanding.get("field") or {}).get("name") or "")))
+            if gate is not None:
+                return gate
+        if verb in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement",
+                    "edit_product", "add_api", "remove_api", "add_integration", "remove_integration"):
+            return self._definition(verb, understanding, self._ask)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":
@@ -614,9 +978,22 @@ class SmithSession:
         if verb == "disconnect_design":
             return self._disconnect_design(user_message)
         if verb in ("compose_route", "add_widgets"):
-            return self._compose(verb, understanding, user_message)
+            return self._compose(verb, understanding, self._ask)
         if verb == "add_field":
             return self._add_field(understanding)
+        if verb == "revert":
+            return self._revert()
+        from services.smith.limits import cannot as _cannot
+        if _cannot(verb):
+            # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely
+            # cannot serve; each now says why in a clause and offers the
+            # nearest thing that works, as sentences a click can say.
+            from services.smith.engine_blueprint_adapter import load_engine_doc
+            from services.smith.limits import answer as _limit_answer
+            said, options = _limit_answer(verb, understanding,
+                                          load_engine_doc(str(self.output_dir)) or {})
+            if said:
+                return TurnResult(status="needs_user", answer=said, options=options)
         if verb == "rebuild":
             # A CHAT TURN CANNOT START A RUN, so it must not imply that it can.
             # The build is driven by the client — `useBlueprintRun` posts the
@@ -624,6 +1001,21 @@ class SmithSession:
             # to reach it. It used to answer "say rebuild again to confirm",
             # and nothing consumed the confirmation: saying it again returned
             # the same sentence forever.
+            # THE GATE IS CONSULTED HERE, before anyone spends anything. The
+            # approval recorded at the last build is fingerprinted against the
+            # product surface; a definition changed since is a stale approval,
+            # and a build on a stale approval is refused with the reason and
+            # the way to renew it — the card, whose "Approve and build" IS the
+            # renewal. Nothing here starts a run.
+            stale = self._stale_plan_reason()
+            if stale:
+                return TurnResult(
+                    status="needs_user",
+                    answer=(f"Not building on the current approval: {stale}. Open the "
+                            "\u201cDefinition ready to review\u201d card above and press "
+                            "\u201cApprove and build\u201d to renew it against the definition "
+                            "as it now stands; the build then proceeds."),
+                )
             return TurnResult(
                 status="needs_user",
                 answer=("Building the whole application is started from the "
@@ -635,14 +1027,58 @@ class SmithSession:
                         "\u2014 name the route and I will rebuild that."),
             )
 
+        if verb == "remove":
+            # The move reads an empty `new_value` as "take it off" — the one
+            # thing that separates a removal from a rename to it.
+            understanding = {**understanding, "new_value": ""}
+
         target_file = (understanding.get("target_file") or "").strip()
         element_label = (understanding.get("element_label") or "").strip()
+
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        doc = load_engine_doc(str(self.output_dir)) or {}
+
         if not target_file:
+            # The screens are in the Blueprint; asking for one by name and
+            # leaving the person to type it is a question they answer worse
+            # than a click does.
+            from services.smith.slot_options import options_for
             return TurnResult(
                 status="asked",
-                answer="I need one more detail — which file or screen "
-                       "should I edit? A route path or a screen name works.",
+                answer="Which screen?",
+                options=options_for("route", doc),
             )
+
+        # THE TREE KNOWS THE WORDS; THE PERSON SHOULD NOT HAVE TO. The move
+        # matches a label by string equality, so "the delete thing" and
+        # "Delete  button" both reached "I looked for it and could not find
+        # it" with a Delete sitting in the tree. Resolved here: one match is
+        # used, several are asked about, none is still said plainly.
+        if element_label:
+            from services.smith.labels import collect, describe, resolve
+            found = resolve(doc, element_label, target_file)
+            if found.get("candidates"):
+                return TurnResult(
+                    status="asked",
+                    answer=(f"There is more than one “{element_label}”. "
+                            "Which one did you mean?"),
+                    options=[describe(c) for c in found["candidates"]][:5],
+                )
+            if found.get("text"):
+                if found["text"] != element_label:
+                    understanding = {**understanding, "element_label": found["text"]}
+                    element_label = found["text"]
+            else:
+                on_screen = [c["text"] for c in collect(doc)
+                             if self._on_route(c, target_file)][:5]
+                if on_screen:
+                    return TurnResult(
+                        status="asked",
+                        answer=(f"I could not find “{element_label}” on "
+                                f"{target_file}, so I have changed nothing. "
+                                "Is it one of these?"),
+                        options=on_screen,
+                    )
 
         # The "is this even a rename?" question is the VERB's now, decided
         # above, so it is not re-litigated here. f1a601f checked `new_value`
@@ -661,12 +1097,17 @@ class SmithSession:
                 ),
             )
 
-        # Ground truth: what did git actually see change?
+        # Ground truth: what did the working tree actually see change?
         modified_now = set(git_status_modified(self.output_dir))
         # Baseline may have had uncommitted changes; only NEW ones this
         # turn count as Smith's.
         baseline_status = set(baseline.get("status") or [])
-        actually_touched = sorted(modified_now - baseline_status)
+        # A generated project's repo has no commits, so to git all of
+        # `app/` is one untracked entry before and after — a rewritten page
+        # schema is invisible to it. The tree fingerprint sees the rewrite.
+        baseline_tree = baseline.get("tree") or {}
+        actually_touched = sorted((modified_now - baseline_status)
+                                  | set(tree_changes(self.output_dir, baseline_tree)))
 
         if not actually_touched:
             return TurnResult(
@@ -682,8 +1123,10 @@ class SmithSession:
                          "leave it and I'll come back later"],
             )
 
-        # Diff-based checks.
-        diff = git_diff_lines(self.output_dir, actually_touched)
+        # Diff-based checks — git's diff for what it tracks, the tree's for
+        # what it cannot yet see.
+        diff = (git_diff_lines(self.output_dir, actually_touched)
+                + tree_diff_lines(self.output_dir, baseline_tree, actually_touched))
 
         # Target-file check: is target_file in the actual set?
         touched_lower = {p.lower() for p in actually_touched}
@@ -758,11 +1201,23 @@ class SmithSession:
         )
         bp.save()
 
-        answer = (
-            f"Done. Changed `{target_file}` — "
-            f"{(understanding.get('current_behavior') or 'previous state').strip()}"
-            f" → {(understanding.get('desired_behavior') or 'requested change').strip()}."
-        )
+        # WHAT CHANGED, IN THE WORDS ON THE SCREEN. "Changed /master-data —
+        # previous state → requested change" is the shape of a sentence with
+        # nothing in it: it is what the template says when the model filled in
+        # neither behaviour, which is most of the time for a rename or a
+        # removal, where the label IS the change.
+        label = str(understanding.get("element_label") or "").strip()
+        new_text = str(understanding.get("new_value") or "").strip()
+        if label and new_text:
+            answer = f"Done — **{label}** on {target_file} now says **{new_text}**."
+        elif label:
+            answer = (f"Done — **{label}** is off {target_file}, and the screen "
+                      "no longer offers what it did.")
+        else:
+            was = str(understanding.get("current_behavior") or "").strip()
+            now = str(understanding.get("desired_behavior") or "").strip()
+            answer = (f"Done — {target_file}: {was} → {now}." if was and now
+                      else f"Done — {target_file} has been changed.")
         return TurnResult(
             status="resolved",
             answer=answer,

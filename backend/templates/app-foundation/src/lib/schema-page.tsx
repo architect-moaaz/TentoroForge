@@ -180,6 +180,13 @@ export async function renderSchemaPage(
   const engineCtx = actorCtx(user);
 
   const previewData: Record<string, unknown> = {};
+  // A RECORD PAGE WHOSE RECORD IS GONE IS A 404, NOT AN EMPTY 200. On an
+  // id-bearing route the page's own `get` source names the record; when it
+  // resolves to nothing (deleted, never existed, or not this user's to see)
+  // the page used to catch the error and render anyway — every binding
+  // empty, every action still armed, a Delete that then posted an empty id.
+  const isRecordRoute = /\[[^\]]+\]/.test(String((page as any).route ?? ""));
+  let recordMissing = false;
   for (const s0 of ((page as any).dataSources ?? []) as Array<{ name: string; op?: string }>) {
     // Aggregates carry their own scoping filter (the KPI breakdowns); only
     // row-returning sources follow the user's filter selection.
@@ -231,8 +238,13 @@ export async function renderSchemaPage(
         // sees an array and renders nothing.
         const isDetail = s.op === "get" || s.op === "detail" || s.op === "find" || s.op === "one";
         previewData[s.name] = isDetail && Array.isArray(res) ? (res[0] ?? null) : res;
+        if (isDetail && isRecordRoute && previewData[s.name] == null) recordMissing = true;
       }
     } catch (e) {
+      const isDetailSrc = s.op === "get" || s.op === "detail" || s.op === "find" || s.op === "one";
+      if (isDetailSrc && isRecordRoute && (e as { name?: string })?.name === "NotFoundError") {
+        recordMissing = true;
+      }
       // DV-BIND-2: elevated to console.error so the failure is visible in the
       // Next dev server output — .warn was scrolling off unnoticed. Include the
       // stack so we can tell "Unknown entity: X" apart from a real DB error.
@@ -254,6 +266,7 @@ export async function renderSchemaPage(
   // empty (the Approve button never showed for the stage that held the
   // case, Criterion Refunds v2). The session user is what the page knows;
   // it carries no credential.
+  if (recordMissing) notFound();
   if (user) previewData.user = user;
   const hasPreview = Object.keys(previewData).length > 0;
 

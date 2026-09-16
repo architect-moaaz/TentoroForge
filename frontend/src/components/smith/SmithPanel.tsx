@@ -49,6 +49,8 @@ import {
   SkipForward,
   XCircle,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
 import {
@@ -235,6 +237,38 @@ export interface SmithPanelProps {
   className?: string;
 }
 
+/**
+ * Smith's side of the conversation, rendered as light markdown.
+ *
+ * Smith answers about an application by naming its screens, routes, fields
+ * and requirements, and a paragraph that names six of them in a row is a
+ * wall. The backend now writes a one-line lead and a list where there is a
+ * list, with the names in bold; this is where that structure becomes
+ * visible. Compact on purpose — the bubble is a chat message, not a
+ * document — so headings are flattened to bold and lists sit tight.
+ */
+function SmithProse({ text }: { text: string }) {
+  return (
+    <div
+      className={cn(
+        "prose prose-sm max-w-none text-sm leading-relaxed text-foreground",
+        "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
+        "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4",
+        "[&_li]:my-0.5 [&_li]:pl-0.5 [&_li>p]:my-0",
+        "[&_strong]:font-semibold [&_strong]:text-foreground",
+        "[&_code]:rounded [&_code]:bg-background/70 [&_code]:px-1 [&_code]:py-0 [&_code]:text-[0.85em] [&_code]:font-normal",
+        "[&_code]:before:content-none [&_code]:after:content-none",
+        "[&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold",
+        "[&_h1]:my-1.5 [&_h2]:my-1.5 [&_h3]:my-1.5",
+        "[&_a]:underline [&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-2 [&_blockquote]:not-italic",
+        "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
+      )}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 export function SmithPanel({
   projectId,
   initialBrief,
@@ -295,7 +329,7 @@ export function SmithPanel({
             const rows = (await res.json()) as Array<Record<string, unknown>>;
             if (!Array.isArray(rows)) return;
             setMessages((cur) => {
-              const seen = new Set(cur.map((m) => `${m.role} ${m.text}`));
+              const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
               const add = rows
                 .filter((r) => String(r.content ?? "").trim())
                 .map((r) => {
@@ -308,7 +342,7 @@ export function SmithPanel({
                     at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
                   };
                 })
-                .filter((m) => !seen.has(`${m.role} ${m.text}`));
+                .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
               return add.length ? [...cur, ...add] : cur;
             });
           } catch {
@@ -368,12 +402,15 @@ export function SmithPanel({
     return () => document.removeEventListener("visibilitychange", restore);
   }, []);
 
+  // Follows the thinking as well as the messages: the reasoning block grows
+  // at the bottom of the transcript while a turn runs, and a block the
+  // transcript does not scroll to is a block nobody sees.
   useEffect(() => {
     transcriptRef.current?.scrollTo({
       top: transcriptRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length, run.nodesDone]);
+  }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
 
@@ -910,7 +947,11 @@ export function SmithPanel({
                   : "bg-muted",
               )}
             >
-            <p>{m.text}</p>
+            {m.role === "user" ? (
+              <p className="whitespace-pre-wrap">{m.text}</p>
+            ) : (
+              <SmithProse text={m.text} />
+            )}
 
             {m.diffSummary && (
               // §71 — what the change touched, before it is believed.
@@ -1345,15 +1386,16 @@ function StageList({
  * SECONDARY BY CONSTRUCTION. Small, muted, and gone the moment Smith speaks —
  * the answer says it better than the reasoning that reached it. §111 asks that
  * BUILD PROGRESS show observable status rather than model reasoning, and the
- * stage list still does exactly that; this is the conversation.
+ * stage list still does exactly that; this is the conversation, where the
+ * reasoning is shown while it happens, labelled as thinking, never as a reply.
  */
 export function ThinkingTrail({
   thoughts,
-  nodes,
+  nodes = [],
   busy,
 }: {
   thoughts: RunThought[];
-  nodes: RunNode[];
+  nodes?: RunNode[];
   busy: boolean;
 }) {
   // A live elapsed clock, so a turn that runs for minutes reads as working
@@ -1375,15 +1417,32 @@ export function ThinkingTrail({
     return () => clearInterval(id);
   }, [busy]);
 
-  // §111 — "Do not expose hidden model reasoning." The raw first-person
-  // chain-of-thought ("Let me analyze this: 1. This is a change request…") was
-  // being painted straight into the chat and read as Smith's answer before the
-  // real one arrived (DEFECT-THINKING-LEAK, seen on K-01 `deploy` and L-05).
-  // Deterministic `step` events ARE observable status — the compose stages,
-  // labelled from the same table the build stage list uses — so those stay;
-  // the model's reasoning does not.
+  // Deterministic `step` events are observable status — the compose stages,
+  // labelled from the same table the build stage list uses.
   const steps = thoughts.filter((t) => t.kind === "step");
   const last = thoughts[thoughts.length - 1];
+
+  // THE THINKING, SHOWN AS THINKING. The model's reasoning streams in as
+  // fragments; joined, it is what Smith is weighing right now. It was hidden
+  // after DEFECT-THINKING-LEAK, when a raw "Let me analyze this: 1. This is a
+  // change request…" was painted into the chat AS IF IT WERE THE ANSWER. The
+  // defect was the framing, not the content: rendered under its own
+  // "Thinking" heading, muted and italic, scrolling, and gone the moment the
+  // answer lands, it reads as what it is — the work in progress — and tells
+  // the person what a twenty-second silence is about.
+  // Each fragment is a whole thought — the server's ReasoningSink flushes at
+  // sentence boundaries and trims what it flushes — so they go on their own
+  // lines; joined flush, "…any visit." ran straight into "- REQ-004".
+  const reasoning = thoughts
+    .filter((t) => t.kind === "reasoning")
+    .map((t) => t.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  const reasoningRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = reasoningRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [reasoning]);
 
   // Nothing happening and nothing to leave behind — render nothing.
   if (!busy && !steps.length) return null;
@@ -1431,6 +1490,16 @@ export function ThinkingTrail({
           {t.node ? labelFor(t.node) : t.text}
         </p>
       ))}
+      {busy && reasoning.trim() && (
+        <div
+          ref={reasoningRef}
+          data-testid="smith-thinking"
+          aria-label="Smith's thinking"
+          className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/60 px-2.5 py-1.5 text-xs italic leading-relaxed text-muted-foreground"
+        >
+          {reasoning}
+        </div>
+      )}
     </div>
   );
 }

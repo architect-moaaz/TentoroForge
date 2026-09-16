@@ -96,6 +96,14 @@ function humanize(key: string): string {
   const s = String(key ?? "").replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
   return s ? s.replace(/\b\w/g, (c) => c.toUpperCase()) : "";
 }
+/** The one confirmation every destructive control goes through. A host with
+ *  no window (SSR, tests) proceeds; a person gets asked, naming the row. */
+export function confirmDestructive(label: string, rec?: Record<string, unknown>): boolean {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+  const name = rec && (rec.name ?? rec.title ?? rec.fullName ?? rec.label ?? rec.id);
+  return window.confirm(`${label}${name ? ` "${String(name)}"` : ""}? This cannot be undone.`);
+}
+
 function applyTemplate(tpl: string, rec: Record<string, unknown>): string {
   // Accept both the schema's Mustache-style {{id}} (what the generator emits for
   // rowHref / navigate) and bare {id}. Matching only {id} turned "/x/{{id}}" into
@@ -287,7 +295,11 @@ function Cell({ value, fmt }: { value: unknown; fmt: NonNullable<ColumnDef["form
         className="h-10 w-10 rounded-md object-cover border border-border/60" />
     );
   }
-  const s = typeof value === "object" ? JSON.stringify(value) : String(value);
+  // A list of scalars (a `string[]` column) reads as its values, not as the
+  // JSON text of the array.
+  const s = Array.isArray(value) && value.every((v) => v === null || typeof v !== "object")
+    ? value.filter((v) => v != null && v !== "").map(String).join(", ")
+    : typeof value === "object" ? JSON.stringify(value) : String(value);
   return <span className="block max-w-[28rem] truncate" title={s}>{s}</span>;
 }
 
@@ -502,8 +514,25 @@ export function Table(props: TableProps) {
   }
 
   async function runAction(a: RowActionDef, r: Record<string, unknown>, key: string) {
-    if (a.navigate) { const url = applyTemplate(a.navigate, r); if (typeof window !== "undefined") window.location.assign(url); return; }
+    if (a.navigate) {
+      // Through the Navigator, like the empty-state action and the row link —
+      // a hard `location.assign` escaped the host's base path (the preview
+      // serves an app under `/p/<id>`), so a row's Edit reached a 404 there.
+      nav.push(applyTemplate(a.navigate, r));
+      return;
+    }
     if (a.workflow) {
+      // A row with no id has nothing to act on — the engine would refuse the
+      // empty WHERE; refuse here, before a request is made.
+      if (r?.id === undefined || r?.id === null || r?.id === "") {
+        console.warn(`[Table] row action "${a.label}" skipped: the row has no id`);
+        return;
+      }
+      // A DESTRUCTIVE ROW ACTION ASKS FIRST. "Delete, with a confirmation
+      // prompt" is what every brief asks for and what the composition
+      // conventions promise; a `danger` row action ran on the click. The
+      // platform confirms, once, here — not a Dialog re-composed per page.
+      if (a.variant === "danger" && !confirmDestructive(a.label, r)) return;
       // Re-entrancy guard: ignore clicks while this row-action is mid-flight
       // (belt-and-suspenders with the button's disabled attr).
       if (busyKeys.has(key)) return;

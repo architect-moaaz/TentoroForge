@@ -345,6 +345,27 @@ def test_iteration_ask_user_when_understand_returns_low_confidence(tmp_path):
     result = session.run_iteration(user_message="it's broken")
     assert result.status == "asked"
     assert "which page" in result.answer.lower()
+    assert result.options == []
+
+
+def test_a_clarification_with_choices_offers_them_as_chips(tmp_path):
+    """"Where should the calculator live?" with three alternatives: the
+    alternatives reach the turn result as options, which the panel renders
+    as chips, so the person clicks rather than types one back."""
+    _init_repo(tmp_path)
+    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
+    bp.set_domain(name="ATS", primary_actors=[], core_verbs=[], distinctive_shape="", why="")
+    bp.save()
+
+    def _understand(m, ctx, **kw):
+        return {"clarification_needed": "Where should the calculator live?",
+                "clarification_options": ["A new page at /calculator", "A panel on Nurse Registration", " ", "A panel on Master Data"]}
+
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=_understand, iteration_move_fn=lambda *a, **kw: None)
+    result = session.run_iteration(user_message="add a calculator")
+    assert result.status == "asked" and result.answer == "Where should the calculator live?"
+    assert result.options == ["A new page at /calculator", "A panel on Nurse Registration", "A panel on Master Data"]
 
 
 # --------------------------------------------------------------------------- #
@@ -384,3 +405,68 @@ def test_change_log_entry_records_ask_move_diff_and_verification(tmp_path):
     assert entry["smith_move"] == "edit_file(a.json)"
     assert "a.json" in entry["diff_summary"]
     assert any("git" in v.lower() for v in entry["verified_by"])
+
+
+def test_a_removal_lands_in_a_repo_with_no_commits(tmp_path):
+    """The shape every generated project has: `.git` and no commits, so to git
+    all of the tree is one untracked entry before and after the turn — a
+    rewritten page schema was reported as "nothing actually changed on disk".
+    The tree fingerprint sees the rewrite; the diff carries the removed label;
+    the `remove` verb reaches the move with an empty `new_value`."""
+    subprocess.check_call(["git", "init", "-q", str(tmp_path)])
+    schema = tmp_path / "app" / "src" / "schemas" / "master-data.json"
+    schema.parent.mkdir(parents=True)
+    schema.write_text('{"rowActions": [{"label": "Edit"}, {"label": "Delete", "workflow": "FLOW-003"}]}\n')
+
+    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
+    bp.set_domain(name="Med", primary_actors=[], core_verbs=[], distinctive_shape="", why="")
+    bp.save()
+
+    seen = {}
+
+    def _move(understanding, output_dir):
+        seen.update(understanding)
+        schema.write_text('{"rowActions": [{"label": "Edit"}]}\n')
+        return IterationMove(move_name="remove 'Delete' from PAGE-002",
+                             touched_paths=["app/src/schemas/master-data.json"])
+
+    def _understand(user_message, ctx, history=None):
+        return {"verb": "remove", "target_file": "/master-data", "element_label": "Delete"}
+
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=_understand, iteration_move_fn=_move)
+    result = session.run_iteration(user_message="remove the delete button")
+    assert seen["new_value"] == ""                       # a removal, to the move
+    assert result.status == "resolved", result.answer
+    assert result.touched_paths == ["app/src/schemas/master-data.json"]
+
+
+def test_a_build_asked_for_in_chat_is_refused_while_the_plan_approval_is_stale(tmp_path):
+    """C-04: the approval recorded at the last build is fingerprinted against
+    the product surface; a definition changed since is a stale approval, and
+    "build" is refused with the reason and the way to renew — before anything
+    is spent. A fresh approval gets the ordinary "open the card" answer."""
+    from services.blueprint import approval
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="App", domain="ops")
+    svc.doc["requirements"] = [{"id": "REQ-001", "description": "Do a thing.", "status": "APPROVED",
+                                "evidence": [{"message": "do a thing", "type": "conversation"}]}]
+    svc.save()
+    approval.record(svc, "plan")
+    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=_no_op_guards,
+                           understand_ask_fn=lambda m, c, history=None: {"verb": "rebuild"},
+                           iteration_move_fn=lambda *a, **k: None)
+    fresh = session.run_iteration(user_message="build")
+    assert fresh.status == "needs_user" and "Approve and build" in fresh.answer and "stale" not in fresh.answer.lower()
+    # the definition changes materially: a module goes
+    svc.doc["application"]["name"] = "Renamed App"
+    svc.commit(user_request="rename", smith_interpretation="rename", before=svc.snapshot(), affected=[])
+    assert approval.state_of(svc.doc, "plan") == "stale"
+    refused = session.run_iteration(user_message="build")
+    assert refused.status == "needs_user"
+    assert "Not building on the current approval" in refused.answer and "reviewed again" in refused.answer
+    assert "Approve and build" in refused.answer                      # the way to renew it
+    # re-approving is what the card's click does: recorded fresh, the build proceeds
+    approval.record(svc, "plan")
+    assert approval.state_of(BlueprintService.load(output_dir=str(tmp_path)).doc, "plan") == "approved"
+    assert "stale" not in session.run_iteration(user_message="build").answer.lower()

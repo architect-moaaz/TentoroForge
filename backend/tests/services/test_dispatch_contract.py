@@ -114,3 +114,26 @@ def test_the_projection_writes_the_manifest(tmp_path):
     assert r == {"files": ["src/contracts/dispatches.json"], "dispatches": 3}
     data = json.loads((tmp_path / "src/contracts/dispatches.json").read_text())
     assert {e["workflow"] for e in data["dispatches"]} == {"FLOW-C", "FLOW-D"}
+
+
+def test_a_list_column_collected_by_a_text_field_is_refused():
+    """`specialities: string[]` on the entity and the input, composed as a
+    textarea with a "comma-separated" hint: the edit form showed the record's
+    array as JSON and would have written a string back. A list is collected by
+    a `tags` field, which submits an array."""
+    from services.blueprint.dispatch_contract import field_kind_findings
+    doc = _doc()
+    doc["data"]["entities"][0]["fields"].append({"name": "specialities", "type": "string[]"})
+    doc["workflows"][0]["inputs"].append({"name": "specialities", "kind": "field", "type": "string[]", "required": True})
+    form = doc["pageLayouts"][2]["root"]["props"]
+    form["fields"] = [{"name": "fullName", "kind": "text"}, {"name": "specialities", "kind": "textarea"}]
+    found = field_kind_findings(doc)
+    assert [f["rule"] for f in found] == ["form-field-kind-mismatch"]
+    assert found[0]["page"] == "PAGE-ADD" and "specialities" in found[0]["detail"] and '"tags"' in found[0]["detail"]
+    assert found[0] in page_findings(doc)                      # the composer's refusal, not advice
+    form["fields"][1]["kind"] = "tags"
+    assert field_kind_findings(doc) == []
+    # the column's type alone is enough — the input may say only `field`
+    doc["workflows"][0]["inputs"][-1].pop("type")
+    form["fields"][1]["kind"] = "text"
+    assert len(field_kind_findings(doc)) == 1

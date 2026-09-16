@@ -30,6 +30,9 @@ import { FormValuesContext } from "./FormValuesContext";
 type FieldSpec =
   | { kind: "text" | "email" | "number"; name: string; label: string; required?: boolean; placeholder?: string }
   | { kind: "textarea"; name: string; label: string; required?: boolean; rows?: number }
+  // A list of short values (a `string[]` column): entered comma-separated,
+  // shown as chips, submitted as an array.
+  | { kind: "tags"; name: string; label: string; required?: boolean; placeholder?: string }
   | { kind: "select"; name: string; label: string; required?: boolean; options: { value: string; label: string }[] }
   | { kind: "checkbox"; name: string; label: string }
   | { kind: "date"; name: string; label: string; required?: boolean }
@@ -844,6 +847,22 @@ function FormFieldImpl({
               : null}
         </div>
       );
+    case "tags":
+      return (
+        <Controller name={name} control={control}
+          rules={{ validate: (v) => (!effRequired || (Array.isArray(v) && v.length > 0)) || "required" }}
+          render={({ field: f }) => (
+            <TagsInput
+              id={id}
+              label={field.label}
+              placeholder={field.placeholder}
+              value={f.value}
+              onChange={f.onChange}
+              error={error}
+              hint={(field as { hint?: string }).hint}
+            />
+          )} />
+      );
     case "textarea":
       return (
         <div className={FIELD_WRAP}>
@@ -997,3 +1016,72 @@ function KeyValueField({
     }} />
   );
 }
+
+/** "Pediatrics, ICU" → ["Pediatrics", "ICU"]. The value the tags field submits. */
+export function parseTags(text: unknown): string[] {
+  if (Array.isArray(text)) return text.map((t) => String(t).trim()).filter(Boolean);
+  if (text == null) return [];
+  return String(text).split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+}
+
+/**
+ * The control behind `kind: "tags"`. The typed text is local state — the
+ * form holds the ARRAY — so a trailing comma survives the keystroke that
+ * typed it (parse-and-rejoin on every change ate the separator and made a
+ * second value impossible to enter). Outside changes to the value (the
+ * record fetch resolving, a reset) resync the text.
+ */
+function TagsInput({ id, label, placeholder, value, onChange, error, hint }: {
+  id: string;
+  label: string;
+  placeholder?: string;
+  value: unknown;
+  onChange: (next: string[]) => void;
+  error?: string;
+  hint?: string;
+}) {
+  const items = parseTags(value);
+  const joined = items.join(", ");
+  const [text, setText] = React.useState(joined);
+  const lastJoined = React.useRef(joined);
+  React.useEffect(() => {
+    if (joined !== lastJoined.current) {
+      lastJoined.current = joined;
+      setText(joined);
+    }
+  }, [joined]);
+  return (
+    <div className={FIELD_WRAP}>
+      <label htmlFor={id} className={FIELD_LABEL}>{label}</label>
+      <input
+        id={id}
+        type="text"
+        value={text}
+        placeholder={placeholder ?? "Separate values with commas"}
+        className={FIELD_CONTROL}
+        data-kind="tags"
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          const parsed = parseTags(next);
+          lastJoined.current = parsed.join(", ");
+          onChange(parsed);
+        }}
+      />
+      {items.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1" data-tags-preview="">
+          {items.map((t, i) => (
+            <span key={`${t}-${i}`}
+              className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-foreground">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      {error
+        ? <p role="alert" className={FIELD_ERROR}>{error}</p>
+        : hint ? <p className={FIELD_HINT}>{hint}</p> : null}
+    </div>
+  );
+}
+
