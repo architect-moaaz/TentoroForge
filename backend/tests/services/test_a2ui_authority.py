@@ -1220,3 +1220,25 @@ def test_the_brief_names_what_each_declared_action_must_become():
     doc["workflows"].pop()
     lst = "\n".join(_contract_guidance(doc["pages"][0], reg_no := registry_from_blueprint(doc), "PAGE-001"))
     assert "no workflow deletes a Record yet — leave it out" in lst
+
+
+# --- what the composition cost rides out with the surface --------------------
+
+def test_the_composers_usage_leaves_with_the_result_not_the_surface(tmp_path):
+    """The MCP calls the model itself; its cost reached no ledger. It now
+    appends a usage block, `_mcp_surface` carries it under `_meta`, and the
+    composer pops it before the surface is persisted or translated."""
+    root = _app(tmp_path)
+    base = GOOD()
+    def provider(*_):
+        return {**base, "_meta": {"usage": {"input_tokens": 12000, "output_tokens": 3000,
+                                              "cache_read_tokens": 9000, "cache_write_tokens": 0,
+                                              "model": "claude-sonnet-5", "calls": 2}}}
+    res = compose_dashboard_via_a2ui(str(root), surface_provider=provider)
+    assert res["applied"] is True
+    assert res["usage"] == {"input_tokens": 12000, "output_tokens": 3000, "cache_read_tokens": 9000,
+                            "cache_write_tokens": 0, "calls": 2, "model": "claude-sonnet-5"}
+    surfaces = list((root / "src" / "contracts" / "a2ui-surfaces").glob("*.json"))
+    assert surfaces and all("_meta" not in json.loads(f.read_text()) for f in surfaces)
+    # A provider that reports nothing leaves the field empty, not invented.
+    assert compose_dashboard_via_a2ui(str(root), surface_provider=GOOD).get("usage") is None

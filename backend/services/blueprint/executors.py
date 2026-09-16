@@ -2701,6 +2701,28 @@ def make_executor(
     longest stretch of a compose turn silent.
     """
 
+    def _record_composer_usage(spec: TaskSpec, out: dict, elapsed: float) -> None:
+        """The composer calls the model itself; its cost reached no ledger,
+        so page composition — the dominant cost of a build — was missing from
+        every per-application figure. The MCP now reports it and it is
+        recorded here as the page's own entry, `a2ui_pages:compose`."""
+        got = out.get("usage") if isinstance(out, dict) else None
+        if usage is None or not got or not isinstance(got, dict):
+            return
+        try:
+            usage.record(
+                node=spec.node, agent=f"{spec.agent}:compose",
+                usage=Usage(model=str(got.get("model") or ""),
+                            input_tokens=int(got.get("input_tokens") or 0),
+                            output_tokens=int(got.get("output_tokens") or 0),
+                            cache_read_tokens=int(got.get("cache_read_tokens") or 0),
+                            cache_write_tokens=int(got.get("cache_write_tokens") or 0)),
+                elapsed_s=elapsed,
+                project=str((svc.doc.get("application") or {}).get("id", "")),
+            )
+        except Exception:  # noqa: BLE001 — the ledger never fails a build
+            logger.debug("[a2ui] usage record failed", exc_info=True)
+
     def _compose_via_a2ui(spec: TaskSpec) -> AgentResult | None:
         """§34 — A2UI composes the page; the agent is what runs if it declines.
 
@@ -2830,6 +2852,7 @@ def make_executor(
         with svc.lock:
             context = shared_context(svc.doc)
             registry = registry_from_blueprint(svc.doc)
+        t0 = time.monotonic()
         try:
             out = compose_page_via_a2ui(
                 svc.output_dir, page["route"], page.get("pattern") or "",
@@ -2849,6 +2872,7 @@ def make_executor(
         except Exception as exc:  # noqa: BLE001 — composition, never the build
             logger.warning("[a2ui] %s: %s", spec.subject, exc)
             return None
+        _record_composer_usage(spec, out, time.monotonic() - t0)
         if not out.get("applied") or not out.get("root"):
             reason = str(out.get("reason") or "").strip()
             logger.info("[a2ui] %s declined (%s) — authoring agent runs",

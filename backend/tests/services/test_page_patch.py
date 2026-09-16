@@ -179,3 +179,32 @@ def test_the_executor_edits_on_a_repair_and_composes_on_a_first_pass(monkeypatch
     # must return the patch before it is tried.
     assert run(Spec(feedback=FEEDBACK)) == "PATCHED"
     assert calls == [("patch", "PAGE-001")]
+
+
+def test_the_executor_records_the_composers_usage_as_the_pages_own_entry(monkeypatch):
+    """Page composition was the dominant cost of a build and absent from every
+    per-application figure. What the MCP reports is recorded under
+    `a2ui_pages:compose`, the same ledger every other agent call lands in."""
+    from services.blueprint import executors as ex
+    from services.blueprint.executors import RunUsage
+    doc = _doc()
+    doc["pages"][0]["route"] = "/master-data"
+    svc = Svc(doc)
+    def fake_compose(output_dir, route, kind, **kw):
+        return {"applied": True, "route": route, "kind": kind, "reason": "ok",
+                "root": {"type": "Stack", "props": {}, "children": []},
+                "schema": {"dataSources": []},
+                "usage": {"input_tokens": 12000, "output_tokens": 3000, "cache_read_tokens": 9000,
+                          "cache_write_tokens": 500, "model": "claude-sonnet-5", "calls": 2}}
+    monkeypatch.setattr("services.a2ui_authority.compose_page_via_a2ui", fake_compose)
+    monkeypatch.setattr("services.a2ui_authority.registry_from_blueprint", lambda d: {"entities": {"Record": {}}})
+    monkeypatch.setattr("services.a2ui_ui_composition.shared_context", lambda d: "")
+    ledger = RunUsage()
+    run = ex.make_executor(svc, lambda **kw: "{}", usage=ledger)
+    result = run(Spec(node="page_layouts", agent="a2ui_pages", subject="PAGE-001", feedback=""))
+    assert result is not None and result.proposals[0].section == "pageLayouts"
+    (entry,) = ledger.entries
+    assert entry["agent"] == "a2ui_pages:compose" and entry["node"] == "page_layouts"
+    assert entry["model"] == "claude-sonnet-5" and entry["input_tokens"] == 12000
+    assert entry["cache_read_tokens"] == 9000 and entry["cache_write_tokens"] == 500
+    assert entry["priced"] is True and entry["cost_usd"] > 0

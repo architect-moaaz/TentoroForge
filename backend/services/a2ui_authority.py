@@ -1133,10 +1133,30 @@ def _mcp_surface(requirement: str, domain_context: str,
                 if out.isError:
                     text = getattr(out.content[0], "text", "") if out.content else ""
                     raise _server_error(text)
+                # content[0] is the payload; the server APPENDS what else it
+                # has to say — warnings, and what the composition cost. The
+                # cost rides out under `_meta`, popped before the payload is
+                # persisted or translated, so a consumer of the surface never
+                # sees it and the ledger does.
+                payload = None
+                meta: dict[str, Any] = {}
                 for block in out.content:
                     text = getattr(block, "text", None)
-                    if text:
-                        return json.loads(text)
+                    if not text:
+                        continue
+                    try:
+                        data = json.loads(text)
+                    except ValueError:
+                        continue
+                    if payload is None:
+                        payload = data
+                    elif isinstance(data, dict) and "usage" in data:
+                        meta["usage"] = data["usage"]
+                if payload is None:
+                    raise RuntimeError("a2ui server returned no content")
+                if meta and isinstance(payload, dict):
+                    payload["_meta"] = meta
+                return payload
         raise RuntimeError("a2ui server returned no content")
 
     box: dict[str, Any] = {}
@@ -1320,6 +1340,7 @@ def compose_page_via_a2ui(
     # shapes was being noticed.
     payload = None
     last_exc: Exception | None = None
+    composer_usage: dict[str, Any] = {}
     for attempt in range(1, 4):
         try:
             payload = surface_provider(build_requirement(root, kind, route,
@@ -1346,6 +1367,14 @@ def compose_page_via_a2ui(
         except Exception as exc:  # noqa: BLE001 — a composer must never fail a build
             last_exc, payload = exc, None
         else:
+            if isinstance(payload, dict) and isinstance(payload.get("_meta"), dict):
+                # Summed across the caller's own retries too: what THIS page
+                # cost is every call made on its behalf.
+                got = payload.pop("_meta").get("usage") or {}
+                for k in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "calls"):
+                    composer_usage[k] = int(composer_usage.get(k, 0)) + int(got.get(k, 0) or 0)
+                if got.get("model"):
+                    composer_usage["model"] = str(got["model"])
             if payload and (payload.get("messages") or []):
                 break
             last_exc = None
@@ -1363,7 +1392,8 @@ def compose_page_via_a2ui(
                + (f" ({last_exc})" if last_exc else ""))
         logger.warning("[a2ui] %s composition failed: %s", route, why)
         return {"applied": False, "route": route, "kind": kind,
-                "reason": f"composition failed: {why}"}
+                "reason": f"composition failed: {why}",
+                "usage": composer_usage or None}
 
     # Keep the raw surface per attempt, decline or not. When a composition ships
     # something wrong the first question is always what the composer actually
@@ -1488,6 +1518,8 @@ def compose_page_via_a2ui(
     return {
         "applied": True, "route": route, "kind": kind, "reason": "ok",
         "pruned": pruned,
+        # What the composer's own model calls cost, for the build's ledger.
+        "usage": composer_usage or None,
         # The composition itself, for a caller emitting an artifact rather
         # than reading the file back.
         "root": schema.get("root"),
