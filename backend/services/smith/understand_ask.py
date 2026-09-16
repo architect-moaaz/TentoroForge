@@ -41,9 +41,10 @@ Return ONLY a JSON object with exactly these keys:
       the wrong reading would be expensive to undo. Asking is not a failure.
   "clarification_options": when the question offers CHOICES, the choices as
       short labels, 2 to 5, each a complete answer on its own that they can
-      pick with one click — ["A new page at /calculator", "A panel on Nurse
-      Registration", "A panel on Master Data"]. Put the choices here rather
-      than spelling them out in the question; the question then just asks.
+      pick with one click — ["A new page of its own", "A panel on the screen
+      they named", "Both"]. Draw them from THIS application: a choice between
+      screens names its own screens and their routes. Put the choices here
+      rather than spelling them out in the question; the question then asks.
       [] when the question is open (a name, a URL, a value).
   "verb": WHICH KIND OF CHANGE this is. Exactly one of:
       "rename"        — change the wording of something that already exists.

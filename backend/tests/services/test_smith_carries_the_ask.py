@@ -183,3 +183,15 @@ def test_the_composition_hands_the_turns_words_to_the_composer(tmp_path):
     # And the page the composition created says what it is for, on one line.
     page = next(p for p in svc.doc["pages"] if p["route"] == "/calculator")
     assert page["purpose"] == "add a simple arithmetic calculator A new page at /calculator"
+
+
+def test_the_word_a_claim_is_checked_by_is_the_longest_one(tmp_path):
+    """No curated list of common words: one length rule, and an ask with no
+    long word goes unchecked rather than guessed at."""
+    from services.smith.compose import _distinctive
+
+    assert _distinctive("Father's Name (fathersName) input field") == "fathersname"
+    assert _distinctive("a recent activity feed") == "activity"
+    assert _distinctive("upcoming sessions and quorum status") == "upcoming"
+    assert _distinctive("add a row") == ""          # nothing distinctive to look for
+    assert _distinctive("") == ""

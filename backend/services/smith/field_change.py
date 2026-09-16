@@ -189,28 +189,58 @@ def rename_field(svc: Any, entity_ref: str, field_ref: str, new_name: str, *, ap
             "edited_paths": _project(svc, app_root)}
 
 
-#: The Form control a Blueprint field type gets when it is put on a screen.
-_KIND_BY_TYPE = {"string": "text", "text": "textarea", "email": "email", "integer": "number",
-                 "decimal": "number", "number": "number", "boolean": "checkbox", "date": "date",
-                 "timestamp": "date"}
 _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: Where a field lands on a screen, in the words the reply uses.
+FORM_FIELD = "form field"
+TABLE_COLUMN = "table column"
 
 
 def label_of(name: str, label: str = "") -> str:
     """The words a person sees for a field: theirs if they said them
-    ("Father's Name"), else the name spelled out ("experienceYears" ->
-    "Experience Years")."""
+    ("Father's Name"), else the name spelled out by the same helper the
+    templates use, so a field added in conversation is labelled exactly as
+    one the build wrote."""
+    from services.blueprint.template_page import _humanise
+    return str(label).strip() if str(label or "").strip() else _humanise(str(name or ""))
+
+
+def _control_for(field: dict, label: str = "") -> dict:
+    """The Form field a Blueprint field becomes, from the ONE place that
+    decides it.
+
+    A private map here read `string -> text, integer -> number` and stopped:
+    a list column (`string[]`) became a plain text box rather than the `tags`
+    control the contract requires — the raw-JSON-in-a-textbox defect, re-made
+    one module over — and an enum column lost its options. `template_page`
+    already answers this for every page the build writes, including the
+    `required` and `options` keys; a second answer is one that drifts.
+    """
+    from services.blueprint.template_page import _field_kind
+    spec = _field_kind(field)
+    # A NEW FIELD IS NEVER REQUIRED: the rows that already exist have no value
+    # for it, so the form must accept one without it.
+    spec["required"] = False
     if str(label or "").strip():
-        return str(label).strip()
-    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name or "")).replace("_", " ").split()
-    return " ".join(w[:1].upper() + w[1:] for w in words)
+        spec["label"] = str(label).strip()
+    return spec
+
+
+def _column_for(field: dict, label: str = "") -> dict:
+    """The Table column a Blueprint field becomes — same rule, same module,
+    so a date is formatted as a date rather than printed raw."""
+    from services.blueprint.template_page import _column
+    col = _column(field)
+    if str(label or "").strip():
+        col["label"] = str(label).strip()
+    return col
 
 
 def _names_of(ent: dict) -> set[str]:
     return {str(f.get("name") or "") for f in (ent.get("fields") or []) if isinstance(f, dict)}
 
 
-def _surface(svc: Any, ent: dict, name: str, label: str, kind: str, known: set[str],
+def _surface(svc: Any, ent: dict, field: dict, label: str, known: set[str],
              only_page: str | None = None) -> list[dict]:
     """Put field `name` on every live layout that edits or lists `ent`.
 
@@ -220,6 +250,7 @@ def _surface(svc: Any, ent: dict, name: str, label: str, kind: str, known: set[s
     page does not. `only_page` narrows it to one page id.
     """
     eid, ename = str(ent["id"]), str(ent.get("name") or "")
+    name = str(field.get("name") or "")
     surfaced: list[dict] = []
     pages = {str(p.get("id")): p for p in (svc.doc.get("pages") or []) if isinstance(p, dict)}
     for layout in _live(svc.doc.get("pageLayouts")):
@@ -236,14 +267,14 @@ def _surface(svc: Any, ent: dict, name: str, label: str, kind: str, known: set[s
             if node.get("type") == "Form" and isinstance(flds, list) and any(
                     isinstance(f, dict) and str(f.get("name") or "") in known for f in flds):
                 if not any(isinstance(f, dict) and str(f.get("name") or "") == name for f in flds):
-                    flds.append({"name": name, "kind": kind, "label": label, "required": False})
-                    surfaced.append({"page": pname, "route": route, "where": "form field"})
+                    flds.append(_control_for(field, label))
+                    surfaced.append({"page": pname, "route": route, "where": FORM_FIELD})
             cols = props.get("columns")
             if node.get("type") == "Table" and isinstance(cols, list) and any(
                     isinstance(c, dict) and str(c.get("key") or "") in known for c in cols):
                 if not any(isinstance(c, dict) and str(c.get("key") or "") == name for c in cols):
-                    cols.append({"key": name, "label": label})
-                    surfaced.append({"page": pname, "route": route, "where": "table column"})
+                    cols.append(_column_for(field, label))
+                    surfaced.append({"page": pname, "route": route, "where": TABLE_COLUMN})
     return surfaced
 
 
@@ -264,10 +295,10 @@ def _present(svc: Any, ent: dict, name: str, only_page: str | None = None) -> li
             props = node.get("props") or {}
             if node.get("type") == "Form" and any(isinstance(f, dict) and str(f.get("name") or "") == name
                                                   for f in (props.get("fields") or [])):
-                out.append({"page": pname, "route": route, "where": "form field"})
+                out.append({"page": pname, "route": route, "where": FORM_FIELD})
             if node.get("type") == "Table" and any(isinstance(c, dict) and str(c.get("key") or "") == name
                                                    for c in (props.get("columns") or [])):
-                out.append({"page": pname, "route": route, "where": "table column"})
+                out.append({"page": pname, "route": route, "where": TABLE_COLUMN})
     return out
 
 
@@ -284,8 +315,7 @@ def show_field(svc: Any, entity_ref: str, field_ref: str, *, page_id: str | None
     name = str(fld["name"])
     before = svc.snapshot()
     known = _names_of(ent) - _MANAGED
-    surfaced = _surface(svc, ent, name, label_of(name, label), _KIND_BY_TYPE.get(str(fld.get("type") or "").lower(), "text"),
-                        known, only_page=page_id)
+    surfaced = _surface(svc, ent, fld, label_of(name, label), known, only_page=page_id)
     if not surfaced:
         # ALREADY THERE. The Blueprint has the control; if the person cannot
         # see it, the running app is behind the Blueprint, so the screens
@@ -322,7 +352,9 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
         raise SectionChangeError(f"I cannot tell which entity {entity_ref!r} means. The entities are: {names(_entities(svc.doc))}.")
     name = str((field or {}).get("name") or "").strip()
     if not _FIELD_NAME.fullmatch(name):
-        raise SectionChangeError(f"{name!r} is not a field name: letters, digits and underscores, starting with a letter (\"fathersName\").")
+        raise SectionChangeError(
+            f"{name!r} is not a field name: letters, digits and underscores, "
+            "starting with a letter, in the app's own style.")
     clash = next((f for f in _names_of(ent) if f.lower() == name.lower()), None)
     if clash:
         raise SectionChangeError(f"{ent.get('name')} already has a field named {clash}, so I changed nothing.")
@@ -330,11 +362,11 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     eid, ename = str(ent["id"]), str(ent.get("name") or "")
     known = _names_of(ent) - _MANAGED
     before = svc.snapshot()
-    ent.setdefault("fields", []).append({"name": name, "type": ftype, "required": False})
+    declared = {"name": name, "type": ftype, "required": False}
+    ent.setdefault("fields", []).append(declared)
     label = label_of(name, str((field or {}).get("label") or ""))
-    kind = _KIND_BY_TYPE.get(ftype.lower(), "text")
 
-    surfaced = _surface(svc, ent, name, label, kind, known)
+    surfaced = _surface(svc, ent, declared, label, known)
     svc.validate()
     svc.commit(user_request=f"add {ename}.{name}",
                smith_interpretation=f"add the field and show it in {len(surfaced)} place(s)",

@@ -505,25 +505,21 @@ def prepare_capabilities(svc: Any, route: str, request: str, *, app_root: str | 
 VERBS = ("compose_route", "add_widgets")
 
 
-#: Words that name a KIND of thing rather than the thing: "input field" is
-#: on every form, so it says nothing about whether THIS field is there.
-_GENERIC = frozenset({"input", "field", "fields", "button", "buttons", "section", "sections",
-                      "widget", "widgets", "card", "cards", "list", "table", "form", "column",
-                      "columns", "the", "and", "for", "with", "show", "display", "add", "page",
-                      "screen", "new", "item", "items", "control"})
+#: Below this a word is too common to say anything about whether a particular
+#: thing was composed — "add", "row", "the". A curated list of such words is
+#: the exception list this codebase has been burned by; a length is one rule
+#: with nothing to maintain, and being wrong about it leaves a claim
+#: unchecked rather than contradicting a true one.
+MIN_DISTINCTIVE = 5
 
 
-def _tokens(widget: str) -> list[str]:
-    """The distinctive words of a widget ask, longest first — an identifier
-    kept whole ("fathersname") and split ("fathers", "name")."""
-    out: set[str] = set()
-    for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or ""):
-        if len(w) >= 4 and w.lower() not in _GENERIC:
-            out.add(w.lower())
-        for part in re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", w).lower().split():
-            if len(part) >= 3 and part not in _GENERIC:
-                out.add(part)
-    return sorted(out, key=len, reverse=True)
+def _distinctive(widget: str) -> str:
+    """The longest word of a widget ask, lowercased, or "" when it has none
+    worth looking for. An identifier survives whole ("fathersname"), which is
+    what makes it the most specific thing the ask contains."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", widget or "")]
+    longest = max(words, key=len, default="")
+    return longest if len(longest) >= MIN_DISTINCTIVE else ""
 
 
 def unshown(svc: Any, route: str, wanted: Sequence[str]) -> list[str]:
@@ -531,9 +527,9 @@ def unshown(svc: Any, route: str, wanted: Sequence[str]) -> list[str]:
 
     The composer is TOLD what to add and is free to lay the page out without
     it — it did exactly that with a "Father's Name (fathersName) input field",
-    and the reply said "added". A widget counts as shown when its most
-    specific word (the identifier, or the longest content word) appears
-    anywhere in the layout — a label, a binding, a column key.
+    and the reply said "added". A widget counts as shown when its longest
+    word appears anywhere in the layout — a label, a binding, a column key.
+    An ask with no long word is left unchecked rather than guessed at.
     """
     page = _page_for_route(svc.doc, route)
     if page is None:
@@ -546,8 +542,8 @@ def unshown(svc: Any, route: str, wanted: Sequence[str]) -> list[str]:
     hay = json.dumps(layouts[-1].get("root") or {}).lower()
     missing = []
     for w in wanted:
-        toks = _tokens(str(w))
-        if toks and toks[0] not in hay:
+        word = _distinctive(str(w))
+        if word and word not in hay:
             missing.append(str(w))
     return missing
 

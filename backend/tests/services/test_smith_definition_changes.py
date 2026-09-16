@@ -127,6 +127,37 @@ def test_the_tool_entry_adds_a_field_the_same_way(svc):
     assert not fc.run(str(svc.output_dir), "add_field", entity="Nurse", field={"name": "phone"})["applied"]
 
 
+def test_a_surfaced_field_gets_the_control_its_type_earns(svc):
+    """The control and the column come from the one place that decides them
+    for every page the build writes. A private map here read `string -> text`
+    and stopped: a list column became a plain text box, which is the
+    raw-JSON-in-a-textbox defect re-made one module over."""
+    ent = svc.doc["data"]["entities"][0]
+    ent["fields"] += [{"name": "specialities", "type": "string[]"},
+                      {"name": "gender", "type": "string", "enumValues": ["Male", "Female"]},
+                      {"name": "startedOn", "type": "date"}]
+    svc.save()
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    for name in ("specialities", "gender", "startedOn"):
+        fc.show_field(fresh, "Nurse", name)
+    layout = next(l for l in BlueprintService.load(output_dir=str(svc.output_dir)).doc["pageLayouts"]
+                  if l["page"] == svc._t.lst["id"] and l.get("status") != "SUPERSEDED")
+    fields = {f["name"]: f for f in layout["root"]["children"][2]["props"]["fields"]}
+    assert fields["specialities"]["kind"] == "tags"          # never text: it holds several values
+    assert fields["gender"]["kind"] == "select"
+    assert fields["gender"]["options"] == [{"label": "Male", "value": "Male"},
+                                           {"label": "Female", "value": "Female"}]
+    assert fields["startedOn"]["kind"] == "date"
+    assert all(fields[n]["required"] is False for n in ("specialities", "gender", "startedOn"))
+    columns = {c["key"]: c for c in layout["root"]["children"][1]["props"]["columns"]}
+    assert columns["startedOn"]["format"] == "date"          # formatted, not printed raw
+    # The label is the person's words when they gave any, the name spelled
+    # out by the same helper the templates use when they did not.
+    assert columns["specialities"]["label"] == "Specialities"
+    assert fc.label_of("experienceYears") == "Experience Years"
+    assert fc.label_of("experienceYears", "Years on the ward") == "Years on the ward"
+
+
 def test_a_field_with_no_screen_to_show_it_says_so(svc):
     out = fc.add_field(svc, "Ward", {"name": "capacity", "type": "integer"})
     assert out["surfaced"] == []

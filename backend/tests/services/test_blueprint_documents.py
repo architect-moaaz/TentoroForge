@@ -67,3 +67,12 @@ def test_the_engine_adapter_hands_smith_the_requirements_with_evidence():
 def test_no_designation_is_no_design_reference():
     from routers.blueprint_generate import _has_design_references
     assert _has_design_references("00000000-0000-0000-0000-000000000000") is False
+
+
+def test_the_nodes_that_read_documents_are_real_nodes():
+    """A node renamed in the DAG would silently stop being shown the
+    documents — the list here would just never match again."""
+    from services.blueprint.documents import READS_DOCUMENTS
+    from services.blueprint.orchestrator import DAG
+
+    assert READS_DOCUMENTS <= set(DAG), sorted(READS_DOCUMENTS - set(DAG))
