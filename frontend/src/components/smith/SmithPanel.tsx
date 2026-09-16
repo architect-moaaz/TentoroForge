@@ -402,12 +402,15 @@ export function SmithPanel({
     return () => document.removeEventListener("visibilitychange", restore);
   }, []);
 
+  // Follows the thinking as well as the messages: the reasoning block grows
+  // at the bottom of the transcript while a turn runs, and a block the
+  // transcript does not scroll to is a block nobody sees.
   useEffect(() => {
     transcriptRef.current?.scrollTo({
       top: transcriptRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages.length, run.nodesDone]);
+  }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
 
@@ -1383,15 +1386,16 @@ function StageList({
  * SECONDARY BY CONSTRUCTION. Small, muted, and gone the moment Smith speaks —
  * the answer says it better than the reasoning that reached it. §111 asks that
  * BUILD PROGRESS show observable status rather than model reasoning, and the
- * stage list still does exactly that; this is the conversation.
+ * stage list still does exactly that; this is the conversation, where the
+ * reasoning is shown while it happens, labelled as thinking, never as a reply.
  */
 export function ThinkingTrail({
   thoughts,
-  nodes,
+  nodes = [],
   busy,
 }: {
   thoughts: RunThought[];
-  nodes: RunNode[];
+  nodes?: RunNode[];
   busy: boolean;
 }) {
   // A live elapsed clock, so a turn that runs for minutes reads as working
@@ -1413,15 +1417,32 @@ export function ThinkingTrail({
     return () => clearInterval(id);
   }, [busy]);
 
-  // §111 — "Do not expose hidden model reasoning." The raw first-person
-  // chain-of-thought ("Let me analyze this: 1. This is a change request…") was
-  // being painted straight into the chat and read as Smith's answer before the
-  // real one arrived (DEFECT-THINKING-LEAK, seen on K-01 `deploy` and L-05).
-  // Deterministic `step` events ARE observable status — the compose stages,
-  // labelled from the same table the build stage list uses — so those stay;
-  // the model's reasoning does not.
+  // Deterministic `step` events are observable status — the compose stages,
+  // labelled from the same table the build stage list uses.
   const steps = thoughts.filter((t) => t.kind === "step");
   const last = thoughts[thoughts.length - 1];
+
+  // THE THINKING, SHOWN AS THINKING. The model's reasoning streams in as
+  // fragments; joined, it is what Smith is weighing right now. It was hidden
+  // after DEFECT-THINKING-LEAK, when a raw "Let me analyze this: 1. This is a
+  // change request…" was painted into the chat AS IF IT WERE THE ANSWER. The
+  // defect was the framing, not the content: rendered under its own
+  // "Thinking" heading, muted and italic, scrolling, and gone the moment the
+  // answer lands, it reads as what it is — the work in progress — and tells
+  // the person what a twenty-second silence is about.
+  // Each fragment is a whole thought — the server's ReasoningSink flushes at
+  // sentence boundaries and trims what it flushes — so they go on their own
+  // lines; joined flush, "…any visit." ran straight into "- REQ-004".
+  const reasoning = thoughts
+    .filter((t) => t.kind === "reasoning")
+    .map((t) => t.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  const reasoningRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = reasoningRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [reasoning]);
 
   // Nothing happening and nothing to leave behind — render nothing.
   if (!busy && !steps.length) return null;
@@ -1469,6 +1490,16 @@ export function ThinkingTrail({
           {t.node ? labelFor(t.node) : t.text}
         </p>
       ))}
+      {busy && reasoning.trim() && (
+        <div
+          ref={reasoningRef}
+          data-testid="smith-thinking"
+          aria-label="Smith's thinking"
+          className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/60 px-2.5 py-1.5 text-xs italic leading-relaxed text-muted-foreground"
+        >
+          {reasoning}
+        </div>
+      )}
     </div>
   );
 }
