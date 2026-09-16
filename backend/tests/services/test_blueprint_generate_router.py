@@ -385,3 +385,51 @@ def test_the_chat_request_carries_the_supplied_documents_into_the_brief():
     assert brief.startswith("a clinic visit tracker") and "SUPPLIED DOCUMENTS" in brief
     assert "--- document 1 ---\n1. Reception registers a patient." in brief
     assert _brief_with_documents("x", []) == "x" and _brief_with_documents("x", ["  "]) == "x"
+
+
+def test_a_credential_is_taken_out_before_the_turn_is_written_down():
+    """§42: chat history is the first place a raw credential must not rest.
+    The extracted FIELD was already dropped, so a token never reached the
+    Blueprint — but the message was stored exactly as typed, which put it on
+    disk and handed it back to every later turn."""
+    from services.smith.secrets_scrub import MASK, carries_secret, scrub
+
+    assert scrub("use figd_abcdefghij1234567890 please").startswith("use " + MASK)
+    assert MASK in scrub("my key is SG.abcdefghij.klmnopqrstuv")
+    assert scrub("password: hunter2000") == "password: " + MASK
+    assert MASK in scrub("Authorization: Bearer sk-ant-abcdefghijklmnop1234")
+    # A NAME IS NOT A SECRET — it is the thing Smith asks for.
+    for kept in ("set SENDGRID_API_KEY in the environment",
+                 "the API_KEY = SENDGRID_API_KEY variable",
+                 "add a phone number to nurses",
+                 "call the app Nurse Roster"):
+        assert scrub(kept) == kept and not carries_secret(kept)
+    assert scrub("") == "" and scrub(None) == ""
+    # Idempotent: scrubbing what is already scrubbed changes nothing.
+    once = scrub("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijkl")
+    assert scrub(once) == once
+
+
+def test_the_lifecycle_words_are_answered_where_they_are_typed(tmp_path):
+    """`preview`, `export` and `deploy` were declared lifecycle verbs with no
+    branch, so the architect took them as changes: "preview" came back
+    refusing a build on a stale approval and "export" asked what kind."""
+    from routers.blueprint_generate import (_deploy_refusal, _export_report,
+                                            _lifecycle_verb, _preview_report)
+
+    doc = {"pages": [{"route": "/master-data", "id": "PAGE-001"},
+                     {"route": "/gone", "id": "PAGE-002", "status": "DEPRECATED"}]}
+    assert "Nothing to look at yet" in _preview_report(doc, tmp_path)
+    assert "nothing to export yet" in _export_report(tmp_path)
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    built = _preview_report(doc, tmp_path)
+    assert "`/master-data`" in built and "/gone" not in built
+    assert "Export" in _export_report(tmp_path)
+    # Publishing is never done from a typed sentence.
+    said = _deploy_refusal()
+    assert "not something I do from a typed sentence" in said and "export" in said
+    # Only an exact one-word command is the verb.
+    assert _lifecycle_verb("preview") == "preview"
+    assert _lifecycle_verb("preview the nurses page") is None

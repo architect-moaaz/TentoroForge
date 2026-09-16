@@ -296,7 +296,12 @@ def test_an_integration_is_declared_with_secret_names_only(svc):
     out = dc.add_integration(svc, "send email through SendGrid", executor=agent)
     fresh = BlueprintService.load(output_dir=str(svc.output_dir))
     assert fresh.doc["integrations"][0]["secretRefs"] == ["SENDGRID_API_KEY"] and out["secrets"] == ["SENDGRID_API_KEY"]
-    assert "names only" in dc.summary_of("add_integration", out)
+    said = dc.summary_of("add_integration", out)
+    assert "Names only" in said and "SENDGRID_API_KEY" in said
+    # DECLARED IS NOT CONNECTED. The reply stopped at "Declared the
+    # integration", which reads as "connected" to someone who asked for email
+    # to be sent; this seam writes no code and touches no file.
+    assert "not a connection" in said and out["edited_paths"] == []
     dc.remove_integration(svc, "sendgrid")
     assert BlueprintService.load(output_dir=str(svc.output_dir)).doc["integrations"][0]["status"] == "DEPRECATED"
 

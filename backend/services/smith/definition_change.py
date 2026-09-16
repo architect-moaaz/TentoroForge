@@ -369,9 +369,19 @@ def summary_of(verb: str, out: dict) -> str:
     if verb == "remove_api":
         return f"Retired {out['method']} {out['path']} ({out['api']})."
     if verb == "add_integration":
-        return (f"Declared the integration {out['name']} ({out['integration']}, {out['kind']} via {out['provider'] or 'unspecified provider'}), "
-                f"recorded as {out['requirement']}."
-                + (f" It needs these secrets set in the environment: {', '.join(out['secrets'])} — names only, the values never live in the Blueprint." if out.get("secrets") else ""))
+        # WRITTEN DOWN, NOT WIRED UP. This declares the integration and the
+        # names of the secrets it would need; it changes no code, and the
+        # application does not talk to the service until somebody builds that.
+        # The reply used to stop at "Declared", which reads as "connected" to
+        # anyone who asked for email to be sent.
+        return (f"Recorded **{out['name']}** in the definition ({out['integration']}, "
+                f"{out['kind']} via {out['provider'] or 'unspecified provider'}), "
+                f"as {out['requirement']}."
+                + (f"\n\nIt names these secrets, which have to be set in the environment: "
+                   f"{', '.join('`%s`' % x for x in out['secrets'])}. Names only — no value ever "
+                   "goes in the Blueprint." if out.get("secrets") else "")
+                + "\n\nThis is a declaration, not a connection: nothing is sent or received "
+                  "until a developer wires it up against those secrets.")
     return f"Retired the integration {out['name']} ({out['integration']})."
 
 

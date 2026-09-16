@@ -121,6 +121,50 @@ def _status_report(doc: dict) -> str:
     ])
 
 
+def _preview_report(doc: dict, output_dir) -> str:
+    """Where to look at the application, or why there is nothing to look at.
+
+    `preview`, `export` and `deploy` were in `_LIFECYCLE_VERBS` and only
+    `status` had a branch, so they fell through to the architect: typing
+    "preview" came back refusing a build on a stale approval, and "export"
+    came back asking what kind of export. Deterministic, like the status
+    report — these are commands, and none of them needs a model.
+    """
+    if not _is_built(output_dir):
+        return ("Nothing to look at yet — this application has not been built.\n\n"
+                "Open the **Definition ready to review** card above and press "
+                "**Approve and build**. The screens appear in the panel on the "
+                "left as they land.")
+    routes = [str(p.get("route")) for p in (doc or {}).get("pages") or []
+              if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("route")]
+    lines = ["It is built. Pick a page in the Blueprint panel on the left and it "
+             "opens in the preview beside this conversation."]
+    if routes:
+        lines.append("")
+        lines += [f"- `{r}`" for r in sorted(set(routes))[:12]]
+    return "\n".join(lines)
+
+
+def _export_report(output_dir) -> str:
+    """How to take the source away. Chat cannot hand over a file."""
+    if not _is_built(output_dir):
+        return ("There is nothing to export yet — this application has not been "
+                "built, so there is no source to take away.")
+    return ("I cannot hand you a file from this box. **Export** in the project "
+            "menu gives you the whole source as a zip, with a Dockerfile and a "
+            "compose file if you want them, or pushes it to a git repository.")
+
+
+def _deploy_refusal() -> str:
+    """Publishing, refused in the one place a person asks for it."""
+    return ("Publishing is not something I do from a typed sentence. It puts the "
+            "application on the internet under your account and needs "
+            "credentials and a deliberate go-ahead, so it is done from the "
+            "project's own deploy action by someone who can sign in to it.\n\n"
+            "What I can do from here is change the application itself, or hand "
+            "you the source to deploy wherever you like — say `export`.")
+
+
 def _is_built(output_dir) -> bool:
     """Whether the application has actually been GENERATED, not just defined.
 
@@ -410,80 +454,6 @@ def _requirement_report(doc: dict, req_id: str) -> str:
     except Exception:  # noqa: BLE001 — a trace degrades to the text + id, never 500s
         pass
     return "\n".join(lines)
-
-
-# The only external systems this platform integrates with are the two design
-# SOURCES. Everything else — an ATS, a CRM, a payments or messaging provider —
-# is not something Smith can wire up, and saying so plainly beats asking which
-# sync direction the user wants for a thing that will never be built.
-_SUPPORTED_INTEGRATIONS = ("figma", "ux pilot", "uxpilot")
-#: Phrasings that mean "wire this app to an external system".
-_INTEGRATION_PHRASES = (
-    "integrate with", "integration with", "integrate it with", "integrate into",
-    "connect to", "connect it to", "connect with", "connect this to",
-    "sync with", "sync to", "sync it with", "hook up to", "hook it up to",
-    "pull from", "webhook to", "api integration with",
-)
-#: If the target names a part of THIS app, the phrase is internal wiring ("connect
-#: the form to the dashboard"), not an external integration — leave it to the mover.
-_INTERNAL_TARGET_NOUNS = (
-    "page", "screen", "route", "dashboard", "table", "list", "form", "view",
-    "workflow", "tab", "panel", "section", "field", "button", "modal", "sidebar",
-    "nav", "menu", "record", "entity", "database", "db", "endpoint", "api route",
-)
-
-
-def _unsupported_integration(message: str) -> str | None:
-    """The external system a message asks to integrate with, when that system
-    is NOT one Smith supports — or None.
-
-    DEFECT-F-07: 'Integrate with Greenhouse' was met with 'which sync direction
-    — import / push / two-way?', implying a capability the platform does not
-    have. Only Figma and UX Pilot (design sources) are wired; an ATS/CRM/payment
-    integration is not, and the honest answer is to say so and offer what can be
-    done (record it as a requirement, or rebuild), not to interview the user
-    about a build that will never happen.
-
-    Conservative: fires only on an explicit integration phrase, and never for
-    the two design sources (they have their own connect flow).
-    """
-    if not message:
-        return None
-    low = message.lower()
-    for phrase in _INTEGRATION_PHRASES:
-        idx = low.find(phrase)
-        if idx == -1:
-            continue
-        tail = message[idx + len(phrase):].strip()
-        tail_low = tail.lower()
-        if not tail:
-            continue
-        if any(s in tail_low for s in _SUPPORTED_INTEGRATIONS):
-            return None  # Figma / UX Pilot — the supported design-source flow
-        # The named system, trimmed to its first clause / few words for the reply.
-        name = re.split(r"[.,;:\n]", tail, maxsplit=1)[0].strip()
-        name = " ".join(name.split()[:5])
-        if not name:
-            continue
-        # "connect the form to the dashboard" is internal wiring, not an
-        # external integration — don't refuse it as one.
-        if any(re.search(rf"\b{re.escape(n)}\b", name.lower())
-               for n in _INTERNAL_TARGET_NOUNS):
-            return None
-        return name
-    return None
-
-
-def _unsupported_integration_reply(name: str) -> str:
-    return (
-        f"I can't connect an app to {name} — external integrations like that "
-        "aren't something I can build yet. The only outside sources I wire up "
-        "are Figma and UX Pilot, and those are design references, not data "
-        "connections.\n\nWhat I can do: record it as a requirement so it's "
-        "captured in the definition (and whoever builds the integration later "
-        "has it written down), or make changes to the app I did build. Want me "
-        "to note it as a requirement?"
-    )
 
 
 #: Action verbs whose presence means the app actually DOES something. A brief
@@ -1274,6 +1244,14 @@ def _remember(loop: Any, project_id: Any, role: str, content: str,
     if not (content or "").strip():
         return
 
+    # §42: chat history is the first place a raw credential must not come to
+    # rest. `understand_ask` already drops one out of the field the model
+    # returns, so it never reaches the Blueprint or a reply — but the message
+    # itself was stored exactly as typed, which put a pasted token on disk and
+    # handed it back to every later turn through the history endpoint.
+    from services.smith.secrets_scrub import scrub as _scrub
+    content = _scrub(content)
+
     async def _write() -> None:
         try:
             if lock is not None:
@@ -1467,6 +1445,19 @@ async def smith_chat(
                 emit("message", {"text": _status_report(svc.doc if svc else {}),
                                  "status": "reported"})
                 return {"status": "reported"}
+            # THE OTHER LIFECYCLE WORDS, ANSWERED WHERE THEY ARE TYPED. They
+            # were declared in `_LIFECYCLE_VERBS` and handled nowhere, so the
+            # architect took them as changes to reason about.
+            if verb == "preview":
+                emit("message", {"text": _preview_report(svc.doc if svc else {}, output_dir),
+                                 "status": "reported"})
+                return {"status": "reported"}
+            if verb == "export":
+                emit("message", {"text": _export_report(output_dir), "status": "reported"})
+                return {"status": "reported"}
+            if verb == "deploy":
+                emit("message", {"text": _deploy_refusal(), "status": "needs_user"})
+                return {"status": "needs_user"}
 
             # DEFECT-I-05: 'Trace REQ-001' is a question with a determinate
             # answer — the requirement's text, verdict and the ids that cite it,
@@ -1491,17 +1482,14 @@ async def smith_chat(
                     emit("message", {"text": cited, "status": "reported"})
                     return {"status": "reported"}
 
-            # DEFECT-F-07: an external integration Smith cannot build (an ATS, a
-            # CRM, a payments provider) is refused honestly here — before the
-            # model can engage as if it were a normal change and ask which sync
-            # direction the user wants for something that will never be built.
-            # Not gated on `approved`: an integration ask is never an approval.
-            if not req.approved:
-                unsupported = _unsupported_integration(req.message)
-                if unsupported:
-                    emit("message", {"text": _unsupported_integration_reply(unsupported),
-                                     "status": "asked"})
-                    return {"status": "asked"}
+            # DEFECT-F-07 was an integration ask met with an interview about
+            # sync direction for a capability that does not exist. The answer
+            # then was a phrase list that refused anything naming an outside
+            # system. `add_integration` is the answer now: it DECLARES the
+            # integration with the names of the secrets it would need and says
+            # plainly that nothing is wired — one honest outcome for every
+            # phrasing, where the list gave "send email through SendGrid" a
+            # declaration and "connect it to our payroll system" a refusal.
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
