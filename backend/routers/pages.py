@@ -186,6 +186,16 @@ async def editor_remove_page(
             status_code=400,
             detail=result.get("reason") or f"could not remove page {route!r}",
         )
+    # THE BLUEPRINT IS THE SOURCE OF TRUTH. The files are gone; unless the page
+    # is retired in the Blueprint too, the next build projects it straight
+    # back. `DEPRECATED` is what every projection and fan-out already skips.
+    from services.remove_page_seam import retire_blueprint_pages
+    try:
+        retired = retire_blueprint_pages(project.output_dir, route, cascade=cascade)
+    except Exception:  # noqa: BLE001 — the files are removed; say what the Blueprint did not do
+        logging.getLogger(__name__).warning(
+            "remove-page: Blueprint retire failed for %s", project_id, exc_info=True)
+        retired = []
     committed = False
     try:
         from services.git_service import git_commit, git_init
@@ -200,6 +210,7 @@ async def editor_remove_page(
         "removed": route,
         "cascade": cascade,
         "changes": result.get("changes") or [],
+        "blueprint": retired,          # page ids retired, so a rebuild cannot resurrect them
         "committed": committed,
     }
 

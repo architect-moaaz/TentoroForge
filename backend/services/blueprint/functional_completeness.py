@@ -87,8 +87,10 @@ def _planner_placeholders() -> set[str]:
 
 
 def _live(items: Any) -> list[dict]:
+    # SUPERSEDED (replaced by a later version) and DEPRECATED (retired — a page
+    # removed in the editor) are both gone: nothing about them is a defect.
     return [i for i in (items or [])
-            if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
+            if isinstance(i, dict) and i.get("status") not in ("SUPERSEDED", "DEPRECATED")]
 
 
 def _action_props() -> set[str]:
