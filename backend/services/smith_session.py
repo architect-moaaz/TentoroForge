@@ -882,9 +882,10 @@ class SmithSession:
             from services.smith import confirm as _confirm
             if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
                 _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))
-                _plan.remember(self.output_dir, steps)
+                planned, over = _plan.split(steps)
+                _plan.remember(self.output_dir, planned)
                 return TurnResult(status="asked",
-                                  answer=_plan.as_question(steps),
+                                  answer=_plan.as_question(planned, over),
                                   options=[_plan.ALL_LABEL, _plan.FIRST_LABEL,
                                            _plan.REWORD_LABEL])
 

@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 PENDING_PATH = Path(".forge") / "pending-plan.json"
 
-#: More than this in one message is a conversation, not a request; the plan
-#: would be longer than the screen and agreeing to it would be agreeing to
-#: something nobody read.
+#: How many steps one yes can cover. More than this on screen is a list nobody
+#: reads before agreeing to it — but the ones past it are SAID rather than
+#: dropped: silently keeping six of nine is the same silence this module
+#: exists to end, at a different number.
 MAX_STEPS = 6
 
 #: What the chips say when the plan is offered.
@@ -45,9 +46,16 @@ def _path(output_dir: str | Path) -> Path:
     return Path(output_dir) / PENDING_PATH
 
 
+def split(steps: list[str]) -> tuple[list[str], list[str]]:
+    """The steps one yes can cover, and the ones past that — which are named
+    in the question rather than dropped out of it."""
+    tidy = [" ".join(str(s).split()) for s in (steps or []) if str(s or "").strip()]
+    return tidy[:MAX_STEPS], tidy[MAX_STEPS:]
+
+
 def remember(output_dir: str | Path, steps: list[str]) -> None:
     """Keep the steps still to do, in order."""
-    kept = [" ".join(str(s).split()) for s in (steps or []) if str(s or "").strip()][:MAX_STEPS]
+    kept, _over = split(steps)
     if not kept:
         clear(output_dir)
         return
@@ -94,10 +102,17 @@ def wants_next(message: str) -> bool:
     return m in _NEXT
 
 
-def as_question(steps: list[str]) -> str:
-    """The plan, numbered, with the question under it."""
+def as_question(steps: list[str], overflow: list[str] | None = None) -> str:
+    """The plan, numbered, with the question under it — and anything that did
+    not fit, said out loud."""
+    planned, over = (steps, list(overflow or [])) if overflow is not None else split(steps)
     lines = ["That is more than one change. Here is what I would do, in order:"]
-    lines += [f"{i}. {s}" for i, s in enumerate(steps, start=1)]
+    lines += [f"{i}. {s}" for i, s in enumerate(planned, start=1)]
+    if over:
+        lines += ["",
+                  f"You asked for {len(over)} more than I can plan in one go — "
+                  "tell me these again once the list above is done:"]
+        lines += [f"- {s}" for s in over]
     lines += ["", "Shall I work through them?"]
     return "\n".join(lines)
 
@@ -113,5 +128,5 @@ def remaining_note(steps: list[str]) -> str:
 
 
 __all__ = ["ALL_LABEL", "FIRST_LABEL", "REWORD_LABEL", "MAX_STEPS", "PENDING_PATH",
-           "as_question", "clear", "peek", "remaining_note", "remember",
+           "as_question", "clear", "peek", "remaining_note", "remember", "split",
            "take_next", "wants_next"]

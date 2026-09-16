@@ -1,8 +1,9 @@
-"""Three asks in one message become a plan, not one change and two silences.
+"""More than one ask in a message becomes a plan, whatever the number.
 
-"Add a phone number, show it on the form, and make it required" is three
-changes. `understand_ask` returns one verb, so the other two were dropped: the
-biggest one happened and the person found out later that the rest had not.
+`understand_ask` returns ONE verb, so everything else in the message was
+dropped: the biggest ask happened and the person found out later that the rest
+had not. Two asks or six, the shape is the same — the number three is only
+what the example happens to have.
 """
 
 from __future__ import annotations
@@ -96,9 +97,31 @@ def test_one_ask_is_not_turned_into_a_plan(project):
     assert plan.peek(project.output_dir) == []
 
 
-def test_a_plan_longer_than_the_screen_is_cut(project):
-    plan.remember(project.output_dir, [f"step {i}" for i in range(20)])
-    assert len(plan.peek(project.output_dir)) == plan.MAX_STEPS
+def test_two_asks_are_a_plan_as_much_as_three(project):
+    """Nothing about this is about the number three."""
+    done: list[str] = []
+    result = _session(project, done, ["make the phone number required"]).run_iteration(
+        user_message=STEPS[0])
+    assert result.status == "asked" and done == []
+    assert "1. " + STEPS[0] in result.answer
+    assert "2. make the phone number required" in result.answer
+    assert plan.peek(project.output_dir) == [STEPS[0], "make the phone number required"]
+
+
+def test_what_does_not_fit_in_one_yes_is_said_rather_than_dropped(project):
+    """Silently keeping six of nine is the same silence this exists to end,
+    at a different number."""
+    many = [f"ask number {i}" for i in range(1, 10)]
+    planned, over = plan.split(many)
+    assert len(planned) == plan.MAX_STEPS and len(over) == 3
+    said = plan.as_question(planned, over)
+    assert f"{plan.MAX_STEPS}. ask number {plan.MAX_STEPS}" in said
+    assert "You asked for 3 more than I can plan in one go" in said
+    for late in over:
+        assert late in said
+    # And the ones that fit are what is kept to work through.
+    plan.remember(project.output_dir, planned)
+    assert plan.peek(project.output_dir) == planned
     plan.remember(project.output_dir, ["  ", ""])
     assert plan.peek(project.output_dir) == []
 
