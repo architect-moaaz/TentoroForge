@@ -447,6 +447,19 @@ def understand_ask(
             "I did not follow that. Which screen should I change, and "
             "what on it?"))
 
+    # ONE FACT UNDER TWO NAMES. `route` and `target_file` both mean "which
+    # screen": the composing verbs read one and the editing verbs read the
+    # other, and the model fills whichever the example it matched used. Asked
+    # to "delete the Master Data page" it answered `remove_page` with
+    # `target_file: /master-data` and `route: ""` — so the turn asked which
+    # screen, about a screen the understanding had already named.
+    _route = str(data.get("route") or "").strip()
+    _target = str(data.get("target_file") or "").strip()
+    if not _route and _is_route(_target):
+        _route = _target
+    if not _target and _route:
+        _target = _route
+
     # Normalised so `run_iteration`'s `.strip()` checks see strings, not None.
     return {
         # A QUESTION IS NOT AN UNDERSPECIFIED CHANGE. The contract already knew
@@ -469,7 +482,7 @@ def understand_ask(
         # Empty is still `rename` downstream (`verbs.verb_of`), which is what
         # every caller predating this field already did.
         "verb": str(data.get("verb") or "").strip().lower(),
-        "route": str(data.get("route") or "").strip(),
+        "route": _route,
         "widgets": [str(w).strip() for w in (data.get("widgets") or [])
                     if str(w).strip()],
         "figma_url": str(data.get("figma_url") or "").strip(),
@@ -483,7 +496,7 @@ def understand_ask(
         # A NAME, never an `ep_` key — the same guard `token_env` has.
         "key_env": _env_name_only(data.get("key_env")),
         "treat_as": _design_scope(data.get("treat_as")),
-        "target_file": str(data.get("target_file") or "").strip(),
+        "target_file": _target,
         "element_label": str(data.get("element_label") or "").strip(),
         # restyle: the change to the look, in the user's words.
         "change": str(data.get("change") or "").strip(),
@@ -541,6 +554,17 @@ def _blank(**given: Any) -> dict[str, Any]:
                 "further_asks": []})
     out.update(given)
     return out
+
+
+def _is_route(text: str) -> bool:
+    """Whether a `target_file` is a ROUTE rather than a path to a file.
+
+    Understanding returns either, depending on what the Blueprint slice showed
+    it; only the route half is the same fact as `route`.
+    """
+    text = (text or "").strip()
+    return bool(text) and text.startswith("/") and not text.endswith(".json") \
+        and "src/" not in text
 
 
 def _labels(raw: Any) -> list[str]:

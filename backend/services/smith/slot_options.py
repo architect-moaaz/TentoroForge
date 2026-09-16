@@ -105,6 +105,36 @@ def options_for(slot: str, doc: dict, understanding: dict | None = None) -> list
     return []                              # open question: a value, not a choice
 
 
+def fill_from(gaps: list[str], message: str, doc: dict,
+              understanding: dict | None = None) -> dict:
+    """The gaps whose answer is already in what they said.
+
+    "Delete the Master Data page" names the screen; asking which screen is
+    asking a person to repeat themselves. Only an UNAMBIGUOUS match counts —
+    exactly one of the known answers appears in the message — because two
+    matches is a real question and picking one is a guess.
+    """
+    from services.smith.labels import normalise
+
+    said = normalise(message)
+    if not said:
+        return {}
+    found: dict[str, str] = {}
+    for gap in gaps:
+        hits = [o for o in options_for(gap, doc, understanding)
+                if normalise(o) and normalise(o) in said]
+        # A route is also named by its page's title ("the Master Data page"),
+        # which is not the option text — so the pages are matched by name too.
+        if not hits and gap in ("route", "target_file", "screen"):
+            for page in _live(doc.get("pages")):
+                name = normalise(str(page.get("name") or ""))
+                if name and name in said and page.get("route"):
+                    hits.append(str(page["route"]))
+        if len(set(hits)) == 1:
+            found[gap] = hits[0]
+    return found
+
+
 def ask_for(gaps: list[str], doc: dict, understanding: dict | None = None) -> tuple[str, list[str]]:
     """The question to ask for the first missing fact, and its choices.
 

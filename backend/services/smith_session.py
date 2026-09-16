@@ -935,10 +935,19 @@ class SmithSession:
                 # Smith's spelling of a value the document already holds. Asked
                 # with its own answers attached, the question is a click.
                 from services.smith.engine_blueprint_adapter import load_engine_doc
-                from services.smith.slot_options import ask_for
+                from services.smith.slot_options import ask_for, fill_from
                 doc = load_engine_doc(str(self.output_dir)) or {}
-                question, choices = ask_for(gaps, doc, understanding)
-                return TurnResult(status="asked", answer=question, options=choices)
+                # ASKED FOR ONLY WHAT WAS NOT SAID. The answer is often in the
+                # message already — "delete the Master Data page" names the
+                # screen — and asking for it is asking a person to repeat
+                # themselves.
+                known = fill_from(gaps, self._ask, doc, understanding)
+                if known:
+                    understanding = {**understanding, **known}
+                    gaps = missing_fields(understanding)
+                if gaps:
+                    question, choices = ask_for(gaps, doc, understanding)
+                    return TurnResult(status="asked", answer=question, options=choices)
 
         if verb == "restyle":
             return self._restyle(understanding, self._ask)

@@ -70,14 +70,18 @@ def test_missing_keys_normalise_to_strings():
     from services.smith.understand_ask import SHAPE
     out = understand_ask("x", CTX, provider=_says('{"target_file":"/plants"}'))
     assert set(out) == SHAPE
-    assert out["target_file"] == "/plants"
+    # ONE FACT, TWO NAMES: a route given as `target_file` is the same screen,
+    # and leaving `route` empty made the turn ask which screen about a screen
+    # it had already been told.
+    assert out["target_file"] == "/plants" and out["route"] == "/plants"
     # `run_iteration` dispatches on the verb and reads route and widgets off
     # the same dict. An absent verb still means rename.
-    assert out["verb"] == "" and out["route"] == "" and out["widgets"] == []
+    assert out["verb"] == "" and out["widgets"] == []
     assert out["clarification_options"] == [] and out["field"] == {}
     assert out["further_asks"] == []
     assert all(out[k] == "" for k in SHAPE - {"widgets", "field", "target_file",
-                                              "clarification_options", "further_asks"})
+                                              "route", "clarification_options",
+                                              "further_asks"})
 
 
 def test_a_replacement_carries_the_value_to_write():

@@ -98,6 +98,19 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                 "purpose": e.get("purpose") or "",
                 "key_fields": [f.get("name") for f in (e.get("fields") or [])
                                if isinstance(f, dict) and f.get("name")],
+                # THE FIELDS THEMSELVES, NOT ONLY THEIR NAMES. Asked to add
+                # format validation on a telephone number, Smith asked whether
+                # the field existed — it could not see that it did, because
+                # the context printed the entity's name and table and nothing
+                # else. A type says as much as a name here: "is it text or a
+                # number" is the next question after "is it there".
+                "fields": [
+                    {"name": f.get("name"), "type": f.get("type"),
+                     "required": bool(f.get("required")),
+                     "enumValues": list(f.get("enumValues") or [])}
+                    for f in (e.get("fields") or [])
+                    if isinstance(f, dict) and f.get("name")
+                ],
                 "why_shaped_this_way": e.get("purpose") or "",
             }
             for e in _live(entities)
@@ -110,6 +123,13 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                 "why": w.get("purpose") or "",
             }
             for w in _live(doc.get("workflows"))
+        ],
+        # The rules already in force, so "add a rule that…" can be answered
+        # with "that one is already there" instead of a question.
+        "business_rules": [
+            {"name": r.get("name"), "statement": r.get("statement"),
+             "entity": r.get("entity"), "when": r.get("when")}
+            for r in _live(doc.get("businessRules"))
         ],
         "pages": [
             {

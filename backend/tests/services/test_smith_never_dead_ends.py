@@ -167,3 +167,30 @@ def test_a_change_is_confirmed_in_the_words_on_the_screen(tmp_path):
     result = session.run_iteration(user_message="change Delete to Archive")
     assert "previous state" not in result.answer and "requested change" not in result.answer
     assert "**Delete**" in result.answer and "**Archive**" in result.answer
+
+
+def test_a_screen_named_in_the_message_is_not_asked_for_again():
+    """"Delete the Master Data page" came back as remove_page with the screen
+    in `target_file` and `route` empty, so the turn asked which screen — about
+    a screen the understanding had already named."""
+    from services.smith.slot_options import fill_from
+    from services.smith.understand_ask import _is_route
+
+    # The two names for one fact are reconciled in the understanding itself.
+    assert _is_route("/master-data") and not _is_route("src/schemas/x.json")
+    assert not _is_route("master-data") and not _is_route("/x.json")
+
+    doc = {"pages": [{"route": "/master-data", "name": "Master Data"},
+                     {"route": "/nurse-registration", "name": "Nurse Registration"}],
+           "data": {"entities": [{"name": "Nurse", "fields": []},
+                                 {"name": "Ward", "fields": []}]}}
+    # Named by its title, which is not the option text.
+    assert fill_from(["route"], "delete the Master Data page", doc) == {"route": "/master-data"}
+    # Named by its route.
+    assert fill_from(["route"], "the /nurse-registration screen is empty", doc) \
+        == {"route": "/nurse-registration"}
+    # Named among the records.
+    assert fill_from(["entity"], "add a notes box to wards", doc) == {"entity": "Ward"}
+    # Nothing named, or two things named: a real question either way.
+    assert fill_from(["route"], "delete that page", doc) == {}
+    assert fill_from(["entity"], "add notes to nurses and wards", doc) == {}

@@ -170,3 +170,66 @@ def test_requirements_render_with_their_evidence(tmp_path):
 def test_requirements_alone_are_not_an_empty_blueprint(tmp_path):
     bp = Blueprint(project_id="p1", requirements=[{"id": "REQ-001", "description": "x"}])
     assert "bootstrap conversation" not in blueprint_to_context(bp)
+
+
+def test_an_entity_is_shown_with_its_boxes(tmp_path):
+    """Asked to add format validation on a telephone number, Smith asked
+    whether a telephone field existed: the context printed the entity's name
+    and table and nothing else, so asking was the only honest thing it could
+    do."""
+    bp = Blueprint(project_id="p1", domain={"name": "clinic"}, entities=[
+        {"name": "Nurse", "table": "nurses", "purpose": "A nurse.", "fields": [
+            {"name": "id", "type": "uuid"},
+            {"name": "phoneNumber", "type": "string"},
+            {"name": "gender", "type": "string", "required": True,
+             "enumValues": ["Male", "Female"]}]}])
+    ctx = blueprint_to_context(bp)
+    assert "phoneNumber: string" in ctx
+    assert "gender: string, required [Male|Female]" in ctx
+    # An entity the adapter only gave names for still shows them.
+    older = Blueprint(project_id="p1", domain={"name": "c"},
+                      entities=[{"name": "Ward", "key_fields": ["id", "capacity"]}])
+    assert "fields — id, capacity" in blueprint_to_context(older)
+
+
+def test_the_rules_in_force_are_shown(tmp_path):
+    """Asked to add one, Smith could not tell whether it was already there."""
+    bp = Blueprint(project_id="p1", domain={"name": "clinic"}, business_rules=[
+        {"name": "Experience Cap", "statement": "Experience cannot exceed 60.",
+         "when": "experienceYears > 60"}])
+    ctx = blueprint_to_context(bp)
+    assert "## Rules (1)" in ctx
+    assert "**Experience Cap**: Experience cannot exceed 60." in ctx
+    assert "when `experienceYears > 60`" in ctx
+    assert "## Rules\n(none yet.)" in blueprint_to_context(
+        Blueprint(project_id="p1", domain={"name": "c"}))
+
+
+def test_the_engine_document_is_what_smith_reads(tmp_path):
+    """Smith's own file used to win, so on a project with both it read the
+    application as it stood some builds ago — a record with a field that had
+    been renamed and without one that had been added."""
+    import json
+
+    forge = tmp_path / ".forge"
+    (forge / "blueprint").mkdir(parents=True)
+    (forge / "blueprint" / "current.json").write_text(json.dumps({
+        "application": {"description": "d"},
+        "data": {"entities": [{"id": "ENTITY-001", "name": "Nurse", "table": "nurses",
+                               "fields": [{"name": "experienceYears", "type": "integer"},
+                                          {"name": "phoneNumber", "type": "string"}]}]},
+        "businessRules": [{"name": "Cap", "statement": "No more than 60."}],
+    }))
+    # Smith's own store, stale: the old field name and no phone number.
+    (forge / "blueprint.json").write_text(json.dumps({
+        "project_id": "p1",
+        "entities": [{"name": "Nurse", "key_fields": ["yearsOfExperience"]}],
+        "change_log": [{"at": "then", "smith_move": "rename"}],
+    }))
+
+    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
+    names = [f["name"] for f in bp.entities[0]["fields"]]
+    assert names == ["experienceYears", "phoneNumber"]
+    assert bp.business_rules[0]["name"] == "Cap"
+    # What only Smith's file knows is kept.
+    assert len(bp.change_log) == 1 and bp.change_log[0]["smith_move"] == "rename"
