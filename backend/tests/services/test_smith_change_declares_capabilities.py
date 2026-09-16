@@ -52,9 +52,10 @@ def _stub_compose(monkeypatch):
 
 def test_the_request_names_a_delete_and_the_contract_learns_it(svc, monkeypatch):
     calls = _stub_compose(monkeypatch)
-    sc.add_widgets(svc, "/master-data",
-                   ["Delete Record action button on each row, with a confirmation prompt before deletion"],
-                   request="Can you add delete record functionality")
+    out = sc.run(str(svc.output_dir), "add_widgets", route="/master-data",
+                 widgets=["Delete Record action button on each row, with a confirmation prompt before deletion"],
+                 request="Can you add delete record functionality")
+    assert out["applied"] and "declared delete on it" in out["diff_summary"]
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
     pages = [p for p in doc["pages"] if p["route"] == "/master-data"]
     assert len(pages) == 1, "the page must be updated, not duplicated"
@@ -68,19 +69,19 @@ def test_the_request_names_a_delete_and_the_contract_learns_it(svc, monkeypatch)
 
 def test_a_second_ask_adds_nothing_and_a_wish_without_a_verb_touches_no_actions(svc, monkeypatch):
     _stub_compose(monkeypatch)
-    sc.add_widgets(svc, "/master-data", ["Delete Record button"], request="add delete record functionality")
+    sc.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["Delete Record button"], request="add delete record functionality")
     n_wf = len(BlueprintService.load(output_dir=svc.output_dir).doc["workflows"])
-    sc.add_widgets(svc, "/master-data", ["Delete Record button"], request="add delete record functionality")
+    sc.run(str(svc.output_dir), "compose_route", route="/master-data", request="add delete record functionality")
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
     assert len(doc["workflows"]) == n_wf and [p["route"] for p in doc["pages"]].count("/master-data") == 1
-    sc.add_widgets(svc, "/master-data", ["a total count tile"], request="show a total count at the top")
+    sc.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["a total count tile"], request="show a total count at the top")
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
     assert next(p for p in doc["pages"] if p["route"] == "/master-data")["actions"] == ["view_record", "edit_record", "delete"]
 
 
 def test_a_new_route_is_allocated_under_the_registrys_key(svc, monkeypatch):
     _stub_compose(monkeypatch)
-    sc.add_widgets(svc, "/clients", ["a clients table"], request="add a clients screen")
+    sc.run(str(svc.output_dir), "add_widgets", route="/clients", widgets=["a clients table"], request="add a clients screen")
     ids = json.load(open(f"{svc.output_dir}/.forge/ids.json"))["bindings"]
     assert "PAGE:/clients" in ids and "/clients" not in ids
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
@@ -102,8 +103,10 @@ def test_an_edit_request_gets_the_edit_screen_the_definition_never_made(svc, mon
     Smith creates it, makes it reachable and launchable, and composes it
     before the list."""
     calls = _stub_compose(monkeypatch)
-    sc.add_widgets(svc, "/master-data", ["Edit action button on each row"],
-                   request="Can you implement the edit functionality")
+    # Through `compose_route` — the verb the router actually picked for this ask.
+    out = sc.run(str(svc.output_dir), "compose_route", route="/master-data",
+                 request="Can you implement the edit functionality")
+    assert "created the edit screen /nurse-registration/[id]" in out["diff_summary"]
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
     edit = next(p for p in doc["pages"] if p["route"] == "/nurse-registration/[id]")
     assert edit["pattern"] == "form" and edit["name"] == "Edit Nurse"
@@ -114,13 +117,13 @@ def test_an_edit_request_gets_the_edit_screen_the_definition_never_made(svc, mon
     assert edit["id"] in upd["launchedFrom"]                              # the composer may bind it there
     assert calls == ["/nurse-registration/[id]", "/master-data"]          # edit screen first, then the list
     # Asked again: the screen exists, nothing is created twice.
-    sc.add_widgets(svc, "/master-data", ["Edit action button on each row"], request="implement edit")
+    sc.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["Edit action button on each row"], request="implement edit")
     assert [p["route"] for p in BlueprintService.load(output_dir=svc.output_dir).doc["pages"]].count("/nurse-registration/[id]") == 1
 
 
 def test_no_edit_screen_is_invented_without_an_update_workflow(svc, monkeypatch):
     calls = _stub_compose(monkeypatch)
     svc.doc["workflows"] = [w for w in svc.doc["workflows"] if w["id"] != "FLOW-002"]; svc.save()
-    sc.add_widgets(svc, "/master-data", ["Edit button"], request="implement the edit functionality")
+    sc.run(str(svc.output_dir), "add_widgets", route="/master-data", widgets=["Edit button"], request="implement the edit functionality")
     assert "/nurse-registration/[id]" not in [p["route"] for p in BlueprintService.load(output_dir=svc.output_dir).doc["pages"]]
     assert calls == ["/master-data"]

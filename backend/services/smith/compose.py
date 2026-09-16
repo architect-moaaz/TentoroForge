@@ -322,22 +322,6 @@ def add_widgets(
         svc.upsert("pages", body, natural_key=page_key(str(page.get("route") or route)))
         svc.save()
         logger.info("[smith] %s primaryTasks += %s", page.get("route"), added)
-    # A capability the request names is contract, not prose: the verb goes into
-    # `actions` and its workflow is declared, so the composition is HELD to it.
-    page = _page_for_route(svc.doc, page.get("route") or route) or page
-    named = capabilities_named(f"{request} {' '.join(wanted)}")
-    declare_capabilities(svc, page, f"{request} {' '.join(wanted)}")
-    # An edit needs a screen that edits. Created and composed FIRST, so the
-    # list's Edit has somewhere to go by the time the list is composed.
-    if "edit" in named:
-        page = _page_for_route(svc.doc, page.get("route") or route) or page
-        edit_page = ensure_edit_page(svc, page)
-        if edit_page is not None:
-            tell(reasoning, f"There was no screen to edit a record on — creating "
-                            f"{edit_page.get('route')} first.", "step")
-            compose_route(svc, edit_page["route"], app_root=app_root,
-                          request=f"compose the edit screen at {edit_page['route']}",
-                          executor=executor, reasoning=reasoning)
 
     return compose_route(
         svc, page.get("route") or route, app_root=app_root,
@@ -465,6 +449,32 @@ def ensure_edit_page(svc: Any, page: dict) -> dict | None:
     return new_page
 
 
+def prepare_capabilities(svc: Any, route: str, request: str, *, app_root: str | None = None,
+                         executor: Any = None, reasoning: Any = None) -> dict:
+    """Before EITHER compose verb runs: what the request asks the screen to
+    DO becomes contract (`declare_capabilities`), and an edit gets the screen
+    it needs (`ensure_edit_page`), composed first so the list's Edit has
+    somewhere to go. Lives on the one entry point both verbs share — wired
+    into `add_widgets` alone, "implement the edit functionality" went through
+    `compose_route` and none of it happened."""
+    page = _page_for_route(svc.doc, route)
+    if page is None:
+        return {"declared": [], "created": []}
+    declared = declare_capabilities(svc, page, request)
+    created: list[str] = []
+    if "edit" in capabilities_named(request):
+        page = _page_for_route(svc.doc, route) or page
+        edit_page = ensure_edit_page(svc, page)
+        if edit_page is not None:
+            created.append(str(edit_page["route"]))
+            tell(reasoning, f"There was no screen to edit a record on — creating "
+                            f"{edit_page.get('route')} first.", "step")
+            compose_route(svc, edit_page["route"], app_root=app_root,
+                          request=f"compose the edit screen at {edit_page['route']}",
+                          executor=executor, reasoning=reasoning)
+    return {"declared": declared, "created": created}
+
+
 VERBS = ("compose_route", "add_widgets")
 
 
@@ -494,19 +504,30 @@ def run(output_dir: str, verb: str, *, route: str = "",
 
     app_root = str(Path(output_dir) / "app")
     wanted = [str(w).strip() for w in (widgets or []) if str(w).strip()]
+    if verb not in VERBS:
+        return {"applied": False, "edited_paths": [],
+                "reason": f"unknown compose verb {verb!r}; "
+                          f"expected one of {', '.join(VERBS)}"}
+    try:
+        prepared = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
+                                        app_root=app_root, reasoning=reasoning)
+    except ComposeError as exc:
+        return {"applied": False, "edited_paths": [], "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] preparing %s for %s failed", route, verb)
+        return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+    extra = "".join(
+        ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
+        + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
     try:
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
                                  request=request, reasoning=reasoning)
-            did = f"added {', '.join(wanted)} to {route}"
+            did = f"added {', '.join(wanted)} to {route}{extra}"
         elif verb == "compose_route":
             result = compose_route(svc, route, app_root=app_root,
                                    request=request, reasoning=reasoning)
-            did = f"composed {route}"
-        else:
-            return {"applied": False, "edited_paths": [],
-                    "reason": f"unknown compose verb {verb!r}; "
-                              f"expected one of {', '.join(VERBS)}"}
+            did = f"composed {route}{extra}"
     except ComposeError as exc:
         # The composer declining is a real outcome and says so.
         return {"applied": False, "edited_paths": [], "reason": str(exc)}
