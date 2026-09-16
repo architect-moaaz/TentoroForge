@@ -43,6 +43,12 @@ interface SchemaRendererWrapperProps {
    *  similar Tailwind utilities resolve to the project's actual brand colors.
    *  Without this the preview renders with no brand colours (unstyled buttons). */
   cssVarTokens?: Record<string, unknown>;
+  /** The project ships src/app/tokens.css, projected from its Blueprint and
+   *  inlined by the page on `html:root`. EngineProvider writes its DEFAULT
+   *  semantic colours (--primary: #2563eb …) inline on its wrapper element,
+   *  which outranks any stylesheet — so with the flag set it emits none, and
+   *  the project's palette is what renders. */
+  hasProjectTokens?: boolean;
 }
 
 
@@ -54,6 +60,7 @@ export function SchemaRendererWrapper({
   projectId,
   navFlow,
   cssVarTokens,
+  hasProjectTokens = false,
 }: SchemaRendererWrapperProps) {
   // Synthetic designSpec from the discrete scaffold inputs. EngineProvider
   // reads register + tokens from this object; Engine reads illustrationBasePath
@@ -121,7 +128,8 @@ export function SchemaRendererWrapper({
   }, [router, projectId]);
 
   return (
-    <EngineProvider designSpec={designSpec} navFlow={navFlow ?? null} cssVarTokens={cssVarTokens ?? null}>
+    <EngineProvider designSpec={designSpec} navFlow={navFlow ?? null} cssVarTokens={cssVarTokens ?? null}
+                    semanticVars={!hasProjectTokens}>
       <NavigatorProvider value={navigator}>
         <WorkflowDispatcherProvider dispatch={authDispatcher}>
           <Engine schema={page} previewData={resolvedPreview} apiBaseUrl="" />

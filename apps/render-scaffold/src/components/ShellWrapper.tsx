@@ -35,6 +35,9 @@ interface ShellWrapperProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   navFlow?: any;
   cssVarTokens?: Record<string, unknown>;
+  /** The project ships src/app/tokens.css (inlined by the page): the engine
+   *  must not emit its default semantic colours over it. */
+  hasProjectTokens?: boolean;
 }
 
 export function ShellWrapper({
@@ -46,6 +49,7 @@ export function ShellWrapper({
   projectId,
   navFlow,
   cssVarTokens,
+  hasProjectTokens,
 }: ShellWrapperProps) {
   // Render the page schema as a ReactNode. This becomes the value provided
   // via PageOutletContext so the PageOutlet node in the shell renders it
@@ -59,6 +63,7 @@ export function ShellWrapper({
       projectId={projectId}
       navFlow={navFlow}
       cssVarTokens={cssVarTokens}
+      hasProjectTokens={hasProjectTokens}
     />
   );
 
@@ -72,6 +77,7 @@ export function ShellWrapper({
         projectId={projectId}
         navFlow={navFlow}
         cssVarTokens={cssVarTokens}
+        hasProjectTokens={hasProjectTokens}
       />
     </PageOutletContext.Provider>
   );
