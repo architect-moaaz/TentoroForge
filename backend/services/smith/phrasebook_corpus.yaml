@@ -1,0 +1,778 @@
+# The owner's phrasebook — the sentences, and nothing that moves.
+#
+# Each entry is one sentence a business owner would type, kept VERBATIM. The
+# sentence is the evidence; reworded into product language it stops being
+# evidence of anything. What colour Smith gives it is never DECIDED here — it
+# is computed by `services.smith.phrasebook` against the code as it stands
+# today, because the colour is exactly the part that goes stale, and written
+# back as `checked` only so the next run can contradict it. The phrasebook's
+# closing list once said "Put it back how it was — no undo and no restore
+# point" while `services/smith/revert.py` was shipped and `VERB_HELP` quoted
+# "put it back" as an example of asking for it.
+#
+# PER SENTENCE, ONLY WHAT IS TRUE OF THE SENTENCE:
+#
+#   say        the words, verbatim.
+#   checked    the colour the code gave the sentence when this file was last
+#              written, and how. Recorded ONLY so it can be contradicted:
+#              nothing reads it to decide anything, and
+#              `tests/services/test_phrasebook.py` fails when the code's answer
+#              and this disagree — in either direction. A sentence newly
+#              answered and a verb that quietly stopped answering one both show
+#              up here as a one-line diff.
+#   source     `code` when the sentence is quoted in the code as an example of
+#              asking for something (`verbs.VERB_HELP` or the understanding
+#              prompt) — those are owner-voice by construction and they are
+#              what the chips offer; `phrasebook` when it comes from the
+#              document.
+#   reaches    what the sentence is asking for, as one of:
+#                verb:    a verb in `verbs.REQUIRED_BY_VERB`
+#                command: a lifecycle word in `_LIFECYCLE_VERBS`
+#                gate:    a consent gate in the router
+#              omitted entirely when the sentence reaches nothing.
+#   states     the slots the SENTENCE ITSELF supplies. Not what the verb needs
+#              — that is read from the verb table on every run, and a slot
+#              added to a verb turns every sentence that does not state it from
+#              "Smith acts" into "Smith asks", which is the drift this catches.
+#   gap        for a sentence that reaches nothing: what it is an instance of.
+#   because    for a sentence that reaches nothing: why, in one clause.
+#
+# THERE IS NO PLACE HERE FOR AN EXCEPTION. If a sentence cannot be coloured
+# without one, that is a finding about the verb set — `phrasebook.findings()`
+# reports those — not a case to hide in this file.
+#
+# This is a seed. The document's full set pastes in under `sentences:` with the
+# keys above, `checked` left out and filled in by
+# `python -m services.smith.phrasebook --rewrite-checked`. Every sentence the
+# code itself quotes is already here, which is what makes the stale-claim
+# check bite.
+
+version: 1
+
+# THE VERB SET'S OWN DEFECTS, WRITTEN DOWN RATHER THAN EXEMPTED.
+#
+# `phrasebook.findings()` and `phrasebook.contract_gaps()` read the verb table,
+# the understanding prompt, the capability groups and the dispatcher, and
+# report what does not line up. Each one below is open today. The test asserts
+# this list EXACTLY: a new one fails it, and so does fixing one without
+# striking it here — which is how a fix gets noticed rather than absorbed.
+open_findings:
+
+  # `rebuild` is recognised, answered with a reason and changes nothing — the
+  # dispatcher tells the person to press "Approve and build" — but it is not in
+  # `limits.cannot`, so `capabilities.GROUPS` files it under "The whole
+  # application · Regenerate it from its definition", which is a thing the chat
+  # cannot do. Either the answer moves into `limits`, or the group stops
+  # advertising it.
+  - about: verb refused outside the refusal table
+    verbs: [rebuild]
+
+  # `define` and `approve` are in `_LIFECYCLE_VERBS`, which is what stops a
+  # bare command being read as an edit — and no branch in the router answers
+  # either of them and no consent gate takes them. Typed on their own they
+  # reach the architect as a sentence to reason about. `build` is in the same
+  # list and is fine: `_is_build_consent` takes it.
+  - about: command declared and answered nowhere
+    verbs: [approve, define]
+
+  # `REQUIRED_BY_VERB["rename"]` demands `screen`, `current_behavior` and
+  # `desired_behavior`; an understanding has no such fields, and the prompt
+  # asks for `new_value`, which the table does not list. The gate is skipped
+  # for `rename` rather than never passing — see `slot_gate_skips`.
+  - about: required slot the understanding cannot carry
+    verbs: [rename]
+
+sentences:
+
+  # -- The screens ---------------------------------------------------------
+
+  - id: screens-page-is-empty
+    say: "The page is empty"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: code
+    reaches: {verb: compose_route, states: []}
+
+  - id: screens-dashboard-at-root
+    say: "add a dashboard at /"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: screens-lay-it-out-again
+    say: "Lay the sessions screen out again from scratch"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: screens-widgets-on-dashboard
+    say: "put upcoming sessions and quorum status on the dashboard"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: screens-cannot-see-field
+    say: "I cannot see fathersName on the registration page"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: screens-show-phone
+    say: "show phone on the nurse form"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: screens-rename-button
+    say: "On the nurse list, the button that says Delete should say Archive"
+    checked: {colour: acts, via: move}
+    source: phrasebook
+    reaches:
+      verb: rename
+      states: [screen, target_file, element_label, current_behavior, desired_behavior]
+
+  - id: screens-rename-bare
+    say: "Call it something clearer"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: phrasebook
+    reaches: {verb: rename, states: []}
+
+  - id: screens-remove-delete-button
+    say: "remove the delete button"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: code
+    reaches: {verb: remove, states: [element_label]}
+
+  - id: screens-get-rid-of-export-link
+    say: "get rid of the export link"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: code
+    reaches: {verb: remove, states: [element_label]}
+
+  - id: screens-remove-named-screen
+    say: "Take the Delete button off the nurse list"
+    checked: {colour: acts, via: move}
+    source: phrasebook
+    reaches: {verb: remove, states: [target_file, element_label]}
+
+  # -- What it keeps -------------------------------------------------------
+
+  - id: keeps-discount-field
+    say: "add a discount field to offers"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: keeps-due-date
+    say: "give tasks a due date"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: keeps-customers-phone
+    say: "customers need a phone number"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: keeps-rename-field-bare
+    say: "rename yearsOfExperience to experienceYears"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: code
+    reaches: {verb: rename_field, states: [field, new_value]}
+
+  - id: keeps-rename-field-named
+    say: "On a nurse, rename yearsOfExperience to experienceYears"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: rename_field, states: [entity, field, new_value]}
+
+  - id: keeps-drop-location
+    say: "drop the location field from nurses"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_field, states: [entity, field]}
+
+  - id: keeps-add-ward-entity
+    say: "add a Ward entity with a name and a capacity"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_entity, states: [entity]}
+
+  - id: keeps-drop-department
+    say: "we don't need the Department entity"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_entity, states: [entity]}
+
+  # -- What it does by itself ---------------------------------------------
+
+  - id: does-email-admin
+    say: "email the admin after a registration"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: does-archive-instead
+    say: "archive a nurse instead of deleting"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: does-monday-reminder
+    say: "send a reminder every Monday"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: does-also-notify
+    say: "when a nurse is registered, also notify the ward manager"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_workflow, states: [workflow, change]}
+
+  - id: does-ask-for-reason
+    say: "the delete should ask for a reason first"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_workflow, states: [workflow, change]}
+
+  - id: does-remove-delete-workflow
+    say: "remove the delete nurse workflow"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_workflow, states: [workflow]}
+
+  - id: does-stop-welcome-email
+    say: "stop sending the welcome email"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_workflow, states: [workflow]}
+
+  # -- What it will not let people do -------------------------------------
+
+  - id: rules-experience-cap
+    say: "years of experience cannot exceed 60"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: rules-needs-speciality
+    say: "a nurse needs at least one speciality"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: rules-raise-cap
+    say: "raise the experience cap to 70"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_rule, states: [rule, change]}
+
+  - id: rules-drop-speciality-rule
+    say: "Drop the rule that a nurse needs at least one speciality"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: remove_rule, states: [rule]}
+
+  # -- Who is allowed to do what ------------------------------------------
+
+  - id: access-ward-manager-role
+    say: "add a Ward Manager role"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: access-only-admins-delete
+    say: "only admins can delete a nurse"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: access-master-data-admin-only
+    say: "make Master Data admin-only"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: access-anyone-registers
+    say: "let anyone open registration without signing in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_access, states: [change]}
+
+  # -- How it looks --------------------------------------------------------
+
+  - id: looks-theme-green
+    say: "change the theme colour to green"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: restyle, states: [change]}
+
+  - id: looks-darker-compact
+    say: "make it darker and more compact"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: restyle, states: [change]}
+
+  - id: looks-blue-to-green
+    say: "change the theme colour from blue to green"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: restyle, states: [change]}
+
+  - id: looks-make-it-nicer
+    say: "Make it look nicer"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: restyle, states: [change]}
+
+  - id: menu-master-data-first
+    say: "put Master Data first"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: menu-call-it-nurse-directory
+    say: "call it Nurse Directory"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: menu-hide-registration
+    say: "hide the registration page from the menu"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: menu-group-under-admin
+    say: "group these under Admin"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: menu-open-on-master-data
+    say: "open on Master Data"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_navigation, states: [change]}
+
+  # -- What it is, and what it talks to ------------------------------------
+
+  - id: product-call-it-nurse-roster
+    say: "call the app Nurse Roster"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: product-for-ward-managers
+    say: "it is for ward managers"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: product-in-arabic
+    say: "the interface should be in Arabic"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: reqs-mark-unavailable
+    say: "the app should also let a nurse mark herself unavailable"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_requirement, states: [requirement]}
+
+  - id: reqs-restate
+    say: "REQ-012 should say the roster is published a week ahead"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_requirement, states: [requirement, change]}
+
+  - id: reqs-no-longer-need
+    say: "We no longer need the shift-swapping requirement"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: remove_requirement, states: [requirement]}
+
+  - id: api-list-wards
+    say: "an endpoint that lists wards"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_api, states: [api]}
+
+  - id: api-remove-export
+    say: "remove the export endpoint"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_api, states: [api]}
+
+  - id: integration-sendgrid
+    say: "send email through SendGrid"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_integration, states: [integration]}
+
+  - id: integration-drop-stripe
+    say: "drop the Stripe integration"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_integration, states: [integration]}
+
+  # -- A design somebody gave you ------------------------------------------
+
+  - id: design-figma-link-only
+    say: "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster"
+    checked: {colour: asks, via: none, missing: [token_env]}
+    source: phrasebook
+    reaches: {verb: connect_figma, states: [figma_url]}
+
+  - id: design-figma-with-env
+    say: "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster — my token is in FIGMA_TOKEN"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: connect_figma, states: [figma_url, token_env]}
+
+  - id: design-uxpilot-ref-only
+    say: "Use this UX Pilot page https://uxpilot.ai/s/nurse-roster"
+    checked: {colour: asks, via: none, missing: [key_env]}
+    source: phrasebook
+    reaches: {verb: connect_uxpilot, states: [uxpilot_ref]}
+
+  - id: design-uxpilot-with-env
+    say: "Use this UX Pilot page https://uxpilot.ai/s/nurse-roster — the key is in UXPILOT_API_KEY"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: connect_uxpilot, states: [uxpilot_ref, key_env]}
+
+  - id: design-disconnect
+    say: "disconnect the Figma design"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: disconnect_design, states: []}
+
+  - id: design-drop-it
+    say: "drop the design"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: disconnect_design, states: []}
+
+  - id: design-compose-from-components
+    say: "compose the pages from components instead"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: disconnect_design, states: []}
+
+  # -- Putting it back -----------------------------------------------------
+
+  - id: revert-undo-that
+    say: "undo that"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: revert, states: []}
+
+  - id: revert-undo
+    say: "undo"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: revert, states: []}
+
+  - id: revert-put-it-back
+    say: "put it back"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: revert, states: []}
+
+  # THE SENTENCE THE DOCUMENT GOT WRONG. Section 08 named it as reaching
+  # nothing — "no undo and no restore point" — on a day when `revert.py` was
+  # shipped and `VERB_HELP` quoted "put it back" as the way to ask for it.
+  # Left here, verbatim, as the case the whole of this exists to catch.
+  - id: revert-put-it-back-how-it-was
+    say: "Put it back how it was"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: revert, states: []}
+
+  - id: revert-that-was-wrong
+    say: "that was wrong, revert it"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: revert, states: []}
+
+  - id: revert-go-back
+    say: "go back"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: revert, states: []}
+
+  # -- Getting it built, looked at and out ---------------------------------
+
+  - id: lifecycle-status
+    say: "status"
+    checked: {colour: answers, via: command}
+    source: phrasebook
+    reaches: {command: status}
+
+  - id: lifecycle-preview
+    say: "preview"
+    checked: {colour: answers, via: command}
+    source: phrasebook
+    reaches: {command: preview}
+
+  - id: lifecycle-export
+    say: "export"
+    checked: {colour: answers, via: command}
+    source: phrasebook
+    reaches: {command: export}
+
+  - id: lifecycle-deploy
+    say: "deploy"
+    checked: {colour: answers, via: command}
+    source: phrasebook
+    reaches: {command: deploy}
+
+  - id: lifecycle-help
+    say: "help"
+    checked: {colour: answers, via: command}
+    source: phrasebook
+    reaches: {command: help}
+
+  - id: build-build-it
+    say: "build it"
+    checked: {colour: acts, via: gate}
+    source: phrasebook
+    reaches: {gate: build_consent}
+
+  - id: build-go-ahead
+    say: "go ahead"
+    checked: {colour: acts, via: gate}
+    source: phrasebook
+    reaches: {gate: build_consent}
+
+  - id: build-yes-build-it
+    say: "yes, build it"
+    checked: {colour: acts, via: gate}
+    source: phrasebook
+    reaches: {gate: build_consent}
+
+  - id: verify-unscoped
+    say: "Verify the app and fix anything that's broken."
+    checked: {colour: asks, via: gate}
+    source: phrasebook
+    reaches: {gate: verify_consent}
+
+  - id: verify-critical-journeys
+    say: "Verify only the critical journeys."
+    checked: {colour: acts, via: gate}
+    source: phrasebook
+    reaches: {gate: verify_consent}
+
+  - id: verify-not-now
+    say: "not now"
+    checked: {colour: answers, via: gate}
+    source: phrasebook
+    reaches: {gate: declined}
+
+  - id: rebuild-everything
+    say: "rebuild everything"
+    checked: {colour: answers, via: dispatch-answer}
+    source: code
+    reaches: {verb: rebuild, states: []}
+
+  - id: rebuild-generate-the-app
+    say: "generate the app"
+    checked: {colour: answers, via: dispatch-answer}
+    source: code
+    reaches: {verb: rebuild, states: []}
+
+  # -- Recognised, and refused with a reason -------------------------------
+  #
+  # These are verbs. They are not successes and they are not silent gaps:
+  # `limits.answer` says why in a clause and offers the nearest thing that
+  # works, and `limits.cannot` is what this is read from.
+
+  - id: refuse-delete-wards-page
+    say: "delete the Wards page"
+    checked: {colour: answers, via: limit}
+    source: code
+    reaches: {verb: remove_page, states: [route]}
+
+  - id: refuse-remove-reports-screen
+    say: "remove the reports screen"
+    checked: {colour: answers, via: limit}
+    source: code
+    reaches: {verb: remove_page, states: [route]}
+
+  - id: refuse-call-nurses-colleagues
+    say: "call nurses colleagues"
+    checked: {colour: answers, via: limit}
+    source: code
+    reaches: {verb: rename_entity, states: [entity, new_value]}
+
+  - id: refuse-ward-to-unit
+    say: "rename the Ward record to Unit"
+    checked: {colour: answers, via: limit}
+    source: code
+    reaches: {verb: rename_entity, states: [entity, new_value]}
+
+  - id: refuse-phone-as-number
+    say: "make the phone number a number instead of text"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: code
+    reaches: {verb: change_field_type, states: [field]}
+
+  - id: refuse-nurse-phone-as-number
+    say: "Make the phone number on a nurse a number instead of text"
+    checked: {colour: answers, via: limit}
+    source: phrasebook
+    reaches: {verb: change_field_type, states: [entity, field]}
+
+  - id: refuse-endpoint-date-range
+    say: "make that endpoint take a date range"
+    checked: {colour: answers, via: limit}
+    source: code
+    reaches: {verb: edit_api, states: [api]}
+
+  - id: refuse-move-chart
+    say: "move the chart above the table"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: code
+    reaches: {verb: reorder, states: []}
+
+  - id: refuse-move-chart-on-dashboard
+    say: "Move the chart above the table on the dashboard"
+    checked: {colour: answers, via: limit}
+    source: phrasebook
+    reaches: {verb: reorder, states: [route]}
+
+  - id: refuse-search-at-top
+    say: "put the search at the top"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: code
+    reaches: {verb: reorder, states: []}
+
+  # -- The sentences that reach nothing ------------------------------------
+  #
+  # No `reaches`. Each one is a claim that nothing in the code takes it, and
+  # the claim is re-tested on every run: a verb, a command or a gate that
+  # starts taking one of these turns its colour and fails the test.
+
+  - id: gap-spreadsheet-import
+    say: "I've got all my customers in a spreadsheet, can you load them in?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Getting data in
+    because: >-
+      no verb takes a file; `add_entity` and `add_field` describe the shape of a
+      record and nothing fills one
+
+  - id: gap-spreadsheet-import-csv
+    say: "Can I import a CSV of last year's bookings?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Getting data in
+    because: >-
+      the same: there is no verb for putting existing records into a built
+      application
+
+  - id: gap-individual-logins
+    say: "Each of my staff needs their own login"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: People and passwords
+    because: >-
+      `edit_access` decides roles and which screens each role opens, and no
+      verb creates an account for a named person
+
+  - id: gap-password-reset
+    say: "One of my team forgot her password — how does she reset it?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: People and passwords
+    because: >-
+      there is nothing behind sign-in beyond the roles the access model
+      describes
+
+  - id: gap-records-export
+    say: "Can I get all the bookings out as a spreadsheet?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Getting data out
+    because: >-
+      `export` is the source code, not the records — it hands over the
+      application, not what has been typed into it
+
+  - id: gap-nightly-backup
+    say: "Can you back this up every night?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Keeping it safe
+    because: >-
+      undo restores the definition, not the data; nothing schedules or keeps a
+      copy of what the running application holds
+
+  - id: gap-where-are-backups
+    say: "Where are the backups kept?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Keeping it safe
+    because: there is nothing to point at, so the question has no answer to read out
+
+  - id: gap-its-slow
+    say: "It's slow"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: When something is wrong
+    because: >-
+      nothing measures a built application's speed, so this is neither a change
+      to make nor a fact to report
+
+  - id: gap-crashed-on-save
+    say: "It crashed when I pressed save"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: When something is wrong
+    because: >-
+      `verify & fix` reads pages as they render on request; nothing collects
+      what went wrong while someone was using it
+
+  - id: gap-see-the-errors
+    say: "How do I see the errors?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: When something is wrong
+    because: the running application reports nothing back to this conversation
+
+  - id: gap-logo-upload
+    say: "Can I put my logo at the top?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Pictures and branding
+    because: >-
+      `restyle` decides colours, type and density from words — there is no way
+      to give it a file
+
+  - id: gap-photo-per-record
+    say: "I want to upload a photo for each nurse"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Pictures and branding
+    because: >-
+      a field can be added to a record, and nothing puts an image into one
+
+  - id: gap-what-has-it-cost
+    say: "How much has this cost me so far?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: What it costs
+    because: >-
+      what a build spends is recorded against the run and never surfaced in the
+      conversation that spent it
+
+  - id: gap-pdf-invoice
+    say: "Can it produce a PDF invoice?"
+    checked: {colour: nothing, via: none}
+    source: phrasebook
+    gap: Paper out the other end
+    because: >-
+      the workflow node catalogue has nothing that renders a document, so this
+      cannot be authored as a process either
