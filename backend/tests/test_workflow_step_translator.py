@@ -432,9 +432,33 @@ def test_sequential_gateway_gets_then_else():
     edges = _translate_edges_sequential(steps)
     then = [e for e in edges if e["source"] == "g" and e["data"]["edgeType"] == "then"]
     els = [e for e in edges if e["source"] == "g" and e["data"]["edgeType"] == "else"]
-    assert then and then[0]["target"] == "a"          # then → step after gateway
-    assert els and els[0]["target"] == "end"           # else → end (heuristic)
+    assert then and then[0]["target"] == "a"          # then → the guarded step
+    # else → the step AFTER the guarded one, not end.
+    #
+    # Sending else straight to end and chaining the rest off the THEN target
+    # made the two branches sequential rather than exclusive: the true path
+    # inherited the whole remaining workflow and the false path did nothing.
+    # On real planner output that shortlisted an applicant, emailed them, then
+    # rejected them and emailed them again in one run. Array order is all this
+    # builder has — it only runs when the planner emitted no `next` and no
+    # `branches` — and this is the reading that keeps the exclusivity the node
+    # type promises: run the guarded step and finish, or carry on with the rest.
+    assert els and els[0]["target"] == "b"
     assert els[0]["sourceHandle"] == "else"
+
+
+def test_a_gateway_with_nothing_after_the_guarded_step_falls_to_end():
+    """The fallback the rule above still needs: no step after, so `else` has
+    nowhere to carry on to."""
+    steps = [
+        {"id": "trigger", "type": "trigger"},
+        {"id": "g", "type": "exclusive_gateway", "config": {"condition": "x == 1"}},
+        {"id": "a", "type": "action", "config": {"actionType": "db_update"}},
+        {"id": "end", "type": "end"},
+    ]
+    edges = _translate_edges_sequential(steps)
+    els = [e for e in edges if e["source"] == "g" and e["data"]["edgeType"] == "else"]
+    assert els and els[0]["target"] == "end"
 
 
 def test_ioup5l3v_shortlist_is_connected_and_branches():

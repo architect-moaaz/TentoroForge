@@ -22,20 +22,44 @@ def test_sync_writes_executable_domain_workflows(tmp_path):
 
 def test_sync_duplicate_named_rich_workflows_do_not_clobber(tmp_path):
     """Two rich workflows whose names slug to the same value must produce two
-    distinct files — the slug-based id must not silently overwrite."""
-    rich_steps = [
-        {"id": "trigger", "type": "trigger", "next": "ins"},
-        {"id": "ins", "type": "action", "next": "end",
-         "config": {"actionType": "db_insert", "table": "records", "fields": ["email"]}},
-        {"id": "end", "type": "end"},
-    ]
+    distinct files — the slug-based id must not silently overwrite.
+
+    STILL FAILING, AND IT IS THE CODE, NOT THIS TEST. `_sync_workflows_from_plan`
+    folds each workflow's name to an alphanumeric key and skips one whose key it
+    has already seen, so the SECOND of two same-named workflows is dropped
+    instead of overwriting the first. The outcome is the same either way: the
+    plan declared two workflows and the application gets one, with nothing said.
+
+    Sharpened to prove the loss rather than count files, because a file count
+    cannot tell dedup-of-identical-twins from losing a workflow. The two below
+    differ — one writes `records`, the other `audit_entries` — and only the
+    first reaches disk.
+
+    Left red on purpose. The fix is a change to generation output (disambiguate
+    the slug, or refuse the plan and say which name is duplicated), and which
+    of those is right is a decision about what a plan with two same-named
+    workflows MEANS. Nobody should make that by editing an assertion.
+    """
+    def _steps(table):
+        return [
+            {"id": "trigger", "type": "trigger", "next": "ins"},
+            {"id": "ins", "type": "action", "next": "end",
+             "config": {"actionType": "db_insert", "table": table,
+                        "fields": ["email"]}},
+            {"id": "end", "type": "end"},
+        ]
+
     plan = {"workflows": [
-        {"name": "Approval Workflow", "steps": rich_steps},
-        {"name": "Approval Workflow", "steps": rich_steps},
+        {"name": "Approval Workflow", "steps": _steps("records")},
+        {"name": "Approval Workflow", "steps": _steps("audit_entries")},
     ]}
     _sync_workflows_from_plan(str(tmp_path), plan)
-    files = list((tmp_path / "workflows").glob("*.json"))
-    assert len(files) == 2, f"expected 2 distinct files, got {len(files)}"
+    written = "\n".join(f.read_text() for f in (tmp_path / "workflows").glob("*.json"))
+    assert "records" in written, "the first workflow was lost"
+    assert "audit_entries" in written, (
+        "the second same-named workflow was dropped — the plan declared two "
+        "and the app has one"
+    )
 
 
 def test_all_six_domain_workflows_intelligent(tmp_path):

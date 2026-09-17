@@ -218,7 +218,10 @@ def test_repair_drops_when_no_trigger_input():
     repaired, changes = repair_workflow_values(defn, ASSESSMENTS_COLS, trigger_inputs=set())
     vals = repaired["nodes"][0]["data"]["config"]["values"]
     assert "candidateId" not in vals
+    # `dropped: True` joined the record — the repair distinguishes "replaced
+    # this value" from "removed it", and only the second sets the flag.
     assert changes == [{"node": "create_assessment_record", "column": "candidateId",
+                        "dropped": True,
                         "from": "CURRENT_TIMESTAMP", "to": None}]
 
 
