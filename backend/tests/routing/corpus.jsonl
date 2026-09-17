@@ -239,3 +239,5 @@
 {"say": "Make the phone number on a nurse a number instead of text", "verb": "change_field_type"}
 {"say": "make that endpoint take a date range", "verb": "edit_api", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Move the chart above the table on the dashboard", "verb": "reorder"}
+{"say": "what have I spent on this", "verb": "spend"}
+{"say": "How much has this cost me so far?", "verb": "spend"}

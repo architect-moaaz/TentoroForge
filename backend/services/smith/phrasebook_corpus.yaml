@@ -1663,6 +1663,13 @@ sentences:
     source: routing
     reaches: {verb: compose_route, states: []}
 
+  # -- What it has cost to run (from the routing corpus) ------------------
+
+  - id: spend-what-have-i-spent-on-this
+    say: "what have I spent on this so far"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: spend, states: []}
   # -- Recognised, and refused with a reason -------------------------------
   #
   # These are verbs. They are not successes and they are not silent gaps:
