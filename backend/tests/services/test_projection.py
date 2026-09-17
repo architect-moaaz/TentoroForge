@@ -346,8 +346,12 @@ def test_the_platform_declaration_is_parsed_not_transcribed():
     from services.blueprint.projection import parse_platform_table, platform_table
 
     declared = {f["name"]: f for f in platform_table("users")}
+    # `accountType` joined the scaffold's users table — the account type the
+    # user picked at signup, which auth folds into the session role so the menu
+    # can gate on it. Parsing is what makes this a one-line acknowledgement
+    # instead of a fourth hand-copy drifting off the original.
     assert set(declared) == {"id", "email", "password", "name",
-                             "isActive", "createdAt"}
+                             "accountType", "isActive", "createdAt"}
     assert declared["email"] == {"name": "email", "type": "text",
                                  "required": True, "unique": True}
     # The default `authorize()` depends on — a falsy isActive rejects the login.

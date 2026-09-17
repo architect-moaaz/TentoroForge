@@ -196,16 +196,47 @@ def test_entity_free_page_passes():
 # Rule 6 — archetype in the closed set
 # =========================================================================
 
+def _an_unsupported_archetype() -> str:
+    """A label the builder genuinely does not handle, taken from the set.
+
+    The two tests below used "report", which the builder handles now — it was
+    added to `_VALID_ARCHETYPES` along with "inbox" when `page_type_templates`
+    grew them, and the comment there says the two lists must stay in sync. So
+    the tests asserted a violation on a supported archetype and reported the
+    rule as broken. Derived rather than named so the next archetype to be
+    supported cannot do this again.
+    """
+    from services.plan_validator import _VALID_ARCHETYPES
+
+    for candidate in ("gantt", "carousel", "sparkline", "zzz-not-an-archetype"):
+        if candidate not in _VALID_ARCHETYPES:
+            return candidate
+    raise AssertionError("every candidate is supported — pick a new one")
+
+
 def test_unsupported_archetype_is_flagged():
-    """The drift I found in the current planner — 'report' and 'inbox'
-    are emitted but the builder handles neither."""
+    """An archetype outside the builder's closed set is flagged at plan time,
+    because everything else falls through to the LLM fallback and misfires."""
+    bogus = _an_unsupported_archetype()
     plan = _minimal_clean_plan()
     plan["pages"].append({
         "route": "/reports", "name": "ReportsPage",
-        "entity": "Todo", "archetype": "report",
+        "entity": "Todo", "archetype": bogus,
     })
     v = validate_plan(plan)
-    assert any(x["rule"] == "unsupported_archetype" and "report" in x["message"] for x in v)
+    assert any(x["rule"] == "unsupported_archetype" and bogus in x["message"] for x in v)
+
+
+def test_report_and_inbox_are_supported_now():
+    """The two this file used to call drift. `page_type_templates` handles
+    both, and `_VALID_ARCHETYPES` says so — pinned here so the pair cannot
+    drift back apart silently."""
+    plan = _minimal_clean_plan()
+    for i, arch in enumerate(("report", "inbox")):
+        plan["pages"].append({"route": f"/p{i}", "name": f"P{i}",
+                              "entity": "Todo", "archetype": arch})
+    assert not [x for x in validate_plan(plan)
+                if x["rule"] == "unsupported_archetype"]
 
 
 def test_all_supported_archetypes_pass():
@@ -520,11 +551,12 @@ def test_literal_string_values_do_not_trigger():
 def test_retry_prompt_lists_violations_numbered():
     plan = _minimal_clean_plan()
     plan["dataModels"][1]["fields"].append({"name": "reviewerId", "type": "uuid"})
-    plan["pages"].append({"route": "/reports", "entity": "Todo", "archetype": "report"})
+    bogus = _an_unsupported_archetype()
+    plan["pages"].append({"route": "/reports", "entity": "Todo", "archetype": bogus})
     text = format_violations_for_retry(validate_plan(plan))
     assert "1." in text and "2." in text
     assert "reviewerId" in text
-    assert "report" in text
+    assert bogus in text                      # was "report", which is supported now
     assert "corrected plan" in text.lower()
 
 

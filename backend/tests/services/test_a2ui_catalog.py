@@ -58,7 +58,11 @@ def test_primitives_without_a_contract_still_get_props():
     c = load_contracts()
     for name in ("Stack", "Row", "Grid", "Container", "Text"):
         assert props_for(name, c), f"{name} would author against nothing"
-    assert set(props_for("Text", c)) == {"content", "as"}
+    # `variant` joined them deliberately: it is the style band the composer
+    # naturally emits (h1..h5/caption/body), and without it declared here
+    # every composed Text carrying one was rejected and the page dropped.
+    # `as` still picks the element.
+    assert set(props_for("Text", c)) == {"content", "as", "variant"}
 
 
 # ------------------------------------------------------------------- required
