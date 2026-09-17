@@ -188,7 +188,12 @@ def test_intent_carries_prompt_first_line(app_root):
 
 def test_missing_contracts_returns_empty_map(tmp_path):
     m = build_app_map(str(tmp_path))
-    assert m == {"intent": "", "entities": {}, "pages": [], "workflows": {}}
+    # EMPTY, NOT A LITERAL. This pinned the exact four-key dict and the map
+    # has since grown `detail_gaps` and `peer_shape_inconsistencies`, so a
+    # richer empty map read as a wrong one. What "no contracts" means is that
+    # every section is empty, whatever sections there are.
+    assert set(m) >= {"intent", "entities", "pages", "workflows"}
+    assert not any(v for v in m.values()), m
 
 
 def test_missing_dossier_still_extracts_entities(app_root):

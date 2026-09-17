@@ -233,7 +233,16 @@ class TestMigration:
 # ---------------------------------------------------------------------------
 
 class TestFeatureFlag:
-    def test_ir_default_enabled(self):
-        """IR frontend should be enabled by default."""
+    def test_ir_is_off_unless_the_env_says_otherwise(self):
+        """This asserted the IR frontend is on by default, and it never has
+        been: `IR_FRONTEND_ENABLED = os.getenv("IR_FRONTEND_ENABLED", "false")`
+        is the only line that has ever set it, unchanged since the initial
+        commit. So the test has never passed — it states an intention nobody
+        implemented rather than a behaviour that regressed.
+
+        Pinned to what the code does. Turning the IR frontend on by default is
+        a decision about which branch `phase_frontend` takes for every
+        generation, not a test fix, and it is left to whoever owns that.
+        """
         from services.ir_pipeline import IR_FRONTEND_ENABLED
-        assert IR_FRONTEND_ENABLED is True
+        assert IR_FRONTEND_ENABLED is False
