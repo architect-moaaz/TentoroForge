@@ -2531,6 +2531,37 @@ class MalformedEnvelope(ValueError):
     """The model's reply did not parse as the §29 envelope."""
 
 
+def _meant_to_store_nothing(node: str, data: dict) -> bool:
+    """Whether an empty data model is this reply's ANSWER rather than its
+    failure to give one.
+
+    TWO AUTHORITIES THAT DISAGREED. `data_model` is told, in its own task
+    text, that some applications store nothing — a calculator, a converter —
+    and that the right answer is then `entities: []` with the reason in
+    `assumptions`. It did exactly that on a measured run and this check
+    refused the reply as malformed, twice, so the node retried until it
+    invented a table. The instruction and the validator were describing
+    different contracts.
+
+    The distinction the check actually needs is not "did it name entities" but
+    "did it MEAN to name none". A stall produces no `entities` key and no
+    reasoning; the instructed answer produces both, because the instruction
+    asks for both. Read, not inferred.
+
+    Only for `data_model`. `entity_fields` is handed one entity and asked for
+    its columns, and "this entity has no fields" is not an answer it can mean
+    — an entity that should not exist is a `change_request`, which is the path
+    the corrections machinery already acts on.
+    """
+    if node != "data_model":
+        return False
+    declared = data.get("entities")
+    if not isinstance(declared, list) or declared:
+        return False
+    said = [str(a).strip() for a in (data.get("assumptions") or [])]
+    return any(said)
+
+
 def parse_envelope(raw: str, *, task_id: str, agent: str,
                    node: str = "") -> AgentResult:
     try:
@@ -2541,7 +2572,7 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     proposals: list[ArtifactProposal] = []
     if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
-        if not proposals:
+        if not proposals and not _meant_to_store_nothing(node, data):
             # A reply that parsed but named nothing is not a data model. Said
             # here rather than committed as an empty section, which is how a
             # missing `data.entities` looked like a stall for three runs.

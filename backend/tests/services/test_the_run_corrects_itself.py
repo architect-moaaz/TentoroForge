@@ -162,3 +162,52 @@ def test_a_question_that_names_nothing_is_still_a_question(svc):
                         "reason": "Re-run this stage with a clean emission"}]))
     assert verdict == "retry"
     assert report.corrections == []
+
+
+# ----------------------------------- an empty data model is an answer, not a stall
+
+def _envelope(**over):
+    import json
+    body = {"entities": [], "confidence": 0.9, "issues": [], "change_requests": [],
+            "assumptions": ["REQ-001 says nothing is stored; a calculator keeps "
+                            "its display on the screen"]}
+    body.update(over)
+    return json.dumps(body)
+
+
+def test_an_application_that_stores_nothing_may_say_so():
+    """MEASURED, ON A LIVE RUN. `data_model` is told in its own task text that
+    some applications store nothing and that the answer is then `entities: []`
+    with the reason in `assumptions`. It did exactly that, three attempts in a
+    row, and the envelope check refused all three as malformed — so the node
+    retried until it invented a table. The instruction and the validator were
+    describing different contracts."""
+    from services.blueprint.executors import parse_envelope
+
+    out = parse_envelope(_envelope(), task_id="t", agent="data_model",
+                         node="data_model")
+    assert out.proposals == []
+    assert out.assumptions
+
+
+def test_a_reply_that_named_nothing_and_said_nothing_is_still_malformed():
+    """The check exists for a real failure: a reply that parsed and stalled.
+    A stall carries no `entities` key and no reasoning; the instructed answer
+    carries both, because the instruction asks for both."""
+    from services.blueprint.executors import MalformedEnvelope, parse_envelope
+
+    for body in (_envelope(assumptions=[]), _envelope(entities=None)):
+        with pytest.raises(MalformedEnvelope):
+            parse_envelope(body, task_id="t", agent="data_model",
+                           node="data_model")
+
+
+def test_a_field_author_cannot_answer_with_nothing():
+    """`entity_fields` is handed ONE entity and asked for its columns. "This
+    entity has no fields" is not an answer it can mean — an entity that should
+    not exist is a change_request, which is the path above."""
+    from services.blueprint.executors import MalformedEnvelope, parse_envelope
+
+    with pytest.raises(MalformedEnvelope):
+        parse_envelope(_envelope(), task_id="t", agent="data_model",
+                       node="entity_fields")
