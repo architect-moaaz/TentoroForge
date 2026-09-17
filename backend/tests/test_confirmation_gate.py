@@ -214,3 +214,133 @@ class TestTheQuestionReachesTheUser:
         assert asking_remove_page[-1].get("_confirmed") is True
         assert result["answer"] == "Removed /x."
         assert result["edited_paths"] == ["src/app/x/page.tsx"]
+
+
+# --------------------------------------------------------------------------- #
+# Asking is writing                                                           #
+# --------------------------------------------------------------------------- #
+
+def _handlers_that_can_ask() -> set[str]:
+    """Tool names whose handler in ``smith_tools`` can return
+    ``needs_confirmation_result``, read off the source.
+
+    Derived rather than listed. A hand-written list is a second copy of the
+    truth that goes stale the moment a seam grows a confirmation — which is
+    exactly how `remove_entity`, `edit_entity` and `remove_workflow` came to be
+    asking questions while outside `_MUTATING_TOOLS`.
+    """
+    import ast
+    import inspect
+
+    from services import smith_tools
+
+    tree = ast.parse(inspect.getsource(smith_tools))
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("_smith_"):
+            continue
+        asks = any(
+            isinstance(c, ast.Call)
+            and getattr(c.func, "id", getattr(c.func, "attr", None)) == "needs_confirmation_result"
+            for c in ast.walk(node)
+        )
+        if asks:
+            found.add(node.name[len("_smith_"):])
+    assert found, "found no confirmation-asking handlers — the AST walk is broken"
+    unknown = found - set(smith_tools.READONLY_HANDLERS)
+    assert not unknown, (
+        f"handler name does not match its tool name: {sorted(unknown)}. "
+        "This check maps `_smith_x` to tool `x`; fix the mapping rather than "
+        "letting the tool go unchecked.")
+    return found
+
+
+class TestAskingIsWriting:
+    """A tool that asks "are you sure?" before it writes is, definitionally, a
+    tool that writes. So membership of `_MUTATING_TOOLS` is not a judgement
+    call for these — it follows from the fact that they can ask at all.
+
+    Seven handlers can ask. Four were registered and three were not
+    (`remove_entity`, `edit_entity`, `remove_workflow`), which left the
+    confirmation as the ONLY gate on the highest-cascade writes Smith has:
+    the two gates that catch a turn which never asked in the first place —
+    understand_ask-before-mutation and no-"Done!"-without-a-mutating-call —
+    do not look at a tool they have never heard of.
+    """
+
+    def test_every_tool_that_can_ask_is_a_mutating_tool(self):
+        from agents.smith_agent import _MUTATING_TOOLS
+
+        missing = _handlers_that_can_ask() - _MUTATING_TOOLS
+        assert not missing, (
+            f"{sorted(missing)} can return needs_confirmation but are not in "
+            "_MUTATING_TOOLS, so they can run with no understand_ask and be "
+            "reported as done with nothing verified.")
+
+    def test_the_check_would_have_caught_the_three(self):
+        """Anchors what the check is worth: these are the ones it found."""
+        asks = _handlers_that_can_ask()
+        assert {"remove_entity", "edit_entity", "remove_workflow"} <= asks
+        assert {"remove_page", "remove_field", "edit_field", "edit_workflow"} <= asks
+
+
+@pytest.mark.parametrize("tool,kind,target", [
+    ("remove_entity", "entity", "Nurse"),
+    ("edit_entity", "entity", "Nurse → Clinician"),
+    ("remove_workflow", "workflow", "ScheduleShift"),
+])
+def test_a_newly_registered_write_is_still_grantable(tmp_path, monkeypatch, tool, kind, target):
+    """Registering a confirmation-asking tool must not make its confirmation
+    ungrantable — the trap the field seams hit. Ask, relay, yes, apply."""
+    import json
+
+    from agents import smith_agent
+    from services import smith_tools
+    from services.confirmation_gate import CONFIRMATION_PROMPT_MARKER
+
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "contracts" / "resource-registry.json").write_text(json.dumps({
+        "entities": [], "relationships": [], "roles": [], "interactions": [],
+    }))
+    asks = needs_confirmation_result(kind, target, ["one thing that names it"])
+    calls: list[dict] = []
+
+    def _stub(output_dir, args):
+        calls.append(dict(args))
+        if args.get("_confirmed"):
+            return {"applied": True, "edited_paths": ["src/x.ts"], "diff_summary": "done"}
+        return asks
+
+    monkeypatch.setitem(smith_tools.READONLY_HANDLERS, tool, _stub)
+
+    def _canned(*steps):
+        def _fn(system_prompt, messages, tool_catalog):
+            for step in steps:
+                yield step
+        return _fn
+
+    understand = {"tool": "understand_ask", "args": {
+        "verb": "remove_page", "route": "/nurses"}}
+
+    asked = smith_agent.run_smith_agent(
+        f"get rid of {target}", str(tmp_path), recall_block="", memory_block="",
+        query_fn=_canned(understand, {"tool": tool, "args": {"entity": "Nurse",
+                                                            "workflow_id": "ScheduleShift"}},
+                         {"tool": "answer", "args": {"text": asks["summary"]}}),
+    )
+    assert CONFIRMATION_PROMPT_MARKER in (asked["answer"] or "")
+    assert asked["pending_confirmation"]["target"] == target
+
+    granted = smith_agent.run_smith_agent(
+        "yes", str(tmp_path), recall_block="", memory_block="",
+        prior_messages=[{"role": "assistant", "content": asked["answer"]}],
+        pending_confirmation=asked["pending_confirmation"],
+        query_fn=_canned(understand,
+                         {"tool": tool, "args": {"entity": "Nurse",
+                                                 "workflow_id": "ScheduleShift",
+                                                 "_confirmed": True}},
+                         {"tool": "run_guards", "args": {}},
+                         {"tool": "answer", "args": {"text": "Done."}}),
+    )
+    assert calls[-1].get("_confirmed") is True
+    assert granted["answer"] == "Done." and granted["edited_paths"] == ["src/x.ts"]
