@@ -1101,6 +1101,75 @@
             "additionalProperties": false
           },
           "default": []
+        },
+        "imports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+              },
+              "table": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "rowCount": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "rejectedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    },
+                    "field": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "column",
+                    "field"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              },
+              "ignoredColumns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "importedAt": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "id",
+              "entity",
+              "table",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
         }
       },
       "additionalProperties": false,
