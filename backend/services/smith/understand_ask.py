@@ -144,9 +144,27 @@ Return ONLY a JSON object with exactly these keys:
                         managers", "the interface should be in Arabic".
       "add_api" / "remove_api" — an API endpoint: "an endpoint that lists
                         wards", "remove the export endpoint".
-      "add_integration" / "remove_integration" — a third-party service:
-                        "send email through SendGrid", "drop the Stripe
-                        integration".
+      "add_integration" / "remove_integration" — WRITE DOWN (or retire) a
+                        third-party service, without wiring it up: "make a
+                        note that we use Stripe for payments", "drop the
+                        Stripe integration". Only when they are recording it
+                        for later — if they want the application to actually
+                        talk to it, that is connect_service.
+      "connect_service" — they want the app to ACTUALLY TALK to an outside
+                        service: "connect it to our Outlook", "connect it to
+                        Xero", "send the emails through our own account",
+                        "send the emails through SendGrid", "text people
+                        through Twilio". Outbound email is connected for
+                        real; anything else is answered with why it cannot be
+                        and what works instead. A COMPLAINT is not this verb:
+                        "the confirmation email never came" is a question, and
+                        the outside services listed below say whether this
+                        application's email is connected — answer it from
+                        those. Put the service in
+                        "integration", in their words ("our Outlook", "Xero").
+                        NEVER put a key, token or password in any field — if
+                        they paste one, leave the field empty and ask for the
+                        NAME of the variable holding it instead.
       "remove_page"   — a whole SCREEN should go: "delete the Wards page",
                         "remove the reports screen". Not a control on a
                         screen (that is "remove").
@@ -161,6 +179,15 @@ Return ONLY a JSON object with exactly these keys:
       "reorder"       — things should MOVE AROUND on a screen that exists:
                         "move the chart above the table", "put the search at
                         the top".
+      "write_guide"   — they want SOMETHING TO GIVE THEIR STAFF, not a change
+                        to the app: "write me a one-page guide for the team",
+                        "something I can hand to the staff", "how do I explain
+                        this to the people using it?", "a cheat sheet for the
+                        drivers". Smith writes it from the screens that
+                        actually built, per role, and saves it in the app so
+                        it can be printed. Nothing about the application
+                        changes. NOT edit_product, which changes what the app
+                        IS called and for.
       "import_data"   — LOAD DATA THEY ALREADY HAVE from the spreadsheet they
                         attached: "here's our customer spreadsheet, load it
                         in", "import these suppliers", "put our existing
@@ -290,6 +317,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
 
   add_integration needs "integration": the service in the user's words;
       remove_integration needs "integration": which one.
+
+  connect_service needs "integration": the service to connect, in the user's
+      words — "our Outlook", "our own account", "SendGrid", "Xero". Do not
+      translate it into a provider or a product name they did not use, and do
+      not include a credential of any kind.
 
   edit_navigation needs:
   "change": what should be different about the menu, in the user's words.

@@ -75,7 +75,19 @@ async def _collect_integrations(
 ) -> dict[str, str]:
     """Decrypt every set integration for this org into a flat dict the
     env-sync module can merge. Ciphertext failures are logged and skipped
-    so a single corrupted row doesn't block the whole publish."""
+    so a single corrupted row doesn't block the whole publish.
+
+    THIS IS WHERE A CONNECTED SERVICE'S CREDENTIAL ENTERS A PUBLISHED APP.
+    The Blueprint records the service and the NAMES of its variables
+    (`services.smith.email_connect`); the owner sets the value once, here, on
+    the platform, encrypted per organisation; and this publish is what puts it
+    in the deployment's environment, where the app's `getSecret` reads it. No
+    credential is ever typed into a conversation, written into the Blueprint
+    or committed to the generated app — so a connection that is live in
+    production and one that is only declared differ by exactly one row in this
+    table, which is why the app asks for presence by name and says so when it
+    is missing.
+    """
     res = await db.execute(
         select(PlatformIntegration).where(PlatformIntegration.org_id == org_id)
     )

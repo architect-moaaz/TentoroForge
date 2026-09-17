@@ -1897,6 +1897,121 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/lib/workflows/launch-roles.ts"], "workflows": len(roles)}
 
 
+#: The module the runtime reads to know what this application is actually
+#: connected to. Its absence means "nothing is declared", which is why
+#: `runtime_injector` writes an empty one for an app whose Blueprint declared
+#: no integration: a static import must always resolve.
+CONNECTED_SERVICES_FILE = "src/lib/integrations/connected.ts"
+
+
+def connected_services(doc: dict) -> list[dict[str, Any]]:
+    """Every integration that SERVES a workflow action, in document order.
+
+    A row with no `serves` is a note for a developer — recorded, not wired —
+    and is deliberately absent here. Only the names of the secrets travel;
+    a value never reaches a projected file any more than it reaches the
+    Blueprint (§42).
+    """
+    from services.smith.email_connect import FROM_KEY, LIVE_KEY
+
+    out: list[dict[str, Any]] = []
+    for row in _live(doc.get("integrations")):
+        serves = str(row.get("serves") or "").strip()
+        if not serves:
+            continue
+        provider = str(row.get("provider") or "")
+        keys = [str(k) for k in row.get("secretRefs") or []]
+        # NO ADAPTER, NO CONNECTION. A row may name a provider nothing in the
+        # runtime can talk to — a hand-authored Blueprint can say
+        # `provider: "mailchimp", serves: "send_email"` — and handing it to
+        # the app would make the step try to send through a path that does not
+        # exist. It is dropped with a reason in the log, and the application
+        # says no service is connected, which is the truth for it.
+        if provider not in LIVE_KEY:
+            logger.warning(
+                "[projection] integration %s serves %s through %r, which has no "
+                "adapter — not projected as a connection",
+                row.get("id"), serves, provider)
+            continue
+        out.append({
+            "action": serves,
+            "name": str(row.get("name") or provider or "an outside service"),
+            "provider": provider,
+            "keys": keys,
+            # Which key makes it live, and which carries the from-address.
+            # Declared once, in `email_connect`, so the runtime does not
+            # re-decide the provider precedence in TypeScript.
+            "liveKey": LIVE_KEY[provider],
+            "fromKey": FROM_KEY if FROM_KEY in keys else "",
+        })
+    return out
+
+
+def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/integrations/connected.ts`` — the declared connections.
+
+    A DECLARATION IS NOT A CONNECTION, and until this file existed the
+    application could not tell the difference. `integrations` recorded the
+    name of a service and the names of its secrets; the `send_email` step
+    read `process.env` directly, sent nothing when it found nothing, and
+    returned `{sent: true}` with an in-app notification instead — so the owner
+    was told the workflow completed and the customer never got the email.
+
+    What this gives the runtime is the one thing it could not derive: WHICH
+    service this application's owner chose, and the name of the variable whose
+    presence means it is live. The value stays where it belongs — the
+    platform's credential store, shipped into the app's environment by
+    `env_writer` locally and by the publish for a deployment.
+    """
+    entries = connected_services(doc)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// What this application is CONNECTED to: for each workflow action that",
+        "// talks to an outside service, the service its owner chose and the NAME",
+        "// of the environment variable that carries the credential. Never a",
+        "// value \u2014 the value is set once on the platform and arrives in this",
+        "// app's environment (.env.local locally, the deployment's env on publish).",
+        "//",
+        "// An action absent from this map has no connected service. A step for it",
+        "// must say so rather than report a send it did not make.",
+        "",
+        "export type ConnectedService = {",
+        "  /** The service as its owner names it, e.g. \"Microsoft 365 / Outlook\". */",
+        "  name: string;",
+        "  /** The adapter that carries it, e.g. \"smtp\" or \"resend\". */",
+        "  provider: string;",
+        "  /** Every variable NAME this provider's path reads. */",
+        "  keys: string[];",
+        "  /** The variable whose presence means the service is live. */",
+        "  liveKey: string;",
+        "  /** The variable carrying the from-address, when the action has one. */",
+        "  fromKey: string;",
+        "};",
+        "",
+        "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {",
+    ]
+    for entry in entries:
+        lines.append(f"  {json.dumps(entry['action'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"],
+            "keys": entry["keys"], "liveKey": entry["liveKey"],
+            "fromKey": entry["fromKey"],
+        }) + ",")
+    lines += [
+        "};",
+        "",
+        "/** The service declared for a workflow action, or undefined. */",
+        "export function connectedService(action: string): ConnectedService | undefined {",
+        "  return CONNECTED_SERVICES[action];",
+        "}",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib" / "integrations"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "connected.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": [CONNECTED_SERVICES_FILE], "services": len(entries)}
+
+
 def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     """Each entity slug -> the roles that may read it and the roles that may
     write it, from the pages that use it.

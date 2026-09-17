@@ -98,6 +98,18 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "remove_api": {"api"},
     "add_integration": {"integration"},
     "remove_integration": {"integration"},
+    # CONNECTED, NOT JUST WRITTEN DOWN. `add_integration` records a service
+    # and the NAMES of its secrets and changes nothing else — which from the
+    # owner's chair is indistinguishable from an application that is broken:
+    # the "email the customer" step still runs and the customer still hears
+    # nothing. This verb is the ask "make it actually talk to X", and it is
+    # answered one of two ways: outbound email has an adapter and is connected
+    # for real, and everything else is refused with the reason and the nearest
+    # thing that works. `integration` is the service in the user's words —
+    # "our Outlook", "Xero", "our own account" — and never a credential: the
+    # value is set by the owner on the platform, and only its variable NAME is
+    # ever spoken about here (§42).
+    "connect_service": {"integration"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -124,6 +136,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # The guide the owner hands their staff. Needs nothing: the audiences and
+    # the screens are read off the composed application, not off the ask —
+    # asking who it is for would be asking the owner to list their own roles.
+    "write_guide": set(),
     # What the application has cost to run. Needs nothing — it is always this
     # application, and the ledger is read whole. Answers a question that had
     # no verb at all: "how much has this cost me?" was the last entry on the
@@ -290,11 +306,24 @@ VERB_HELP: dict[str, str] = {
     "add_api": ("Declare an API endpoint: \"an endpoint that lists wards\". Needs it in the user's words."),
     "remove_api": ("Retire an endpoint. Needs which one (method and path, or id)."),
     "add_integration": (
-        "Declare an integration: \"send email through SendGrid\". Records the "
-        "NAMES of the secrets it needs, never their values. Needs it in the "
-        "user's words."
+        "WRITE DOWN an outside service without wiring it up: \"make a note "
+        "that we use Stripe for payments\". Records the NAMES of the secrets "
+        "it needs, never their values, and says plainly that nothing is "
+        "connected. Needs it in the user's words. NOT connect_service, which "
+        "makes the application actually talk to it."
     ),
     "remove_integration": ("Retire an integration. Needs which one."),
+    "connect_service": (
+        "Make the application actually talk to an outside service: \"connect "
+        "it to our Outlook\", \"send the emails through our own account\", "
+        "\"send email through SendGrid\", \"connect it to Xero\". "
+        "Outbound email has an adapter and is "
+        "connected for real — the service is recorded, the app sends through "
+        "it, and the owner sets the key on the platform, never here. Anything "
+        "else is answered with why it cannot be connected and the nearest "
+        "thing that works. Needs the service in the user's words. NOT "
+        "add_integration, which only writes the service down."
+    ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "
         "nothing, or the user wants it laid out again from scratch."
@@ -355,6 +384,15 @@ VERB_HELP: dict[str, str] = {
         "They want things MOVED AROUND on a screen that already exists: "
         "\"move the chart above the table\", \"put the search at the top\". "
         "Nothing rearranges a composed screen. Needs the screen."
+    ),
+    "write_guide": (
+        "Write the short guide the owner gives their staff: \"write me a "
+        "one-page guide for the team\", \"something I can hand to the staff\", "
+        "\"how do I explain this to my team?\". One page, per role, in the "
+        "words of the people who will use it — derived from the screens that "
+        "actually built, and saved as a file at the top of the application so "
+        "it can be printed and handed on. Changes nothing about the "
+        "application. Needs nothing."
     ),
     "explain_crash": (
         "Something in the RUNNING application broke and they are telling "

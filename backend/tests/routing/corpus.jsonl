@@ -114,9 +114,9 @@
 {"say": "an endpoint that lists wards", "verb": "add_api"}
 {"say": "my IT guy is asking for an API for the nurse list", "verb": "add_api"}
 {"say": "remove the export endpoint", "verb": "remove_api"}
-{"say": "send the emails through SendGrid", "verb": "add_integration"}
-{"say": "text people through Twilio", "verb": "add_integration"}
-{"say": "connect it to our payroll system", "verb": "add_integration"}
+{"say": "send the emails through SendGrid", "verb": "connect_service", "note": "SendGrid sends through its SMTP relay: a real connection"}
+{"say": "text people through Twilio", "verb": "connect_service", "note": "SMS has no adapter; the refusal offers declaring it"}
+{"say": "connect it to our payroll system", "verb": "connect_service", "note": "no adapter: refused with the nearest thing that works"}
 {"say": "take Stripe out, we don't charge anyone", "verb": "remove_integration"}
 {"say": "use this design https://figma.com/design/abc/Nurse-Roster", "verb": "connect_figma"}
 {"say": "our designer sent me this, can you use it", "verb": "connect_figma"}
@@ -136,6 +136,10 @@
 {"say": "start again", "verb": "rebuild"}
 {"say": "that thing I said about approvals — it's the manager who approves, not the admin", "verb": "edit_requirement"}
 {"say": "use this UX Pilot page https://uxpilot.ai/p/abc123", "verb": "connect_uxpilot"}
+{"say": "connect it to our Outlook", "verb": "connect_service"}
+{"say": "send the emails through our own account", "verb": "connect_service"}
+{"say": "connect it to Xero", "verb": "connect_service", "note": "no adapter: the reason, and what works instead"}
+{"say": "make a note that we use Stripe for payments", "verb": "add_integration", "note": "written down for later, not wired up"}
 {"say": "how much has this cost me?", "verb": "spend", "note": "the phrasebook's last dead end"}
 {"say": "what have I spent on this so far", "verb": "spend"}
 {"say": "what did the build cost", "verb": "spend"}
@@ -162,3 +166,88 @@
 {"say": "it's really slow", "verb": "explain_slowness"}
 {"say": "why is it so slow", "verb": "explain_slowness"}
 {"say": "loading takes ages", "verb": "explain_slowness"}
+{"say": "The page is empty", "verb": "compose_route", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "add a dashboard at /", "verb": "compose_route", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Lay the sessions screen out again from scratch", "verb": "compose_route"}
+{"say": "put upcoming sessions and quorum status on the dashboard", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "I cannot see fathersName on the registration page", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "show phone on the nurse form", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "On the nurse list, the button that says Delete should say Archive", "verb": "rename"}
+{"say": "Call it something clearer", "verb": "rename"}
+{"say": "remove the delete button", "verb": "remove", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Take the Delete button off the nurse list", "verb": "remove"}
+{"say": "add a discount field to offers", "verb": "add_field", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "give tasks a due date", "verb": "add_field", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "customers need a phone number", "verb": "add_field", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "rename yearsOfExperience to experienceYears", "verb": "rename_field", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "On a nurse, rename yearsOfExperience to experienceYears", "verb": "rename_field"}
+{"say": "add a Ward entity with a name and a capacity", "verb": "add_entity", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "we don't need the Department entity", "verb": "remove_entity", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "email the admin after a registration", "verb": "add_workflow", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "archive a nurse instead of deleting", "verb": "add_workflow", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "send a reminder every Monday", "verb": "add_workflow", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "when a nurse is registered, also notify the ward manager", "verb": "edit_workflow", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "remove the delete nurse workflow", "verb": "remove_workflow", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "years of experience cannot exceed 60", "verb": "add_rule", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "a nurse needs at least one speciality", "verb": "add_rule", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "raise the experience cap to 70", "verb": "edit_rule", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Drop the rule that a nurse needs at least one speciality", "verb": "remove_rule"}
+{"say": "let anyone open registration without signing in", "verb": "edit_access", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "change the theme colour to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "make it darker and more compact", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "change the theme colour from blue to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Make it look nicer", "verb": "restyle"}
+{"say": "call it Nurse Directory", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "hide the registration page from the menu", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "group these under Admin", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "open on Master Data", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "it is for ward managers", "verb": "edit_product", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "the interface should be in Arabic", "verb": "edit_product", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "the app should also let a nurse mark herself unavailable", "verb": "add_requirement", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "REQ-012 should say the roster is published a week ahead", "verb": "edit_requirement"}
+{"say": "We no longer need the shift-swapping requirement", "verb": "remove_requirement"}
+{"say": "send email through SendGrid", "verb": "connect_service", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "drop the Stripe integration", "verb": "remove_integration", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster", "verb": "connect_figma"}
+{"say": "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster — my token is in FIGMA_TOKEN", "verb": "connect_figma"}
+{"say": "Use this UX Pilot page https://uxpilot.ai/s/nurse-roster", "verb": "connect_uxpilot"}
+{"say": "Use this UX Pilot page https://uxpilot.ai/s/nurse-roster — the key is in UXPILOT_API_KEY", "verb": "connect_uxpilot"}
+{"say": "disconnect the Figma design", "verb": "disconnect_design", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "drop the design", "verb": "disconnect_design", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "compose the pages from components instead", "verb": "disconnect_design", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Put it back how it was", "verb": "revert"}
+{"say": "that was wrong, revert it", "verb": "revert", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "go back", "verb": "revert", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "generate the app", "verb": "rebuild", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "set up a login for dave@clinic.com", "verb": "add_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "add my new receptionist", "verb": "add_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "my six staff need accounts", "verb": "add_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Each of my staff needs their own login", "verb": "add_login"}
+{"say": "Sarah has left", "verb": "remove_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "take away dave@clinic.com's access", "verb": "remove_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Sarah is locked out", "verb": "reset_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "send dave@clinic.com a new password link", "verb": "reset_login", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "One of my team forgot her password — how does she reset it?", "verb": "reset_login"}
+{"say": "I've got all my customers in a spreadsheet, can you load them in?", "verb": "import_data"}
+{"say": "Can I import a CSV of last year's bookings?", "verb": "import_data"}
+{"say": "download the bookings", "verb": "export_data", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Can I get all the bookings out as a spreadsheet?", "verb": "export_data"}
+{"say": "the app crashed", "verb": "explain_crash", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "I got an error", "verb": "explain_crash", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "It crashed when I pressed save", "verb": "explain_crash"}
+{"say": "How do I see the errors?", "verb": "explain_crash"}
+{"say": "this takes forever", "verb": "explain_slowness", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "It's slow", "verb": "explain_slowness"}
+{"say": "call nurses colleagues", "verb": "rename_entity", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "rename the Ward record to Unit", "verb": "rename_entity", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Make the phone number on a nurse a number instead of text", "verb": "change_field_type"}
+{"say": "make that endpoint take a date range", "verb": "edit_api", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Move the chart above the table on the dashboard", "verb": "reorder"}
+{"say": "what have I spent on this", "verb": "spend"}
+{"say": "How much has this cost me so far?", "verb": "spend"}
+{"say": "can you write me a one-page guide for the team?", "verb": "write_guide", "note": "section 06 listed this under \"no document generation\"; handover.py answers it"}
+{"say": "write me a one-page guide for the team", "verb": "write_guide", "note": "the bare ask, as VERB_HELP quotes it"}
+{"say": "something I can hand to the staff", "verb": "write_guide", "note": "no word for guide or document in it"}
+{"say": "how do I explain this to my team?", "verb": "write_guide", "note": "a question in form, a request for the guide"}
+{"say": "how do I explain this to the people using it?", "verb": "write_guide", "note": "same ask, said about the users"}
+{"say": "a cheat sheet for the drivers", "verb": "write_guide", "note": "names a role; the guide is per role anyway"}

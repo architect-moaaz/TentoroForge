@@ -270,6 +270,9 @@ TOOL_TAGS: dict[str, set[str]] = {
     "remove_api":                {"delete", "meta"},
     "add_integration":           {"add", "meta"},
     "remove_integration":        {"delete", "meta"},
+    # Connecting a service edits what the application talks to and writes a
+    # file into it, so it is `edit` as much as `add`.
+    "connect_service":           {"add", "edit", "meta"},
     "add_rule":                  {"add", "form", "entity"},
     "edit_rule":                 {"edit", "form", "entity"},
     "remove_rule":               {"delete", "form", "entity"},

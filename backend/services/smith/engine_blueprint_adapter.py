@@ -147,6 +147,71 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def connection_lines(doc: dict[str, Any], output_dir: str) -> list[dict[str, Any]]:
+    """Each outside service, and whether it is connected or only declared.
+
+    Two halves, from two places. The DECLARATION — what service, which
+    variables carry its credential — is in the document. Whether those
+    variables are SET is in the platform's credential store (or this
+    environment), which no document can know; `platform_secrets.keys_set_for`
+    answers it with NAMES and never touches a value.
+
+    The store is asked only about a service that claims to serve a runtime
+    action. A row with no `serves` is a note for a developer: it is declared,
+    it is reported as declared, and there is nothing to look up.
+    """
+    from services.smith.email_connect import LIVE_KEY, SERVES, sending_steps
+
+    rows = [i for i in (doc.get("integrations") or [])
+            if isinstance(i, dict) and i.get("status") not in ("DEPRECATED", "SUPERSEDED")]
+    steps = [f"{step} in {wf}" for wf, step in sending_steps(doc)]
+    if not rows and not steps:
+        return []
+
+    serving = [r for r in rows if str(r.get("serves") or "").strip()]
+    set_keys: set[str] = set()
+    if serving and output_dir:
+        from services.platform_secrets import keys_set_for
+
+        keys = [str(k) for r in serving for k in r.get("secretRefs") or []]
+        set_keys = keys_set_for(output_dir, sorted(set(keys)))
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        serves = str(row.get("serves") or "").strip()
+        keys = [str(k) for k in row.get("secretRefs") or []]
+        live = LIVE_KEY.get(str(row.get("provider") or ""), "")
+        # A ROW CAN CLAIM TO SERVE SOMETHING THERE IS NO ADAPTER FOR — a
+        # hand-authored Blueprint saying `provider: "mailchimp"`. There is no
+        # key whose presence would make it work, so it is what it is: a
+        # declaration. The projection drops it for the same reason.
+        if serves and not live:
+            serves = ""
+        out.append({
+            "gap": False,
+            "name": str(row.get("name") or ""),
+            "kind": str(row.get("kind") or ""),
+            "provider": str(row.get("provider") or ""),
+            "serves": serves,
+            "secret_names": keys,
+            # NAMES, both of them. A value never enters this context any more
+            # than it enters the Blueprint (§42).
+            "set_names": [k for k in keys if k in set_keys],
+            "connected": bool(serves) and live in set_keys,
+            "needs": live,
+            "sending_steps": steps if serves == SERVES else [],
+        })
+    if steps and not any(i["serves"] == SERVES for i in out):
+        # A GAP IS A FACT ABOUT THIS APPLICATION, not the absence of one.
+        # Steps that send email and no service to send through is the state
+        # behind "the confirmation email never came", and a context that
+        # simply omitted email left Smith with nothing to say about it.
+        out.append({"gap": True, "name": "", "kind": "email", "provider": "",
+                    "serves": SERVES, "secret_names": [], "set_names": [],
+                    "connected": False, "needs": "", "sending_steps": steps})
+    return out
+
+
 def _schema_path(route: str) -> str:
     body = (route or "/").strip("/")
     return f"src/schemas/{body or 'home'}.json"
