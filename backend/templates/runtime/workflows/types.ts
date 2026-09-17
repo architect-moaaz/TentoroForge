@@ -342,6 +342,17 @@ export interface WorkflowExecutionResult {
   log: ExecutionLogEntry[];
   /** Final process variable state */
   output: Record<string, unknown>;
+  /**
+   * What a step could not do, in words for the person who ran it.
+   *
+   * A run is not only "completed" or "failed": a step can do half of what it
+   * says — an email saved as a notification because no email service is
+   * connected — and that used to live in the step's own output where nothing
+   * read it. The engine collects every `notice` a handler returns onto the
+   * run, so the caller that shows "complete · 4 steps" can show the half as
+   * well instead of a success the owner has to disprove.
+   */
+  notices?: string[];
   error?: string;
   /** If paused: which node and what task is pending */
   pausedAt?: string;

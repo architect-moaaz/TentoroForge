@@ -2697,15 +2697,22 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
-    """Everything the server reads: workflow definitions and seed rows."""
+    """Everything the server reads: workflow definitions, connections, seed rows.
+
+    The connections belong beside the definitions because they are read
+    together: a `send_email` step and the service it sends through are one
+    fact, and a step projected without it is the step that reports a send it
+    never made.
+    """
     from services.blueprint.projection import (
-        project_dispatches, project_seed, project_workflows,
+        project_dispatches, project_integrations, project_seed, project_workflows,
     )
 
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     project_dispatches(svc.doc, app_root)
+    project_integrations(svc.doc, app_root)
     project_seed(svc.doc, app_root)
     svc.save()
 

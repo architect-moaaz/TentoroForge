@@ -108,8 +108,8 @@ _WHERE_IT_IS = {
 
 def _status_report(doc: dict) -> str:
     """A deterministic status line read straight off the Blueprint — never a
-    define. Answers 'where are we' with the state, what has been drafted, and
-    the next explicit step."""
+    define. Answers 'where are we' with what has been drafted and the next
+    explicit step, and NOT with the state machine's own name: see below."""
     from services.smith import decisions as _decisions
     state = (doc or {}).get("state", "DISCOVERY")
     reqs = len((doc or {}).get("requirements") or [])
@@ -907,7 +907,7 @@ async def generate_via_blueprint(
             # Effort is per node: thinking bills as output, and a node filling
             # in a constrained shape does not need a frontier thinking budget.
             # The nodes everything downstream derives from stay at `high`.
-            usage = RunUsage()
+            usage = RunUsage.for_app(svc)
             router = tiered_router()
             executor = make_executor(svc, router, usage=usage)
             # §73 — the observer judges each node as it lands and sends what
@@ -1513,11 +1513,14 @@ async def smith_chat(
             # DEFECT-F-07 was an integration ask met with an interview about
             # sync direction for a capability that does not exist. The answer
             # then was a phrase list that refused anything naming an outside
-            # system. `add_integration` is the answer now: it DECLARES the
-            # integration with the names of the secrets it would need and says
-            # plainly that nothing is wired — one honest outcome for every
-            # phrasing, where the list gave "send email through SendGrid" a
-            # declaration and "connect it to our payroll system" a refusal.
+            # system. Two verbs answer it now, and which one depends on
+            # whether there is an adapter: `connect_service` CONNECTS the
+            # outbound email — the service is recorded, the app is projected
+            # to send through it, and the owner sets the key on the platform —
+            # while `add_integration` DECLARES anything else with the names of
+            # the secrets it would need and says plainly that nothing is
+            # wired. A declaration that looked like a connection was the whole
+            # of "the confirmation email never came".
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
@@ -2045,7 +2048,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                   "alreadyComplete": sorted(already),
                   "awaitingApproval": not approved})
 
-    usage = RunUsage()
+    usage = RunUsage.for_app(svc)
     router = tiered_router()
     executor = make_executor(svc, router, usage=usage)
     watcher = anthropic_observer(router, usage=usage)

@@ -52,6 +52,27 @@ export function getActionHandler(
 }
 
 /**
+ * Every notice the steps of this run left behind, oldest first.
+ *
+ * A handler returns `notice` when it did less than its name claims — the
+ * email that became an in-app notification because no service is connected.
+ * Read off the log rather than threaded through a handler argument, so a
+ * handler only has to be honest in its return value; duplicates are dropped
+ * because three steps of the same workflow sending mail through a service
+ * that is not connected is one thing for a person to fix, not three.
+ */
+export function noticesOf(log: ExecutionLogEntry[]): string[] {
+  const out: string[] = [];
+  for (const entry of log ?? []) {
+    const notice = (entry?.output as { notice?: unknown } | undefined)?.notice;
+    if (typeof notice === "string" && notice.trim() && !out.includes(notice)) {
+      out.push(notice);
+    }
+  }
+  return out;
+}
+
+/**
  * Execute a workflow definition.
  *
  * Walks the node graph starting from the trigger node, evaluating
@@ -122,6 +143,7 @@ export async function executeWorkflow(
       status: "failed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       error: "No trigger node found",
     };
   }
@@ -156,6 +178,7 @@ export async function executeWorkflow(
       status: isPaused ? "paused" : "completed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       pausedAt: isPaused ? lastLog.nodeId : undefined,
       pendingTask: isPaused ? {
         nodeId: lastLog.nodeId,
@@ -209,6 +232,7 @@ export async function executeWorkflow(
       status: "failed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       error,
     };
   }
