@@ -356,6 +356,30 @@ sentences:
     source: code
     reaches: {verb: set_logo, states: []}
 
+  - id: looks-logo-here-it-is
+    say: "here is our logo, put it on the app"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-brand-colours-from-the-logo
+    say: "put our brand colours, the green from our logo"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: restyle, states: [change]}
+
+  - id: looks-replace-the-logo
+    say: "remove the old logo and use this one"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-take-the-logo-off
+    say: "take our logo off"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: remove_logo, states: []}
+
   - id: looks-drop-the-logo
     say: "remove the logo"
     checked: {colour: acts, via: handler}

@@ -94,6 +94,14 @@
 {"say": "bigger text, the screen is across the room", "verb": "restyle"}
 {"say": "it looks like a toy — make it look clinical", "verb": "restyle"}
 {"say": "too bright", "verb": "restyle"}
+{"say": "put our logo in the corner", "verb": "set_logo", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "Can I put my logo at the top?", "verb": "set_logo", "note": "a question in form, a request for the mark"}
+{"say": "use this as our logo", "verb": "set_logo", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "remove the logo", "verb": "remove_logo", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "put our brand colours, the green from our logo", "verb": "restyle", "note": "names the logo and asks for colour — restyle, not set_logo"}
+{"say": "here is our logo, put it on the app", "verb": "set_logo", "note": "the file is the request"}
+{"say": "take our logo off", "verb": "remove_logo"}
+{"say": "remove the old logo and use this one", "verb": "set_logo", "note": "says remove and means replace — the reason these are two verbs and not a flag"}
 {"say": "put Master Data first", "verb": "edit_navigation"}
 {"say": "call that menu item Nurse Directory", "verb": "edit_navigation"}
 {"say": "group Nurses, Wards and Shifts under Admin", "verb": "edit_navigation"}
