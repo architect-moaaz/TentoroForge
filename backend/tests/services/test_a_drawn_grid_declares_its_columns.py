@@ -124,4 +124,4 @@ def test_the_children_survive_either_way():
 def test_the_composed_tree_passes_the_validator():
     """The end of it: this exact shape is what the Blueprint rejected."""
     errors = validate_props({"root": _root(GRID_JSX)}, load_catalog())
-    assert not [e for e in errors if "columns" in e], errors
+    assert not [e for e in errors if "columns" in e.split(" — ")[0]], errors

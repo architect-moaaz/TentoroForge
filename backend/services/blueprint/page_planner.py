@@ -34,7 +34,7 @@ from collections import Counter
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 #: Emitted by ``npm run emit:catalog --workspace=packages/library``.
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "contracts" / "component-catalog.json"
@@ -632,6 +632,32 @@ def narrow_to_prop(value: Any, spec: dict) -> Any:
     ]
 
 
+def _allowed_at(schema: Any, path: Iterable[Any]) -> list[str]:
+    """The property names a component's schema allows at `path` — what the
+    model should have written. Empty when the schema says nothing useful
+    there (a `type` error, an enum, a path through `anyOf` branches that
+    disagree)."""
+    node = schema
+    for step in path:
+        if not isinstance(node, dict):
+            return []
+        if isinstance(step, int):
+            node = node.get("items") or {}
+            if isinstance(node, list):
+                node = node[step] if step < len(node) else {}
+        else:
+            node = (node.get("properties") or {}).get(step) or {}
+    while isinstance(node, dict) and not node.get("properties"):
+        branches = node.get("anyOf") or node.get("oneOf") or []
+        objects = [b for b in branches if isinstance(b, dict) and b.get("properties")]
+        if len(objects) != 1:
+            return []
+        node = objects[0]
+    props = (node.get("properties") or {}) if isinstance(node, dict) else {}
+    required = set(node.get("required") or []) if isinstance(node, dict) else set()
+    return [f"{k} (required)" if k in required else k for k in props]
+
+
 def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
     """Prop errors in an instantiated page, against each component's own schema."""
     from jsonschema import Draft7Validator
@@ -668,8 +694,16 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
             # `registry.ts` lifts both out of the props and forwards them to
             # the element, so neither is a component prop this can judge.
             _PASSTHROUGH = {"className", "style"}
+            # `_figmaNodeId` AND ITS KIN ARE PROVENANCE, NOT PROPS. The Figma
+            # and JSX transforms stamp the source node's id onto props so
+            # `realize` can find the region again; the UX Pilot path strips
+            # its copy before proposing, the Figma path does not, and the
+            # catalog's `additionalProperties: false` then refused the page
+            # for carrying the very marker the platform wrote. No model
+            # authors these — they all start with `_figma`.
             checkable = {k: v for k, v in props.items()
-                         if k not in bound and k not in _PASSTHROUGH}
+                         if k not in bound and k not in _PASSTHROUGH
+                         and not k.startswith("_figma")}
             schema = entry["props"]
             if bound and isinstance(schema.get("required"), list):
                 schema = dict(schema)
@@ -694,7 +728,17 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
                 ):
                     continue
                 loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
-                errors.append(f"{path}.props.{loc}: {err.message}")
+                # NAME THE COMPONENT AND WHAT IT TAKES. A path and
+                # "'value' was unexpected" does not say which component was
+                # wrong or what it accepts instead, so the retry guesses:
+                # LabConnect's PAGE-012 wrote {label, value} into an `items`
+                # prop, was refused twice with that sentence, and the
+                # orchestrator stopped asking. The allowed keys come from the
+                # component's own schema at the failing path.
+                allowed = _allowed_at(schema, err.absolute_path)
+                errors.append(f"{path}.props.{loc}: {node.get('type')} {err.message}"
+                              + (f" — {node.get('type')}.{loc} accepts: "
+                                 f"{', '.join(allowed)}" if allowed else ""))
         for i, child in enumerate(node.get("children") or []):
             walk(child, f"{path}.children[{i}]")
 

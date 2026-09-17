@@ -253,6 +253,33 @@ def _workflow_by_id(doc: dict, wid: str) -> dict | None:
 #: (a Save can insert or update), so they are left out rather than guessed. This
 #: is the closed CRUD vocabulary, not a growing exception list: a control that
 #: says one of these must run a workflow that does the matching thing.
+def _acts_on_another_thing(label: str, entity_name: str) -> bool:
+    """Whether an action's object is something OTHER than this page's record.
+
+    Read from the action's own name. `add_test_to_package` joins two things
+    and creates neither, `add_lab_staff` adds staff rather than a Lab, while
+    `add_package` on a TestPackage page is that page's own create — the
+    contract's short name for the entity, which is why the object only has to
+    be part of the entity's name, not equal to it.
+
+    Ambiguous names (`create_user_account` on a User page) fall on the side of
+    NOT demanding, on purpose: a demand that should not have been made costs
+    the page every attempt it has and then the page itself, while a demand
+    that is not made is still caught by the terminal `verification` node.
+    """
+    words = [w for w in re.split(r"[^a-z0-9]+", str(label or "").lower()) if w]
+    if len(words) < 2:
+        return False                       # a bare `add` is a create
+    if {"to", "from", "into", "onto"} & set(words[1:]):
+        return True                        # joins two things; creates neither
+    entity = re.sub(r"[^a-z0-9]", "", str(entity_name or "").lower())
+    obj = "".join(words[1:])
+    for candidate in (obj, obj.rstrip("s"), obj + "s"):
+        if candidate and candidate in entity:
+            return False
+    return True
+
+
 _VERB_DB_OP: dict[str, str] = {
     "create": "db_insert", "add": "db_insert", "new": "db_insert", "register": "db_insert",
     "edit": "db_update", "update": "db_update",
@@ -488,6 +515,15 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
             continue
         verb = _verb_of(label)
         op = _VERB_DB_OP.get(verb)
+        if op and _acts_on_another_thing(label, ent_name):
+            # `add_test_to_package` ADDS A TEST, NOT A PACKAGE. The verb is
+            # the first word and the object is not read at all, so an
+            # association action on a record page was demanding a control
+            # that CREATES the record the page is already showing.
+            # LabConnect's /packages/[id] was refused eight times for not
+            # offering "Create TestPackage" on the package's own detail page,
+            # and never composed. `add_package` still reads as a create.
+            continue
         if op:
             if op in seen or runs_op(op):
                 continue

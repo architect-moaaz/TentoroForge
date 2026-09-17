@@ -139,5 +139,5 @@ def test_a_card_without_a_fill_carries_no_variant():
         root = transform_jsx_to_schema(jsx, {}, canvas=(1440.0, 900.0))
     card = _find(root, "1:2")
     assert card["type"] == "Container" and "variant" not in card["props"]
-    assert not [e for e in validate_props({"root": root}, load_catalog()) if "variant" in e]
+    assert not [e for e in validate_props({"root": root}, load_catalog()) if "variant" in e.split(" — ")[0]]
 

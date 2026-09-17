@@ -118,6 +118,10 @@ ACTION_TYPES = frozenset({
     "BulkActionBar", "Wizard", "Stepper",
 })
 
+# Takes a reader from a listed record to the record itself. Counted as an
+# action on a collection: opening the thing you found is acting on it.
+OPENS_RECORD_TYPES = frozenset({"Link", "NavLink", "CardLink"})
+
 KPI_TYPES = frozenset({"MetricTile", "Stat", "KpiTile", "SplitArc"})
 CHART_TYPES = frozenset({"Chart", "Gauge", "Heatmap", "Sparkline", "Schematic"})
 ACTIVITY_TYPES = frozenset({
@@ -144,6 +148,32 @@ def _a_control_acts(schema: dict) -> bool:
         return True
     return any(any((n.get("props") or {}).get(p) for p in DOES_SOMETHING)
                for n in controls)
+
+
+def _a_record_can_be_acted_on(schema: dict) -> bool:
+    """Whether a collection lets a reader do something with what it lists.
+
+    A ROW ACTION IS AN ACTION, AND A FILTER IS NOT. The rule counted eight
+    button-like component types by walking `children`, so a Table's
+    `rowActions` — a prop, never a child — did not count, while the refusal
+    it printed promised that row actions and filter controls did. LabConnect's
+    `/labs` composed six times with a FilterBar and a Table and was refused
+    each time for a reason its next attempt could not act on. Row actions and
+    anything that opens a record now count, because both are how a reader acts
+    on a record; filtering only narrows the list, so it still does not.
+    """
+    # The same root `findings` walks: a legacy flat page IS its own root.
+    root = schema.get("root") if isinstance(schema.get("root"), dict) else schema
+    for node in _walk(root):
+        if str(node.get("type")) in ACTION_TYPES:
+            return True
+        props = node.get("props") or {}
+        if props.get("rowActions") or props.get("onRowClick"):
+            return True
+        if str(node.get("type")) in OPENS_RECORD_TYPES and (
+                props.get("href") or props.get("navigate") or props.get("to")):
+            return True
+    return False
 
 
 # ------------------------------------------------------------- the demands
@@ -201,11 +231,15 @@ DEMANDS: dict[str, tuple[Demand, ...]] = {
         ),
         Demand(
             rule="collection_no_action", slot="action", types=ACTION_TYPES,
-            detail=("nothing on this collection can be clicked: no create, "
-                    "no row action, no filter control. A reader arrives and "
-                    "leaves."),
-            demand=("Something to do once a record is found. A list nobody "
-                    "can act on is a reading dead end."),
+            check=_a_record_can_be_acted_on,
+            detail=("nothing on this collection can be acted on: no create, "
+                    "no row action, nothing that opens a record. Filtering "
+                    "the list is not acting on what it lists — a reader "
+                    "arrives, narrows, and leaves."),
+            demand=("Something to do with a record once it is found: open "
+                    "it, or act on it where it sits. Narrowing the list is "
+                    "not acting on it, and a list nobody can act on is a "
+                    "reading dead end."),
         ),
     ),
     "record": (
@@ -310,4 +344,5 @@ def brief(family: str) -> str:
 
 __all__ = ["Demand", "DEMANDS", "FAMILIES", "KPI_FLOOR", "brief", "findings",
            "LIST_TYPES", "BODY_TYPES", "FIELD_TYPES", "ACTION_TYPES",
+           "OPENS_RECORD_TYPES",
            "KPI_TYPES", "CHART_TYPES", "ACTIVITY_TYPES"]
