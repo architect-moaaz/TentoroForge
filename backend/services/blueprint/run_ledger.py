@@ -174,6 +174,16 @@ class RunLedger:
                      "subject": subject, "reason": str(reason)[:600],
                      "at": _now()})
 
+    def deferred(self, key: str, section: str, reason: str) -> None:
+        """A finding the node that was judged cannot act on.
+
+        Recorded rather than repaired: sending it back to that node's author
+        spends a round asking for something outside its reach.
+        """
+        self._write({"event": "observer:deferred", "node": key,
+                     "section": section, "reason": str(reason)[:600],
+                     "at": _now()})
+
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
                      "reason": str(reason)[:600], "at": _now()})

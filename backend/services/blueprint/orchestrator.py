@@ -1300,8 +1300,19 @@ def _execute(
     def finish(pool: ThreadPoolExecutor, key: str) -> None:
         state = runs[key]
         finished.add(key)
-        if observer_agent is not None and _watchable(key, state, order, in_plan,
-                                                    finished):
+        # NOT JUDGED WHEN NOTHING CAN BE DONE ABOUT THE VERDICT. A node whose
+        # repair rounds are zero was still sent to the critic on every
+        # subject, and the only thing the verdict could become was a note. On
+        # a four-page build that was 4 of 29 observer calls, 13% of the
+        # observer's cost and 105 seconds, with no repair behind any of them;
+        # it grows with the page count. `page_layouts` is the node, and its
+        # rounds were set to zero on measurement (149 composed pages judged,
+        # none passed after repair). The page is still held to its contract
+        # and its floor when it is composed — that is where its correctness is
+        # enforced — and still checked by `verification` at the end.
+        if (observer_agent is not None
+                and OBSERVER_ROUNDS_BY_NODE.get(key, 1) != 0
+                and _watchable(key, state, order, in_plan, finished)):
             observe(pool, key, _applied(state))
             return
         complete(key)
@@ -1456,6 +1467,23 @@ def _execute(
             complete(key)
             return
         _record_observation(report, ledger, obs)
+        from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
+        # WHAT THIS NODE CANNOT FIX, SAID ONCE AND KEPT. Deferred findings
+        # used to be counted and dropped. The ones the critic raised are the
+        # useful kind — "no Patient entity is defined" — so they travel as
+        # change requests to the report, where Smith and a person can read
+        # them, instead of burning repair rounds on an author that cannot act.
+        for f in getattr(obs, "deferred", ()) or ():
+            if getattr(f, "edge", "") != _CRITIC_EDGE:
+                continue
+            key_ = (key, f.section, f.detail)
+            if key_ in w.deferred_seen:
+                continue
+            w.deferred_seen.add(key_)
+            report.change_requests.append({
+                "section": f.section or "", "reason": f.detail,
+                "raisedBy": f"observer:{key}"})
+            _note(ledger, "deferred", key, f.section or "", f.detail)
         for subject in obs.subjects:
             label = f"{key}:{subject}" if subject else key
             if obs.findings.get(subject):
@@ -1656,6 +1684,9 @@ class _Watch:
     #: burning the remaining round — the observer's biggest source of wasted
     #: re-authoring on hard apps (measured: NKit page_layouts).
     stuck: set[str] = field(default_factory=set)
+    #: Findings already reported as deferred, so a second round's identical
+    #: verdict does not repeat them in the report.
+    deferred_seen: set[tuple] = field(default_factory=set)
 
 
 def _applied(state: _NodeRun) -> list[str]:

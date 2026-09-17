@@ -191,7 +191,16 @@ class _Critic:
         return json.dumps(self.reply)
 
 
-def test_the_observer_judges_a_page_and_records_it_but_never_re_composes_it(svc):
+def test_a_page_is_not_sent_to_the_observer_at_all(svc):
+    """ITS REPAIR ROUNDS ARE ZERO, SO ITS VERDICT COULD ONLY EVER BE A NOTE.
+
+    This used to judge the page, never re-compose it, and leave the verdict as
+    an OUT_OF_SYNC note. Measured on a four-page build: 4 of 29 observer calls
+    (14%), 13% of the observer's cost and 105 seconds, with no repair behind
+    any of them. A composed
+    page is held to its contract and floor when it is written, and checked by
+    `verification` at the end; the critic is not asked about it.
+    """
     calls = []
     def executor(spec):
         calls.append((spec.subject, spec.feedback))
@@ -205,13 +214,13 @@ def test_the_observer_judges_a_page_and_records_it_but_never_re_composes_it(svc)
     svc.doc["pages"] = [p for p in svc.doc["pages"] if p["id"] == "PAGE-001"]
     svc.save()
     report = run(svc, executor, plan=["page_layouts"], observer_agent=Observer(critic=critic, rounds=2))
-    assert [c[0] for c in calls] == ["PAGE-001"]           # composed once; no repair call
-    assert all(c[1] == "" for c in calls)
+    assert [c[0] for c in calls] == ["PAGE-001"]           # composed once
+    assert critic.calls == [], "the critic was asked about a node it cannot change"
     events = [l["event"] for l in read(svc.output_dir, runs(svc.output_dir)[0])]
-    assert "observer:verdict" in events and "observer:repair" not in events
-    assert "page_layouts:PAGE-001" in report.unrepaired    # the verdict is kept as the note
+    assert "observer:verdict" not in events and "observer:repair" not in events
+    assert "page_layouts" in report.completed
     page = next(p for p in svc.doc["pages"] if p["id"] == "PAGE-001")
-    assert page.get("status") == "OUT_OF_SYNC" and "#" in str(page.get("syncNote"))
+    assert page.get("status") != "OUT_OF_SYNC"
 
 
 def test_the_contract_judges_a_page_with_the_other_pages_in_view():

@@ -519,8 +519,21 @@ class Observer:
                     continue
                 if req:
                     detail = f"{req}: {detail}"
+                # AN EMPTY ARTIFACT MEANS "THIS DOES NOT EXIST YET". The
+                # critic is told exactly that above, and this line used to
+                # fill the blank with the subject being judged — so on a
+                # fan-out node, "no Patient entity is defined" was filed
+                # against the User entity and sent to the field author, who
+                # writes the columns of the entity it is handed and cannot
+                # create another. LabConnect spent 34 minutes and 18 repair
+                # rounds on findings of that shape.
+                #
+                # Left empty, `_file` defers it: a per-subject author has
+                # nothing to re-author for it. A single-subject node still
+                # receives it, because that node owns the whole section and
+                # CAN create what is missing.
                 finding = Finding(CRITIC_EDGE, detail=detail,
-                                  artifact_id=artifact or (subject or None),
+                                  artifact_id=artifact or None,
                                   section=section or None)
                 self._file(obs, finding, subject_of)
                 filed += 1
