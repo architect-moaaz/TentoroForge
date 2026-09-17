@@ -29,7 +29,10 @@ from services.page_kind_anatomy import page_family
 _CONTRACT = (pathlib.Path(__file__).resolve().parents[2]
              / "contracts" / "blueprint.schema.json")
 
-FAMILIES = {"dashboard", "collection", "record", "form"}
+# `standalone` is the fifth, and the only one that is not about records: a
+# calculator declared `dashboard` because the enum offered nothing else, and
+# was then required to carry three KPI tiles, a chart and an activity feed.
+FAMILIES = {"dashboard", "collection", "record", "form", "standalone"}
 
 
 def _declared_patterns() -> list[str]:
@@ -57,6 +60,18 @@ def test_the_kinds_that_were_refused_for_not_being_dashboards():
     assert _family_of("search_results") == "collection"
     assert _family_of("data_explorer") == "collection"
     assert _family_of("document_workspace") == "record"
+
+
+def test_a_tool_is_judged_as_a_tool():
+    """The calculator's pattern. Judged by what a self-contained screen owes —
+    values of its own and controls that change them — and not by a floor that
+    counts records it does not have."""
+    from services.a2ui_authority import STANDALONE_FAMILY, is_standalone
+
+    assert _family_of("tool") == STANDALONE_FAMILY
+    assert _family_of("tool", "/") == STANDALONE_FAMILY
+    # A declaration, not an inference. The page says so and is believed.
+    assert is_standalone("tool", {"data": {"primaryEntity": ""}})
 
 
 def test_the_kinds_that_were_judged_by_nothing():

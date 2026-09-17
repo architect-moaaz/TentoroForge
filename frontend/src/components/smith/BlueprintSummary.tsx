@@ -15,6 +15,7 @@ import { useState, type ReactNode } from "react";
 import {
   ArrowRight,
   BarChart3,
+  Calculator,
   Calendar,
   Check,
   CheckCircle2,
@@ -164,6 +165,10 @@ const PAGE_ICON: Record<string, LucideIcon> = {
   timeline: ListOrdered,
   settings: Settings,
   configuration: Settings,
+  // A screen that is not about the application's records. Every other icon
+  // here shows a way of holding records; the fallback document icon said the
+  // opposite of what a calculator is.
+  tool: Calculator,
 };
 
 /** A capability's icon, from what its name says it does. */

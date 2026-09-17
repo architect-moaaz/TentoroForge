@@ -376,7 +376,8 @@
               "data_explorer",
               "command_center",
               "split_view",
-              "document_workspace"
+              "document_workspace",
+              "tool"
             ]
           },
           "module": {

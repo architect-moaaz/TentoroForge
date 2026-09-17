@@ -1070,7 +1070,24 @@ NODE_TASKS: dict[str, str] = {
         "beyond the set is dropped. A page earns its route when it has a "
         "different job, a different primary entity, or a different audience; "
         "a different filter over the same list is a view the contract will "
-        "declare, not a page."
+        "declare, not a page.\n\n"
+        # THE PATTERN A CALCULATOR HAD TO LIE ABOUT. Every other value in the
+        # enum names a way of showing, entering or arranging RECORDS, so a
+        # self-contained tool took `dashboard` — the least-bad option for one
+        # screen at "/" — and the dashboard floor then demanded three KPI
+        # tiles, a chart and a recent-activity surface it had no records for.
+        # Every composition was refused, and the page author bolted a chart
+        # bound to {{resultHistory}} and a feed bound to {{keystrokeLog}} onto
+        # a keypad to get past it. Naming the value in the enum is not enough;
+        # the agent has to be told when it is the right one.
+        "`tool` is the pattern for a screen that is NOT about the "
+        "application's records: a calculator, a converter, a scratch pad, "
+        "anything whose values live on the screen while someone works and are "
+        "not kept afterwards. Give it no `data.primaryEntity` — there is no "
+        "entity, and inventing one to hold a value nobody wants stored is the "
+        "mistake this value exists to prevent. Choose it on what the screen is "
+        "FOR, never on where it sits: a tool is still a tool at \"/\", and "
+        "`dashboard` means a summary of records someone signs in to read."
     ),
     "page_details": (
         "Write the Page Contracts for the pages of ONE feature, the pages given "

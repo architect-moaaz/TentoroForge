@@ -221,6 +221,13 @@ UNCLASSIFIED_FAMILY = "collection"
 #: :data:`UNCLASSIFIED_FAMILY`; see :func:`build_requirement`.
 STANDALONE_FAMILY = "standalone"
 
+#: The pattern a page contract uses to SAY it is one, rather than leaving it to
+#: be inferred from an absence. Added to the enum because every other value
+#: names a way of showing records, so a calculator's contract had to choose
+#: `dashboard` and everything downstream then behaved correctly on a false
+#: premise. Kept in step with `PagePattern` in packages/schema.
+STANDALONE_PATTERN = "tool"
+
 
 def _family_of(kind: Any, route: Any = "") -> str:
     """Every declared kind reduced to one of the four shapes above.
@@ -864,12 +871,23 @@ def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[
 def is_standalone(kind: Any, contract: dict | None) -> bool:
     """Whether this screen is about something other than the app's records.
 
-    Both halves come from the page contract — no declared pattern and no
-    entity — so this is a reading of the definition, not a guess from the
-    route's spelling. Shared by the requirement and the domain context, which
-    otherwise contradicted each other.
+    Two readings, and the first is now a declaration. `tool` is a value of the
+    pattern enum: a page that says it is a self-contained tool IS one, and no
+    inference is needed or wanted. The enum could not say this until it could,
+    which is why the second reading exists.
+
+    The second — no declared pattern and no entity — still holds, for the page
+    whose contract names no pattern at all. It is a reading of the definition
+    rather than a guess from the route's spelling, and it stays because the
+    contract's `pattern` is optional and always has been.
+
+    Shared by the requirement and the domain context, which otherwise
+    contradicted each other.
     """
-    return not str(kind or "").strip() and not _entities_named(contract)
+    declared = str(kind or "").strip().lower()
+    if declared == STANDALONE_PATTERN:
+        return True
+    return not declared and not _entities_named(contract)
 
 
 def _entities_named(contract: dict | None) -> list[str]:
@@ -1442,7 +1460,11 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
     # having none — which is how a calculator whose keys did nothing passed.
     # The tool floor asks the only two questions that mean anything here: does
     # it keep values of its own, and do its controls change them.
-    if is_standalone(kind, contract):
+    # A page that DECLARED itself a tool was judged by `page_kind_findings`
+    # above, which owns the question of what a kind owes. This covers the other
+    # reading — a contract naming no pattern at all — without reporting the
+    # same fault twice.
+    if _family_of(kind, route) != STANDALONE_FAMILY and is_standalone(kind, contract):
         findings += tool_findings(route, schema)
 
     # THE MIRROR OF A DANGLING BINDING, FOR EVERY PAGE. `{{state.total}}` with

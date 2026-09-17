@@ -119,6 +119,13 @@ _FAMILY = {
     "wizard": "form",
     "configuration": "form",
     "settings": "form",
+    # standalone — not about the application's records at all. A calculator, a
+    # converter, a scratch tool. Every family above judges a page by the
+    # records it shows, so this one had nowhere honest to land: a calculator
+    # declared `dashboard` was required to carry three KPI tiles, a chart and a
+    # recent-activity surface, and the page author bolted a chart bound to
+    # {{resultHistory}} onto a keypad to get past it.
+    "tool": "standalone",
 }
 
 # A surface that shows many records. Kanban and Calendar qualify — they are
@@ -319,6 +326,15 @@ def page_kind_findings(kind: Any, route: str, doc: Any) -> list[dict]:
                 "record_no_action", route, "action",
                 "the reader can see this record and do nothing with it — no "
                 "edit, no delete, no advance, not even a way back."))
+
+    elif family == "standalone":
+        # WHAT A TOOL OWES IS NARROWER AND CHECKABLE. It has no records, so
+        # every branch above passes it silently — which is how a calculator
+        # whose keys did nothing cleared every floor there was. `tool_findings`
+        # asks the only two questions that mean anything here: does it keep
+        # values of its own, and do its controls change them.
+        from services.client_state_anatomy import tool_findings
+        out += tool_findings(route, doc)
 
     elif family == "form":
         if not (types & _FIELD_TYPES):

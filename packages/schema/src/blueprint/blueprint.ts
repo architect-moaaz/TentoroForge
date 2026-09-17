@@ -185,6 +185,22 @@ export const PagePattern = z.enum([
   "command_center",
   "split_view",
   "document_workspace",
+  // A SCREEN THAT IS NOT ABOUT THE APPLICATION'S RECORDS. Every other value
+  // here names a way of showing, entering or arranging records, so a
+  // calculator, a converter or a scratch tool had no value it could honestly
+  // take. Asked for "a simple arithmetic calculator", `page_contracts` chose
+  // `dashboard` — the least-bad option for a single screen at "/" — and
+  // everything downstream then behaved correctly on a false premise: the
+  // dashboard floor demanded three KPI tiles, a chart and a recent-activity
+  // surface, none of which a calculator has records for, so every composition
+  // was refused and the page author bolted a chart bound to {{resultHistory}}
+  // and a feed bound to {{keystrokeLog}} onto a keypad to get past it.
+  //
+  // Pairs with `clientState`: a tool's values live on the screen. The two
+  // arrived together because neither is much use alone — a pattern that says
+  // "not about records" and no way to say what it IS about leaves the same
+  // hole.
+  "tool",
 ]);
 
 /** §33 — every page has a structured contract *before* implementation. */

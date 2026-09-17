@@ -2145,13 +2145,34 @@ def page_slots(doc: dict) -> list[dict]:
     if designed:
         return frame_slots(designed)
 
+    entities = (doc.get("data") or {}).get("entities") or []
+
+    # A HOME SLOT THAT SAID `dashboard` NO MATTER WHAT THE APPLICATION WAS.
+    #
+    # This is where a calculator became a dashboard. The slot is the answer
+    # space — the whole point of slots is that the agent fills what it is
+    # given rather than inventing — and the only slot an application with no
+    # entities gets is this one. It arrived pre-labelled `dashboard`, the
+    # agent filled it exactly as told, and the dashboard floor then demanded
+    # three KPI tiles, a chart and a recent-activity surface from a keypad.
+    # Every composition was refused; the page author bolted a chart bound to
+    # {{resultHistory}} onto the keys to get past it.
+    #
+    # A dashboard summarises records. With no entities there are none, so the
+    # label was not a default that happened to be wrong here — it was
+    # unsatisfiable by construction. Read from the data model rather than
+    # guessed, and the agent may still choose otherwise: a slot is what to
+    # answer, not what to say.
+    home_pattern = "dashboard" if entities else "tool"
+    home_prompt = ("Where a user lands." if entities else
+                   "The screen itself. This application has no stored records, "
+                   "so its home is the tool, not a summary of anything.")
     slots: list[dict] = [
         {"feature": "home", "entity": None, "requirements": [],
-         "pages": [{"slot": "home", "pattern": "dashboard",
-                    "prompt": "Where a user lands."}],
+         "pages": [{"slot": "home", "pattern": home_pattern,
+                    "prompt": home_prompt}],
          "prompt": "Omit if the app opens on a list."},
     ]
-    entities = (doc.get("data") or {}).get("entities") or []
     names = {e.get("id"): e.get("name") or e.get("id") for e in entities}
     for entity in entities:
         eid = entity.get("id")

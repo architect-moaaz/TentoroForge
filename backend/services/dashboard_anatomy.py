@@ -151,6 +151,22 @@ def dashboard_findings(route: str, doc: Any, registry: Any) -> list[dict]:
     if not is_dashboard_route(route):
         return []
 
+    # A PAGE THAT SAYS IT IS NOT A DASHBOARD IS NOT ONE. `is_dashboard_route`
+    # reads the URL, and a URL says nothing about what a screen is for: a
+    # calculator lives at "/" like any other single-page application, and this
+    # floor then demanded three KPI tiles, a chart and a recent-activity
+    # surface from a keypad that has no records to count.
+    #
+    # The page's own declared pattern is the stronger evidence and it travels
+    # with the projected schema (`meta.pattern`). Read, never inferred: only a
+    # contract that NAMES a non-dashboard pattern is excused, so a page that
+    # declares nothing is judged exactly as before.
+    from services.page_kind_anatomy import page_family
+
+    declared = str(((doc or {}).get("meta") or {}).get("pattern") or "").strip().lower()
+    if declared and page_family(declared) not in (None, "dashboard"):
+        return []
+
     root = page_root(doc)
     if root is None:
         # A dashboard we cannot read is a finding, never silence. Returning []
