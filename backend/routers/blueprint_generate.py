@@ -108,8 +108,8 @@ _WHERE_IT_IS = {
 
 def _status_report(doc: dict) -> str:
     """A deterministic status line read straight off the Blueprint — never a
-    define. Answers 'where are we' with the state, what has been drafted, and
-    the next explicit step."""
+    define. Answers 'where are we' with what has been drafted and the next
+    explicit step, and NOT with the state machine's own name: see below."""
     from services.smith import decisions as _decisions
     state = (doc or {}).get("state", "DISCOVERY")
     reqs = len((doc or {}).get("requirements") or [])
@@ -907,7 +907,7 @@ async def generate_via_blueprint(
             # Effort is per node: thinking bills as output, and a node filling
             # in a constrained shape does not need a frontier thinking budget.
             # The nodes everything downstream derives from stay at `high`.
-            usage = RunUsage()
+            usage = RunUsage.for_app(svc)
             router = tiered_router()
             executor = make_executor(svc, router, usage=usage)
             # §73 — the observer judges each node as it lands and sends what
@@ -2045,7 +2045,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                   "alreadyComplete": sorted(already),
                   "awaitingApproval": not approved})
 
-    usage = RunUsage()
+    usage = RunUsage.for_app(svc)
     router = tiered_router()
     executor = make_executor(svc, router, usage=usage)
     watcher = anthropic_observer(router, usage=usage)

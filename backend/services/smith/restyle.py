@@ -151,7 +151,8 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
     brief = brief_for(change, design, previous)
     agent = DAG[NODE].agent
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
-                                    usage=RunUsage(), reasoning=reasoning)
+                                    usage=RunUsage.for_app(svc, phase="change"),
+                                    reasoning=reasoning)
     feedback = ""
     out = None
     for attempt in range(1, MAX_ATTEMPTS + 1):

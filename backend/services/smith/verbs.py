@@ -119,6 +119,12 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # What the application has cost to run. Needs nothing — it is always this
+    # application, and the ledger is read whole. Answers a question that had
+    # no verb at all: "how much has this cost me?" was the last entry on the
+    # owner phrasebook's dead-end list, and every figure it wants has been on
+    # disk the whole time.
+    "spend": set(),
     # The owner's own data, from the spreadsheet they attached. Needs only
     # WHICH RECORDS it holds — the file is not a slot, for the same reason
     # `revert` has none: it is always the one just attached, and an attachment
@@ -379,6 +385,15 @@ VERB_HELP: dict[str, str] = {
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "
         "when a change is larger than a single screen."
+    ),
+    "spend": (
+        "What this application has cost to run: \"how much has this cost "
+        "me?\", \"what has this spent so far\", \"show me the usage\", "
+        "\"how many tokens has this burned\". Reads the usage ledger for "
+        "this application and reports the model spend — building it, the "
+        "changes since, and where it went. Says plainly that the figure is "
+        "the platform's cost of running the models and not an invoice. Needs "
+        "nothing, and changes nothing."
     ),
 }
 
