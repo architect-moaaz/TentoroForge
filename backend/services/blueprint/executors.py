@@ -2668,9 +2668,42 @@ class RunUsage:
     its tokens intact and its dollar figure withheld — a fabricated total is
     worse than an honest gap, especially when the point of mixing providers is
     to compare what they cost.
+
+    WHOSE SPEND IT IS, AND WHAT IT WAS FOR. ``project`` and ``phase`` are
+    settled once, where the run is started and both are known, because the
+    calls themselves are not all in a position to say. The observer is the
+    case that proved it: it judges a document it was handed and has no
+    ``BlueprintService``, so it recorded ``project=""`` and every critic call
+    landed in the ledger under the literal string ``blueprint``. Summing a
+    project's rows then silently omitted the watching — 19-28% of three
+    measured builds — and the omission looked like a smaller bill rather than
+    a missing one. The alternative, matching those rows back by the times they
+    were written, is a guess: runs overlap, and a guess about money is worse
+    than no answer.
     """
 
     entries: list[dict[str, Any]] = field(default_factory=list)
+    #: The application every call on this run is spending on — its
+    #: ``application.id``. Used whenever a call site cannot say for itself.
+    project: str = ""
+    #: What this run IS to the person who owns the application: ``build``
+    #: while it is being made (defining it, building it, building it again),
+    #: ``change`` for anything asked for afterwards. Recorded per row so the
+    #: two can be told apart without reading timestamps.
+    phase: str = "build"
+
+    @classmethod
+    def for_app(cls, svc: Any, *, phase: str = "build") -> "RunUsage":
+        """A ledger that already knows whose run it is and what it is for.
+
+        The one place the application's id and the run's purpose are both in
+        hand is where the run is started, so that is where they are settled —
+        rather than at each of the dozen call sites that record a call, only
+        some of which are in a position to know either.
+        """
+        doc = getattr(svc, "doc", None) or {}
+        return cls(project=str((doc.get("application") or {}).get("id") or ""),
+                   phase=phase)
 
     def record(self, *, node: str, agent: str, usage: Usage,
                elapsed_s: float, project: str = "") -> None:
@@ -2698,12 +2731,13 @@ class RunUsage:
             from services.build_usage import record_usage
 
             record_usage(
-                project=project or "blueprint",
+                project=project or self.project or "blueprint",
                 agent=f"{node}:{agent}",
                 model=usage.model,
                 usage=usage.as_ledger_dict(),
                 duration_ms=int(elapsed_s * 1000),
                 kind="blueprint",
+                phase=self.phase,
             )
         except Exception:  # ledger is best-effort; never fail a run over it
             pass

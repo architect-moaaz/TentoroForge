@@ -685,6 +685,24 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Undone."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _spend(self) -> "TurnResult":
+        """What this application has cost to run.
+
+        Answers, changes nothing, and touches no path — so it resolves even
+        when there is no figure to give: "I cannot see what it cost" is a
+        complete answer, and the only alternative is a zero that reads like a
+        statement of account.
+        """
+        from services.smith.spend import run as spend_run
+
+        out = spend_run(str(self.output_dir), reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason")
+                                         or "I could not read what this has cost."))
+        return TurnResult(status="resolved",
+                          answer=str(out.get("diff_summary") or ""),
+                          touched_paths=[])
     def _import_data(self, understanding: dict) -> "TurnResult":
         """Load the spreadsheet they attached into one kind of record.
 
@@ -1094,6 +1112,8 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        if verb == "spend":
+            return self._spend()
         if verb == "import_data":
             return self._import_data(understanding)
         if verb == "export_data":

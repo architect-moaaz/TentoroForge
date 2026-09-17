@@ -497,9 +497,18 @@ class Observer:
         usage = getattr(raw, "usage", None)
         if self.usage is not None and usage is not None:
             try:
+                # NO PROJECT OF ITS OWN, AND IT MUST NOT INVENT ONE. The
+                # observer judges a document it was handed; it holds no
+                # service and cannot name the application. It used to pass
+                # `project=""`, which the ledger wrote as the literal string
+                # `blueprint` — so every critic call on every build landed in
+                # one anonymous bucket and a per-project total silently left
+                # the watching out, 19-28% of three measured builds. The run's
+                # own `RunUsage` knows whose run it is; leaving this off is
+                # what lets it say so.
                 self.usage.record(node=f"observer:{obs.node}",
                                   agent=OBSERVER_AGENT, usage=usage,
-                                  elapsed_s=time.monotonic() - t0, project="")
+                                  elapsed_s=time.monotonic() - t0)
             except Exception:  # noqa: BLE001 — the ledger never ends a run
                 pass
         try:
