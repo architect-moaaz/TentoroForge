@@ -103,3 +103,62 @@ def test_a_dry_run_reports_without_changing_anything(svc):
     orchestrator._act_on(svc, "entity_fields", _ask(), report, commit=False)
     assert report.corrections == []
     assert "status" not in svc.doc["data"]["entities"][0]
+
+
+# ------------------------------------------------ the retry that follows it
+
+def _outcome(change_requests, *, confidence=0.35):
+    """An agent result shaped the way `_apply_subject` reads one."""
+    from services.blueprint.agent_contract import AgentResult
+
+    return AgentResult(task_id="t", agent="data_model", status="completed",
+                       proposals=[], change_requests=list(change_requests),
+                       confidence=confidence)
+
+
+def _apply(svc, outcome, subject="ENTITY-001", attempt=1, max_attempts=3):
+    from services.blueprint.orchestrator import (
+        RunReport, _apply_subject, _NodeRun,
+    )
+
+    report = RunReport()
+    state = _NodeRun(subjects=[subject], pending=[subject])
+    verdict = _apply_subject(
+        svc, "entity_fields", state, subject, outcome,
+        attempt=attempt, max_attempts=max_attempts, commit=True,
+        user_request="", report=report,
+    )
+    return verdict, report, state
+
+
+def test_a_subject_the_run_just_retired_is_not_asked_about_again(svc):
+    """227 seconds to conclude the table should not exist, the entity retired
+    on that conclusion, and the same agent immediately asked to author its
+    columns — a worse answer in 57 seconds, then two observer repair rounds on
+    a table the run had already agreed to remove."""
+    verdict, report, _state = _apply(svc, _outcome(_ask()))
+    assert verdict == "applied"
+    assert [c["retired"] for c in report.corrections] == ["ENTITY-001"]
+
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    gone = next(e for e in fresh.doc["data"]["entities"] if e["id"] == "ENTITY-001")
+    assert gone["status"] == "DEPRECATED"
+
+
+def test_objecting_to_somebody_elses_artifact_still_leaves_work_to_do(svc):
+    """A subject that survives its own objection is still unwritten."""
+    verdict, report, _state = _apply(
+        svc, _outcome(_ask(retire="ENTITY-002")), subject="ENTITY-001")
+    assert verdict == "retry"
+    assert [c["retired"] for c in report.corrections] == ["ENTITY-002"]
+
+
+def test_a_question_that_names_nothing_is_still_a_question(svc):
+    """The retry exists for a real case: `data_model` is bimodal, and a stub
+    asks to be re-run in its own change_requests. That names no artifact, so
+    nothing is retired and the retry is still the right answer."""
+    verdict, report, _state = _apply(
+        svc, _outcome([{"section": "data.entities",
+                        "reason": "Re-run this stage with a clean emission"}]))
+    assert verdict == "retry"
+    assert report.corrections == []

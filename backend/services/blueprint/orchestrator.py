@@ -2196,7 +2196,26 @@ def _apply_subject(
     # calculator's `entity_fields` came back at confidence 0.35 saying the
     # entity should not exist — the correction belongs here, before the retry
     # asks the same impossible question again.
-    _act_on(svc, key, getattr(outcome, "change_requests", None), report, commit=commit)
+    retired = _act_on(svc, key, getattr(outcome, "change_requests", None),
+                      report, commit=commit)
+
+    # A SUBJECT THAT NO LONGER EXISTS IS NOT A SUBJECT TO RE-ASK ABOUT.
+    #
+    # The correction above is carried out and the retry then asked the same
+    # agent for the same artifact anyway. On the calculator, `entity_fields`
+    # spent 227 seconds concluding that CalculatorSession should not be a
+    # table, said so, had the entity retired — and was immediately asked to
+    # author its columns again. It produced a worse answer in 57 seconds, and
+    # the observer then spent two repair rounds, 126 seconds, judging the
+    # columns of a table the run had already agreed to remove.
+    #
+    # Retiring the subject IS the outcome. Nothing is left to write, and the
+    # ledger records why rather than leaving a node that looks skipped.
+    if subject and subject in retired:
+        report.change_requests.extend(
+            getattr(outcome, "change_requests", None) or [])
+        _note(ledger, "node_subject", key, subject, _at(), total, True)
+        return "applied"
 
     if application.needs_clarification or outcome.status == "blocked":
         if attempt < max_attempts:
@@ -2248,7 +2267,7 @@ def _apply_round(
 
 
 def _act_on(svc: "BlueprintService", key: str, change_requests: Any,
-            report: "RunReport", *, commit: bool) -> None:
+            report: "RunReport", *, commit: bool) -> set[str]:
     """Carry out the corrections this node asked for (§30).
 
     Every agent could already say "the fault is in that section", and the run
@@ -2259,15 +2278,19 @@ def _act_on(svc: "BlueprintService", key: str, change_requests: Any,
     reporting on.
     """
     if not commit or not change_requests:
-        return
+        return set()
     try:
         from services.blueprint.corrections import apply_corrections
         retired = apply_corrections(svc, change_requests, asked_by=key)
     except Exception as exc:  # noqa: BLE001 — a correction never fails a run
         logger.warning("[corrections] %s: %s", key, exc)
-        return
+        return set()
     for artifact in retired:
         report.corrections.append({"node": key, "retired": artifact})
+    # WHICH ONES WENT, not just that some did. A node whose own subject was
+    # retired has nothing left to author, and the caller cannot know that from
+    # a count.
+    return {str(a) for a in retired}
 
 
 def _asked(application: Any) -> str:

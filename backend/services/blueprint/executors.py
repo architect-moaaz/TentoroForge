@@ -1151,6 +1151,26 @@ NODE_TASKS: dict[str, str] = {
         "hole."
     ),
     "workflows": (
+        # A CALCULATOR GOT FIVE. `Calculate`, `ClearCalculator`, `EnterDigit`,
+        # `EnterDecimalPoint`, `SetOperator` — one per key — each a server
+        # process posting to an endpoint, against a table the run had already
+        # been told should not exist. Authoring their step graphs took 212
+        # seconds, declaring them 59 more, and the page then wired its keys to
+        # them, so every press was a round trip that wrote to a row nothing
+        # ever created.
+        #
+        # None of it was this agent's mistake: it was asked what processes the
+        # requirements describe, and "clear the display" is one. What it was
+        # never told is that a process here means the SERVER doing something,
+        # and that a screen changing its own values is not that.
+        "SOME APPLICATIONS RUN NO SERVER PROCESS AT ALL, and then this section "
+        "is empty. A workflow reads or writes the application's records; if "
+        "the data model holds no entities, there is nothing for one to act on "
+        "and `workflows: []` is the correct and complete answer. A screen that "
+        "works something out from what is on it — a calculator's keys, a "
+        "converter's fields — does that in the browser through the page's own "
+        "`clientState`, and needs no workflow, no endpoint and no table. Do "
+        "not declare one per button.\n\n"
         "Declare the business processes as workflows: for each, its `name`, "
         "`purpose`, `trigger`, the page that launches it (`launchedFrom`, "
         "required for a manual trigger) and its `inputs`. DO NOT write "
