@@ -98,6 +98,21 @@ Return ONLY a JSON object with exactly these keys:
                         "add a Ward Manager role", "only admins can delete a
                         nurse", "make Master Data admin-only", "let anyone
                         open registration without signing in".
+      "add_login"     — a PERSON should be able to log in: "set up a login
+                        for dave@clinic.com", "add my new receptionist",
+                        "my six staff need accounts", "give Sarah access".
+                        This is about WHO EXISTS, not what a role may do —
+                        edit_access is roles and permissions, this is one
+                        person's account. The account is created with no
+                        password and a one-time link they use to choose one.
+      "remove_login"  — a PERSON should no longer be able to log in: "remove
+                        Dave's login", "Sarah has left", "revoke
+                        dave@clinic.com". Not remove_page, not edit_access.
+      "reset_login"   — a PERSON cannot get in and needs a way back: "reset
+                        Dave's password", "Sarah is locked out", "send
+                        dave@clinic.com a new password link". NEVER ask for or
+                        repeat a password: the answer is always a fresh
+                        one-time link they use to set their own.
       "add_rule"      — a NEW business rule constraining a form or a record:
                         "years of experience cannot exceed 60", "a nurse
                         needs at least one speciality".
@@ -250,6 +265,28 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
 
   edit_access needs:
   "change": who should be able to do what, in the user's words.
+
+  add_login needs:
+  "email": the email address the person will sign in with, exactly as they
+      gave it. If they named a person but no address ("a login for Dave"),
+      leave this "" and ask for the address in "clarification_needed" — an
+      account is identified by it, and inventing one locks the person out of
+      their own login. Several people in one message is several asks (see
+      "asks"), one address each.
+      NEVER put a password here or anywhere else. If they offer one ("make her
+      password Summer2026"), leave it out entirely, do not repeat it in your
+      reply, and say that the person chooses their own from a link.
+  "person_name": their name as the user said it ("Dave Okafor"), or "".
+  "role": the role they sign in as, if the user named one ("as a ward
+      manager"), or "". A role the application does not have is still their
+      words — it is recorded against the account, not invented into the
+      access model.
+
+  remove_login / reset_login need:
+  "person": who, as the user identified them — their email address if they
+      gave one, otherwise the name ("Dave"). It is resolved against the people
+      who actually have logins, and an ambiguous name is refused rather than
+      guessed, so copy what they said rather than choosing between two people.
 
   add_rule needs:
   "rule": the rule in the user's words.
@@ -534,6 +571,16 @@ def understand_ask(
         "element_label": str(data.get("element_label") or "").strip(),
         # restyle: the change to the look, in the user's words.
         "change": str(data.get("change") or "").strip(),
+        # THE PEOPLE WHO LOG IN. `email` identifies an account being created;
+        # `person` is how the user referred to an existing one, resolved
+        # against the roster rather than here. A password is not a field on
+        # purpose: there is nowhere in this contract to put one, because Smith
+        # must never hold one (§42, and this reply is written to the
+        # conversation log).
+        "email": str(data.get("email") or "").strip(),
+        "person": str(data.get("person") or "").strip(),
+        "person_name": str(data.get("person_name") or "").strip(),
+        "role": str(data.get("role") or "").strip(),
         # workflows: what a new process should do, or which existing one is meant.
         "workflow": str(data.get("workflow") or "").strip(),
         # rules: the rule in the user's words, or which existing one is meant.
@@ -582,6 +629,7 @@ SHAPE: frozenset[str] = frozenset({
     "widgets", "figma_url", "token_env", "uxpilot_ref", "key_env", "treat_as",
     "target_file", "element_label", "change", "workflow", "rule", "requirement",
     "api", "integration", "new_value", "entity", "field", "asks",
+    "email", "person", "person_name", "role",
 })
 
 

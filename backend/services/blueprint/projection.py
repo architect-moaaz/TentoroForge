@@ -1803,12 +1803,48 @@ def _humanise_field(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", " ", name).replace("_", " ").strip().title()
 
 
+#: A field the seed must not invent a value for, however the Blueprint spells
+#: it. Anything this writes is either a plaintext password — a readable
+#: credential in a file that is committed, exported and published (§42) — or a
+#: label like "Password Hash 1", and BOTH produce an account that cannot be
+#: signed into, because `auth.ts` bcrypt-compares what it finds.
+#:
+#: THREE RULES ABOUT CREDENTIAL-SHAPED NAMES, because they answer three
+#: different questions, and each is narrower than the last on purpose:
+#:
+#:   * `sensitive_column_guard.is_sensitive_column` — what never reaches a
+#:     SCREEN or a generated payload. The widest: reset tokens, client
+#:     secrets and private keys have no business being displayed either.
+#:   * `functional_completeness._CREDENTIAL_COLUMNS` — what a WORKFLOW may
+#:     not write to a platform table. Wide is free there: a workflow has no
+#:     business writing `salt` to `users` either.
+#:   * this one — what the seed may not DERIVE A VALUE FOR, in any table.
+#:     Over-reaching here corrupts demo data: `salt` is a real column in a
+#:     recipe app and `passes` in a gym one, and blanking them to protect a
+#:     credential trades one broken application for another. It is also held
+#:     to what the runtime can fill (`_unusableCredentials` fills a
+#:     password column and nothing else), so omitting more than that would
+#:     lose the whole row to a NOT NULL constraint instead.
+#:
+#: A column whose name contains "password" is a credential in every
+#: application there is. That is the whole rule, with no exceptions to keep.
+def _is_credential_field(name: str) -> bool:
+    return "password" in re.sub(r"[^a-z]", "", str(name or "").lower())
+
+
 def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
     A preview of an empty database shows empty states everywhere, which looks
     identical to a broken one. Values are derived, never random, so the same
     Blueprint seeds the same rows and a screenshot is reproducible.
+
+    NO CREDENTIAL IS DERIVED. A `password`/`passwordHash` field is left out of
+    every row: the seed cannot produce a value that works (a hash is not
+    derivable from a Blueprint) and every value it could produce is a readable
+    credential in a file that ships. The runtime seed fills the column with a
+    hash nobody holds, so the row exists as data and the account cannot be
+    signed into — `admin@example.com` and the invited accounts are the ways in.
 
     AN ENTITY THE OWNER HAS LOADED DATA INTO GETS NONE. The demo rows exist so
     an empty screen is not mistaken for a broken one; an entity holding the
@@ -1836,6 +1872,8 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
             record = {}
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):
+                    continue
+                if _is_credential_field(field.get("name")):
                     continue
                 record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
             out_rows.append(record)
@@ -2268,9 +2306,15 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: `/signup` was gated — the gate redirected the very visitor who has no account
 #: yet straight back to `/login`, so "Sign up" never opened the signup page.
 #: The pages that create or restore a session cannot themselves require one.
+#:
+#: `set-password` is the third of them. It is where a setup link lands — the
+#: screen on which someone the owner invited, or someone whose password was
+#: reset, chooses a password. Gated, it would redirect the one visitor who
+#: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
+#: nothing: the page shows only the email its own one-time token resolves to.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
-    "login", "signup",
+    "login", "signup", "set-password",
 )
 
 
