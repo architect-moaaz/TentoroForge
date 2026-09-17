@@ -496,6 +496,15 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     except Exception as e:
         errors.append(f"Failed to inject file storage: {e}")
 
+    # The connected-services module the workflow runtime imports. On its own,
+    # because it is a static import in shipped code: folded into another
+    # injector, one unrelated failure there would leave the app unable to
+    # compile.
+    try:
+        copied.extend(_ensure_connected_services_stub(output_path))
+    except Exception as e:
+        errors.append(f"Failed to write the connected-services stub: {e}")
+
     # Rewrite any LLM-hallucinated workflow routes (non-existent getWorkflowEngine)
     # to the real stateless API so `next build` doesn't break.
     try:
@@ -644,6 +653,36 @@ def _plan_has_commerce_flag(output_path: Path) -> bool:
     except Exception:
         return False
     return False
+
+
+def _ensure_connected_services_stub(output_path: Path) -> list[str]:
+    """`src/lib/integrations/connected.ts`, when the projection wrote none.
+
+    The Blueprint projection (`project_integrations`) writes which service
+    each workflow action talks to. The workflow runtime imports that module
+    statically, so it must always resolve — an app whose Blueprint declares no
+    connection, and every app built before connections existed, gets an EMPTY
+    map, which reads as "no service is connected" and is the truth for it.
+    Never overwrites: the projected file is the real answer.
+    """
+    out = output_path / "src" / "lib" / "integrations" / "connected.ts"
+    if out.exists():
+        return []
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(chr(10).join([
+        "// Written by the Blueprint projection (project_integrations).",
+        "// Empty: this application declares no connected service, so every step",
+        "// that would talk to one says so instead of reporting a send it did not",
+        "// make.",
+        "export type ConnectedService = { name: string; provider: string;"
+        " keys: string[]; liveKey: string; fromKey: string };",
+        "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {};",
+        "export function connectedService(action: string): ConnectedService | undefined {",
+        "  return CONNECTED_SERVICES[action];",
+        "}",
+        "",
+    ]), encoding="utf-8")
+    return ["src/lib/integrations/connected.ts"]
 
 
 def _inject_file_storage(output_path: Path) -> list[str]:

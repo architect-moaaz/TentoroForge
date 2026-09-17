@@ -1551,6 +1551,10 @@
             },
             "default": []
           },
+          "serves": {
+            "type": "string",
+            "default": ""
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },

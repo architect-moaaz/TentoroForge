@@ -48,8 +48,11 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
             files.extend(str(f) for f in (out.get("files") or []))
 
     _run("data_layer", lambda: project_data_layer(svc.doc, app_root))
+    # Workflow definitions, the connected-services map and the seed: the
+    # projection node's own function, so a re-projection writes exactly what
+    # a build writes.
     _run("integrations", lambda: _project_integration(svc, app_root))
-    files.append("src/lib/workflows/definitions")
+    files += ["src/lib/workflows/definitions", "src/lib/integrations/connected.ts"]
     _run("frontend", lambda: apply_frontend_projection(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),

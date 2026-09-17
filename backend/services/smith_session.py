@@ -280,6 +280,30 @@ class SmithSession:
             )
         return TurnResult(status="resolved", answer=out["summary"])
 
+    def _connect_service(self, understanding: dict) -> "TurnResult":
+        """Make the application talk to an outside service, or say why not.
+
+        Outbound email is the one that is real: the owner names their service,
+        the Blueprint records it with the NAMES of its variables, the
+        projection writes the binding into the app, and the key itself is set
+        once on the platform — never here, because this conversation is
+        written to disk (§42). Anything with no adapter is the refusal shape:
+        the reason, and the nearest thing that works, as chips.
+        """
+        from services.smith.email_connect import run as go
+
+        said = str(understanding.get("integration") or "").strip()
+        out = go(str(self.output_dir), service=said, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason")
+                                         or "I could not connect that and have changed nothing."),
+                              options=list(out.get("options") or []))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _disconnect_design(self, user_message: str) -> "TurnResult":
         """Remove the connected design and compose every screen from components.
 
@@ -971,6 +995,8 @@ class SmithSession:
         if verb in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement",
                     "edit_product", "add_api", "remove_api", "add_integration", "remove_integration"):
             return self._definition(verb, understanding, self._ask)
+        if verb == "connect_service":
+            return self._connect_service(understanding)
         if verb == "connect_figma":
             return self._connect_figma(understanding)
         if verb == "connect_uxpilot":

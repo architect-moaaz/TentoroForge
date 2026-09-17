@@ -16,13 +16,22 @@ def test_lifecycle_verb_only_matches_a_bare_command():
     assert _lifecycle_verb("") is None
 
 
-def test_status_report_never_defines_and_reads_state():
-    assert "DISCOVERY" in _status_report({})
-    assert "define" in _status_report({}).lower()
+def test_status_report_never_defines_and_says_where_it_is():
+    """A STATE MACHINE'S NAME IS NOT AN ANSWER, and `_status_report` stopped
+    printing one: "DISCOVERY" and "BLUEPRINT_REVIEW" told a person nothing
+    about what to do. It says where the application is and what the next act
+    is, in words — which is what these assertions hold it to now. (This test
+    asserted the old wording and this module could not even be imported, so
+    nothing here ran; the state names went, and nobody saw.)"""
+    empty = _status_report({})
+    assert "nothing is written down" in empty.lower()
+    assert "tell me what you want to build" in empty.lower()
+    assert "DISCOVERY" not in empty
     doc = {"state": "BLUEPRINT_REVIEW", "requirements": [{"id": "REQ-001"}],
            "pages": [{"id": "PAGE-001"}], "decisions": [{"id": "DEC-001", "source": "user"}]}
     r = _status_report(doc)
-    assert "BLUEPRINT_REVIEW" in r and "1 requirement" in r and "approve" in r.lower()
+    assert "BLUEPRINT_REVIEW" not in r
+    assert "**1** thing(s) it has to do" in r and "approve" in r.lower()
 
 
 def test_functionless_brief_guard_is_conservative():
@@ -98,45 +107,54 @@ def test_requirement_report_when_nothing_is_defined_yet():
     assert "no requirements defined" in out and "define" in out.lower()
 
 
-# ── DEFECT-F-07: honest refusal for an unsupported external integration ──
+# ── DEFECT-F-07: an integration ask, answered honestly ──
+#
+# `_unsupported_integration` was a phrase list that refused any message naming
+# an outside system, with Figma and UX Pilot as its exception list — and it is
+# gone, which left this module unimportable and its other twenty tests
+# uncollected. Two things answer the ask now, and which one depends on whether
+# there is an adapter rather than on the shape of the sentence:
+# `connect_service` CONNECTS outbound email, and `add_integration` DECLARES
+# anything else and says so every time. These tests keep what the old ones
+# were for: a service Forge cannot talk to is named, refused with a reason,
+# and handed the nearest thing that works — and internal wiring is never
+# mistaken for an outside service.
 
-from routers.blueprint_generate import (
-    _unsupported_integration, _unsupported_integration_reply,
-)
-
-
-def test_unsupported_integration_is_detected():
-    assert _unsupported_integration("Integrate with Greenhouse.") == "Greenhouse"
-    assert _unsupported_integration("connect to Salesforce") == "Salesforce"
-    assert _unsupported_integration("please sync with our Stripe account") \
-        == "our Stripe account"
-    assert _unsupported_integration("pull from HubSpot nightly") == "HubSpot nightly"
-
-
-def test_supported_design_sources_are_not_refused():
-    # Figma / UX Pilot have their own connect flow — never the F-07 refusal.
-    assert _unsupported_integration("integrate with Figma") is None
-    assert _unsupported_integration("connect to UX Pilot") is None
+from services.smith.email_connect import refusal, service_for
 
 
-def test_internal_wiring_is_not_mistaken_for_an_integration():
-    # "connect X to the dashboard/page/list" is internal, not external.
-    assert _unsupported_integration("connect the form to the dashboard") is None
-    assert _unsupported_integration("connect to the candidates page") is None
-    assert _unsupported_integration("sync to the roles table") is None
+def test_a_service_there_is_no_adapter_for_is_not_matched_into_one():
+    for said in ("Integrate with Greenhouse.", "connect to Salesforce",
+                 "please sync with our Stripe account", "pull from HubSpot nightly"):
+        assert service_for(said) is None, said
 
 
-def test_non_integration_messages_are_ignored():
-    assert _unsupported_integration("add a candidates page") is None
-    assert _unsupported_integration("what does this app do?") is None
-    assert _unsupported_integration("") is None
+def test_the_design_tools_are_not_email_services():
+    # Figma / UX Pilot have their own connect verbs and their own credentials.
+    assert service_for("integrate with Figma") is None
+    assert service_for("connect to UX Pilot") is None
 
 
-def test_integration_reply_names_the_system_and_offers_an_alternative():
-    r = _unsupported_integration_reply("Greenhouse")
-    assert "Greenhouse" in r
-    assert "requirement" in r.lower()          # offers the real alternative
-    assert "figma" in r.lower() and "pilot" in r.lower()  # names what IS supported
+def test_internal_wiring_is_not_mistaken_for_an_outside_service():
+    assert service_for("connect the form to the dashboard") is None
+    assert service_for("connect to the candidates page") is None
+    assert service_for("sync to the roles table") is None
+
+
+def test_messages_about_nothing_outside_match_nothing():
+    assert service_for("add a candidates page") is None
+    assert service_for("what does this app do?") is None
+    assert service_for("") is None
+
+
+def test_the_refusal_names_the_system_and_offers_what_works():
+    said, options = refusal("Greenhouse", {})
+    assert "Greenhouse" in said
+    # Why it cannot be done, and the two things that can: connect the email,
+    # or write it down with the names of the secrets it would need.
+    assert "cannot connect" in said and "adapter" in said
+    assert any("email" in o.lower() for o in options)
+    assert any("Declare Greenhouse" in o for o in options)
 
 
 # ── DEFECT-C-03/B-09: a change at the definition gate redrafts the definition ──

@@ -75,6 +75,18 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "remove_api": {"api"},
     "add_integration": {"integration"},
     "remove_integration": {"integration"},
+    # CONNECTED, NOT JUST WRITTEN DOWN. `add_integration` records a service
+    # and the NAMES of its secrets and changes nothing else — which from the
+    # owner's chair is indistinguishable from an application that is broken:
+    # the "email the customer" step still runs and the customer still hears
+    # nothing. This verb is the ask "make it actually talk to X", and it is
+    # answered one of two ways: outbound email has an adapter and is connected
+    # for real, and everything else is refused with the reason and the nearest
+    # thing that works. `integration` is the service in the user's words —
+    # "our Outlook", "Xero", "our own account" — and never a credential: the
+    # value is set by the owner on the platform, and only its variable NAME is
+    # ever spoken about here (§42).
+    "connect_service": {"integration"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
     # A new field on an existing entity's data model. `field` carries at least
@@ -211,6 +223,16 @@ VERB_HELP: dict[str, str] = {
         "user's words."
     ),
     "remove_integration": ("Retire an integration. Needs which one."),
+    "connect_service": (
+        "Make the application actually talk to an outside service: \"connect "
+        "it to our Outlook\", \"send the emails through our own account\", "
+        "\"connect it to Xero\". Outbound email has an adapter and is "
+        "connected for real — the service is recorded, the app sends through "
+        "it, and the owner sets the key on the platform, never here. Anything "
+        "else is answered with why it cannot be connected and the nearest "
+        "thing that works. Needs the service in the user's words. NOT "
+        "add_integration, which only writes the service down."
+    ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "
         "nothing, or the user wants it laid out again from scratch."

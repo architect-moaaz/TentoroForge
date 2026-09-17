@@ -1355,11 +1355,22 @@ export function registerDefaultActions(): void {
     return { sent: true, channel: "in_app", notificationId };
   });
 
-  // Real email — provider priority (mutually exclusive):
-  //   1. SMTP (via nodemailer) when SMTP_HOST is set — corporate mail servers,
-  //      Gmail/Outlook app passwords, self-hosted (Postfix, Mailu, …).
-  //   2. Resend (HTTP, no npm dep) when RESEND_API_KEY is set — hosted email API.
-  //   3. In-app notification fallback so the message is never lost.
+  // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND
+  // THROUGH: `src/lib/integrations/connected.ts` is projected from the
+  // Blueprint's `integrations` (the owner chose it in conversation) and names
+  // the provider plus the NAME of the variable that carries its credential.
+  //
+  //   1. The declared service, when one is declared — SMTP via nodemailer, or
+  //      Resend over HTTP.
+  //   2. No declaration: whichever credential the environment happens to hold
+  //      (SMTP first), which is how every app built before the declaration
+  //      existed keeps working.
+  //   3. NOTHING CONNECTED, OR THE SEND FAILED: the message is persisted as an
+  //      in-app notification so it is not lost, and the step returns
+  //      `sent: false` with a `notice` saying so in words an owner can act on.
+  //      It used to return `{sent: true, channel: "in_app"}` here, so a
+  //      workflow that never emailed anybody reported a completed run — the
+  //      "the confirmation email never came" that no screen explained.
   // Credentials resolved via getSecret() so admins can override env from the
   // /settings/integrations UI without restarting the app.
   registerActionHandler("send_email", async (config, ctx) => {
@@ -1394,10 +1405,26 @@ export function registerDefaultActions(): void {
       }
     }
     const { getSecret } = await import("@/lib/integrations/resolver");
-    const from = (await getSecret("resend", "FORGE_EMAIL_FROM")) || "notifications@example.com";
+    const { connectedService } = await import("@/lib/integrations/connected");
+    const service = connectedService("send_email");
+    const ownFrom = await getSecret("resend", "FORGE_EMAIL_FROM");
+    const from = ownFrom || "notifications@example.com";
+    // The from-address an owner never set: the mail goes out from a stand-in,
+    // which is the "it's sending from a weird address" complaint. Said once,
+    // on a send that actually happened, rather than guessed at afterwards.
+    const fromNotice = ownFrom
+      ? undefined
+      : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
 
-    // 1. SMTP wins when SMTP_HOST is set.
-    const smtpHost = await getSecret("smtp", "SMTP_HOST");
+    // 1. SMTP: the declared provider, or an SMTP_HOST in the environment when
+    //    nothing is declared. A DECLARED provider is never overridden by the
+    //    other one's stray credential — the owner said which service sends.
+    const smtpDeclared = service ? service.provider === "smtp" : true;
+    const smtpHost = smtpDeclared ? await getSecret("smtp", "SMTP_HOST") : undefined;
+    // A PROVIDER THAT WAS TRIED AND REFUSED is not a provider that was never
+    // configured, and the notice must not say it was: an owner who has set
+    // the credential would go looking for a setting that is already there.
+    let refused = "";
     if (smtpHost && to) {
       const port = Number((await getSecret("smtp", "SMTP_PORT")) || "587");
       const user = await getSecret("smtp", "SMTP_USER");
@@ -1414,15 +1441,19 @@ export function registerDefaultActions(): void {
         });
         const info: any = await transporter.sendMail({ from, to, subject, html: `<p>${body}</p>` });
         // Contract-declared `messageId`. nodemailer surfaces it as info.messageId.
-        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null };
+        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null, notice: fromNotice };
       } catch (e) {
         console.warn("[workflow] send_email: smtp failed:", e);
+        refused = `${service?.name ?? "the mail server"} refused the message (${e instanceof Error ? e.message : String(e)})`;
         // Fall through to the fallback — do NOT try Resend after SMTP was
         // configured; the two are mutually exclusive.
       }
     } else {
-      // 2. Resend — only when SMTP isn't configured.
-      const key = await getSecret("resend", "RESEND_API_KEY");
+      // 2. Resend — the declared provider, or the key the environment holds
+      //    when nothing is declared and SMTP is not configured.
+      const key = (!service || service.provider === "resend")
+        ? await getSecret("resend", "RESEND_API_KEY")
+        : undefined;
       if (key && to) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
@@ -1432,38 +1463,48 @@ export function registerDefaultActions(): void {
           });
           if (res.ok) {
             const j: any = await res.json().catch(() => null);
-            return { sent: true, channel: "email", messageId: j?.id ?? null };
+            return { sent: true, channel: "email", messageId: j?.id ?? null, notice: fromNotice };
           }
           console.warn("[workflow] send_email: resend error", res.status);
-        } catch (e) { console.warn("[workflow] send_email failed:", e); }
+          refused = `${service?.name ?? "Resend"} rejected the message (HTTP ${res.status})`;
+        } catch (e) {
+          console.warn("[workflow] send_email failed:", e);
+          refused = `${service?.name ?? "Resend"} could not be reached (${e instanceof Error ? e.message : String(e)})`;
+        }
       }
     }
 
-    // 3. Fallback — persist so the message is never lost. But be honest
-    // about it: return channel="in_app" AND a warning flag so a downstream
-    // audit/UI can distinguish "actually delivered by email" from "landed
-    // as an in-app notification because no address was resolvable / the
-    // provider errored". The `sent:true` claim used to hide both failure
-    // modes silently.
+    // 3. NOT SENT. The message is persisted so it is not lost, and the step
+    // says which of the four reasons it was: no service is connected, the
+    // connected service's credential is not set here, there was nobody to
+    // send to, or the provider itself refused. `sent` is false for all four
+    // — it used to be true, with `channel: "in_app"`, which is why an owner
+    // could watch a workflow report success while no email existed.
     const table = (schema as any).forgeNotifications;
     if (table) {
       try {
         await (db as any).insert(table).values({ title: subject || "Email", message: body, userId: null, role: null, type: "email", entityId: null, read: false });
       } catch { /* ignore */ }
     }
+    // `notice` is what the owner reads. The engine collects every step's
+    // notice onto the run, the dispatch shows them on the toast the person
+    // who pressed the button is already looking at, and the wording says
+    // what to do rather than naming an internal state.
+    const notice = refused
+      ? `${refused} — nothing was sent, and the message was saved as a notification instead.`
+      : !to
+      ? "No email address could be worked out for this step, so nothing was sent — it was saved as a notification instead."
+      : service
+        ? `Email is set up to go through ${service.name}, but its credential (${service.liveKey}) is not set in this environment — nothing was sent, and the message was saved as a notification instead.`
+        : "No email service is connected to this application, so the email was not sent — it was saved as a notification instead. Ask Forge to connect one.";
     return {
-      sent: true,
+      sent: false,
       channel: "in_app",
-      // A0-7: `messageId` is contract-declared, but only the two PROVIDER paths
-      // returned it — so on this fallback the declared path resolved to
-      // undefined with no explanation. Returning an explicit null keeps the
-      // path resolvable and says what it means: delivered, but not by a
-      // provider that issues message ids. `channel` and `warning` carry the
-      // detail.
+      // A0-7: `messageId` is contract-declared, so the path stays resolvable
+      // on this branch too; null says no provider issued one.
       messageId: null,
-      warning: to
-        ? "email provider failed — persisted as in-app notification"
-        : "no email address resolvable (no `to`, and role→email lookup empty) — persisted as in-app notification",
+      notice,
+      warning: notice,
     };
   });
 

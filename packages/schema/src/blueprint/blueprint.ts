@@ -1268,6 +1268,20 @@ export const Integration = z.object({
   provider: z.string().default(""),
   /** Names only. §42/§99 — raw credentials never live in the Blueprint. */
   secretRefs: z.array(z.string()).default([]),
+  /**
+   * The workflow action type this integration SERVES — `send_email` for
+   * outbound mail — or "" when it serves none.
+   *
+   * WHY A DECLARATION AND NOT AN INFERENCE. A row with `kind: "email"` used to
+   * be the whole record, and nothing downstream could tell a service the
+   * runtime can actually talk to from a note left for a developer: both read
+   * as "email", and an owner who asked for a confirmation email got a
+   * declaration and an app that silently sent nothing. `serves` names the
+   * runtime capability, so the projection can write the binding into the app
+   * (`src/lib/integrations/connected.ts`) and the step that sends can say
+   * which service it is sending through — or that none is connected.
+   */
+  serves: z.string().default(""),
   ...artifactBase,
 });
 

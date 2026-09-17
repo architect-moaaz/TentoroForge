@@ -537,6 +537,22 @@ def assemble(doc: dict, app_root: str | Path, *,
         # the request, which is correct for any port a preview lands on.
         f"AUTH_TRUST_HOST=true\n"
     )
+    # THE VARIABLES A CONNECTED SERVICE READS, BY NAME AND WITH NO VALUE.
+    # `.env.example` is the file a developer who exports this application
+    # copies, and until now it said nothing about the email the app sends —
+    # so the one thing standing between a run and a delivered message was
+    # invisible outside the platform. The values come from the platform's
+    # credential store (`services.env_writer` writes `.env.local`, a publish
+    # writes the deployment's environment); an example file carries names.
+    from services.blueprint.projection import connected_services
+
+    for service in connected_services(doc):
+        env_body += (
+            f"\n# {service['name']} — carries this application's "
+            f"`{service['action']}` steps. Set these on the platform under "
+            "Settings \u2192 Integrations, or here for a local run.\n"
+            + "".join(f"# {key}=\n" for key in service["keys"])
+        )
     (out / ".env.example").write_text(env_body, "utf-8")
 
     # Next.js gives `.env.local` precedence over `.env`, and the scaffold ships

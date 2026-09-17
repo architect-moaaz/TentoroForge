@@ -332,6 +332,8 @@ _VERB_NOTES: dict[str, str] = {
         "add named sections to a screen: 'put upcoming sessions and quorum status on the dashboard'. NOT for a new data-model field (see add_field).",
     'compose_route':
         'build or rebuild the screen at a route. Use this when a route renders nothing.',
+    'connect_service':
+        "make the application ACTUALLY TALK to an outside service: 'connect it to our Outlook', 'send the emails through our own account', 'connect it to Xero'. Outbound email is connected for real; anything with no adapter is refused with the reason and the nearest thing that works. `integration` is the service in the user's words — never a key, which must not reach the conversation log.",
     'connect_figma':
         'attach a Figma design as evidence. `token_env` is the NAME of the environment variable holding the token (e.g. FIGMA_TOKEN); never the token itself, which must not reach the conversation log.',
     'connect_uxpilot':
@@ -664,6 +666,15 @@ TOOL_CATALOG: list[dict] = [
     {"name": "remove_integration",
      "signature": "remove_integration(integration) -> {applied, diff_summary}",
      "desc": "RETIRE AN INTEGRATION by name."},
+    {"name": "connect_service",
+     "signature": "connect_service(integration) -> {applied, edited_paths, diff_summary, reason?, options?}",
+     "desc": "CONNECT AN OUTSIDE SERVICE FOR REAL, not just declare it: \"connect it to our "
+             "Outlook\", \"send the emails through our own account\". Outbound email has an "
+             "adapter \u2014 the service is recorded in the Blueprint with the NAMES of its "
+             "variables, the app is projected to send through it, and the owner sets the key "
+             "once on the platform (never here). A service with no adapter is refused with the "
+             "reason and the nearest thing that works, and nothing changes. Pass the service in "
+             "the user's words; never a credential."},
     {"name": "edit_access",
      "signature": "edit_access(change) -> {applied, edited_paths, diff_summary, reason?}",
      "desc": "CHANGE WHO CAN DO WHAT \u2014 roles, permissions, which roles open which "
@@ -1350,6 +1361,7 @@ READONLY_HANDLERS = {
     "edit_product":             lambda output_dir, args: _smith_definition(output_dir, "edit_product", args),
     "add_api":                  lambda output_dir, args: _smith_definition(output_dir, "add_api", args),
     "remove_api":               lambda output_dir, args: _smith_definition(output_dir, "remove_api", args),
+    "connect_service":          lambda output_dir, args: _smith_connect_service(output_dir, args),
     "add_integration":          lambda output_dir, args: _smith_definition(output_dir, "add_integration", args),
     "remove_integration":       lambda output_dir, args: _smith_definition(output_dir, "remove_integration", args),
     "add_rule":                 lambda output_dir, args: _smith_rule(output_dir, "add_rule", args),
@@ -1461,6 +1473,17 @@ def _smith_field_change(output_dir: str, verb: str, args: dict) -> dict:
     field = str(field.get("name") or "") if isinstance(field, dict) else str(field)
     return _field_run(output_dir, verb, entity=str(args.get("entity") or ""), field=field,
                       new_value=str(args.get("new_value") or args.get("new_name") or ""))
+
+
+def _smith_connect_service(output_dir: str, args: dict) -> dict:
+    from services.smith.email_connect import run as _connect_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "connect_service requires an object arg"}
+    said = str(args.get("integration") or args.get("service") or args.get("request") or "").strip()
+    if not said:
+        return {"applied": False, "edited_paths": [],
+                "reason": "nothing given. Pass integration: the service to connect, in the user's words."}
+    return _connect_run(output_dir, service=said)
 
 
 def _smith_definition(output_dir: str, verb: str, args: dict) -> dict:

@@ -1513,11 +1513,14 @@ async def smith_chat(
             # DEFECT-F-07 was an integration ask met with an interview about
             # sync direction for a capability that does not exist. The answer
             # then was a phrase list that refused anything naming an outside
-            # system. `add_integration` is the answer now: it DECLARES the
-            # integration with the names of the secrets it would need and says
-            # plainly that nothing is wired — one honest outcome for every
-            # phrasing, where the list gave "send email through SendGrid" a
-            # declaration and "connect it to our payroll system" a refusal.
+            # system. Two verbs answer it now, and which one depends on
+            # whether there is an adapter: `connect_service` CONNECTS the
+            # outbound email — the service is recorded, the app is projected
+            # to send through it, and the owner sets the key on the platform —
+            # while `add_integration` DECLARES anything else with the names of
+            # the secrets it would need and says plainly that nothing is
+            # wired. A declaration that looked like a connection was the whole
+            # of "the confirmation email never came".
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
