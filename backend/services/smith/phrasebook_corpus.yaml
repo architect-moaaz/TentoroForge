@@ -504,6 +504,51 @@ sentences:
     source: code
     reaches: {verb: revert, states: []}
 
+  # -- Something to hand your staff ----------------------------------------
+
+  # THE SECOND SENTENCE THE DOCUMENT GOT WRONG, and it was wrong the same way
+  # round as the first. Section 06 listed the guide as reaching nothing — "no
+  # document generation" — at the moment the app stops being the owner's toy
+  # and is handed to the people who have to use it, and the two asks recorded
+  # straight after it ("my staff say the form takes too long to fill in", "two
+  # people complained they can't find the search") are what the missing guide
+  # cost. `services/smith/handover.py` answers it now.
+  - id: handover-one-page-guide-document
+    say: "can you write me a one-page guide for the team?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: write_guide, states: []}
+
+  - id: handover-one-page-guide
+    say: "write me a one-page guide for the team"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: write_guide, states: []}
+
+  - id: handover-hand-to-the-staff
+    say: "something I can hand to the staff"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: write_guide, states: []}
+
+  - id: handover-explain-to-my-team
+    say: "how do I explain this to my team?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: write_guide, states: []}
+
+  - id: handover-explain-to-people-using-it
+    say: "how do I explain this to the people using it?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: write_guide, states: []}
+
+  - id: handover-cheat-sheet-for-drivers
+    say: "a cheat sheet for the drivers"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: write_guide, states: []}
+
   # -- Getting it built, looked at and out ---------------------------------
 
   - id: lifecycle-status
