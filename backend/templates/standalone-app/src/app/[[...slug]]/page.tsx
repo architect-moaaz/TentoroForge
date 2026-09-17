@@ -1,8 +1,8 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { renderSchemaPage } from "@/lib/schema-page";
-import { schemas as routesRegistry } from "@/schemas/registry";
+import { entryRoute, schemas as routesRegistry } from "@/schemas/registry";
 
 /**
  * DV-BIND: dynamic-segment aware catch-all.
@@ -68,6 +68,20 @@ export default async function Page({
         /* not this one — keep trying */
       }
     }
+  }
+  if (!matched && isRoot && entryRoute) {
+    // MOST APPLICATIONS DECLARE NO PAGE AT "/". A master-data app is
+    // `/add-data` and `/master-data`; nothing is at the root. The scaffold
+    // used to ship a landing page there and it had to be retired — a route
+    // group contributes nothing to the URL, so `(dashboard)/page.tsx` WAS "/"
+    // and collided with this file. That left the root with nothing behind it:
+    // a sign-in redirect, and a 404 on the way back from it.
+    //
+    // `entryRoute` is projected from the Blueprint — the page marked `entry`,
+    // or the first thing in the navigation — and is empty when the
+    // application genuinely has a page at "/", in which case this never runs
+    // and the schema above renders.
+    redirect(entryRoute);
   }
   if (!matched) notFound();
 

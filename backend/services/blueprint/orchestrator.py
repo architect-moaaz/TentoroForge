@@ -2589,7 +2589,7 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     projection makes it unnecessary.
     """
     from services.blueprint.assembly import (
-        apply_assembly, page_funnel, verify_build,
+        apply_assembly, page_funnel, verify_boot, verify_build,
     )
 
     assembled = apply_assembly(
@@ -2605,7 +2605,25 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
 
     result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
     result.setdefault("install", 0)
+
+    # AND THEN IT HAS TO START. `next build` does not catch a route collision:
+    # an app with two files resolving to "/" built clean, exit 0, full route
+    # listing — and `next dev` refused to start. Every node had completed and
+    # the first person to learn the application was broken was the person
+    # running it.
+    #
+    # Booted AFTER the production build so the verified `.next` is what the
+    # tree is left holding; the dev server writes its own and is stopped.
+    # `entry` comes from the Blueprint rather than being assumed: "/" for a
+    # single-page tool that IS the root, the entry page for an app whose root
+    # forwards. Asserting a shape here would refuse a calculator for correctly
+    # serving its own landing page.
+    from services.blueprint.projection import _entry_route
+
+    boot = verify_boot(app_root, entry=_entry_route(svc.doc) or "/")
+
     runtime = dict(svc.doc.get("runtime") or {})
+    runtime["boot"] = boot
     runtime["build"] = {"install": result["install"], "build": result["build"],
                         "status": "passed"}
     # An unsubstituted placeholder does fail the build above — but as a

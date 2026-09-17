@@ -1511,6 +1511,13 @@ def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_pat
     seen: list[dict] = []
     monkeypatch.setattr(assembly, "verify_build",
                         lambda root, **kw: seen.append(kw) or {"install": 0, "build": 0})
+    # The build node also STARTS the app now — `next build` does not catch a
+    # route collision, so compiling is not the whole gate. Stubbed for the
+    # same reason the build is: this test asserts what the install was told,
+    # and a real dev server would make it minutes long.
+    monkeypatch.setattr(assembly, "verify_boot",
+                        lambda root, **kw: {"port": 0, "entry": "/", "status": 200,
+                                            "seconds": 0.0})
     monkeypatch.setattr(assembly, "apply_assembly", lambda *a, **k: {})
     monkeypatch.setattr(assembly, "page_funnel",
                         lambda doc, root: {"planned": 0, "served": 0, "missing": []})

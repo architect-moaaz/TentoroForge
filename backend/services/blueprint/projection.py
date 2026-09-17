@@ -469,7 +469,7 @@ def project_frontend(doc: dict, app_root: str | Path,
     for name in stale:
         (root / name).unlink()
 
-    _write_route_registry(root, written)
+    _write_route_registry(root, written, doc)
 
     return {
         "files": written,
@@ -555,13 +555,52 @@ def apply_frontend_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
     return result
 
 
-def _write_route_registry(root: Path, written: list[str]) -> None:
+def _entry_route(doc: dict | None) -> str:
+    """Where someone arriving at "/" should be sent when no page IS "/".
+
+    MOST APPLICATIONS DECLARE NO PAGE AT THE ROOT. A master-data app is
+    `/add-data` and `/master-data`; nothing is at "/". The scaffold used to
+    ship a landing page there, and it had to be retired because a route group
+    contributes nothing to the URL — so that file WAS "/" and collided with
+    the catch-all that serves every other page. Retiring it left the root with
+    nothing behind it: a sign-in redirect, and a 404 on the way back.
+
+    The Blueprint already says where to go. `entry: true` marks the page each
+    audience arrives at (§ the page contract), and the navigation tree's first
+    item is where a reader would click anyway. Read in that order, and "" when
+    the application genuinely has a page at "/" — then the catch-all renders it
+    and there is nothing to redirect to.
+    """
+    pages = [p for p in ((doc or {}).get("pages") or []) if isinstance(p, dict)]
+    live = [p for p in pages if str(p.get("status") or "") not in ("DEPRECATED", "SUPERSEDED")]
+    routes = {str(p.get("route") or "") for p in live}
+    if "/" in routes:
+        return ""
+
+    for page in live:
+        if page.get("entry") and str(page.get("route") or "").startswith("/"):
+            return str(page["route"])
+
+    nav = ((doc or {}).get("navigation") or {}).get("tree") or []
+    by_id = {str(p.get("id")): str(p.get("route") or "") for p in live}
+    for item in nav:
+        if isinstance(item, dict) and by_id.get(str(item.get("page"))):
+            return by_id[str(item.get("page"))]
+
+    return next((str(p["route"]) for p in live
+                 if str(p.get("route") or "").startswith("/")), "")
+
+
+def _write_route_registry(root: Path, written: list[str],
+                          doc: dict | None = None) -> None:
     """Emit ``src/schemas/registry.ts`` — the authoritative live-route map.
 
     The catch-all route treats this as authoritative and only falls back to
     probing the filesystem, so a page schema with no registry entry is a page
     that may never resolve. Generated from what was actually written, so the
     two cannot disagree.
+
+    Also carries `entryRoute`: where "/" sends a visitor when no page is "/".
     """
     from services.route_slug import route_from_slug
 
@@ -579,6 +618,8 @@ def _write_route_registry(root: Path, written: list[str]) -> None:
         'import { loadSchema } from "./load";\n\n'
         "export const schemas: Record<string, () => Promise<unknown>> = {\n"
         + "\n".join(entries) + "\n};\n\n"
+        + "// Where \"/\" sends a visitor when no page IS \"/\". Empty when one is.\n"
+        + f'export const entryRoute = "{_entry_route(doc)}";\n\n'
         "export async function getSchema(route: string) {\n"
         "  const loader = schemas[route];\n"
         "  if (!loader) throw new Error(`unknown route '${route}'`);\n"
@@ -2363,7 +2404,18 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     open_routes = [_matcher_segment(r) for r in access["public"]]
     open_routes = [r for r in open_routes if r]
     # A public route at "/" needs the bare root excluded too.
-    root_public = "/" in access["public"]
+    #
+    # AND SO DOES A ROOT THAT ONLY FORWARDS. Most applications declare no page
+    # at "/" — a master-data app is `/add-data` and `/master-data` — so the
+    # root renders nothing of its own and the catch-all sends the visitor to
+    # the entry page. Gating that forward puts a sign-in screen in front of a
+    # public page, which is a login for nothing: the visitor signs in, arrives
+    # back at "/", and is forwarded to the page they could always have seen.
+    #
+    # It leaks nothing. The root holds no content, and the page it forwards to
+    # is public by its own declaration or this does not fire.
+    root_public = "/" in access["public"] or (
+        _entry_route(doc) and _entry_route(doc) in access["public"])
 
     # A public page is only public if what it fetches is reachable too.
     apis = public_apis(doc)

@@ -85,6 +85,14 @@ def smith(tmp_path, monkeypatch):
         "services.blueprint.assembly.verify_build",
         lambda app_root, **kw: {"install": 0, "build": 0},
     )
+    # The build node starts the app as well: `next build` does not catch a
+    # route collision, and an app that compiles and will not boot reached a
+    # user. Stubbed here for the same reason the build is.
+    monkeypatch.setattr(
+        "services.blueprint.assembly.verify_boot",
+        lambda app_root, **kw: {"port": 0, "entry": "/", "status": 200,
+                                "seconds": 0.0},
+    )
     monkeypatch.setattr(
         "services.blueprint.assembly.install_dependencies",
         lambda app_root, **kw: 0,

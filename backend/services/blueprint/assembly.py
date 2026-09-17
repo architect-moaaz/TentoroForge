@@ -39,6 +39,7 @@ import json
 import re
 import secrets
 import shutil
+import os
 from pathlib import Path
 from typing import Any
 
@@ -860,6 +861,114 @@ def install_dependencies(app_root: str | Path, *, timeout: int = 900) -> int:
     rather than at the end of one. Raises :class:`BuildFailed` on a non-zero
     exit, the same way `verify_build` does."""
     return verify_build(app_root, timeout=timeout, build=False)["install"]
+
+
+class BootFailed(RuntimeError):
+    """The application compiles and will not start."""
+
+
+def verify_boot(app_root: str | Path, *, entry: str = "/",
+                timeout: int = 120) -> dict[str, Any]:
+    """Start the app and prove it serves its way in. Raise if it will not.
+
+    `next build` DOES NOT CATCH THIS CLASS OF FAULT, which is the whole reason
+    this exists. Measured: a generated app with two files resolving to "/" —
+    the scaffold's landing page inside a route group, and the optional
+    catch-all — built clean, exit 0, full route listing. `next dev` refused to
+    start:
+
+        You cannot define a route with the same specificity as a optional
+        catch-all route ("/" and "/[[...slug]]")
+
+    Every node had completed, the projection was correct, and the first person
+    to learn the application was broken was the person running it. A gate that
+    compiles is not a gate that boots.
+
+    SHAPE-AGNOSTIC, DELIBERATELY. `entry` is where the Blueprint says a visitor
+    comes in: "/" for a single-page tool whose only page is the root,
+    "/add-data" for an app whose root merely forwards. Asserting a shape here —
+    "the root must redirect", "something must serve /" — would refuse a
+    calculator for correctly being its own landing page. What every
+    application owes is the same: it starts, and its way in is served.
+
+    ANY RESPONSE COUNTS AS SERVED. A 500 from an unreachable database, a 307 to
+    a sign-in — both mean the server started and routed. This checks booting,
+    not behaviour, and a database is not required to run it.
+    """
+    import socket
+    import subprocess
+    import time
+    import urllib.error
+    import urllib.request
+
+    root = Path(app_root)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        ["npm", "run", "dev", "--", "--port", str(port)],
+        cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, env={**os.environ, "BROWSER": "none"},
+    )
+
+    def _stop() -> str:
+        proc.terminate()
+        try:
+            out, _ = proc.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, _ = proc.communicate()
+        return out or ""
+
+    try:
+        listening = False
+        while time.monotonic() - started < timeout:
+            if proc.poll() is not None:
+                # IT DIED RATHER THAN SERVED. This is the route-collision case:
+                # Next prints the conflict and exits, so there is never a port
+                # to connect to. Its own words are the reason.
+                out = (proc.stdout.read() if proc.stdout else "") or ""
+                raise BootFailed(
+                    "the application exited instead of starting: "
+                    + _last_error(out))
+            with socket.socket() as s2:
+                s2.settimeout(1)
+                if s2.connect_ex(("127.0.0.1", port)) == 0:
+                    listening = True
+                    break
+            time.sleep(0.5)
+
+        if not listening:
+            raise BootFailed(
+                f"the application did not listen within {timeout}s: "
+                + _last_error(_stop()))
+
+        url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
+        try:
+            with urllib.request.urlopen(url, timeout=60) as reply:
+                status = reply.status
+        except urllib.error.HTTPError as exc:
+            status = exc.code          # 4xx/5xx still means it routed
+        except Exception as exc:  # noqa: BLE001
+            raise BootFailed(
+                f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
+
+        return {"port": port, "entry": entry, "status": status,
+                "seconds": round(time.monotonic() - started, 1)}
+    finally:
+        if proc.poll() is None:
+            _stop()
+
+
+def _last_error(output: str) -> str:
+    """The line worth reporting out of a dev server's noise."""
+    lines = [l.strip() for l in (output or "").splitlines() if l.strip()]
+    for line in reversed(lines):
+        if "Error" in line or "error" in line or "cannot" in line.lower():
+            return line[:400]
+    return (lines[-1][:400] if lines else "no output")
 
 
 def verify_build(app_root: str | Path, *, timeout: int = 900,
